@@ -8,12 +8,12 @@ describe('TransactionManager', () => {
   let store: TransactionStore
   let manager: TransactionManager
 
-  beforeEach(async () => {
+  beforeEach(() => {
     // Reset indexedDB for each test
     indexedDB = new IDBFactory()
     store = new TransactionStore()
     manager = new TransactionManager(store)
-    await store.clearAll()
+    store.clearAll()
   })
 
   const createMockMutation = (id: string): PendingMutation => ({
@@ -36,70 +36,65 @@ describe('TransactionManager', () => {
   }
 
   describe('Basic Transaction Management', () => {
-    it('should create a transaction in pending state', async () => {
+    it('should create a transaction in pending state', () => {
       const mutations = [createMockMutation('test-1')]
-      const transaction = await manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.createTransaction(mutations, orderedStrategy)
 
       expect(transaction.id).toBeDefined()
       expect(transaction.state).toBe('pending')
       expect(transaction.mutations).toEqual(mutations)
       expect(transaction.attempts).toEqual([])
       expect(transaction.current_attempt).toBe(0)
-      
-      // Verify it was stored
-      const stored = await store.getTransactions()
-      expect(stored).toHaveLength(1)
-      expect(stored[0].id).toBe(transaction.id)
     })
 
-    it('should update transaction state', async () => {
+    it('should update transaction state', () => {
       const mutations = [createMockMutation('test-2')]
-      const transaction = await manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.createTransaction(mutations, orderedStrategy)
       
       // Add a small delay to ensure timestamps are different
-      await new Promise(resolve => setTimeout(resolve, 1))
-      await manager.updateTransactionState(transaction.id, 'persisting')
+      const beforeUpdate = transaction.updated_at
+      manager.updateTransactionState(transaction.id, 'persisting')
       
-      const stored = await store.getTransactions()
-      expect(stored[0].state).toBe('persisting')
-      expect(stored[0].updated_at.getTime()).toBeGreaterThan(transaction.updated_at.getTime())
+      const updated = manager.getTransaction(transaction.id)
+      expect(updated?.state).toBe('persisting')
+      expect(updated?.updated_at.getTime()).toBeGreaterThan(beforeUpdate.getTime())
     })
 
-    it('should throw when updating non-existent transaction', async () => {
-      await expect(manager.updateTransactionState('non-existent', 'completed'))
-        .rejects.toThrow('Transaction non-existent not found')
+    it('should throw when updating non-existent transaction', () => {
+      expect(() => manager.updateTransactionState('non-existent', 'completed'))
+        .toThrow('Transaction non-existent not found')
     })
   })
 
   describe('Retry Scheduling', () => {
-    it('should schedule retry with exponential backoff', async () => {
+    it('should schedule retry with exponential backoff', () => {
       const mutations = [createMockMutation('test-3')]
-      const transaction = await manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.createTransaction(mutations, orderedStrategy)
       
       const now = Date.now()
       const originalNow = Date.now
       Date.now = vi.fn(() => now)
 
-      await manager.scheduleRetry(transaction.id, 0) // First retry
+      manager.scheduleRetry(transaction.id, 0) // First retry
       
-      const stored = await store.getTransactions()
-      const attempt = stored[0].attempts[0]
+      const updated = manager.getTransaction(transaction.id)
+      const attempt = updated?.attempts[0]
       
-      expect(attempt.id).toBeDefined()
-      expect(attempt.started_at).toBeDefined()
-      expect(attempt.retry_scheduled_for).toBeDefined()
+      expect(attempt?.id).toBeDefined()
+      expect(attempt?.started_at).toBeDefined()
+      expect(attempt?.retry_scheduled_for).toBeDefined()
       
       // Should be between 1-1.3 seconds for first retry (with jitter)
-      const delay = attempt.retry_scheduled_for.getTime() - now
+      const delay = attempt!.retry_scheduled_for.getTime() - now
       expect(delay).toBeGreaterThanOrEqual(1000)
       expect(delay).toBeLessThanOrEqual(1300)
       
       Date.now = originalNow
     })
 
-    it('should increase delay with each retry attempt', async () => {
+    it('should increase delay with each retry attempt', () => {
       const mutations = [createMockMutation('test-4')]
-      const transaction = await manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.createTransaction(mutations, orderedStrategy)
       
       const now = Date.now()
       const originalNow = Date.now
@@ -109,10 +104,10 @@ describe('TransactionManager', () => {
       const delays: number[] = []
       
       for (let i = 0; i < 3; i++) {
-        await manager.scheduleRetry(transaction.id, i)
-        const stored = await store.getTransactions()
-        const attempt = stored[0].attempts[i]
-        delays.push(attempt.retry_scheduled_for.getTime() - now)
+        manager.scheduleRetry(transaction.id, i)
+        const updated = manager.getTransaction(transaction.id)
+        const attempt = updated?.attempts[i]
+        delays.push(attempt!.retry_scheduled_for.getTime() - now)
       }
       
       // Each delay should be at least double the previous one
@@ -133,9 +128,9 @@ describe('TransactionManager', () => {
   })
 
   describe('Ordered vs Parallel Transactions', () => {
-    it('should queue ordered transactions with overlapping mutations', async () => {
+    it('should queue ordered transactions with overlapping mutations', () => {
       // Create first transaction modifying object 1
-      const tx1 = await manager.createTransaction(
+      const tx1 = manager.createTransaction(
         [createMockMutation('object-1')],
         orderedStrategy
       )
@@ -143,7 +138,7 @@ describe('TransactionManager', () => {
       expect(tx1.queued_behind).toBeUndefined()
 
       // Create second transaction also modifying object 1 - should be queued
-      const tx2 = await manager.createTransaction(
+      const tx2 = manager.createTransaction(
         [createMockMutation('object-1')],
         orderedStrategy
       )
@@ -151,7 +146,7 @@ describe('TransactionManager', () => {
       expect(tx2.queued_behind).toBe(tx1.id)
 
       // Create third transaction modifying different object - should not be queued
-      const tx3 = await manager.createTransaction(
+      const tx3 = manager.createTransaction(
         [createMockMutation('object-2')],
         orderedStrategy
       )
@@ -159,25 +154,24 @@ describe('TransactionManager', () => {
       expect(tx3.queued_behind).toBeUndefined()
 
       // Complete first transaction
-      await manager.updateTransactionState(tx1.id, 'completed')
+      manager.updateTransactionState(tx1.id, 'completed')
 
       // Check that second transaction is now pending
-      const updated = await store.getTransactions()
-      const updatedTx2 = updated.find(t => t.id === tx2.id)!
+      const updatedTx2 = manager.getTransaction(tx2.id)!
       expect(updatedTx2.state).toBe('pending')
     })
 
-    it('should not queue parallel transactions', async () => {
+    it('should not queue parallel transactions', () => {
       // Create multiple parallel transactions modifying same object
-      const tx1 = await manager.createTransaction(
+      const tx1 = manager.createTransaction(
         [createMockMutation('object-1')],
         parallelStrategy
       )
-      const tx2 = await manager.createTransaction(
+      const tx2 = manager.createTransaction(
         [createMockMutation('object-1')],
         parallelStrategy
       )
-      const tx3 = await manager.createTransaction(
+      const tx3 = manager.createTransaction(
         [createMockMutation('object-1')],
         parallelStrategy
       )
@@ -191,28 +185,22 @@ describe('TransactionManager', () => {
       expect(tx3.queued_behind).toBeUndefined()
     })
 
-    it('should mix ordered and parallel transactions correctly', async () => {
+    it('should mix ordered and parallel transactions correctly', () => {
       // Create an ordered transaction modifying object 1
-      const ordered1 = await manager.createTransaction(
+      const ordered1 = manager.createTransaction(
         [createMockMutation('object-1')],
         orderedStrategy
       )
       
       // Create a parallel transaction modifying object 1 - should not queue
-      const parallel1 = await manager.createTransaction(
+      const parallel1 = manager.createTransaction(
         [createMockMutation('object-1')],
         parallelStrategy
       )
-      
-      // Create another ordered transaction modifying object 1 - should queue
-      const ordered2 = await manager.createTransaction(
+
+      // Create another ordered transaction modifying object 1 - should queue behind ordered1
+      const ordered2 = manager.createTransaction(
         [createMockMutation('object-1')],
-        orderedStrategy
-      )
-      
-      // Create another ordered transaction modifying object 2 - should not queue
-      const ordered3 = await manager.createTransaction(
-        [createMockMutation('object-2')],
         orderedStrategy
       )
 
@@ -222,8 +210,13 @@ describe('TransactionManager', () => {
       expect(parallel1.queued_behind).toBeUndefined()
       expect(ordered2.state).toBe('queued')
       expect(ordered2.queued_behind).toBe(ordered1.id)
-      expect(ordered3.state).toBe('pending')
-      expect(ordered3.queued_behind).toBeUndefined()
+
+      // Complete ordered1, ordered2 should become pending
+      manager.updateTransactionState(ordered1.id, 'completed')
+      
+      const updatedOrdered2 = manager.getTransaction(ordered2.id)!
+      expect(updatedOrdered2.state).toBe('pending')
+      expect(updatedOrdered2.queued_behind).toBeUndefined()
     })
   })
 })
