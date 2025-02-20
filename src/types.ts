@@ -33,6 +33,8 @@ export interface Transaction {
   mutations: PendingMutation[]
   attempts: Attempt[]
   current_attempt: number
+  strategy: MutationStrategy
+  metadata?: Record<string, unknown>
   queued_behind?: string
   error?: {
     transaction_id?: string  // For dependency failures
