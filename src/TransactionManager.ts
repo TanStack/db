@@ -96,6 +96,7 @@ export class TransactionManager {
     }
   }
 
+  // Add a comment to test the pre-commit hook
   async scheduleRetry(id: string, attemptNumber: number): Promise<void> {
     const transaction = await this.getTransaction(id)
     if (!transaction) {
