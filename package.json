@@ -18,8 +18,12 @@
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.3",
     "eslint-plugin-react": "^7.37.4",
+    "fake-indexeddb": "^6.0.0",
     "prettier": "^3.5.1",
     "typescript": "^5.7.3",
     "vitest": "^3.0.6"
+  },
+  "dependencies": {
+    "idb": "^8.0.2"
   }
 }
