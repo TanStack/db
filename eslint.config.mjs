@@ -9,6 +9,7 @@ import globals from "globals"
 export default [
   js.configs.recommended,
   {
+    files: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
