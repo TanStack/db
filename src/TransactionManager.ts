@@ -20,6 +20,25 @@ export class TransactionManager {
       strategy
     }
 
+    // For ordered transactions, check if we need to queue behind another transaction
+    if (strategy.type === 'ordered') {
+      const activeTransactions = await this.getActiveTransactions()
+      const orderedTransactions = activeTransactions.filter(tx => 
+        tx.strategy.type === 'ordered' && 
+        tx.state !== 'queued'
+      )
+      
+      // Find any active transaction that has overlapping mutations
+      const conflictingTransaction = orderedTransactions.find(tx => 
+        this.hasOverlappingMutations(tx.mutations, mutations)
+      )
+      
+      if (conflictingTransaction) {
+        transaction.state = 'queued'
+        transaction.queued_behind = conflictingTransaction.id
+      }
+    }
+
     await this.store.putTransaction(transaction)
     return transaction
   }
@@ -37,6 +56,44 @@ export class TransactionManager {
     }
 
     await this.store.putTransaction(updatedTransaction)
+
+    // If this transaction is completing, check if any are queued behind it
+    if ((newState === 'completed' || newState === 'failed') && transaction.strategy.type === 'ordered') {
+      // Get all ordered transactions that are queued behind this one
+      const transactions = await this.store.getTransactions()
+      const queuedTransactions = transactions.filter(tx => 
+        tx.state === 'queued' &&
+        tx.strategy.type === 'ordered' &&
+        tx.queued_behind === transaction.id
+      )
+      
+      // Find the next transaction to run (the one with earliest created_at)
+      if (queuedTransactions.length > 0) {
+        const nextTransaction = queuedTransactions.reduce((earliest, current) => 
+          earliest.created_at < current.created_at ? earliest : current
+        )
+        
+        // Check if this transaction needs to be queued behind any other active transactions
+        const activeTransactions = await this.getActiveTransactions()
+        const orderedTransactions = activeTransactions.filter(tx => 
+          tx.strategy.type === 'ordered' && 
+          tx.state !== 'queued' &&
+          tx.id !== nextTransaction.id
+        )
+        
+        const conflictingTransaction = orderedTransactions.find(tx => 
+          this.hasOverlappingMutations(tx.mutations, nextTransaction.mutations)
+        )
+
+        const updatedNextTransaction = {
+          ...nextTransaction,
+          state: conflictingTransaction ? 'queued' : 'pending',
+          queued_behind: conflictingTransaction?.id,
+          updated_at: new Date()
+        }
+        await this.store.putTransaction(updatedNextTransaction)
+      }
+    }
   }
 
   async scheduleRetry(id: string, attemptNumber: number): Promise<void> {
@@ -51,10 +108,9 @@ export class TransactionManager {
     const maxDelay = 30000
     const exponentialDelay = Math.min(baseDelay * Math.pow(2, attemptNumber), maxDelay)
     
-    // Add jitter after calculating the exponential delay
-    const minDelay = exponentialDelay
-    const maxJitteredDelay = exponentialDelay * 1.3 // 30% jitter
-    const delay = minDelay + Math.random() * (maxJitteredDelay - minDelay)
+    // Add jitter by increasing delay up to 30%
+    const jitterAmount = exponentialDelay * 0.3 // 30% jitter
+    const delay = exponentialDelay + Math.random() * jitterAmount
 
     const retryTime = new Date(Date.now() + delay)
 
@@ -74,8 +130,30 @@ export class TransactionManager {
     await this.store.putTransaction(updatedTransaction)
   }
 
+  private hasOverlappingMutations(mutations1: PendingMutation[], mutations2: PendingMutation[]): boolean {
+    const ids1 = new Set(mutations1.map(m => m.original.id))
+    const ids2 = new Set(mutations2.map(m => m.original.id))
+    return Array.from(ids1).some(id => ids2.has(id))
+  }
+
   private async getTransaction(id: string): Promise<Transaction | undefined> {
     const transactions = await this.store.getTransactions()
     return transactions.find(tx => tx.id === id)
+  }
+
+  private async getActiveTransactions(): Promise<Transaction[]> {
+    const transactions = await this.store.getTransactions()
+    return transactions.filter(tx => 
+      tx.state !== 'completed' && 
+      tx.state !== 'failed'
+    )
+  }
+
+  private async getQueuedTransactions(queuedBehindId: string): Promise<Transaction[]> {
+    const transactions = await this.store.getTransactions()
+    return transactions.filter(tx => 
+      tx.state === 'queued' &&
+      tx.queued_behind === queuedBehindId
+    )
   }
 }
