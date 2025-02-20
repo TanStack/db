@@ -1,10 +1,10 @@
 export type TransactionState =
-  | 'queued'
-  | 'pending'
-  | 'persisting'
-  | 'persisted_awaiting_sync'
-  | 'completed'
-  | 'failed'
+  | "queued"
+  | "pending"
+  | "persisting"
+  | "persisted_awaiting_sync"
+  | "completed"
+  | "failed"
 
 export interface Attempt {
   id: string
@@ -16,13 +16,13 @@ export interface Attempt {
 
 export interface PendingMutation {
   mutationId: string
-  original: Record<string, any>
-  modified: Record<string, any>
-  changes: Record<string, any>
+  original: Record<string, unknown>
+  modified: Record<string, unknown>
+  changes: Record<string, unknown>
   metadata: unknown
   created_at: Date
   updated_at: Date
-  state: 'created' | 'persisting' | 'synced'
+  state: "created" | "persisting" | "synced"
 }
 
 export interface Transaction {
@@ -37,7 +37,7 @@ export interface Transaction {
   metadata?: Record<string, unknown>
   queued_behind?: string
   error?: {
-    transaction_id?: string  // For dependency failures
+    transaction_id?: string // For dependency failures
     message: string
     error: Error
   }
@@ -45,28 +45,31 @@ export interface Transaction {
 
 export interface SyncConfig {
   id: string
-  setup: (params: { 
-    onUpdate: (data: any) => void 
+  setup: (params: {
+    onUpdate: (data: Record<string, unknown>) => void
   }) => Promise<{
-    data: any
+    data: Record<string, unknown>
   }>
 }
 
 export interface MutationFn {
   persist: (params: {
-    changes: Record<string, any>
+    changes: Record<string, unknown>
     attempt: number
     transaction: Transaction
   }) => Promise<void>
 
   awaitSync?: (params: {
-    changes: Record<string, any>
+    changes: Record<string, unknown>
     transaction: Transaction
-    sync: any // Using any for SyncInstance as it's not defined in the spec
+    sync: SyncConfig
   }) => Promise<void>
 }
 
 export interface MutationStrategy {
-  type: 'ordered' | 'parallel'
-  merge?: (syncedData: any, pendingMutations: PendingMutation[]) => any
+  type: "ordered" | "parallel"
+  merge?: (
+    syncedData: Record<string, unknown>,
+    pendingMutations: PendingMutation[]
+  ) => Record<string, unknown>
 }
