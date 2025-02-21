@@ -66,8 +66,12 @@ export class Collection {
     // Copies of live mutations are stored here and removed once the transaction completes.
     this.optimisticOperations = new Derived({
       fn: ({ currDepVals }) => {
-        console.log(`curr`, currDepVals)
         return Array.from(currDepVals[0].values())
+          .filter(
+            (transaction) =>
+              transaction.state !== `completed` &&
+              transaction.state !== `failed`
+          )
           .map((transaction) =>
             transaction.mutations.map((mutation) => {
               return {
@@ -86,7 +90,6 @@ export class Collection {
     this.derivedState = new Derived({
       // prevVal, prevDepVals,
       fn: ({ currDepVals }) => {
-        console.log(`curr`, currDepVals)
         return currDepVals[0]
       },
       deps: [this.syncedData, this.optimisticOperations],
@@ -162,7 +165,6 @@ export class Collection {
       state: `created` as const,
     }
 
-    console.log({ mutation })
     return this.transactionManager.createTransaction([mutation], {
       type: `ordered`,
     })

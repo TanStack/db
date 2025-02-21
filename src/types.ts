@@ -45,7 +45,6 @@ export interface Transaction {
     message: string
     error: Error
   }
-  mutationFn: MutationFn
 }
 
 type Value<Extensions = never> =

@@ -89,7 +89,9 @@ export class TransactionManager {
           .then(() => {
             if (this.collection.config.mutationFn.awaitSync) {
               transaction.state = `persisted_awaiting_sync`
-              this.collection.config.mutationFn.awaitSync({ transaction })
+              this.collection.config.mutationFn.awaitSync({
+                transaction,
+              })
             }
             transaction.state = `completed`
             this.setTransaction(transaction)

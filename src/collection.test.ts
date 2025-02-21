@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { Collection } from "./collection"
 import type { ChangeMessage } from "./types"
 import "fake-indexeddb/auto"
+import mitt from "mitt"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -59,15 +60,28 @@ describe(`Collection`, () => {
   })
 
   it(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
+    const emitter = mitt()
     // new collection w/ mock sync/mutation
     const collection = new Collection({
       sync: {
         id: `mock`,
-        sync: () => {},
+        sync: ({ begin, write, commit }) => {
+          emitter.on(`*`, (type, { changes }) => {
+            begin()
+            changes.map((change) =>
+              write({ key: `key`, type: `insert`, value: change })
+            )
+            commit()
+          })
+        },
       },
       mutationFn: {
-        persist: async () => {
-          console.log(`persisting...`)
+        persist: async ({ changes, transaction, attempt }) => {
+          console.log(`persisting...`, { attempt })
+          emitter.emit(`foo`, { changes, transaction })
+        },
+        awaitSync: async () => {
+          console.log(`awaiting sync`)
         },
       },
     })
@@ -79,7 +93,6 @@ describe(`Collection`, () => {
     })
 
     // check there's a transaction in peristing state
-    console.log(`transactions`, Array.from(collection.transactions.values()))
     expect(
       Array.from(collection.transactions.values())[0].mutations[0].changes
     ).toEqual({
@@ -92,26 +105,28 @@ describe(`Collection`, () => {
       value: { value: `bar` },
       type: `insert`,
     }
-    // TODO optimisticOperations should be a derived array from looping over transactions (which are a store).
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
-    console.log({ transaction })
+    // TODO how to do this? Transaction is just an object right now. Could make it a class though.
+    // Make mutationFn async
     await transaction.synced
 
     // after mutationFn returns, check that it was called & transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
     expect(collection.optimisticOperations.state).toEqual([])
-    expect(collection.value).toEqual([])
+    expect(collection.value).toEqual(new Map([[`key`, { value: `bar` }]]))
 
-    // do same with update & delete
+    // TODO do same with update & delete
   })
 
+  // Skip until e2e working
   it(`If the mutationFn throws error, it get retried`, () => {
     // new collection w/ mock sync/mutation
     // insert
     // mutationFn fails the first time and then succeeds
   })
 
+  // Skip until e2e working
   it(`If the mutationFn throws NonRetriableError, it doesn't get retried and optimistic state is rolled back`, () => {
     // new collection w/ mock sync/mutation
     // insert
