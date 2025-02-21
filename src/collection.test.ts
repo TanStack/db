@@ -69,7 +69,10 @@ describe(`Collection`, () => {
     })
 
     // insert
-    const transaction = collection.insert({ data: { value: `bar` } })
+    const transaction = collection.insert({
+      key: `foo`,
+      data: { value: `bar` },
+    })
 
     // check there's a transaction in peristing state
     console.log(`transactions`, Array.from(collection.transactions.values()))
@@ -81,7 +84,7 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertOperation: ChangeMessage = {
-      key: ``,
+      key: `foo`,
       value: { value: `bar` },
       type: `insert`,
     }
@@ -93,7 +96,7 @@ describe(`Collection`, () => {
 
     // after mutationFn returns, check that it was called & transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
-    expect(collection.optimistic).toEqual([])
+    expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual([])
 
     // do same with update & delete

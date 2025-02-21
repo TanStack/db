@@ -1,5 +1,11 @@
 import { Store, Derived, batch } from "@tanstack/store"
-import { SyncConfig, MutationFn, ChangeMessage, PendingMutation } from "./types"
+import {
+  SyncConfig,
+  MutationFn,
+  ChangeMessage,
+  PendingMutation,
+  Row,
+} from "./types"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
 
@@ -16,6 +22,7 @@ interface UpdateParams {
 }
 
 interface InsertParams {
+  key: string
   // eslint-disable-next-line
   data: Record<string, any>
   metadata?: unknown
@@ -35,6 +42,8 @@ interface WithMutationParams {
 export class Collection {
   private transactionManager: TransactionManager
   private transactionStore: TransactionStore
+
+  public optimisticOperations: Derived<ChangeMessage[]>
 
   private syncedData = new Store(new Map<string, unknown>())
   private pendingOperations: ChangeMessage[] = []
@@ -59,9 +68,9 @@ export class Collection {
             transaction.mutations.map((mutation) => {
               return {
                 type: mutation.type,
-                key: ``,
-                value: mutation.changes,
-              }
+                key: mutation.key,
+                value: mutation.modified as Row,
+              } satisfies ChangeMessage
             })
           )
           .flat()
@@ -123,6 +132,7 @@ export class Collection {
       original: this.syncedData.state.get(key) || {},
       modified: { ...this.syncedData.state.get(key), ...changes },
       changes,
+      key,
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
@@ -132,12 +142,13 @@ export class Collection {
     this.transactionManager.createTransaction([mutation], { type: `ordered` })
   }
 
-  insert = ({ data, metadata }: InsertParams) => {
+  insert = ({ key, data, metadata }: InsertParams) => {
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
       original: {},
       modified: data,
       changes: data,
+      key,
       metadata,
       type: `insert`,
       created_at: new Date(),
@@ -157,6 +168,7 @@ export class Collection {
       original: this.syncedData.state.get(key) || {},
       modified: { _deleted: true },
       changes: { _deleted: true },
+      key,
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
