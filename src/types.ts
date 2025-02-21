@@ -21,6 +21,7 @@ export interface PendingMutation {
   original: Record<string, unknown>
   modified: Record<string, unknown>
   changes: Record<string, unknown>
+  type: OperationType
   metadata: unknown
   created_at: Date
   updated_at: Date

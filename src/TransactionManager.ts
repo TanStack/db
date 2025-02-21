@@ -1,3 +1,4 @@
+import { Store } from "@tanstack/store"
 import type {
   Transaction,
   TransactionState,
@@ -5,16 +6,40 @@ import type {
   MutationStrategy,
 } from "./types"
 import { TransactionStore } from "./TransactionStore"
+import { SortedMap } from "./SortedMap"
 
 export class TransactionManager {
   private store: TransactionStore
-  private transactions: Map<string, Transaction> = new Map()
+  public transactions: Store<SortedMap<string, Transaction>>
 
   constructor(store: TransactionStore) {
     this.store = store
+    // Initialize store with SortedMap that sorts by created_at
+    this.transactions = new Store(
+      new SortedMap<string, Transaction>(
+        (a, b) => a.created_at.getTime() - b.created_at.getTime()
+      )
+    )
+
     // Load transactions from store on init
     this.store.getTransactions().then((transactions) => {
-      transactions.forEach((tx) => this.transactions.set(tx.id, tx))
+      transactions.forEach((tx) => {
+        this.transactions.setState((sortedMap) => {
+          sortedMap.set(tx.id, tx)
+          return sortedMap
+        })
+      })
+    })
+  }
+
+  getTransaction(id: string): Transaction | undefined {
+    return this.transactions.state.get(id)
+  }
+
+  private setTransaction(transaction: Transaction): void {
+    this.transactions.setState((sortedMap) => {
+      sortedMap.set(transaction.id, transaction)
+      return sortedMap
     })
   }
 
@@ -51,7 +76,7 @@ export class TransactionManager {
       }
     }
 
-    this.transactions.set(transaction.id, transaction)
+    this.setTransaction(transaction)
     // Persist async
     this.store.putTransaction(transaction)
     return transaction
@@ -70,7 +95,7 @@ export class TransactionManager {
       updated_at: new Date(Date.now() + 1),
     }
 
-    this.transactions.set(id, updatedTransaction)
+    this.setTransaction(updatedTransaction)
     // Persist async
     this.store.putTransaction(updatedTransaction)
 
@@ -80,7 +105,9 @@ export class TransactionManager {
       transaction.strategy.type === `ordered`
     ) {
       // Get all ordered transactions that are queued behind this one
-      const queuedTransactions = Array.from(this.transactions.values()).filter(
+      const queuedTransactions = Array.from(
+        this.transactions.state.values()
+      ).filter(
         (tx) =>
           tx.state === `queued` &&
           tx.strategy.type === `ordered` &&
@@ -113,7 +140,7 @@ export class TransactionManager {
           queued_behind: conflictingTransaction?.id,
           updated_at: new Date(Date.now() + 1),
         }
-        this.transactions.set(updatedNextTransaction.id, updatedNextTransaction)
+        this.setTransaction(updatedNextTransaction)
 
         // Persist async
         this.store.putTransaction(updatedNextTransaction)
@@ -155,7 +182,7 @@ export class TransactionManager {
       updated_at: new Date(Date.now() + 1),
     }
 
-    this.transactions.set(id, updatedTransaction)
+    this.setTransaction(updatedTransaction)
 
     // Persist async
     this.store.putTransaction(updatedTransaction)
@@ -170,12 +197,8 @@ export class TransactionManager {
     return Array.from(ids1).some((id) => ids2.has(id))
   }
 
-  getTransaction(id: string): Transaction | undefined {
-    return this.transactions.get(id)
-  }
-
   private getActiveTransactions(): Transaction[] {
-    return Array.from(this.transactions.values()).filter(
+    return Array.from(this.transactions.state.values()).filter(
       (tx) => tx.state !== `completed` && tx.state !== `failed`
     )
   }

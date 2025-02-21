@@ -221,4 +221,38 @@ describe(`TransactionManager`, () => {
       expect(updatedOrdered2.queued_behind).toBeUndefined()
     })
   })
+
+  describe(`Transaction Ordering`, () => {
+    it(`should maintain transactions sorted by created_at`, async () => {
+      // Create transactions with different timestamps
+      const now = Date.now()
+      const timestamps = [now, now - 1000, now - 2000]
+
+      // Create transactions in reverse chronological order
+      await Promise.all(
+        timestamps.map(async (timestamp, i) => {
+          const tx = manager.createTransaction(
+            [createMockMutation(`test-${i + 1}`)],
+            parallelStrategy
+          )
+          // Force the created_at time
+          const updatedTx = {
+            ...tx,
+            created_at: new Date(timestamp),
+          }
+          manager.transactions.setState((sortedMap) => {
+            sortedMap.set(updatedTx.id, updatedTx)
+            return sortedMap
+          })
+          return updatedTx
+        })
+      )
+
+      // Verify transactions are returned in chronological order (oldest first)
+      const sortedTransactions = Array.from(manager.transactions.state.values())
+      expect(sortedTransactions[0].created_at.getTime()).toBe(timestamps[2]) // Oldest
+      expect(sortedTransactions[1].created_at.getTime()).toBe(timestamps[1])
+      expect(sortedTransactions[2].created_at.getTime()).toBe(timestamps[0]) // Newest
+    })
+  })
 })

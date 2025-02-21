@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { Collection } from "./collection"
 import type { ChangeMessage } from "./types"
+import "fake-indexeddb/auto"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -57,14 +58,44 @@ describe(`Collection`, () => {
     })
   })
 
-  it(`Calling mutation operators should trigger creating & persisting a new transaction`, () => {
+  it(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
     // new collection w/ mock sync/mutation
+    const collection = new Collection({
+      sync: {
+        id: `mock`,
+        sync: () => {},
+      },
+      mutationFn: { persist: async () => {} },
+    })
+
     // insert
+    const transaction = collection.insert({ data: { value: `bar` } })
+
     // check there's a transaction in peristing state
-    // check the optimistic operation is there
+    console.log(`transactions`, Array.from(collection.transactions.values()))
+    expect(
+      Array.from(collection.transactions.values())[0].mutations[0].changes
+    ).toEqual({
+      value: `bar`,
+    })
+
+    // Check the optimistic operation is there
+    const insertOperation: ChangeMessage = {
+      key: ``,
+      value: { value: `bar` },
+      type: `insert`,
+    }
+    // TODO optimisticOperations should be a derived array from looping over transactions (which are a store).
+    expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
+
+    console.log({ transaction })
+    await transaction.synced
+
     // after mutationFn returns, check that it was called & transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
-    //
+    expect(collection.optimistic).toEqual([])
+    expect(collection.value).toEqual([])
+
     // do same with update & delete
   })
 
