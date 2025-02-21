@@ -1,10 +1,10 @@
 export type TransactionState =
-  | "queued"
-  | "pending"
-  | "persisting"
-  | "persisted_awaiting_sync"
-  | "completed"
-  | "failed"
+  | `queued`
+  | `pending`
+  | `persisting`
+  | `persisted_awaiting_sync`
+  | `completed`
+  | `failed`
 
 export interface Attempt {
   id: string
@@ -22,7 +22,7 @@ export interface PendingMutation {
   metadata: unknown
   created_at: Date
   updated_at: Date
-  state: "created" | "persisting" | "synced"
+  state: `created` | `persisting` | `synced`
 }
 
 export interface Transaction {
@@ -67,7 +67,7 @@ export interface MutationFn {
 }
 
 export interface MutationStrategy {
-  type: "ordered" | "parallel"
+  type: `ordered` | `parallel`
   merge?: (
     syncedData: Record<string, unknown>,
     pendingMutations: PendingMutation[]

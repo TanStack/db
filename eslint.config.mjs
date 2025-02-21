@@ -5,6 +5,7 @@ import reactPlugin from "eslint-plugin-react"
 import prettierPlugin from "eslint-plugin-prettier"
 import prettierConfig from "eslint-config-prettier"
 import globals from "globals"
+import stylisticPlugin from "@stylistic/eslint-plugin"
 
 export default [
   js.configs.recommended,
@@ -33,11 +34,12 @@ export default [
     plugins: {
       "@typescript-eslint": tsPlugin,
       react: reactPlugin,
+      stylistic: stylisticPlugin,
       prettier: prettierPlugin,
     },
     rules: {
-      quotes: ["error", "backtick"],
       "prettier/prettier": "error",
+      "stylistic/quotes": ["error", "backtick"],
       ...tsPlugin.configs.recommended.rules,
       ...reactPlugin.configs.recommended.rules,
       ...prettierConfig.rules,

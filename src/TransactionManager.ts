@@ -24,7 +24,7 @@ export class TransactionManager {
   ): Transaction {
     const transaction: Transaction = {
       id: crypto.randomUUID(),
-      state: "pending",
+      state: `pending`,
       created_at: new Date(),
       updated_at: new Date(),
       mutations,
@@ -34,10 +34,10 @@ export class TransactionManager {
     }
 
     // For ordered transactions, check if we need to queue behind another transaction
-    if (strategy.type === "ordered") {
+    if (strategy.type === `ordered`) {
       const activeTransactions = this.getActiveTransactions()
       const orderedTransactions = activeTransactions.filter(
-        (tx) => tx.strategy.type === "ordered" && tx.state !== "queued"
+        (tx) => tx.strategy.type === `ordered` && tx.state !== `queued`
       )
 
       // Find any active transaction that has overlapping mutations
@@ -46,7 +46,7 @@ export class TransactionManager {
       )
 
       if (conflictingTransaction) {
-        transaction.state = "queued"
+        transaction.state = `queued`
         transaction.queued_behind = conflictingTransaction.id
       }
     }
@@ -76,14 +76,14 @@ export class TransactionManager {
 
     // If this transaction is completing, check if any are queued behind it
     if (
-      (newState === "completed" || newState === "failed") &&
-      transaction.strategy.type === "ordered"
+      (newState === `completed` || newState === `failed`) &&
+      transaction.strategy.type === `ordered`
     ) {
       // Get all ordered transactions that are queued behind this one
       const queuedTransactions = Array.from(this.transactions.values()).filter(
         (tx) =>
-          tx.state === "queued" &&
-          tx.strategy.type === "ordered" &&
+          tx.state === `queued` &&
+          tx.strategy.type === `ordered` &&
           tx.queued_behind === transaction.id
       )
 
@@ -98,8 +98,8 @@ export class TransactionManager {
         const activeTransactions = this.getActiveTransactions()
         const orderedTransactions = activeTransactions.filter(
           (tx) =>
-            tx.strategy.type === "ordered" &&
-            tx.state !== "queued" &&
+            tx.strategy.type === `ordered` &&
+            tx.state !== `queued` &&
             tx.id !== nextTransaction.id
         )
 
@@ -107,13 +107,14 @@ export class TransactionManager {
           this.hasOverlappingMutations(tx.mutations, nextTransaction.mutations)
         )
 
-        const updatedNextTransaction = {
+        const updatedNextTransaction: Transaction = {
           ...nextTransaction,
-          state: conflictingTransaction ? "queued" : "pending",
+          state: conflictingTransaction ? `queued` : `pending`,
           queued_behind: conflictingTransaction?.id,
           updated_at: new Date(Date.now() + 1),
         }
         this.transactions.set(updatedNextTransaction.id, updatedNextTransaction)
+
         // Persist async
         this.store.putTransaction(updatedNextTransaction)
       }
@@ -155,6 +156,7 @@ export class TransactionManager {
     }
 
     this.transactions.set(id, updatedTransaction)
+
     // Persist async
     this.store.putTransaction(updatedTransaction)
   }
@@ -174,13 +176,7 @@ export class TransactionManager {
 
   private getActiveTransactions(): Transaction[] {
     return Array.from(this.transactions.values()).filter(
-      (tx) => tx.state !== "completed" && tx.state !== "failed"
-    )
-  }
-
-  private getQueuedTransactions(queuedBehindId: string): Transaction[] {
-    return Array.from(this.transactions.values()).filter(
-      (tx) => tx.state === "queued" && tx.queued_behind === queuedBehindId
+      (tx) => tx.state !== `completed` && tx.state !== `failed`
     )
   }
 }

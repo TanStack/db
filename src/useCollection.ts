@@ -8,7 +8,7 @@ let store: TransactionStore | undefined
 let transactionManager: TransactionManager | undefined
 
 function getTransactionManager() {
-  if (typeof window === "undefined") return undefined
+  if (typeof window === `undefined`) return undefined
 
   if (!store) {
     store = new TransactionStore()
@@ -65,10 +65,10 @@ export function useCollection(config: UseCollectionConfig) {
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
-      state: "created" as const,
+      state: `created` as const,
     }
 
-    manager.createTransaction([mutation], { type: "ordered" })
+    manager.createTransaction([mutation], { type: `ordered` })
   }
 
   const insert = ({ id, data: newData, metadata }: InsertParams) => {
@@ -82,10 +82,10 @@ export function useCollection(config: UseCollectionConfig) {
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
-      state: "created" as const,
+      state: `created` as const,
     }
 
-    manager.createTransaction([mutation], { type: "ordered" })
+    manager.createTransaction([mutation], { type: `ordered` })
   }
 
   const deleteFn = ({ id, metadata }: DeleteParams) => {
@@ -99,10 +99,10 @@ export function useCollection(config: UseCollectionConfig) {
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
-      state: "created" as const,
+      state: `created` as const,
     }
 
-    manager.createTransaction([mutation], { type: "ordered" })
+    manager.createTransaction([mutation], { type: `ordered` })
   }
 
   const withMutation = ({ changes, metadata }: WithMutationParams) => {
@@ -116,10 +116,10 @@ export function useCollection(config: UseCollectionConfig) {
       metadata,
       created_at: new Date(),
       updated_at: new Date(),
-      state: "created" as const,
+      state: `created` as const,
     }))
 
-    manager.createTransaction(mutations, { type: "ordered" })
+    manager.createTransaction(mutations, { type: `ordered` })
   }
 
   return {
