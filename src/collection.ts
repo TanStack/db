@@ -11,7 +11,7 @@ import { TransactionStore } from "./TransactionStore"
 
 interface CollectionConfig {
   sync: SyncConfig
-  mutationFn?: MutationFn
+  mutationFn: MutationFn
 }
 
 interface UpdateParams {
@@ -47,17 +47,21 @@ export class Collection {
 
   private syncedData = new Store(new Map<string, unknown>())
   private pendingOperations: ChangeMessage[] = []
+  public config: CollectionConfig
 
   constructor(config?: CollectionConfig) {
     if (!config?.sync) {
       throw new Error(`Collection requires a sync config`)
     }
-    if (!config?.mutationFn) {
+    if (!config?.mutationFn && !config?.mutationFn?.persist) {
       throw new Error(`Collection requires a mutationFn`)
     }
 
     this.transactionStore = new TransactionStore()
-    this.transactionManager = new TransactionManager(this.transactionStore)
+    this.transactionManager = new TransactionManager(
+      this.transactionStore,
+      this
+    )
 
     // Copies of live mutations are stored here and removed once the transaction completes.
     this.optimisticOperations = new Derived({
@@ -87,6 +91,8 @@ export class Collection {
       },
       deps: [this.syncedData, this.optimisticOperations],
     })
+
+    this.config = config
 
     this.derivedState.mount()
 

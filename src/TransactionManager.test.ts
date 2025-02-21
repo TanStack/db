@@ -3,15 +3,28 @@ import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
 import type { PendingMutation, MutationStrategy } from "./types"
 import "fake-indexeddb/auto"
+import { Collection } from "./collection"
 
 describe(`TransactionManager`, () => {
   let store: TransactionStore
+  let collection: Collection
   let manager: TransactionManager
 
   beforeEach(() => {
     // Reset indexedDB for each test using the fake-indexeddb implementation
     store = new TransactionStore()
-    manager = new TransactionManager(store)
+    collection = new Collection({
+      sync: {
+        id: `mock`,
+        sync: () => {},
+      },
+      mutationFn: {
+        persist: async () => {
+          console.log(`persisting...`)
+        },
+      },
+    })
+    manager = new TransactionManager(store, collection)
     store.clearAll()
   })
 
@@ -20,6 +33,8 @@ describe(`TransactionManager`, () => {
     original: { id, value: `original` },
     modified: { id, value: `modified` },
     changes: { value: `modified` },
+    type: `insert`,
+    key: id,
     metadata: null,
     created_at: new Date(),
     updated_at: new Date(),
@@ -40,7 +55,7 @@ describe(`TransactionManager`, () => {
       const transaction = manager.createTransaction(mutations, orderedStrategy)
 
       expect(transaction.id).toBeDefined()
-      expect(transaction.state).toBe(`pending`)
+      expect(transaction.state).toBe(`persisting`)
       expect(transaction.mutations).toEqual(mutations)
       expect(transaction.attempts).toEqual([])
       expect(transaction.current_attempt).toBe(0)
@@ -136,7 +151,7 @@ describe(`TransactionManager`, () => {
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
-      expect(tx1.state).toBe(`pending`)
+      expect(tx1.state).toBe(`persisting`)
       expect(tx1.queued_behind).toBeUndefined()
 
       // Create second transaction also modifying object 1 - should be queued
@@ -152,7 +167,7 @@ describe(`TransactionManager`, () => {
         [createMockMutation(`object-2`)],
         orderedStrategy
       )
-      expect(tx3.state).toBe(`pending`)
+      expect(tx3.state).toBe(`persisting`)
       expect(tx3.queued_behind).toBeUndefined()
 
       // Complete first transaction
@@ -206,7 +221,7 @@ describe(`TransactionManager`, () => {
         orderedStrategy
       )
 
-      expect(ordered1.state).toBe(`pending`)
+      expect(ordered1.state).toBe(`persisting`)
       expect(ordered1.queued_behind).toBeUndefined()
       expect(parallel1.state).toBe(`pending`)
       expect(parallel1.queued_behind).toBeUndefined()

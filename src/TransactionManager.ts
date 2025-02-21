@@ -7,13 +7,16 @@ import type {
 } from "./types"
 import { TransactionStore } from "./TransactionStore"
 import { SortedMap } from "./SortedMap"
+import { Collection } from "./collection"
 
 export class TransactionManager {
   private store: TransactionStore
+  private collection: Collection
   public transactions: Store<SortedMap<string, Transaction>>
 
-  constructor(store: TransactionStore) {
+  constructor(store: TransactionStore, collection: Collection) {
     this.store = store
+    this.collection = collection
     // Initialize store with SortedMap that sorts by created_at
     this.transactions = new Store(
       new SortedMap<string, Transaction>(
@@ -73,6 +76,24 @@ export class TransactionManager {
       if (conflictingTransaction) {
         transaction.state = `queued`
         transaction.queued_behind = conflictingTransaction.id
+      } else {
+        transaction.state = `persisting`
+        this.setTransaction(transaction)
+        console.log(`about to persist`)
+        this.collection.config.mutationFn
+          .persist({
+            transaction,
+            attempt: 1,
+            changes: transaction.mutations.map((mutation) => mutation.changes),
+          })
+          .then(() => {
+            if (this.collection.config.mutationFn.awaitSync) {
+              transaction.state = `persisted_awaiting_sync`
+              this.collection.config.mutationFn.awaitSync({ transaction })
+            }
+            transaction.state = `completed`
+            this.setTransaction(transaction)
+          })
       }
     }
 

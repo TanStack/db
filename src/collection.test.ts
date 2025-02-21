@@ -65,7 +65,11 @@ describe(`Collection`, () => {
         id: `mock`,
         sync: () => {},
       },
-      mutationFn: { persist: async () => {} },
+      mutationFn: {
+        persist: async () => {
+          console.log(`persisting...`)
+        },
+      },
     })
 
     // insert

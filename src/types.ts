@@ -45,6 +45,7 @@ export interface Transaction {
     message: string
     error: Error
   }
+  mutationFn: MutationFn
 }
 
 type Value<Extensions = never> =
@@ -79,7 +80,7 @@ export interface SyncConfig {
 
 export interface MutationFn {
   persist: (params: {
-    changes: Record<string, unknown>
+    changes: Record<string, unknown>[]
     attempt: number
     transaction: Transaction
   }) => Promise<void>
