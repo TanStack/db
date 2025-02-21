@@ -1,3 +1,5 @@
+import { Collection } from "./collection"
+
 export type TransactionState =
   | `queued`
   | `pending`
@@ -43,13 +45,34 @@ export interface Transaction {
   }
 }
 
+type Value<Extensions = never> =
+  | string
+  | number
+  | boolean
+  | bigint
+  | null
+  | Extensions
+  | Value<Extensions>[]
+  | { [key: string]: Value<Extensions> }
+
+type Row<Extensions = never> = Record<string, Value<Extensions>>
+
+type OperationType = `insert` | `update` | `delete`
+
+export type ChangeMessage<T extends Row<unknown> = Row> = {
+  key: string
+  value: T
+  type: OperationType
+}
+
 export interface SyncConfig {
   id: string
-  setup: (params: {
-    onUpdate: (data: Record<string, unknown>) => void
-  }) => Promise<{
-    data: Record<string, unknown>
-  }>
+  sync: (params: {
+    collection: Collection
+    begin: () => void
+    write: (message: ChangeMessage) => void
+    commit: () => void
+  }) => void
 }
 
 export interface MutationFn {

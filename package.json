@@ -43,6 +43,7 @@
     "vitest": "^3.0.6"
   },
   "dependencies": {
+    "@tanstack/store": "^0.7.0",
     "idb": "^8.0.2"
   }
 }
