@@ -112,7 +112,7 @@ export class Collection {
           }
         }
         console.log(`after`, currDepVals)
-        return currDepVals[0]
+        return new Map(currDepVals[0])
       },
       deps: [this.syncedData, this.optimisticOperations],
     })
@@ -152,6 +152,7 @@ export class Collection {
             })
           }
         })
+
         this.pendingOperations = []
       },
     })
