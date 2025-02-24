@@ -59,7 +59,7 @@ describe(`Collection`, () => {
     })
   })
 
-  it.only(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
+  it(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
     const emitter = mitt()
     // Create mock functions that will capture the data for later assertions
     const persistMock = vi.fn()

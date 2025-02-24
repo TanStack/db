@@ -17,7 +17,7 @@ interface CollectionConfig {
 interface UpdateParams {
   key: string
   // eslint-disable-next-line
-  changes: Record<string, any>
+  data: Record<string, any>
   metadata?: unknown
 }
 
@@ -44,6 +44,7 @@ export class Collection {
   private transactionStore: TransactionStore
 
   public optimisticOperations: Derived<ChangeMessage[]>
+  public derivedState: Derived<Map<string, unknown>>
 
   private syncedData = new Store(new Map<string, unknown>())
   private pendingOperations: ChangeMessage[] = []

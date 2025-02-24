@@ -1,132 +1,51 @@
-import { useState } from "react"
+import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
 import type { SyncConfig, MutationFn } from "./types"
-import { TransactionManager } from "./TransactionManager"
-import { TransactionStore } from "./TransactionStore"
-
-// Initialize store and manager once, but only in browser environment
-let store: TransactionStore | undefined
-let transactionManager: TransactionManager | undefined
-
-function getTransactionManager() {
-  if (typeof window === `undefined`) return undefined
-
-  if (!store) {
-    store = new TransactionStore()
-    transactionManager = new TransactionManager(store)
-  }
-
-  return transactionManager
-}
+import { Collection } from "./collection"
 
 interface UseCollectionConfig {
+  id: string
   sync: SyncConfig
-  mutationFn?: MutationFn
+  mutationFn: MutationFn
 }
 
-interface UpdateParams {
-  id: string
-  // eslint-disable-next-line
-  changes: Record<string, any>
-  metadata?: unknown
-}
-
-interface InsertParams {
-  id: string
-  // eslint-disable-next-line
-  data: Record<string, any>
-  metadata?: unknown
-}
-
-interface DeleteParams {
-  id: string
-  metadata?: unknown
-}
-
-interface WithMutationParams {
-  // eslint-disable-next-line
-  changes: Record<string, any>[]
-  metadata?: unknown
-}
+// Store collections in memory
+const collections = new Map<string, Collection>()
 
 export function useCollection(config: UseCollectionConfig) {
-  console.log({ config })
-  // eslint-disable-next-line
-  const [data] = useState<Record<string, any>>({})
-  const manager = getTransactionManager()
+  // Get or create collection instance
+  if (!collections.has(config.id)) {
+    collections.set(
+      config.id,
+      new Collection({
+        sync: config.sync,
+        mutationFn: config.mutationFn,
+      })
+    )
+  }
+  const collection = collections.get(config.id)!
 
-  const update = ({ id, changes, metadata }: UpdateParams) => {
-    if (!manager) return
-
-    const mutation = {
-      mutationId: crypto.randomUUID(),
-      original: data[id] || {},
-      modified: { ...data[id], ...changes, id },
-      changes,
-      metadata,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      state: `created` as const,
+  // Subscribe to collection's derivedState
+  const data = useSyncExternalStoreWithSelector(
+    collection.derivedState.subscribe,
+    () => collection.derivedState.state,
+    () => collection.derivedState.state,
+    (state) => state || new Map(),
+    (a, b) => {
+      if (a === b) return true
+      if (!(a instanceof Map) || !(b instanceof Map)) return false
+      if (a.size !== b.size) return false
+      for (const [key, value] of a) {
+        if (!b.has(key) || !Object.is(value, b.get(key))) return false
+      }
+      return true
     }
-
-    manager.createTransaction([mutation], { type: `ordered` })
-  }
-
-  const insert = ({ id, data: newData, metadata }: InsertParams) => {
-    if (!manager) return
-
-    const mutation = {
-      mutationId: crypto.randomUUID(),
-      original: {},
-      modified: { ...newData, id },
-      changes: newData,
-      metadata,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      state: `created` as const,
-    }
-
-    manager.createTransaction([mutation], { type: `ordered` })
-  }
-
-  const deleteFn = ({ id, metadata }: DeleteParams) => {
-    if (!manager) return
-
-    const mutation = {
-      mutationId: crypto.randomUUID(),
-      original: data[id] || {},
-      modified: { id, _deleted: true },
-      changes: { _deleted: true },
-      metadata,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      state: `created` as const,
-    }
-
-    manager.createTransaction([mutation], { type: `ordered` })
-  }
-
-  const withMutation = ({ changes, metadata }: WithMutationParams) => {
-    if (!manager) return
-
-    const mutations = changes.map((change) => ({
-      mutationId: crypto.randomUUID(),
-      original: data[change.id] || {},
-      modified: { ...data[change.id], ...change },
-      changes: change,
-      metadata,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      state: `created` as const,
-    }))
-
-    manager.createTransaction(mutations, { type: `ordered` })
-  }
+  )
 
   return {
     data,
-    update,
-    insert,
-    delete: deleteFn,
-    withMutation,
+    update: collection.update.bind(collection),
+    insert: collection.insert.bind(collection),
+    delete: collection.delete.bind(collection),
+    // withMutation: collection.withMutation.bind(collection),
   }
 }

@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@tanstack/store": "^0.7.0",
-    "idb": "^8.0.2"
+    "idb": "^8.0.2",
+    "use-sync-external-store": "^1.4.0"
   }
 }
