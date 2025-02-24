@@ -11,10 +11,10 @@ export type TransactionState =
 
 export interface Attempt {
   id: string
-  started_at: Date
-  completed_at?: Date
+  startedAt: Date
+  completedAt?: Date
   error?: Error
-  retry_scheduled_for?: Date
+  retryScheduledFor?: Date
 }
 
 export interface PendingMutation {
@@ -25,25 +25,26 @@ export interface PendingMutation {
   key: string
   type: OperationType
   metadata: unknown
-  created_at: Date
-  updated_at: Date
+  createdAt: Date
+  updatedAt: Date
   state: `created` | `persisting` | `synced`
 }
 
 export interface Transaction {
   id: string
   state: TransactionState
-  created_at: Date
-  updated_at: Date
+  createdAt: Date
+  updatedAt: Date
   mutations: PendingMutation[]
   attempts: Attempt[]
-  current_attempt: number
+  currentAttempt: number
   strategy: MutationStrategy
   metadata?: Record<string, unknown>
-  queued_behind?: string
-  synced?: Deferred<boolean>
+  queuedBehind?: string
+  isSynced?: Deferred<boolean>
+  isPersisted?: Deferred<boolean>
   error?: {
-    transaction_id?: string // For dependency failures
+    transactionId?: string // For dependency failures
     message: string
     error: Error
   }

@@ -18,10 +18,10 @@ export class TransactionManager {
   constructor(store: TransactionStore, collection: Collection) {
     this.store = store
     this.collection = collection
-    // Initialize store with SortedMap that sorts by created_at
+    // Initialize store with SortedMap that sorts by createdAt
     this.transactions = new Store(
       new SortedMap<string, Transaction>(
-        (a, b) => a.created_at.getTime() - b.created_at.getTime()
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
       )
     )
 
@@ -54,13 +54,14 @@ export class TransactionManager {
     const transaction: Transaction = {
       id: crypto.randomUUID(),
       state: `pending`,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       mutations,
       attempts: [],
       current_attempt: 0,
       strategy,
-      synced: createDeferred(),
+      isSynced: createDeferred(),
+      isPersisted: createDeferred(),
     }
 
     // For ordered transactions, check if we need to queue behind another transaction
@@ -88,6 +89,7 @@ export class TransactionManager {
             changes: transaction.mutations.map((mutation) => mutation.changes),
           })
           .then(() => {
+            transaction.isPersisted?.resolve(true)
             if (this.collection.config.mutationFn.awaitSync) {
               transaction.state = `persisted_awaiting_sync`
               this.setTransaction(transaction)
@@ -96,7 +98,7 @@ export class TransactionManager {
                   transaction,
                 })
                 .then(() => {
-                  transaction.synced?.resolve(true)
+                  transaction.isSynced?.resolve(true)
                   transaction.state = `completed`
                   this.setTransaction(transaction)
                 })
@@ -121,11 +123,11 @@ export class TransactionManager {
       throw new Error(`Transaction ${id} not found`)
     }
 
-    // Force a small delay to ensure updated_at is different
+    // Force a small delay to ensure updatedAt is different
     const updatedTransaction: Transaction = {
       ...transaction,
       state: newState,
-      updated_at: new Date(Date.now() + 1),
+      updatedAt: new Date(Date.now() + 1),
     }
 
     this.setTransaction(updatedTransaction)
@@ -147,11 +149,11 @@ export class TransactionManager {
           tx.queued_behind === transaction.id
       )
 
-      // Find the next transaction to run (the one with earliest created_at)
+      // Find the next transaction to run (the one with earliest createdAt)
       if (queuedTransactions.length > 0) {
         const nextTransaction = queuedTransactions.reduce(
           (earliest, current) =>
-            earliest.created_at < current.created_at ? earliest : current
+            earliest.createdAt < current.createdAt ? earliest : current
         )
 
         // Check if this transaction needs to be queued behind any other active transactions
@@ -171,7 +173,7 @@ export class TransactionManager {
           ...nextTransaction,
           state: conflictingTransaction ? `queued` : `pending`,
           queued_behind: conflictingTransaction?.id,
-          updated_at: new Date(Date.now() + 1),
+          updatedAt: new Date(Date.now() + 1),
         }
         this.setTransaction(updatedNextTransaction)
 
@@ -212,7 +214,7 @@ export class TransactionManager {
       ...transaction,
       attempts: [...transaction.attempts, attempt],
       current_attempt: transaction.current_attempt + 1,
-      updated_at: new Date(Date.now() + 1),
+      updatedAt: new Date(Date.now() + 1),
     }
 
     this.setTransaction(updatedTransaction)

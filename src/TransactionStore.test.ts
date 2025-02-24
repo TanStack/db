@@ -15,11 +15,11 @@ describe(`TransactionStore`, () => {
   const createMockTransaction = (id: string): Transaction => ({
     id,
     state: `pending`,
-    created_at: new Date(),
-    updated_at: new Date(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
     mutations: [],
     attempts: [],
-    current_attempt: 0,
+    currentAttempt: 0,
   })
 
   it(`should store and retrieve a transaction`, async () => {

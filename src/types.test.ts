@@ -16,8 +16,8 @@ describe(`Type definitions`, () => {
     const transaction: Transaction = {
       id: `123`,
       state: `pending` as TransactionState,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       mutations: [],
       attempts: [],
       current_attempt: 0,
@@ -35,8 +35,8 @@ describe(`Type definitions`, () => {
       modified: {},
       changes: {},
       metadata: null,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created`,
     }
     expect(mutation.mutationId).toBe(`123`)

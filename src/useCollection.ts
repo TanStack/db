@@ -63,8 +63,8 @@ export function useCollection(config: UseCollectionConfig) {
       modified: { ...data[id], ...changes, id },
       changes,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -80,8 +80,8 @@ export function useCollection(config: UseCollectionConfig) {
       modified: { ...newData, id },
       changes: newData,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -97,8 +97,8 @@ export function useCollection(config: UseCollectionConfig) {
       modified: { id, _deleted: true },
       changes: { _deleted: true },
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -114,8 +114,8 @@ export function useCollection(config: UseCollectionConfig) {
       modified: { ...data[change.id], ...change },
       changes: change,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }))
 

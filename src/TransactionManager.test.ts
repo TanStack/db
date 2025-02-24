@@ -34,8 +34,8 @@ describe(`TransactionManager`, () => {
     type: `insert`,
     key: id,
     metadata: null,
-    created_at: new Date(),
-    updated_at: new Date(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
     state: `created`,
   })
 
@@ -64,12 +64,12 @@ describe(`TransactionManager`, () => {
       const transaction = manager.createTransaction(mutations, orderedStrategy)
 
       // Add a small delay to ensure timestamps are different
-      const beforeUpdate = transaction.updated_at
+      const beforeUpdate = transaction.updatedAt
       manager.updateTransactionState(transaction.id, `persisting`)
 
       const updated = manager.getTransaction(transaction.id)
       expect(updated?.state).toBe(`persisting`)
-      expect(updated?.updated_at.getTime()).toBeGreaterThan(
+      expect(updated?.updatedAt.getTime()).toBeGreaterThan(
         beforeUpdate.getTime()
       )
     })
@@ -236,7 +236,7 @@ describe(`TransactionManager`, () => {
   })
 
   describe(`Transaction Ordering`, () => {
-    it(`should maintain transactions sorted by created_at`, async () => {
+    it(`should maintain transactions sorted by createdAt`, async () => {
       // Create transactions with different timestamps
       const now = Date.now()
       const timestamps = [now, now - 1000, now - 2000]
@@ -248,10 +248,10 @@ describe(`TransactionManager`, () => {
             [createMockMutation(`test-${i + 1}`)],
             parallelStrategy
           )
-          // Force the created_at time
+          // Force the createdAt time
           const updatedTx = {
             ...tx,
-            created_at: new Date(timestamp),
+            createdAt: new Date(timestamp),
           }
           manager.transactions.setState((sortedMap) => {
             sortedMap.set(updatedTx.id, updatedTx)
@@ -263,9 +263,9 @@ describe(`TransactionManager`, () => {
 
       // Verify transactions are returned in chronological order (oldest first)
       const sortedTransactions = Array.from(manager.transactions.state.values())
-      expect(sortedTransactions[0].created_at.getTime()).toBe(timestamps[2]) // Oldest
-      expect(sortedTransactions[1].created_at.getTime()).toBe(timestamps[1])
-      expect(sortedTransactions[2].created_at.getTime()).toBe(timestamps[0]) // Newest
+      expect(sortedTransactions[0].createdAt.getTime()).toBe(timestamps[2]) // Oldest
+      expect(sortedTransactions[1].createdAt.getTime()).toBe(timestamps[1])
+      expect(sortedTransactions[2].createdAt.getTime()).toBe(timestamps[0]) // Newest
     })
   })
 })

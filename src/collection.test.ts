@@ -59,7 +59,7 @@ describe(`Collection`, () => {
     })
   })
 
-  it(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
+  it.only(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
     const emitter = mitt()
     // new collection w/ mock sync/mutation
     const collection = new Collection({
@@ -76,14 +76,161 @@ describe(`Collection`, () => {
         },
       },
       mutationFn: {
-        persist: async ({ changes, transaction, attempt }) => {
-          console.log(`persisting...`, { attempt })
-          emitter.emit(`foo`, { changes, transaction })
-          await new Promise((resolve) => setTimeout(resolve, 1))
+        persist({ changes, transaction, attempt }) {
+          // Redact time-based and random fields
+          const redactedChanges = changes.map((change) => ({
+            ...change,
+            createdAt: `[REDACTED]`,
+            updatedAt: `[REDACTED]`,
+            mutationId: `[REDACTED]`,
+          }))
+          const redactedTransaction = {
+            ...transaction,
+            mutations: {
+              ...transaction.mutations.map((mutation) => {
+                return {
+                  ...mutation,
+                  createdAt: `[REDACTED]`,
+                  updatedAt: `[REDACTED]`,
+                  mutationId: `[REDACTED]`,
+                }
+              }),
+            },
+            createdAt: `[REDACTED]`,
+            updatedAt: `[REDACTED]`,
+            id: `[REDACTED]`,
+            mutationId: `[REDACTED]`,
+          }
+
+          expect({
+            changes: redactedChanges,
+            transaction: redactedTransaction,
+            attempt,
+          }).toMatchInlineSnapshot(`
+            {
+              "attempt": 1,
+              "changes": [
+                {
+                  "createdAt": "[REDACTED]",
+                  "mutationId": "[REDACTED]",
+                  "updatedAt": "[REDACTED]",
+                  "value": "bar",
+                },
+              ],
+              "transaction": {
+                "attempts": [],
+                "createdAt": "[REDACTED]",
+                "current_attempt": 0,
+                "id": "[REDACTED]",
+                "isPersisted": {
+                  "isPending": [Function],
+                  "promise": Promise {},
+                  "reject": [Function],
+                  "resolve": [Function],
+                },
+                "isSynced": {
+                  "isPending": [Function],
+                  "promise": Promise {},
+                  "reject": [Function],
+                  "resolve": [Function],
+                },
+                "mutationId": "[REDACTED]",
+                "mutations": {
+                  "0": {
+                    "changes": {
+                      "value": "bar",
+                    },
+                    "createdAt": "[REDACTED]",
+                    "key": "foo",
+                    "metadata": undefined,
+                    "modified": {
+                      "value": "bar",
+                    },
+                    "mutationId": "[REDACTED]",
+                    "original": {},
+                    "state": "created",
+                    "type": "insert",
+                    "updatedAt": "[REDACTED]",
+                  },
+                },
+                "state": "persisting",
+                "strategy": {
+                  "type": "ordered",
+                },
+                "updatedAt": "[REDACTED]",
+              },
+            }
+          `)
+
+          return Promise.resolve()
         },
-        awaitSync: async () => {
-          console.log(`awaiting sync`)
-          await new Promise((resolve) => setTimeout(resolve, 1))
+        awaitSync({ transaction }) {
+          // Redact time-based and random fields
+          const redactedTransaction = {
+            ...transaction,
+            mutations: {
+              ...transaction.mutations.map((mutation) => {
+                return {
+                  ...mutation,
+                  createdAt: `[REDACTED]`,
+                  updatedAt: `[REDACTED]`,
+                  mutationId: `[REDACTED]`,
+                }
+              }),
+            },
+            createdAt: `[REDACTED]`,
+            updatedAt: `[REDACTED]`,
+            mutationId: `[REDACTED]`,
+            id: `[REDACTED]`,
+          }
+
+          expect({ transaction: redactedTransaction }).toMatchInlineSnapshot(`
+            {
+              "transaction": {
+                "attempts": [],
+                "createdAt": "[REDACTED]",
+                "current_attempt": 0,
+                "id": "[REDACTED]",
+                "isPersisted": {
+                  "isPending": [Function],
+                  "promise": Promise {},
+                  "reject": [Function],
+                  "resolve": [Function],
+                },
+                "isSynced": {
+                  "isPending": [Function],
+                  "promise": Promise {},
+                  "reject": [Function],
+                  "resolve": [Function],
+                },
+                "mutationId": "[REDACTED]",
+                "mutations": {
+                  "0": {
+                    "changes": {
+                      "value": "bar",
+                    },
+                    "createdAt": "[REDACTED]",
+                    "key": "foo",
+                    "metadata": undefined,
+                    "modified": {
+                      "value": "bar",
+                    },
+                    "mutationId": "[REDACTED]",
+                    "original": {},
+                    "state": "created",
+                    "type": "insert",
+                    "updatedAt": "[REDACTED]",
+                  },
+                },
+                "state": "persisted_awaiting_sync",
+                "strategy": {
+                  "type": "ordered",
+                },
+                "updatedAt": "[REDACTED]",
+              },
+            }
+          `)
+          return Promise.resolve()
         },
       },
     })
@@ -95,7 +242,7 @@ describe(`Collection`, () => {
     })
 
     // The merged value should immediately contain the new insert
-    expect(collection.value).toEqual(new Map([[`key`, { value: `bar` }]]))
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
     // check there's a transaction in peristing state
     expect(
@@ -112,14 +259,14 @@ describe(`Collection`, () => {
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
-    // TODO how to do this? Transaction is just an object right now. Could make it a class though.
-    // Make mutationFn async
-    await transaction.synced?.promise
+    console.time(`isSynced`)
+    await transaction.isSynced?.promise
+    console.timeEnd(`isSynced`)
 
     // after mutationFn returns, check that it was called & transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
     expect(collection.optimisticOperations.state).toEqual([])
-    expect(collection.value).toEqual(new Map([[`key`, { value: `bar` }]]))
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
     // TODO do same with update & delete
   })

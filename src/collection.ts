@@ -66,7 +66,7 @@ export class Collection {
     // Copies of live mutations are stored here and removed once the transaction completes.
     this.optimisticOperations = new Derived({
       fn: ({ currDepVals }) => {
-        return Array.from(currDepVals[0].values())
+        const result = Array.from(currDepVals[0].values())
           .filter(
             (transaction) =>
               transaction.state !== `completed` &&
@@ -82,6 +82,9 @@ export class Collection {
             })
           )
           .flat()
+
+        console.log({ result })
+        return result
       },
       deps: [this.transactionManager.transactions],
     })
@@ -90,6 +93,24 @@ export class Collection {
     this.derivedState = new Derived({
       // prevVal, prevDepVals,
       fn: ({ currDepVals }) => {
+        // Apply the optimistic operations on top of the synced state.
+        for (const operation of currDepVals[1]) {
+          switch (operation.type) {
+            case `insert`:
+              currDepVals[0].set(operation.key, operation.value)
+              break
+            case `update`:
+              currDepVals[0].set(operation.key, {
+                ...currDepVals[0].get(operation.key)!,
+                ...operation.value,
+              })
+              break
+            case `delete`:
+              currDepVals[0].delete(operation.key)
+              break
+          }
+        }
+        console.log(`after`, currDepVals)
         return currDepVals[0]
       },
       deps: [this.syncedData, this.optimisticOperations],
@@ -143,8 +164,8 @@ export class Collection {
       changes,
       key,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -160,8 +181,8 @@ export class Collection {
       key,
       metadata,
       type: `insert`,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -178,8 +199,8 @@ export class Collection {
       changes: { _deleted: true },
       key,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }
 
@@ -199,8 +220,8 @@ export class Collection {
       }),
       changes: change,
       metadata,
-      created_at: new Date(),
-      updated_at: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       state: `created` as const,
     }))
 
