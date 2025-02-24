@@ -193,21 +193,26 @@ export class Collection {
     })
   }
 
-  deleteFn = ({ key, metadata }: DeleteParams) => {
+  delete = ({ key, metadata }: DeleteParams) => {
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
-      original: this.syncedData.state.get(key) || {},
+      original: this.value.get(key) || {},
       modified: { _deleted: true },
       changes: { _deleted: true },
       key,
       metadata,
+      type: `delete`,
       createdAt: new Date(),
       updatedAt: new Date(),
     }
 
-    this.transactionManager.createTransaction([mutation], { type: `ordered` })
+    return this.transactionManager.createTransaction([mutation], {
+      type: `ordered`,
+    })
   }
 
+  // TODO should be withTransaction & it shouldn't start saving until it's explicitly started?
+  // Not critical for now so we can defer this.
   withMutation = ({ changes, metadata }: WithMutationParams) => {
     const mutations = changes.map((change) => ({
       mutationId: crypto.randomUUID(),

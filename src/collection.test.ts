@@ -198,6 +198,7 @@ describe(`Collection`, () => {
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
     // TODO do same with update & delete & withMutation
+    //
     // update
     // Reset the mocks for update test
     persistMock.mockClear()
@@ -265,6 +266,71 @@ describe(`Collection`, () => {
     ).toMatchInlineSnapshot(`"completed"`)
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar2` }]]))
+    //
+    // delete
+    // Reset the mocks for delete test
+    persistMock.mockClear()
+    syncMock.mockClear()
+
+    const deleteTransaction = collection.delete({
+      key: `foo`,
+    })
+
+    // The merged value should immediately contain the new update
+    expect(collection.value).toEqual(new Map())
+
+    // check there's a transaction in peristing state
+    expect(
+      Array.from(collection.transactions.values())[2].mutations[0].changes
+    ).toEqual({
+      _deleted: true,
+    })
+
+    // Check the optimistic operation is there
+    const deleteOperation: ChangeMessage = {
+      key: `foo`,
+      type: `delete`,
+      value: {
+        _deleted: true,
+      },
+    }
+    expect(collection.optimisticOperations.state[0]).toEqual(deleteOperation)
+
+    // Check persist data for update (moved outside the persist callback)
+    const deletePersistData = persistMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during persist
+    expect(deletePersistData.transaction.state).toBe(`persisting`)
+    // Check mutation type is correct
+    expect(deletePersistData.transaction.mutations[0].type).toBe(`delete`)
+    // Check original data is correct
+    expect(updatePersistData.transaction.mutations[0].original).toEqual({
+      value: `bar`,
+    })
+
+    await deleteTransaction.isSynced?.promise
+
+    // Check sync data for update (moved outside the awaitSync callback)
+    const deleteSyncData = syncMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during sync waiting
+    expect(deleteSyncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    // Check mutation type is correct
+    expect(deleteSyncData.transaction.mutations[0].type).toBe(`delete`)
+    // Check changes are correct
+    expect(deleteSyncData.transaction.mutations[0].changes).toEqual({
+      _deleted: true,
+    })
+    // Check original data is correct
+    expect(deleteSyncData.transaction.mutations[0].original).toEqual({
+      value: `bar2`,
+    })
+
+    // after mutationFn returns, check that the transaction is updated &
+    // optimistic update is gone & synced data & comibned state are all updated.
+    expect(
+      Array.from(collection.transactions.values())[2].state
+    ).toMatchInlineSnapshot(`"completed"`)
+    expect(collection.optimisticOperations.state).toEqual([])
+    expect(collection.value).toEqual(new Map())
   })
 
   // Skip until e2e working
