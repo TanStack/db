@@ -148,7 +148,6 @@ describe(`Collection`, () => {
                     },
                     "mutationId": "[REDACTED]",
                     "original": {},
-                    "state": "created",
                     "type": "insert",
                     "updatedAt": "[REDACTED]",
                   },
@@ -217,7 +216,6 @@ describe(`Collection`, () => {
                     },
                     "mutationId": "[REDACTED]",
                     "original": {},
-                    "state": "created",
                     "type": "insert",
                     "updatedAt": "[REDACTED]",
                   },
@@ -259,12 +257,13 @@ describe(`Collection`, () => {
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
-    console.time(`isSynced`)
     await transaction.isSynced?.promise
-    console.timeEnd(`isSynced`)
 
-    // after mutationFn returns, check that it was called & transaction is updated &
+    // after mutationFn returns, check that the transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
+    expect(
+      Array.from(collection.transactions.values())[0].state
+    ).toMatchInlineSnapshot(`"completed"`)
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 

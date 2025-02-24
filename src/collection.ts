@@ -166,7 +166,6 @@ export class Collection {
       metadata,
       createdAt: new Date(),
       updatedAt: new Date(),
-      state: `created` as const,
     }
 
     this.transactionManager.createTransaction([mutation], { type: `ordered` })
@@ -183,7 +182,6 @@ export class Collection {
       type: `insert`,
       createdAt: new Date(),
       updatedAt: new Date(),
-      state: `created` as const,
     }
 
     return this.transactionManager.createTransaction([mutation], {
@@ -201,7 +199,6 @@ export class Collection {
       metadata,
       createdAt: new Date(),
       updatedAt: new Date(),
-      state: `created` as const,
     }
 
     this.transactionManager.createTransaction([mutation], { type: `ordered` })
