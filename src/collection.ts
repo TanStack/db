@@ -156,19 +156,23 @@ export class Collection {
     })
   }
 
-  update = ({ key, changes, metadata }: UpdateParams) => {
+  update = ({ key, data, metadata }: UpdateParams) => {
+    console.log(`this.value`, this.value)
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
-      original: this.syncedData.state.get(key) || {},
-      modified: { ...this.syncedData.state.get(key), ...changes },
-      changes,
+      original: this.value.get(key) || {},
+      modified: { ...this.value.get(key), ...data },
+      changes: data,
       key,
       metadata,
+      type: `update`,
       createdAt: new Date(),
       updatedAt: new Date(),
     }
 
-    this.transactionManager.createTransaction([mutation], { type: `ordered` })
+    return this.transactionManager.createTransaction([mutation], {
+      type: `ordered`,
+    })
   }
 
   insert = ({ key, data, metadata }: InsertParams) => {

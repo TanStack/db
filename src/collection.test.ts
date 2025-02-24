@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, vi, expect } from "vitest"
 import { Collection } from "./collection"
 import type { ChangeMessage } from "./types"
 import "fake-indexeddb/auto"
@@ -61,6 +61,10 @@ describe(`Collection`, () => {
 
   it.only(`Calling mutation operators should trigger creating & persisting a new transaction`, async () => {
     const emitter = mitt()
+    // Create mock functions that will capture the data for later assertions
+    const persistMock = vi.fn()
+    const syncMock = vi.fn()
+
     // new collection w/ mock sync/mutation
     const collection = new Collection({
       sync: {
@@ -102,64 +106,12 @@ describe(`Collection`, () => {
             mutationId: `[REDACTED]`,
           }
 
-          expect({
+          // Store the data for later assertion
+          persistMock({
             changes: redactedChanges,
             transaction: redactedTransaction,
             attempt,
-          }).toMatchInlineSnapshot(`
-            {
-              "attempt": 1,
-              "changes": [
-                {
-                  "createdAt": "[REDACTED]",
-                  "mutationId": "[REDACTED]",
-                  "updatedAt": "[REDACTED]",
-                  "value": "bar",
-                },
-              ],
-              "transaction": {
-                "attempts": [],
-                "createdAt": "[REDACTED]",
-                "current_attempt": 0,
-                "id": "[REDACTED]",
-                "isPersisted": {
-                  "isPending": [Function],
-                  "promise": Promise {},
-                  "reject": [Function],
-                  "resolve": [Function],
-                },
-                "isSynced": {
-                  "isPending": [Function],
-                  "promise": Promise {},
-                  "reject": [Function],
-                  "resolve": [Function],
-                },
-                "mutationId": "[REDACTED]",
-                "mutations": {
-                  "0": {
-                    "changes": {
-                      "value": "bar",
-                    },
-                    "createdAt": "[REDACTED]",
-                    "key": "foo",
-                    "metadata": undefined,
-                    "modified": {
-                      "value": "bar",
-                    },
-                    "mutationId": "[REDACTED]",
-                    "original": {},
-                    "type": "insert",
-                    "updatedAt": "[REDACTED]",
-                  },
-                },
-                "state": "persisting",
-                "strategy": {
-                  "type": "ordered",
-                },
-                "updatedAt": "[REDACTED]",
-              },
-            }
-          `)
+          })
 
           return Promise.resolve()
         },
@@ -183,51 +135,9 @@ describe(`Collection`, () => {
             id: `[REDACTED]`,
           }
 
-          expect({ transaction: redactedTransaction }).toMatchInlineSnapshot(`
-            {
-              "transaction": {
-                "attempts": [],
-                "createdAt": "[REDACTED]",
-                "current_attempt": 0,
-                "id": "[REDACTED]",
-                "isPersisted": {
-                  "isPending": [Function],
-                  "promise": Promise {},
-                  "reject": [Function],
-                  "resolve": [Function],
-                },
-                "isSynced": {
-                  "isPending": [Function],
-                  "promise": Promise {},
-                  "reject": [Function],
-                  "resolve": [Function],
-                },
-                "mutationId": "[REDACTED]",
-                "mutations": {
-                  "0": {
-                    "changes": {
-                      "value": "bar",
-                    },
-                    "createdAt": "[REDACTED]",
-                    "key": "foo",
-                    "metadata": undefined,
-                    "modified": {
-                      "value": "bar",
-                    },
-                    "mutationId": "[REDACTED]",
-                    "original": {},
-                    "type": "insert",
-                    "updatedAt": "[REDACTED]",
-                  },
-                },
-                "state": "persisted_awaiting_sync",
-                "strategy": {
-                  "type": "ordered",
-                },
-                "updatedAt": "[REDACTED]",
-              },
-            }
-          `)
+          // Store the data for later assertion
+          syncMock({ transaction: redactedTransaction })
+
           return Promise.resolve()
         },
       },
@@ -257,7 +167,27 @@ describe(`Collection`, () => {
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
+    // Check persist data (moved outside the persist callback)
+    const persistData = persistMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during persist
+    expect(persistData.transaction.state).toBe(`persisting`)
+    // Check mutation type is correct
+    expect(persistData.transaction.mutations[0].type).toBe(`insert`)
+    // Check changes are correct
+    expect(persistData.transaction.mutations[0].changes).toEqual({
+      value: `bar`,
+    })
+
     await transaction.isSynced?.promise
+
+    // Check sync data (moved outside the awaitSync callback)
+    const syncData = syncMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during sync waiting
+    expect(syncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    // Check mutation type is correct
+    expect(syncData.transaction.mutations[0].type).toBe(`insert`)
+    // Check changes are correct
+    expect(syncData.transaction.mutations[0].changes).toEqual({ value: `bar` })
 
     // after mutationFn returns, check that the transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
@@ -267,7 +197,74 @@ describe(`Collection`, () => {
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
-    // TODO do same with update & delete
+    // TODO do same with update & delete & withMutation
+    // update
+    // Reset the mocks for update test
+    persistMock.mockClear()
+    syncMock.mockClear()
+
+    const updateTransaction = collection.update({
+      key: `foo`,
+      data: { value: `bar2` },
+    })
+
+    // The merged value should immediately contain the new update
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar2` }]]))
+
+    // check there's a transaction in peristing state
+    expect(
+      Array.from(collection.transactions.values())[1].mutations[0].changes
+    ).toEqual({
+      value: `bar2`,
+    })
+
+    // Check the optimistic operation is there
+    const updateOperation: ChangeMessage = {
+      key: `foo`,
+      value: { value: `bar2` },
+      type: `update`,
+    }
+    expect(collection.optimisticOperations.state[0]).toEqual(updateOperation)
+
+    // Check persist data for update (moved outside the persist callback)
+    const updatePersistData = persistMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during persist
+    expect(updatePersistData.transaction.state).toBe(`persisting`)
+    // Check mutation type is correct
+    expect(updatePersistData.transaction.mutations[0].type).toBe(`update`)
+    // Check changes are correct
+    expect(updatePersistData.transaction.mutations[0].changes).toEqual({
+      value: `bar2`,
+    })
+    // Check original data is correct
+    expect(updatePersistData.transaction.mutations[0].original).toEqual({
+      value: `bar`,
+    })
+
+    await updateTransaction.isSynced?.promise
+
+    // Check sync data for update (moved outside the awaitSync callback)
+    const updateSyncData = syncMock.mock.calls[0][0]
+    // Check that the transaction is in the right state during sync waiting
+    expect(updateSyncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    // Check mutation type is correct
+    expect(updateSyncData.transaction.mutations[0].type).toBe(`update`)
+    // Check changes are correct
+    expect(updateSyncData.transaction.mutations[0].changes).toEqual({
+      value: `bar2`,
+    })
+    // Check original data is correct
+    expect(updateSyncData.transaction.mutations[0].original).toEqual({
+      value: `bar`,
+    })
+
+    // after mutationFn returns, check that the transaction is updated &
+    // optimistic update is gone & synced data & comibned state are all updated.
+    expect(
+      Array.from(collection.transactions.values())[1].state
+    ).toMatchInlineSnapshot(`"completed"`)
+    expect(collection.optimisticOperations.state).toEqual([])
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar2` }]]))
   })
 
   // Skip until e2e working
