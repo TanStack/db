@@ -1,4 +1,5 @@
 import { Collection } from "./collection"
+import { Deferred } from "./deferred"
 
 export type TransactionState =
   | `queued`
@@ -40,6 +41,7 @@ export interface Transaction {
   strategy: MutationStrategy
   metadata?: Record<string, unknown>
   queued_behind?: string
+  synced?: Deferred<boolean>
   error?: {
     transaction_id?: string // For dependency failures
     message: string

@@ -79,9 +79,11 @@ describe(`Collection`, () => {
         persist: async ({ changes, transaction, attempt }) => {
           console.log(`persisting...`, { attempt })
           emitter.emit(`foo`, { changes, transaction })
+          await new Promise((resolve) => setTimeout(resolve, 1))
         },
         awaitSync: async () => {
           console.log(`awaiting sync`)
+          await new Promise((resolve) => setTimeout(resolve, 1))
         },
       },
     })
@@ -91,6 +93,9 @@ describe(`Collection`, () => {
       key: `foo`,
       data: { value: `bar` },
     })
+
+    // The merged value should immediately contain the new insert
+    expect(collection.value).toEqual(new Map([[`key`, { value: `bar` }]]))
 
     // check there's a transaction in peristing state
     expect(
@@ -109,7 +114,7 @@ describe(`Collection`, () => {
 
     // TODO how to do this? Transaction is just an object right now. Could make it a class though.
     // Make mutationFn async
-    await transaction.synced
+    await transaction.synced?.promise
 
     // after mutationFn returns, check that it was called & transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.

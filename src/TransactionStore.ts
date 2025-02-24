@@ -34,7 +34,9 @@ export class TransactionStore {
 
   async putTransaction(tx: Transaction): Promise<void> {
     const db = await this.getDB()
-    await db.put(`transactions`, tx)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { synced, ...restOfTx } = tx
+    await db.put(`transactions`, restOfTx)
   }
 
   async deleteTransaction(id: string): Promise<void> {

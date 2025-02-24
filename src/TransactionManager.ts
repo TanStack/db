@@ -8,6 +8,7 @@ import type {
 import { TransactionStore } from "./TransactionStore"
 import { SortedMap } from "./SortedMap"
 import { Collection } from "./collection"
+import { createDeferred } from "./deferred"
 
 export class TransactionManager {
   private store: TransactionStore
@@ -59,6 +60,7 @@ export class TransactionManager {
       attempts: [],
       current_attempt: 0,
       strategy,
+      synced: createDeferred(),
     }
 
     // For ordered transactions, check if we need to queue behind another transaction
@@ -79,7 +81,6 @@ export class TransactionManager {
       } else {
         transaction.state = `persisting`
         this.setTransaction(transaction)
-        console.log(`about to persist`)
         this.collection.config.mutationFn
           .persist({
             transaction,
@@ -89,12 +90,20 @@ export class TransactionManager {
           .then(() => {
             if (this.collection.config.mutationFn.awaitSync) {
               transaction.state = `persisted_awaiting_sync`
-              this.collection.config.mutationFn.awaitSync({
-                transaction,
-              })
+              this.setTransaction(transaction)
+              this.collection.config.mutationFn
+                .awaitSync({
+                  transaction,
+                })
+                .then(() => {
+                  transaction.synced?.resolve(true)
+                  transaction.state = `completed`
+                  this.setTransaction(transaction)
+                })
+            } else {
+              transaction.state = `completed`
+              this.setTransaction(transaction)
             }
-            transaction.state = `completed`
-            this.setTransaction(transaction)
           })
       }
     }
@@ -102,6 +111,7 @@ export class TransactionManager {
     this.setTransaction(transaction)
     // Persist async
     this.store.putTransaction(transaction)
+
     return transaction
   }
 

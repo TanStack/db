@@ -19,9 +19,7 @@ describe(`TransactionManager`, () => {
         sync: () => {},
       },
       mutationFn: {
-        persist: async () => {
-          console.log(`persisting...`)
-        },
+        persist: async () => {},
       },
     })
     manager = new TransactionManager(store, collection)
