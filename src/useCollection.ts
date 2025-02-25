@@ -1,6 +1,7 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
-import type { SyncConfig, MutationFn } from "./types"
+import type { SyncConfig, MutationFn, Transaction } from "./types"
 import { Collection } from "./collection"
+import { Store } from "@tanstack/store"
 
 interface UseCollectionConfig {
   id: string
@@ -8,37 +9,135 @@ interface UseCollectionConfig {
   mutationFn: MutationFn
 }
 
-// Store collections in memory
-const collections = new Map<string, Collection>()
+// Store collections in memory using Tanstack store
+const collectionsStore = new Store(new Map<string, Collection>())
 
-export function useCollection(config: UseCollectionConfig) {
-  // Get or create collection instance
-  if (!collections.has(config.id)) {
-    collections.set(
-      config.id,
-      new Collection({
-        sync: config.sync,
-        mutationFn: config.mutationFn,
+// Cache for snapshots to prevent infinite loops
+let snapshotCache: Map<
+  string,
+  { state: Map<unknown, unknown>; transactions: Transaction[] }
+> | null = null
+
+export function useCollections() {
+  return useSyncExternalStoreWithSelector(
+    (callback) => {
+      // Subscribe to the collections store for new collections
+      const storeUnsubscribe = collectionsStore.subscribe(() => {
+        snapshotCache = null // Invalidate cache when collections change
+        callback()
       })
-    )
+
+      // Subscribe to all collections' derived states and transactions
+      const collectionUnsubscribes = Array.from(
+        collectionsStore.state.values()
+      ).map((collection) => {
+        const derivedStateUnsub = collection.derivedState.subscribe(() => {
+          snapshotCache = null // Invalidate cache when state changes
+          callback()
+        })
+        const transactionsUnsub =
+          collection.transactionManager.transactions.subscribe(() => {
+            snapshotCache = null // Invalidate cache when transactions change
+            callback()
+          })
+        return () => {
+          derivedStateUnsub()
+          transactionsUnsub()
+        }
+      })
+
+      return () => {
+        storeUnsubscribe()
+        collectionUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      }
+    },
+    // Get snapshot of all collections and their transactions
+    () => {
+      if (snapshotCache) {
+        return snapshotCache
+      }
+
+      const snapshot = new Map<
+        string,
+        { state: Map<unknown, unknown>; transactions: Transaction[] }
+      >()
+      for (const [id, collection] of collectionsStore.state) {
+        snapshot.set(id, {
+          state: collection.derivedState.state,
+          transactions: collection.transactionManager.transactions.state,
+        })
+      }
+      snapshotCache = snapshot
+      return snapshot
+    },
+    // Server snapshot (same as client for now)
+    () => {
+      if (snapshotCache) {
+        return snapshotCache
+      }
+
+      const snapshot = new Map<
+        string,
+        { state: Map<unknown, unknown>; transactions: Transaction[] }
+      >()
+      for (const [id, collection] of collectionsStore.state) {
+        snapshot.set(id, {
+          state: collection.derivedState.state,
+          transactions: collection.transactionManager.transactions.state,
+        })
+      }
+      snapshotCache = snapshot
+      return snapshot
+    },
+    // Identity selector
+    (state) => state,
+    // Custom equality function for Maps
+    (a, b) => {
+      if (a === b) return true
+      if (!(a instanceof Map) || !(b instanceof Map)) return false
+      if (a.size !== b.size) return false
+      for (const [key, value] of a) {
+        const bValue = b.get(key)
+        if (!b.has(key)) return false
+        if (value instanceof Map) {
+          if (!(bValue instanceof Map)) return false
+          if (!shallow(value, bValue)) return false
+        } else if (!Object.is(value, bValue)) {
+          return false
+        }
+      }
+      return true
+    }
+  )
+}
+
+export function useCollection(
+  config: UseCollectionConfig,
+  selector = (d) => d as unknown
+) {
+  // Get or create collection instance
+  if (!collectionsStore.state.has(config.id)) {
+    collectionsStore.setState((prev) => {
+      const next = new Map(prev)
+      next.set(
+        config.id,
+        new Collection({
+          sync: config.sync,
+          mutationFn: config.mutationFn,
+        })
+      )
+      return next
+    })
   }
-  const collection = collections.get(config.id)!
+  const collection = collectionsStore.state.get(config.id)!
 
   // Subscribe to collection's derivedState
   const data = useSyncExternalStoreWithSelector(
     collection.derivedState.subscribe,
     () => collection.derivedState.state,
     () => collection.derivedState.state,
-    (state) => state || new Map(),
-    (a, b) => {
-      if (a === b) return true
-      if (!(a instanceof Map) || !(b instanceof Map)) return false
-      if (a.size !== b.size) return false
-      for (const [key, value] of a) {
-        if (!b.has(key) || !Object.is(value, b.get(key))) return false
-      }
-      return true
-    }
+    selector,
+    shallow
   )
 
   return {
@@ -46,6 +145,59 @@ export function useCollection(config: UseCollectionConfig) {
     update: collection.update.bind(collection),
     insert: collection.insert.bind(collection),
     delete: collection.delete.bind(collection),
-    // withMutation: collection.withMutation.bind(collection),
   }
+}
+
+export function shallow<T>(objA: T, objB: T) {
+  console.log(`shallow`, { objA, objB })
+  if (Object.is(objA, objB)) {
+    console.log(`they're equal`)
+    return true
+  }
+  console.log(1)
+
+  if (
+    typeof objA !== `object` ||
+    objA === null ||
+    typeof objB !== `object` ||
+    objB === null
+  ) {
+    return false
+  }
+  console.log(2)
+
+  if (objA instanceof Map && objB instanceof Map) {
+    if (objA.size !== objB.size) return false
+    for (const [k, v] of objA) {
+      if (!objB.has(k) || !Object.is(v, objB.get(k))) return false
+    }
+    return true
+  }
+  console.log(3)
+
+  if (objA instanceof Set && objB instanceof Set) {
+    if (objA.size !== objB.size) return false
+    for (const v of objA) {
+      if (!objB.has(v)) return false
+    }
+    return true
+  }
+  console.log(4)
+
+  const keysA = Object.keys(objA)
+  if (keysA.length !== Object.keys(objB).length) {
+    return false
+  }
+  console.log(5)
+
+  for (let i = 0; i < keysA.length; i++) {
+    if (
+      !Object.prototype.hasOwnProperty.call(objB, keysA[i] as string) ||
+      !Object.is(objA[keysA[i] as keyof T], objB[keysA[i] as keyof T])
+    ) {
+      return false
+    }
+  }
+  console.log(6)
+  return true
 }
