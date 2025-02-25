@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@electric-sql/client':
+        specifier: 1.0.0-beta.3
+        version: 1.0.0-beta.3
       '@tanstack/store':
         specifier: ^0.7.0
         version: 0.7.0
@@ -216,6 +219,9 @@ packages:
   '@csstools/css-tokenizer@3.0.3':
     resolution: {integrity: sha512-UJnjoFsmxfKUdNYdWgOB0mWUypuLvAfQPH1+pyvRJs6euowbFkFC6P13w1l8mJyi3vxYMxc9kld5jZEGRQs6bw==}
     engines: {node: '>=18'}
+
+  '@electric-sql/client@1.0.0-beta.3':
+    resolution: {integrity: sha512-x3bzYlX+IRwBAILPxzu3ARkXzmrAQtVOuJCKCxlSqENuJa4zvLPF4f8vC6HMOiiJiHPAntJjfI3Hb0lrt2PTxA==}
 
   '@esbuild/aix-ppc64@0.24.2':
     resolution: {integrity: sha512-thpVCb/rhxE/BnMLQ7GReQLLN8q9qbHmI55F4489/ByVg2aQaQ6kbcLb6FHkocZzQhxc4gx0sCk0tJkKBFzDhA==}
@@ -2335,6 +2341,10 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.3
 
   '@csstools/css-tokenizer@3.0.3': {}
+
+  '@electric-sql/client@1.0.0-beta.3':
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.34.8
 
   '@esbuild/aix-ppc64@0.24.2':
     optional: true

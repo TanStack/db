@@ -27,11 +27,8 @@ services:
     image: electricsql/electric:canary
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/todo_app?sslmode=disable
-      PG_PROXY_PASSWORD: proxy_password
-      AUTH_MODE: insecure
     ports:
-      - "5133:5133"
-      - "65432:65432"
+      - 3000:3000
     depends_on:
       postgres:
         condition: service_healthy

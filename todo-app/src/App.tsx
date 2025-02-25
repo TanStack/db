@@ -1,14 +1,12 @@
 import React, { useState, FormEvent } from "react"
 import { useCollection } from "../../src/useCollection"
-import mitt from "mitt"
+import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
 
 interface Todo {
   text: string
   completed: boolean
 }
-
-const emitter = mitt()
 
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
@@ -19,16 +17,12 @@ export default function App() {
     delete: deleteTodo,
   } = useCollection({
     id: `todos`,
-    sync: {
-      id: `local`,
-      sync: ({ begin, write, commit }) => {
-        emitter.on(`*`, (type, { changes }) => {
-          begin()
-          changes.forEach((change) => write(change))
-          commit()
-        })
+    sync: createElectricSync({
+      url: `http://localhost:3000/v1/shape`,
+      params: {
+        table: `todos`,
       },
-    },
+    }),
     mutationFn: {
       persist: async () => {
         console.log(`persisting...`)
