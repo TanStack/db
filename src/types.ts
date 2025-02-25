@@ -39,7 +39,7 @@ export interface Transaction {
   attempts: Attempt[]
   currentAttempt: number
   strategy: MutationStrategy
-  metadata?: Record<string, unknown>
+  metadata: Record<string, unknown>
   queuedBehind?: string
   isSynced?: Deferred<boolean>
   isPersisted?: Deferred<boolean>
@@ -48,6 +48,11 @@ export interface Transaction {
     message: string
     error: Error
   }
+  /**
+   * Get a plain object representation of the transaction
+   * This is useful for creating clones or serializing the transaction
+   */
+  toObject(): Omit<Transaction, `toObject`>
 }
 
 type Value<Extensions = never> =
@@ -82,15 +87,14 @@ export interface SyncConfig {
 
 export interface MutationFn {
   persist: (params: {
-    changes: Record<string, unknown>[]
     attempt: number
     transaction: Transaction
+    collection: Collection
   }) => Promise<void>
 
   awaitSync?: (params: {
-    changes: Record<string, unknown>
     transaction: Transaction
-    sync: SyncConfig
+    collection: Collection
   }) => Promise<void>
 }
 

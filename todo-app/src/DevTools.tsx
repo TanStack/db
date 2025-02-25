@@ -1,19 +1,7 @@
 import React, { useState } from "react"
 import { useCollections } from "../../src/useCollection"
+import { Transaction } from "../../src/types"
 import { DiffView } from "./DiffView"
-
-interface Transaction {
-  id: string
-  createdAt: string
-  mutations: Array<{
-    type: string
-    key: string
-    modified: Record<string, unknown>
-    original: Record<string, unknown>
-  }>
-  state: string
-  current_attempt: number
-}
 
 export function DevTools() {
   const collections = useCollections()

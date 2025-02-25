@@ -31,8 +31,6 @@ export default function App() {
     },
   })
 
-  console.log({ todos })
-
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!newTodo.trim()) return

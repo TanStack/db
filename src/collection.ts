@@ -40,7 +40,7 @@ interface WithMutationParams {
 }
 
 export class Collection {
-  private transactionManager: TransactionManager
+  public transactionManager: TransactionManager
   private transactionStore: TransactionStore
 
   public optimisticOperations: Derived<ChangeMessage[]>
@@ -84,7 +84,6 @@ export class Collection {
           )
           .flat()
 
-        console.log({ result })
         return result
       },
       deps: [this.transactionManager.transactions],
@@ -111,7 +110,6 @@ export class Collection {
               break
           }
         }
-        console.log(`after`, currDepVals)
         return new Map(currDepVals[0])
       },
       deps: [this.syncedData, this.optimisticOperations],
@@ -159,7 +157,6 @@ export class Collection {
   }
 
   update = ({ key, data, metadata }: UpdateParams) => {
-    console.log(`this.value`, this.value)
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
       original: this.value.get(key) || {},

@@ -10,6 +10,32 @@ import { SortedMap } from "./SortedMap"
 import { Collection } from "./collection"
 import { createDeferred } from "./deferred"
 
+// Singleton instance of TransactionManager
+let transactionManagerInstance: TransactionManager | null = null
+
+/**
+ * Get the global TransactionManager instance
+ * Creates a new instance if one doesn't exist
+ *
+ * @param store Optional TransactionStore instance
+ * @param collection Optional Collection instance
+ * @returns The TransactionManager instance
+ */
+export function getTransactionManager(
+  store?: TransactionStore,
+  collection?: Collection
+): TransactionManager {
+  if (!transactionManagerInstance) {
+    if (!store || !collection) {
+      throw new Error(
+        `TransactionManager not initialized. You must provide store and collection parameters on first call.`
+      )
+    }
+    transactionManagerInstance = new TransactionManager(store, collection)
+  }
+  return transactionManagerInstance
+}
+
 export class TransactionManager {
   private store: TransactionStore
   private collection: Collection
@@ -47,6 +73,55 @@ export class TransactionManager {
     })
   }
 
+  /**
+   * Create a live transaction reference that always returns the latest values
+   * @param id Transaction ID
+   * @returns A proxy that always gets the latest transaction values
+   */
+  createLiveTransactionReference(id: string): Transaction {
+    // eslint-disable-next-line
+    const self: TransactionManager = this
+    return new Proxy(
+      {
+        // Implement the toObject method directly on the proxy target
+        toObject() {
+          const transaction = self.getTransaction(id)
+          if (!transaction) {
+            throw new Error(`Transaction with id ${id} not found`)
+          }
+
+          // Create a shallow copy of the transaction without the toObject method
+          // eslint-disable-next-line
+          const { toObject, ...transactionData } = transaction
+          return { ...transactionData }
+        },
+      } as Transaction,
+      {
+        get(target, prop) {
+          // If the property is toObject, return the method from the target
+          if (prop === `toObject`) {
+            return target.toObject
+          }
+
+          // Otherwise, get the latest transaction data
+          const latest = self.getTransaction(id)
+          if (!latest) {
+            throw new Error(`Transaction with id ${id} not found`)
+          }
+          return latest[prop as keyof Transaction]
+        },
+        set() {
+          // We don't allow direct setting of properties on the transaction
+          // Use updateTransactionState or updateTransactionMetadata instead
+          console.warn(
+            `Direct modification of transaction properties is not allowed. Use updateTransactionState or updateTransactionMetadata instead.`
+          )
+          return true
+        },
+      }
+    )
+  }
+
   createTransaction(
     mutations: PendingMutation[],
     strategy: MutationStrategy
@@ -57,8 +132,9 @@ export class TransactionManager {
       createdAt: new Date(),
       updatedAt: new Date(),
       mutations,
+      metadata: {},
       attempts: [],
-      current_attempt: 0,
+      currentAttempt: 0,
       strategy,
       isSynced: createDeferred(),
       isPersisted: createDeferred(),
@@ -78,33 +154,43 @@ export class TransactionManager {
 
       if (conflictingTransaction) {
         transaction.state = `queued`
-        transaction.queued_behind = conflictingTransaction.id
+        transaction.queuedBehind = conflictingTransaction.id
       } else {
         transaction.state = `persisting`
         this.setTransaction(transaction)
         this.collection.config.mutationFn
           .persist({
-            transaction,
+            transaction: this.createLiveTransactionReference(transaction.id),
             attempt: 1,
-            changes: transaction.mutations.map((mutation) => mutation.changes),
+            collection: this.collection,
           })
           .then(() => {
-            transaction.isPersisted?.resolve(true)
+            const tx = this.getTransaction(transaction.id)
+            if (!tx) return
+
+            tx.isPersisted?.resolve(true)
             if (this.collection.config.mutationFn.awaitSync) {
-              transaction.state = `persisted_awaiting_sync`
-              this.setTransaction(transaction)
+              this.updateTransactionState(
+                transaction.id,
+                `persisted_awaiting_sync`
+              )
+
               this.collection.config.mutationFn
                 .awaitSync({
-                  transaction,
+                  transaction: this.createLiveTransactionReference(
+                    transaction.id
+                  ),
+                  collection: this.collection,
                 })
                 .then(() => {
-                  transaction.isSynced?.resolve(true)
-                  transaction.state = `completed`
-                  this.setTransaction(transaction)
+                  const updatedTx = this.getTransaction(transaction.id)
+                  if (!updatedTx) return
+
+                  updatedTx.isSynced?.resolve(true)
+                  this.updateTransactionState(transaction.id, `completed`)
                 })
             } else {
-              transaction.state = `completed`
-              this.setTransaction(transaction)
+              this.updateTransactionState(transaction.id, `completed`)
             }
           })
       }
@@ -114,7 +200,8 @@ export class TransactionManager {
     // Persist async
     this.store.putTransaction(transaction)
 
-    return transaction
+    // Return a live reference to the transaction
+    return this.createLiveTransactionReference(transaction.id)
   }
 
   updateTransactionState(id: string, newState: TransactionState): void {
@@ -146,41 +233,92 @@ export class TransactionManager {
         (tx) =>
           tx.state === `queued` &&
           tx.strategy.type === `ordered` &&
-          tx.queued_behind === transaction.id
+          tx.queuedBehind === transaction.id
       )
 
-      // Find the next transaction to run (the one with earliest createdAt)
-      if (queuedTransactions.length > 0) {
-        const nextTransaction = queuedTransactions.reduce(
-          (earliest, current) =>
-            earliest.createdAt < current.createdAt ? earliest : current
-        )
+      // Process each queued transaction
+      for (const queuedTransaction of queuedTransactions) {
+        queuedTransaction.queuedBehind = undefined
+        this.setTransaction(queuedTransaction)
+        this.updateTransactionState(queuedTransaction.id, `persisting`)
+        this.collection.config.mutationFn
+          .persist({
+            transaction: this.createLiveTransactionReference(
+              queuedTransaction.id
+            ),
+            attempt: 1,
+            collection: this.collection,
+          })
+          .then(() => {
+            const tx = this.getTransaction(queuedTransaction.id)
+            if (!tx) return
 
-        // Check if this transaction needs to be queued behind any other active transactions
-        const activeTransactions = this.getActiveTransactions()
-        const orderedTransactions = activeTransactions.filter(
-          (tx) =>
-            tx.strategy.type === `ordered` &&
-            tx.state !== `queued` &&
-            tx.id !== nextTransaction.id
-        )
+            tx.isPersisted?.resolve(true)
+            if (this.collection.config.mutationFn.awaitSync) {
+              this.updateTransactionState(
+                queuedTransaction.id,
+                `persisted_awaiting_sync`
+              )
 
-        const conflictingTransaction = orderedTransactions.find((tx) =>
-          this.hasOverlappingMutations(tx.mutations, nextTransaction.mutations)
-        )
+              this.collection.config.mutationFn
+                .awaitSync({
+                  transaction: this.createLiveTransactionReference(
+                    queuedTransaction.id
+                  ),
+                  collection: this.collection,
+                })
+                .then(() => {
+                  const updatedTx = this.getTransaction(queuedTransaction.id)
+                  if (!updatedTx) return
 
-        const updatedNextTransaction: Transaction = {
-          ...nextTransaction,
-          state: conflictingTransaction ? `queued` : `pending`,
-          queued_behind: conflictingTransaction?.id,
-          updatedAt: new Date(Date.now() + 1),
-        }
-        this.setTransaction(updatedNextTransaction)
-
-        // Persist async
-        this.store.putTransaction(updatedNextTransaction)
+                  updatedTx.isSynced?.resolve(true)
+                  this.updateTransactionState(queuedTransaction.id, `completed`)
+                })
+            } else {
+              this.updateTransactionState(queuedTransaction.id, `completed`)
+            }
+          })
       }
     }
+  }
+
+  /**
+   * Update transaction metadata and persist the changes
+   *
+   * @param id Transaction ID
+   * @param metadata Metadata to update or add
+   * @returns The updated transaction
+   */
+  updateTransactionMetadata(
+    id: string,
+    metadata: Record<string, unknown>
+  ): Transaction {
+    const transaction = this.getTransaction(id)
+    if (!transaction) {
+      throw new Error(`Transaction ${id} not found`)
+    }
+
+    // Create a new metadata object by merging the existing metadata with the new one
+    const updatedMetadata = {
+      ...(transaction.metadata || {}),
+      ...metadata,
+    }
+
+    // Create updated transaction with new metadata
+    const updatedTransaction: Transaction = {
+      ...transaction,
+      metadata: updatedMetadata,
+      updatedAt: new Date(),
+    }
+
+    // Update in memory
+    this.setTransaction(updatedTransaction)
+
+    // Persist to storage
+    this.store.putTransaction(updatedTransaction)
+
+    // Return a live reference to the transaction
+    return this.createLiveTransactionReference(id)
   }
 
   scheduleRetry(id: string, attemptNumber: number): void {
@@ -213,7 +351,7 @@ export class TransactionManager {
     const updatedTransaction: Transaction = {
       ...transaction,
       attempts: [...transaction.attempts, attempt],
-      current_attempt: transaction.current_attempt + 1,
+      currentAttempt: transaction.currentAttempt + 1,
       updatedAt: new Date(Date.now() + 1),
     }
 

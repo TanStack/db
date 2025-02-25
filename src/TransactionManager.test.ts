@@ -56,7 +56,7 @@ describe(`TransactionManager`, () => {
       expect(transaction.state).toBe(`persisting`)
       expect(transaction.mutations).toEqual(mutations)
       expect(transaction.attempts).toEqual([])
-      expect(transaction.current_attempt).toBe(0)
+      expect(transaction.currentAttempt).toBe(0)
     })
 
     it(`should update transaction state`, () => {
@@ -150,7 +150,7 @@ describe(`TransactionManager`, () => {
         orderedStrategy
       )
       expect(tx1.state).toBe(`persisting`)
-      expect(tx1.queued_behind).toBeUndefined()
+      expect(tx1.queuedBehind).toBeUndefined()
 
       // Create second transaction also modifying object 1 - should be queued
       const tx2 = manager.createTransaction(
@@ -158,7 +158,7 @@ describe(`TransactionManager`, () => {
         orderedStrategy
       )
       expect(tx2.state).toBe(`queued`)
-      expect(tx2.queued_behind).toBe(tx1.id)
+      expect(tx2.queuedBehind).toBe(tx1.id)
 
       // Create third transaction modifying different object - should not be queued
       const tx3 = manager.createTransaction(
@@ -166,14 +166,14 @@ describe(`TransactionManager`, () => {
         orderedStrategy
       )
       expect(tx3.state).toBe(`persisting`)
-      expect(tx3.queued_behind).toBeUndefined()
+      expect(tx3.queuedBehind).toBeUndefined()
 
       // Complete first transaction
       manager.updateTransactionState(tx1.id, `completed`)
 
       // Check that second transaction is now pending
       const updatedTx2 = manager.getTransaction(tx2.id)!
-      expect(updatedTx2.state).toBe(`pending`)
+      expect(updatedTx2.state).toBe(`persisting`)
     })
 
     it(`should not queue parallel transactions`, () => {
@@ -193,11 +193,11 @@ describe(`TransactionManager`, () => {
 
       // All should be in pending state and not queued
       expect(tx1.state).toBe(`pending`)
-      expect(tx1.queued_behind).toBeUndefined()
+      expect(tx1.queuedBehind).toBeUndefined()
       expect(tx2.state).toBe(`pending`)
-      expect(tx2.queued_behind).toBeUndefined()
+      expect(tx2.queuedBehind).toBeUndefined()
       expect(tx3.state).toBe(`pending`)
-      expect(tx3.queued_behind).toBeUndefined()
+      expect(tx3.queuedBehind).toBeUndefined()
     })
 
     it(`should mix ordered and parallel transactions correctly`, () => {
@@ -220,18 +220,18 @@ describe(`TransactionManager`, () => {
       )
 
       expect(ordered1.state).toBe(`persisting`)
-      expect(ordered1.queued_behind).toBeUndefined()
+      expect(ordered1.queuedBehind).toBeUndefined()
       expect(parallel1.state).toBe(`pending`)
-      expect(parallel1.queued_behind).toBeUndefined()
+      expect(parallel1.queuedBehind).toBeUndefined()
       expect(ordered2.state).toBe(`queued`)
-      expect(ordered2.queued_behind).toBe(ordered1.id)
+      expect(ordered2.queuedBehind).toBe(ordered1.id)
 
       // Complete ordered1, ordered2 should become pending
       manager.updateTransactionState(ordered1.id, `completed`)
 
       const updatedOrdered2 = manager.getTransaction(ordered2.id)!
-      expect(updatedOrdered2.state).toBe(`pending`)
-      expect(updatedOrdered2.queued_behind).toBeUndefined()
+      expect(updatedOrdered2.state).toBe(`persisting`)
+      expect(updatedOrdered2.queuedBehind).toBeUndefined()
     })
   })
 
@@ -250,7 +250,7 @@ describe(`TransactionManager`, () => {
           )
           // Force the createdAt time
           const updatedTx = {
-            ...tx,
+            ...tx.toObject(),
             createdAt: new Date(timestamp),
           }
           manager.transactions.setState((sortedMap) => {

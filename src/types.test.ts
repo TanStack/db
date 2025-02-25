@@ -20,7 +20,7 @@ describe(`Type definitions`, () => {
       updatedAt: new Date(),
       mutations: [],
       attempts: [],
-      current_attempt: 0,
+      currentAttempt: 0,
       strategy: {
         type: `ordered`,
       },

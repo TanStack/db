@@ -149,12 +149,9 @@ export function useCollection(
 }
 
 export function shallow<T>(objA: T, objB: T) {
-  console.log(`shallow`, { objA, objB })
   if (Object.is(objA, objB)) {
-    console.log(`they're equal`)
     return true
   }
-  console.log(1)
 
   if (
     typeof objA !== `object` ||
@@ -164,7 +161,6 @@ export function shallow<T>(objA: T, objB: T) {
   ) {
     return false
   }
-  console.log(2)
 
   if (objA instanceof Map && objB instanceof Map) {
     if (objA.size !== objB.size) return false
@@ -173,7 +169,6 @@ export function shallow<T>(objA: T, objB: T) {
     }
     return true
   }
-  console.log(3)
 
   if (objA instanceof Set && objB instanceof Set) {
     if (objA.size !== objB.size) return false
@@ -182,13 +177,11 @@ export function shallow<T>(objA: T, objB: T) {
     }
     return true
   }
-  console.log(4)
 
   const keysA = Object.keys(objA)
   if (keysA.length !== Object.keys(objB).length) {
     return false
   }
-  console.log(5)
 
   for (let i = 0; i < keysA.length; i++) {
     if (
@@ -198,6 +191,5 @@ export function shallow<T>(objA: T, objB: T) {
       return false
     }
   }
-  console.log(6)
   return true
 }

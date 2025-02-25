@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { Collection } from "../collection"
-import { createElectricSync } from "./electric"
+import { createElectricSync, ElectricSync } from "./electric"
 import { Message, Row } from "@electric-sql/client"
 import "fake-indexeddb/auto"
+import { PendingMutation, Transaction } from "../types"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -21,6 +22,7 @@ vi.mock(`@electric-sql/client`, async () => {
 describe(`Electric Integration`, () => {
   let collection: Collection
   let subscriber: (messages: Message<Row>[]) => void
+  let electricSync: ElectricSync
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -31,14 +33,17 @@ describe(`Electric Integration`, () => {
       return () => {}
     })
 
+    // Create Electric sync config
+    electricSync = createElectricSync({
+      url: `http://test-url`,
+      params: {
+        table: `test_table`,
+      },
+    })
+
     // Create collection with Electric sync
     collection = new Collection({
-      sync: createElectricSync({
-        url: `http://test-url`,
-        params: {
-          table: `test_table`,
-        },
-      }),
+      sync: electricSync,
       mutationFn: {
         persist: vi.fn().mockResolvedValue(undefined),
         awaitSync: async () => {},
@@ -176,5 +181,295 @@ describe(`Electric Integration`, () => {
 
     // Changes should still be pending until up-to-date is received
     expect(collection.value).toEqual(new Map())
+  })
+
+  // Tests for txid tracking functionality
+  describe(`txid tracking`, () => {
+    it(`should track txids from incoming messages`, async () => {
+      const testTxid = `test-txid-123`
+
+      // Send a message with a txid
+      subscriber([
+        {
+          key: `1`,
+          value: { name: `Test User` },
+          headers: {
+            operation: `insert`,
+            txids: [testTxid],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // The txid should be tracked and awaitTxid should resolve immediately
+      await expect(electricSync.awaitTxid(testTxid)).resolves.toBe(true)
+    })
+
+    it(`should handle multiple txids in a single message`, async () => {
+      const txid1 = `txid-1`
+      const txid2 = `txid-2`
+
+      // Send a message with multiple txids
+      subscriber([
+        {
+          key: `1`,
+          value: { name: `Test User` },
+          headers: {
+            operation: `insert`,
+            txids: [txid1, txid2],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Both txids should be tracked
+      await expect(electricSync.awaitTxid(txid1)).resolves.toBe(true)
+      await expect(electricSync.awaitTxid(txid2)).resolves.toBe(true)
+    })
+
+    it(`should handle txids in control messages`, async () => {
+      const controlTxid = `control-txid`
+
+      // Send a control message with a txid
+      subscriber([
+        {
+          headers: {
+            control: `up-to-date`,
+            txids: [controlTxid],
+          },
+        },
+      ])
+
+      // The txid should be tracked
+      await expect(electricSync.awaitTxid(controlTxid)).resolves.toBe(true)
+    })
+
+    it(`should reject with timeout when waiting for unknown txid`, async () => {
+      // Set a short timeout for the test
+      const unknownTxid = `unknown-txid`
+      const shortTimeout = 100
+
+      // Attempt to await a txid that hasn't been seen with a short timeout
+      const promise = electricSync.awaitTxid(unknownTxid, shortTimeout)
+
+      // The promise should reject with a timeout error
+      await expect(promise).rejects.toThrow(
+        `Timeout waiting for txid: ${unknownTxid}`
+      )
+    })
+
+    it(`should resolve when a txid arrives after awaitTxid is called`, async () => {
+      const laterTxid = `later-txid`
+
+      // Start waiting for a txid that hasn't arrived yet
+      const promise = electricSync.awaitTxid(laterTxid, 1000)
+
+      // Send the txid after a short delay
+      setTimeout(() => {
+        subscriber([
+          {
+            headers: {
+              control: `info`,
+              txids: [laterTxid],
+            },
+          },
+        ])
+      }, 50)
+
+      // The promise should resolve when the txid arrives
+      await expect(promise).resolves.toBe(true)
+    })
+
+    // Test the complete flow from persist to awaitSync
+    it(`should simulate the complete flow from persist to awaitSync`, async () => {
+      // Create a fake backend store to simulate server-side storage
+      const fakeBackend = {
+        data: new Map<string, unknown>(),
+        // Simulates persisting data to a backend and returning a txid
+        persist: async (mutations: PendingMutation[]): Promise<string> => {
+          const txid = `txid-${Date.now()}`
+
+          // Store the changes with the txid
+          mutations.forEach((mutation) => {
+            fakeBackend.data.set(mutation.key, {
+              value: mutation.changes,
+              txid,
+            })
+          })
+
+          return txid
+        },
+        // Simulates the server sending sync messages with txids
+        simulateSyncMessage: (txid: string) => {
+          // Create messages for each item in the store that has this txid
+          const messages: Message<Row>[] = []
+
+          fakeBackend.data.forEach((data, key) => {
+            if (data.txid === txid) {
+              messages.push({
+                key,
+                value: data.value,
+                headers: {
+                  operation: `insert`,
+                  txids: [txid],
+                },
+              })
+            }
+          })
+
+          // Add an up-to-date message to complete the sync
+          messages.push({
+            headers: {
+              control: `up-to-date`,
+              txids: [txid],
+            },
+          })
+
+          // Send the messages to the subscriber
+          subscriber(messages)
+        },
+      }
+
+      // Create a test mutation function that uses our fake backend
+      const testMutationFn = {
+        persist: vi.fn(
+          async ({
+            transaction,
+            collection,
+          }: {
+            transaction: Transaction
+            collection: Collection
+          }) => {
+            // Persist to fake backend and get txid
+            const txid = await fakeBackend.persist(transaction.mutations)
+
+            // Store the txid in the transaction metadata using the collection's transactionManager
+            collection.transactionManager.updateTransactionMetadata(
+              transaction.id,
+              {
+                txid,
+              }
+            )
+
+            // Return the txid (which will be passed to awaitSync)
+            return txid
+          }
+        ),
+
+        awaitSync: vi.fn(
+          async ({
+            transaction,
+          }: {
+            transaction: Transaction
+            sync: ElectricSync
+          }) => {
+            // Get the txid from the transaction metadata
+            const txid = transaction.metadata?.txid as string
+
+            if (!txid) {
+              throw new Error(`No txid found in transaction metadata`)
+            }
+
+            // Start waiting for the txid
+            const awaitPromise = electricSync.awaitTxid(txid, 1000)
+
+            // Simulate the server sending sync messages after a delay
+            setTimeout(() => {
+              fakeBackend.simulateSyncMessage(txid)
+            }, 50)
+
+            // Wait for the txid to be seen
+            await awaitPromise
+
+            return true
+          }
+        ),
+      }
+
+      // Create a new collection with our test mutation function
+      const testCollection = new Collection({
+        sync: electricSync,
+        mutationFn: testMutationFn,
+      })
+
+      let transaction = testCollection.insert({
+        key: `item1`,
+        data: { name: `Test item 1` },
+      })
+
+      await transaction.isPersisted?.promise
+
+      transaction = testCollection.transactions.get(transaction.id)!
+
+      // Verify txid was stored in metadata
+      expect(transaction.metadata?.txid).toBeTruthy()
+
+      await transaction.isSynced?.promise
+
+      // Verify the mutation function was called correctly
+      expect(testMutationFn.persist).toHaveBeenCalledTimes(1)
+      expect(testMutationFn.awaitSync).toHaveBeenCalledTimes(1)
+
+      // Check that the data was added to the collection
+      // Note: In a real implementation, the collection would be updated by the sync process
+      // This is just verifying our test setup worked correctly
+      expect(fakeBackend.data.has(`item1`)).toBe(true)
+      expect(testCollection.value.has(`item1`)).toBe(true)
+    })
+  })
+
+  it(`Transaction proxy with toObject method works correctly`, () => {
+    // Create a collection with a simple mutation function
+    const testCollection = new Collection({
+      sync: createElectricSync({}),
+      mutationFn: {
+        persist: async () => {},
+        awaitSync: async () => {},
+      },
+    })
+
+    // Create a transaction
+    const transaction = testCollection.transactionManager.createTransaction(
+      [], // No mutations
+      { type: `ordered` } // Simple strategy
+    )
+
+    // Test that we can access properties
+    expect(transaction.id).toBeDefined()
+    expect(transaction.state).toBe(`persisting`)
+
+    // Test the toObject method
+    const transactionObj = transaction.toObject()
+    expect(transactionObj).toBeDefined()
+    expect(transactionObj.id).toBe(transaction.id)
+    expect(transactionObj.state).toBe(transaction.state)
+
+    // Test that we can create a modified clone
+    const modifiedTransaction = {
+      ...transaction.toObject(),
+      metadata: {
+        ...transaction.toObject().metadata,
+        testKey: `testValue`,
+      },
+    }
+
+    expect(modifiedTransaction.id).toBe(transaction.id)
+    expect(modifiedTransaction.metadata.testKey).toBe(`testValue`)
+
+    // Update the transaction metadata
+    testCollection.transactionManager.updateTransactionMetadata(
+      transaction.id,
+      { anotherKey: `anotherValue` }
+    )
+
+    // Verify the live reference is updated
+    expect(transaction.metadata.anotherKey).toBe(`anotherValue`)
+
+    // But our clone is not affected
+    expect(modifiedTransaction.metadata.anotherKey).toBeUndefined()
   })
 })

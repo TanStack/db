@@ -80,16 +80,10 @@ describe(`Collection`, () => {
         },
       },
       mutationFn: {
-        persist({ changes, transaction, attempt }) {
+        persist({ transaction, attempt }) {
           // Redact time-based and random fields
-          const redactedChanges = changes.map((change) => ({
-            ...change,
-            createdAt: `[REDACTED]`,
-            updatedAt: `[REDACTED]`,
-            mutationId: `[REDACTED]`,
-          }))
           const redactedTransaction = {
-            ...transaction,
+            ...transaction.toObject(),
             mutations: {
               ...transaction.mutations.map((mutation) => {
                 return {
@@ -108,7 +102,6 @@ describe(`Collection`, () => {
 
           // Store the data for later assertion
           persistMock({
-            changes: redactedChanges,
             transaction: redactedTransaction,
             attempt,
           })
@@ -118,7 +111,7 @@ describe(`Collection`, () => {
         awaitSync({ transaction }) {
           // Redact time-based and random fields
           const redactedTransaction = {
-            ...transaction,
+            ...transaction.toObject(),
             mutations: {
               ...transaction.mutations.map((mutation) => {
                 return {
