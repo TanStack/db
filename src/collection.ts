@@ -256,7 +256,7 @@ export class Collection {
       updatedAt: new Date(),
     }
 
-    return this.transactionManager.createTransaction([mutation], {
+    return this.transactionManager.applyTransaction([mutation], {
       type: `ordered`,
     })
   }
@@ -278,7 +278,7 @@ export class Collection {
       updatedAt: new Date(),
     }
 
-    return this.transactionManager.createTransaction([mutation], {
+    return this.transactionManager.applyTransaction([mutation], {
       type: `ordered`,
     })
   }
@@ -300,7 +300,7 @@ export class Collection {
       updatedAt: new Date(),
     }
 
-    return this.transactionManager.createTransaction([mutation], {
+    return this.transactionManager.applyTransaction([mutation], {
       type: `ordered`,
     })
   }
@@ -325,7 +325,7 @@ export class Collection {
   //     state: `created` as const,
   //   }))
   //
-  //   this.transactionManager.createTransaction(mutations, { type: `ordered` })
+  //   this.transactionManager.applyTransaction(mutations, { type: `ordered` })
   // }
 
   get value() {

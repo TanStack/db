@@ -19,7 +19,9 @@ describe(`TransactionManager`, () => {
         sync: () => {},
       },
       mutationFn: {
-        persist: async () => {},
+        persist: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1))
+        },
       },
     })
     manager = new TransactionManager(store, collection)
@@ -50,7 +52,7 @@ describe(`TransactionManager`, () => {
   describe(`Basic Transaction Management`, () => {
     it(`should create a transaction in pending state`, () => {
       const mutations = [createMockMutation(`test-1`)]
-      const transaction = manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations, orderedStrategy)
 
       expect(transaction.id).toBeDefined()
       expect(transaction.state).toBe(`persisting`)
@@ -61,7 +63,7 @@ describe(`TransactionManager`, () => {
 
     it(`should update transaction state`, () => {
       const mutations = [createMockMutation(`test-2`)]
-      const transaction = manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations, orderedStrategy)
 
       // Add a small delay to ensure timestamps are different
       const beforeUpdate = transaction.updatedAt
@@ -84,7 +86,7 @@ describe(`TransactionManager`, () => {
   describe(`Retry Scheduling`, () => {
     it(`should schedule retry with exponential backoff`, () => {
       const mutations = [createMockMutation(`test-3`)]
-      const transaction = manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations, orderedStrategy)
 
       const now = Date.now()
       const originalNow = Date.now
@@ -109,7 +111,7 @@ describe(`TransactionManager`, () => {
 
     it(`should increase delay with each retry attempt`, () => {
       const mutations = [createMockMutation(`test-4`)]
-      const transaction = manager.createTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations, orderedStrategy)
 
       const now = Date.now()
       const originalNow = Date.now
@@ -145,7 +147,7 @@ describe(`TransactionManager`, () => {
   describe(`Ordered vs Parallel Transactions`, () => {
     it(`should queue ordered transactions with overlapping mutations`, () => {
       // Create first transaction modifying object 1
-      const tx1 = manager.createTransaction(
+      const tx1 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
@@ -153,7 +155,7 @@ describe(`TransactionManager`, () => {
       expect(tx1.queuedBehind).toBeUndefined()
 
       // Create second transaction also modifying object 1 - should be queued
-      const tx2 = manager.createTransaction(
+      const tx2 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
@@ -161,7 +163,7 @@ describe(`TransactionManager`, () => {
       expect(tx2.queuedBehind).toBe(tx1.id)
 
       // Create third transaction modifying different object - should not be queued
-      const tx3 = manager.createTransaction(
+      const tx3 = manager.applyTransaction(
         [createMockMutation(`object-2`)],
         orderedStrategy
       )
@@ -178,15 +180,15 @@ describe(`TransactionManager`, () => {
 
     it(`should not queue parallel transactions`, () => {
       // Create multiple parallel transactions modifying same object
-      const tx1 = manager.createTransaction(
+      const tx1 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         parallelStrategy
       )
-      const tx2 = manager.createTransaction(
+      const tx2 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         parallelStrategy
       )
-      const tx3 = manager.createTransaction(
+      const tx3 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         parallelStrategy
       )
@@ -202,19 +204,19 @@ describe(`TransactionManager`, () => {
 
     it(`should mix ordered and parallel transactions correctly`, () => {
       // Create an ordered transaction modifying object 1
-      const ordered1 = manager.createTransaction(
+      const ordered1 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
 
       // Create a parallel transaction modifying object 1 - should not queue
-      const parallel1 = manager.createTransaction(
+      const parallel1 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         parallelStrategy
       )
 
       // Create another ordered transaction modifying object 1 - should queue behind ordered1
-      const ordered2 = manager.createTransaction(
+      const ordered2 = manager.applyTransaction(
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
@@ -244,7 +246,7 @@ describe(`TransactionManager`, () => {
       // Create transactions in reverse chronological order
       await Promise.all(
         timestamps.map(async (timestamp, i) => {
-          const tx = manager.createTransaction(
+          const tx = manager.applyTransaction(
             [createMockMutation(`test-${i + 1}`)],
             parallelStrategy
           )
@@ -266,6 +268,185 @@ describe(`TransactionManager`, () => {
       expect(sortedTransactions[0].createdAt.getTime()).toBe(timestamps[2]) // Oldest
       expect(sortedTransactions[1].createdAt.getTime()).toBe(timestamps[1])
       expect(sortedTransactions[2].createdAt.getTime()).toBe(timestamps[0]) // Newest
+    })
+
+    it(`should create a new transaction when no existing transactions with overlapping keys exist`, () => {
+      // Create a new transaction
+      const mutations = [createMockMutation(`test-apply-1`)]
+      const transaction = manager.applyTransaction(mutations, orderedStrategy)
+
+      // Verify transaction was created with the expected properties
+      expect(transaction.id).toBeDefined()
+      expect(transaction.state).toBe(`persisting`)
+      expect(transaction.mutations).toEqual(mutations)
+      expect(transaction.attempts).toEqual([])
+      expect(transaction.currentAttempt).toBe(0)
+    })
+
+    it(`should overwrite mutations for the same key in existing pending transactions`, () => {
+      // Create first transaction with a mutation
+      const originalMutation = {
+        ...createMockMutation(`test-apply-2`),
+        modified: { id: `test-apply-2`, value: `original-value` },
+        changes: { value: `original-value` },
+      }
+
+      manager.applyTransaction([originalMutation], orderedStrategy)
+
+      // Create second transaction with a mutation - this should be queued behind the first.
+      const tx1 = manager.applyTransaction([originalMutation], orderedStrategy)
+      expect(tx1.mutations[0].modified.value).toBe(`original-value`)
+
+      // Apply a new transaction with a mutation for the same key but different value.
+      const newMutation = {
+        ...createMockMutation(`test-apply-2`),
+        modified: { id: `test-apply-2`, value: `updated-value` },
+        changes: { value: `updated-value` },
+      }
+
+      const tx2 = manager.applyTransaction([newMutation], orderedStrategy)
+
+      // Should reuse the same transaction ID
+      expect(tx2.id).toBe(tx1.id)
+
+      // Should have updated the mutation
+      expect(tx2.mutations.length).toBe(1)
+      expect(tx2.mutations[0].modified.value).toBe(`updated-value`)
+      expect(tx2.mutations[0].changes.value).toBe(`updated-value`)
+    })
+
+    it(`should add new mutations while preserving existing ones for different keys`, () => {
+      // Create first transaction with a mutation
+      const mutation1 = createMockMutation(`test-apply-3a`)
+      const tx1 = manager.applyTransaction([mutation1], orderedStrategy)
+
+      // Apply a new transaction with a mutation for a different key
+      const mutation2 = createMockMutation(`test-apply-3b`)
+      const tx2 = manager.applyTransaction([mutation2], orderedStrategy)
+
+      // Should create a new transaction since keys don't overlap
+      expect(tx2.id).not.toBe(tx1.id)
+      expect(tx2.mutations.length).toBe(1)
+      expect(tx2.mutations[0].key).toBe(`test-apply-3b`)
+    })
+
+    it(`should handle multiple transactions with overlapping keys`, () => {
+      // Create first transaction with mutations for keys A and B
+      const mutationA1 = {
+        ...createMockMutation(`key-A`),
+        modified: { id: `key-A`, value: `A-original` },
+        changes: { value: `A-original` },
+      }
+
+      const mutationB1 = {
+        ...createMockMutation(`key-B`),
+        modified: { id: `key-B`, value: `B-original` },
+        changes: { value: `B-original` },
+      }
+
+      // Apply an initial one so the second is queued behind it.
+      manager.applyTransaction([mutationA1, mutationB1], orderedStrategy)
+      const tx1 = manager.applyTransaction(
+        [mutationA1, mutationB1],
+        orderedStrategy
+      )
+
+      // Create second transaction with mutations for keys B and C
+      const mutationB2 = {
+        ...createMockMutation(`key-B`),
+        modified: { id: `key-B`, value: `B-updated` },
+        changes: { value: `B-updated` },
+      }
+
+      const mutationC1 = {
+        ...createMockMutation(`key-C`),
+        modified: { id: `key-C`, value: `C-original` },
+        changes: { value: `C-original` },
+      }
+
+      // Apply the new transaction
+      const tx2 = manager.applyTransaction(
+        [mutationB2, mutationC1],
+        orderedStrategy
+      )
+
+      // Should update tx1 since it has an overlapping key (B)
+      expect(tx2.id).toBe(tx1.id)
+
+      // Should have 3 mutations now (A, B-updated, C)
+      expect(tx2.mutations.length).toBe(3)
+
+      // Find each mutation by key
+      const mutationA = tx2.mutations.find((m) => m.key === `key-A`)
+      const mutationB = tx2.mutations.find((m) => m.key === `key-B`)
+      const mutationC = tx2.mutations.find((m) => m.key === `key-C`)
+
+      // Verify A is unchanged
+      expect(mutationA).toBeDefined()
+      expect(mutationA?.modified.value).toBe(`A-original`)
+
+      // Verify B is updated
+      expect(mutationB).toBeDefined()
+      expect(mutationB?.modified.value).toBe(`B-updated`)
+
+      // Verify C is added
+      expect(mutationC).toBeDefined()
+      expect(mutationC?.modified.value).toBe(`C-original`)
+    })
+
+    it(`should handle the case where mutations don't overlap at all`, () => {
+      // Create three transactions with non-overlapping mutations
+      const tx1 = manager.applyTransaction(
+        [createMockMutation(`key-1`)],
+        orderedStrategy
+      )
+      const tx2 = manager.applyTransaction(
+        [createMockMutation(`key-2`)],
+        orderedStrategy
+      )
+
+      // Apply a transaction with a new non-overlapping key
+      const tx3 = manager.applyTransaction(
+        [createMockMutation(`key-3`)],
+        orderedStrategy
+      )
+
+      // Should be a new transaction
+      expect(tx3.id).not.toBe(tx1.id)
+      expect(tx3.id).not.toBe(tx2.id)
+      expect(tx3.mutations.length).toBe(1)
+      expect(tx3.mutations[0].key).toBe(`key-3`)
+
+      // Original transactions should be unchanged
+      const updatedTx1 = manager.getTransaction(tx1.id)
+      const updatedTx2 = manager.getTransaction(tx2.id)
+
+      expect(updatedTx1?.mutations.length).toBe(1)
+      expect(updatedTx1?.mutations[0].key).toBe(`key-1`)
+
+      expect(updatedTx2?.mutations.length).toBe(1)
+      expect(updatedTx2?.mutations[0].key).toBe(`key-2`)
+    })
+
+    it(`should only consider active transactions for applying updates`, () => {
+      // Create a transaction and mark it as completed
+      const mutation1 = createMockMutation(`completed-key`)
+      const tx1 = manager.applyTransaction([mutation1], orderedStrategy)
+      manager.updateTransactionState(tx1.id, `completed`)
+
+      // Apply a new transaction with the same key
+      const mutation2 = {
+        ...createMockMutation(`completed-key`),
+        modified: { id: `completed-key`, value: `new-value` },
+        changes: { value: `new-value` },
+      }
+
+      const tx2 = manager.applyTransaction([mutation2], orderedStrategy)
+
+      // Should create a new transaction since the existing one is completed
+      expect(tx2.id).not.toBe(tx1.id)
+      expect(tx2.mutations.length).toBe(1)
+      expect(tx2.mutations[0].modified.value).toBe(`new-value`)
     })
   })
 })

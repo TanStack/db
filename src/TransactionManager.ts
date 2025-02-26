@@ -124,22 +124,52 @@ export class TransactionManager {
     )
   }
 
-  createTransaction(
+  applyTransaction(
     mutations: PendingMutation[],
     strategy: MutationStrategy
   ): Transaction {
-    const transaction: Transaction = {
-      id: crypto.randomUUID(),
-      state: `pending`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      mutations,
-      metadata: {},
-      attempts: [],
-      currentAttempt: 0,
-      strategy,
-      isSynced: createDeferred(),
-      isPersisted: createDeferred(),
+    // See if there's an existing overlapping queued mutation.
+    const mutationKeys = mutations.map((m) => m.key)
+    let transaction: Transaction = Array.from(
+      this.transactions.state.values()
+    ).filter(
+      (t) =>
+        t.state === `queued` &&
+        t.mutations.some((m) => mutationKeys.includes(m.key))
+    )[0]
+
+    // If there's a map, overwrite matching mutations.
+    if (transaction) {
+      console.log(`found overlapping transaction`, transaction)
+      for (const newMutation of mutations) {
+        const existingIndex = transaction.mutations.findIndex(
+          (m) => m.key === newMutation.key
+        )
+
+        if (existingIndex >= 0) {
+          // Replace existing mutation
+          // TODO this won't work for cases where different mutations modify different keys
+          transaction.mutations[existingIndex] = newMutation
+        } else {
+          // Insert new mutation
+          transaction.mutations.push(newMutation)
+        }
+      }
+      // Else create a new transaction.
+    } else {
+      transaction = {
+        id: crypto.randomUUID(),
+        state: `pending`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        mutations,
+        metadata: {},
+        attempts: [],
+        currentAttempt: 0,
+        strategy,
+        isSynced: createDeferred(),
+        isPersisted: createDeferred(),
+      }
     }
 
     // For ordered transactions, check if we need to queue behind another transaction

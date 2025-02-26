@@ -433,7 +433,7 @@ describe(`Electric Integration`, () => {
     })
 
     // Create a transaction
-    const transaction = testCollection.transactionManager.createTransaction(
+    const transaction = testCollection.transactionManager.applyTransaction(
       [], // No mutations
       { type: `ordered` } // Simple strategy
     )
