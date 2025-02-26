@@ -105,6 +105,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
               key: message.key,
               type: message.headers.operation,
               value: message.value,
+              metadata: message.headers,
             })
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true

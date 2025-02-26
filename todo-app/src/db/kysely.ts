@@ -1,10 +1,11 @@
 import { Kysely, PostgresDialect } from "kysely"
 import pg from "pg"
-import { Todo } from "./schema"
+import { Todo, Config } from "./schema"
 
 // Define the database interface for Kysely
 interface Database {
   todos: Todo
+  config: Config
 }
 
 // Create a Kysely instance

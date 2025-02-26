@@ -4,13 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"pnpm api:dev\" \"vite\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
+    "db:ensure-config": "tsx scripts/ensure-default-config.ts",
     "api:dev": "tsx watch src/api/server.ts"
   },
   "dependencies": {
@@ -34,7 +35,8 @@
     "@types/pg": "^8.11.11",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^4.4.4",
+    "concurrently": "^9.1.2",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.4",
     "eslint": "^9.19.0",

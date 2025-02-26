@@ -10,6 +10,7 @@ interface Todo {
 
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
+
   const electricSync = useRef(
     createElectricSync({
       url: `http://localhost:3000/v1/shape`,
@@ -18,6 +19,16 @@ export default function App() {
       },
     })
   )
+
+  const configSync = useRef(
+    createElectricSync({
+      url: `http://localhost:3000/v1/shape`,
+      params: {
+        table: `config`,
+      },
+    })
+  )
+
   const {
     data: todos,
     insert,
@@ -64,6 +75,70 @@ export default function App() {
       },
     },
   })
+
+  const { data: configData, update: updateConfig } = useCollection({
+    id: `config`,
+    sync: configSync.current,
+    mutationFn: {
+      persist: async ({ transaction, collection }) => {
+        console.log(`persisting config...`, transaction.toObject())
+        const response = await fetch(`http://localhost:3001/api/mutations`, {
+          method: `POST`,
+          headers: {
+            "Content-Type": `application/json`,
+          },
+          body: JSON.stringify(transaction.mutations),
+        })
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log(`Config Success:`, result)
+        collection.transactionManager.updateTransactionMetadata(
+          transaction.id,
+          {
+            txid: result.txid,
+          }
+        )
+      },
+      awaitSync: async ({ transaction }) => {
+        // Get the txid from the transaction metadata
+        const txid = transaction.metadata?.txid as string
+
+        if (!txid) {
+          throw new Error(`No txid found in transaction metadata`)
+        }
+        console.log(`awaiting config txid`, txid)
+
+        // Start waiting for the txid
+        await configSync.current.awaitTxid(txid)
+        console.log(`got config txid`)
+      },
+    },
+  })
+
+  const backgroundColor =
+    [...configData.values()].find((v) => v.key === `backgroundColor`)?.value ||
+    ``
+
+  console.log({ configData, backgroundColor })
+
+  const handleColorChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newColor = e.target.value
+
+    // Find the config entry for backgroundColor
+    for (const [key, config] of configData.entries()) {
+      if (config.key === `backgroundColor`) {
+        updateConfig({
+          key,
+          data: { value: newColor },
+        })
+        break
+      }
+    }
+  }
+
   console.log({ todos })
 
   const handleSubmit = async (e: FormEvent) => {
@@ -93,11 +168,33 @@ export default function App() {
 
   return (
     <>
-      <div className="h-[50vh] flex items-start justify-center overflow-auto py-8">
+      <div
+        className="min-h-screen flex items-start justify-center overflow-auto py-8"
+        style={{ backgroundColor }}
+      >
         <div style={{ width: 550 }} className="mx-auto relative">
           <h1 className="text-[100px] text-[rgba(175,47,47,0.15)] font-thin text-center mb-8">
             todos
           </h1>
+
+          <div className="mb-4 flex justify-end">
+            <div className="flex items-center">
+              <label
+                htmlFor="colorPicker"
+                className="mr-2 text-sm text-gray-700"
+              >
+                Background Color:
+              </label>
+              <input
+                type="color"
+                id="colorPicker"
+                value={backgroundColor}
+                onChange={handleColorChange}
+                className="cursor-pointer border border-gray-300 rounded"
+              />
+            </div>
+          </div>
+
           <div className="bg-white shadow-[0_2px_4px_0_rgba(0,0,0,0.2),0_25px_50px_0_rgba(0,0,0,0.1)] relative">
             <form onSubmit={handleSubmit} className="relative">
               {todos.size > 0 && (

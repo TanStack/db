@@ -40,11 +40,11 @@ interface DeleteParams {
   metadata?: unknown
 }
 
-interface WithMutationParams {
-  // eslint-disable-next-line
-  changes: Record<string, any>[]
-  metadata?: unknown
-}
+// interface WithMutationParams {
+//   // eslint-disable-next-line
+//   changes: Record<string, any>[]
+//   metadata?: unknown
+// }
 
 export class Collection {
   public transactionManager: TransactionManager
@@ -54,6 +54,7 @@ export class Collection {
   public derivedState: Derived<Map<string, unknown>>
 
   private syncedData = new Store(new Map<string, unknown>())
+  private syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig
 
@@ -196,6 +197,23 @@ export class Collection {
       batch(() => {
         for (const transaction of this.pendingSyncedTransactions) {
           for (const operation of transaction.operations) {
+            this.syncedMetadata.setState((prevData) => {
+              switch (operation.type) {
+                case `insert`:
+                  prevData.set(operation.key, operation.metadata)
+                  break
+                case `update`:
+                  prevData.set(operation.key, {
+                    ...prevData.get(operation.key)!,
+                    ...operation.metadata,
+                  })
+                  break
+                case `delete`:
+                  prevData.delete(operation.key)
+                  break
+              }
+              return prevData
+            })
             this.syncedData.setState((prevData) => {
               switch (operation.type) {
                 case `insert`:
@@ -224,11 +242,15 @@ export class Collection {
   update = ({ key, data, metadata }: UpdateParams) => {
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
-      original: this.value.get(key) || {},
-      modified: { ...this.value.get(key), ...data },
+      original: (this.value.get(key) || {}) as Record<string, unknown>,
+      modified: { ...(this.value.get(key) || {}), ...data },
       changes: data,
       key,
       metadata,
+      syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+        string,
+        unknown
+      >,
       type: `update`,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -247,6 +269,10 @@ export class Collection {
       changes: data,
       key,
       metadata,
+      syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+        string,
+        unknown
+      >,
       type: `insert`,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -260,11 +286,15 @@ export class Collection {
   delete = ({ key, metadata }: DeleteParams) => {
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
-      original: this.value.get(key) || {},
+      original: (this.value.get(key) || {}) as Record<string, unknown>,
       modified: { _deleted: true },
       changes: { _deleted: true },
       key,
       metadata,
+      syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+        string,
+        unknown
+      >,
       type: `delete`,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -277,26 +307,26 @@ export class Collection {
 
   // TODO should be withTransaction & it shouldn't start saving until it's explicitly started?
   // Not critical for now so we can defer this.
-  withMutation = ({ changes, metadata }: WithMutationParams) => {
-    const mutations = changes.map((change) => ({
-      mutationId: crypto.randomUUID(),
-      original:
-        changes.map((change) => this.syncedData.state.get(change.key)) || [],
-      modified: changes.map((change) => {
-        return {
-          ...this.syncedData.state.get(change.key),
-          ...change.data,
-        }
-      }),
-      changes: change,
-      metadata,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      state: `created` as const,
-    }))
-
-    this.transactionManager.createTransaction(mutations, { type: `ordered` })
-  }
+  // withMutation = ({ changes, metadata }: WithMutationParams) => {
+  //   const mutations = changes.map((change) => ({
+  //     mutationId: crypto.randomUUID(),
+  //     original:
+  //       changes.map((change) => this.syncedData.state.get(change.key)) || [],
+  //     modified: changes.map((change) => {
+  //       return {
+  //         ...(this.syncedData.state.get(change.key) || {}),
+  //         ...change.data,
+  //       }
+  //     }),
+  //     changes: change,
+  //     metadata,
+  //     createdAt: new Date(),
+  //     updatedAt: new Date(),
+  //     state: `created` as const,
+  //   }))
+  //
+  //   this.transactionManager.createTransaction(mutations, { type: `ordered` })
+  // }
 
   get value() {
     return this.derivedState.state

@@ -1,5 +1,10 @@
 import { db } from "../db/kysely"
-import { validateInsertTodo, validateUpdateTodo } from "../db/validation"
+import {
+  validateInsertTodo,
+  validateUpdateTodo,
+  validateInsertConfig,
+  validateUpdateConfig,
+} from "../db/validation"
 import { PendingMutation } from "../../../src/types"
 import { sql } from "kysely"
 import express from "express"
@@ -28,49 +33,96 @@ router.post(`/api/mutations`, async (req, res) => {
       // TODO handle 64-bit numbers
       const txid = Number(txidResult.txid)
 
+      console.log(`mutations`, pendingMutations)
       // Process each mutation in order
       for (const mutation of pendingMutations) {
         // Validate and process based on operation type
         switch (mutation.type) {
           case `insert`: {
-            // Validate the data using our validation helpers
-            const insertData = validateInsertTodo(mutation.modified)
+            // Check which table we're working with based on the collection name
+            if (mutation.syncMetadata.relation?.includes(`config`)) {
+              // Validate the data using our validation helpers
+              const insertData = validateInsertConfig(mutation.modified)
 
-            // Insert the new todo
-            await trx.insertInto(`todos`).values(insertData).execute()
+              // Insert the new config
+              await trx.insertInto(`config`).values(insertData).execute()
+            } else {
+              // Default to todos table
+              // Validate the data using our validation helpers
+              const insertData = validateInsertTodo(mutation.modified)
+
+              // Insert the new todo
+              await trx.insertInto(`todos`).values(insertData).execute()
+            }
             break
           }
 
           case `update`: {
-            // Validate the update data
-            const updateData = validateUpdateTodo(mutation.changes)
+            // Check which table we're working with based on the collection name
+            if (mutation.syncMetadata.relation?.includes(`config`)) {
+              // Validate the update data
+              const updateData = validateUpdateConfig(mutation.changes)
 
-            // Get the ID from the key
-            const updateId = Number(mutation.original.id)
-            if (isNaN(updateId)) {
-              throw new Error(`Invalid todo ID: ${mutation.key}`)
+              // Get the ID from the key
+              const updateId = Number(mutation.original.id)
+              if (isNaN(updateId)) {
+                throw new Error(`Invalid config ID: ${mutation}`)
+              }
+
+              // Update the config
+              await trx
+                .updateTable(`config`)
+                .set(updateData)
+                .where(`id`, `=`, updateId)
+                .execute()
+            } else {
+              // Default to todos table
+              // Validate the update data
+              const updateData = validateUpdateTodo(mutation.changes)
+
+              // Get the ID from the key
+              const updateId = Number(mutation.original.id)
+              if (isNaN(updateId)) {
+                throw new Error(`Invalid todo ID: ${mutation.key}`)
+              }
+
+              console.log({ updateId, updateData })
+
+              // Update the todo
+              await trx
+                .updateTable(`todos`)
+                .set(updateData)
+                .where(`id`, `=`, updateId)
+                .execute()
             }
-
-            console.log({ updateId, updateData })
-
-            // Update the todo
-            await trx
-              .updateTable(`todos`)
-              .set(updateData)
-              .where(`id`, `=`, updateId)
-              .execute()
             break
           }
 
           case `delete`: {
-            // Get the ID from the key
-            const deleteId = Number(mutation.key)
-            if (isNaN(deleteId)) {
-              throw new Error(`Invalid todo ID: ${mutation.key}`)
-            }
+            // Check which table we're working with based on the collection name
+            if (mutation.syncMetadata.relation?.includes(`config`)) {
+              // Get the ID from the key
+              const deleteId = Number(mutation.key)
+              if (isNaN(deleteId)) {
+                throw new Error(`Invalid config ID: ${mutation.key}`)
+              }
 
-            // Delete the todo
-            await trx.deleteFrom(`todos`).where(`id`, `=`, deleteId).execute()
+              // Delete the config
+              await trx
+                .deleteFrom(`config`)
+                .where(`id`, `=`, deleteId)
+                .execute()
+            } else {
+              // Default to todos table
+              // Get the ID from the key
+              const deleteId = Number(mutation.key)
+              if (isNaN(deleteId)) {
+                throw new Error(`Invalid todo ID: ${mutation.key}`)
+              }
+
+              // Delete the todo
+              await trx.deleteFrom(`todos`).where(`id`, `=`, deleteId).execute()
+            }
             break
           }
 

@@ -25,9 +25,9 @@ export interface PendingMutation {
   key: string
   type: OperationType
   metadata: unknown
+  syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  state: `created` | `persisting` | `synced`
 }
 
 export interface Transaction {
@@ -73,6 +73,7 @@ export type ChangeMessage<T extends Row<unknown> = Row> = {
   key: string
   value: T
   type: OperationType
+  metadata?: Record<string, unknown>
 }
 
 export interface SyncConfig {

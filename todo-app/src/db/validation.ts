@@ -1,5 +1,5 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
-import { todos } from "./schema"
+import { todos, config } from "./schema"
 import { z } from "zod"
 
 // Auto-generated schemas from Drizzle schema
@@ -9,10 +9,19 @@ export const selectTodoSchema = createSelectSchema(todos)
 // Partial schema for updates
 export const updateTodoSchema = insertTodoSchema.partial()
 
+// Config schemas
+export const insertConfigSchema = createInsertSchema(config)
+export const selectConfigSchema = createSelectSchema(config)
+export const updateConfigSchema = insertConfigSchema.partial()
+
 // Type inference
 export type InsertTodo = z.infer<typeof insertTodoSchema>
 export type SelectTodo = z.infer<typeof selectTodoSchema>
 export type UpdateTodo = z.infer<typeof updateTodoSchema>
+
+export type InsertConfig = z.infer<typeof insertConfigSchema>
+export type SelectConfig = z.infer<typeof selectConfigSchema>
+export type UpdateConfig = z.infer<typeof updateConfigSchema>
 
 // Validation functions
 export const validateInsertTodo = (data: unknown): InsertTodo => {
@@ -27,6 +36,18 @@ export const validateUpdateTodo = (data: unknown): UpdateTodo => {
   return updateTodoSchema.parse(data)
 }
 
+export const validateInsertConfig = (data: unknown): InsertConfig => {
+  return insertConfigSchema.parse(data)
+}
+
+export const validateSelectConfig = (data: unknown): SelectConfig => {
+  return selectConfigSchema.parse(data)
+}
+
+export const validateUpdateConfig = (data: unknown): UpdateConfig => {
+  return updateConfigSchema.parse(data)
+}
+
 // Safe parsing functions that return Result type instead of throwing
 export const safeParseInsertTodo = (data: unknown) => {
   return insertTodoSchema.safeParse(data)
@@ -38,4 +59,16 @@ export const safeParseSelectTodo = (data: unknown) => {
 
 export const safeParseUpdateTodo = (data: unknown) => {
   return updateTodoSchema.safeParse(data)
+}
+
+export const safeParseInsertConfig = (data: unknown) => {
+  return insertConfigSchema.safeParse(data)
+}
+
+export const safeParseSelectConfig = (data: unknown) => {
+  return selectConfigSchema.safeParse(data)
+}
+
+export const safeParseUpdateConfig = (data: unknown) => {
+  return updateConfigSchema.safeParse(data)
 }
