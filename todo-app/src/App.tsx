@@ -1,4 +1,4 @@
-import React, { useState, FormEvent } from "react"
+import React, { useState, FormEvent, useRef } from "react"
 import { useCollection } from "../../src/useCollection"
 import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
@@ -10,6 +10,14 @@ interface Todo {
 
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
+  const electricSync = useRef(
+    createElectricSync({
+      url: `http://localhost:3000/v1/shape`,
+      params: {
+        table: `todos`,
+      },
+    })
+  )
   const {
     data: todos,
     insert,
@@ -17,19 +25,46 @@ export default function App() {
     delete: deleteTodo,
   } = useCollection({
     id: `todos`,
-    sync: createElectricSync({
-      url: `http://localhost:3000/v1/shape`,
-      params: {
-        table: `todos`,
-      },
-    }),
+    sync: electricSync.current,
     mutationFn: {
-      persist: async () => {
-        console.log(`persisting...`)
+      persist: async ({ transaction, collection }) => {
+        console.log(`persisting...`, transaction.toObject())
+        const response = await fetch(`http://localhost:3001/api/mutations`, {
+          method: `POST`,
+          headers: {
+            "Content-Type": `application/json`,
+          },
+          body: JSON.stringify(transaction.mutations),
+        })
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log(`Success:`, result)
+        collection.transactionManager.updateTransactionMetadata(
+          transaction.id,
+          {
+            txid: result.txid,
+          }
+        )
       },
-      awaitSync: async () => {},
+      awaitSync: async ({ transaction }) => {
+        // Get the txid from the transaction metadata
+        const txid = transaction.metadata?.txid as string
+
+        if (!txid) {
+          throw new Error(`No txid found in transaction metadata`)
+        }
+        console.log(`awaiting txid`, txid)
+
+        // Start waiting for the txid
+        await electricSync.current.awaitTxid(txid)
+        console.log(`got it`)
+      },
     },
   })
+  console.log({ todos })
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -45,7 +80,7 @@ export default function App() {
   const toggleTodo = async (key: string, todo: Todo) => {
     await update({
       key,
-      data: { ...todo, completed: !todo.completed },
+      data: { completed: !todo.completed },
     })
   }
 

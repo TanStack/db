@@ -5,7 +5,7 @@ import mitt from "mitt"
 import "fake-indexeddb/auto"
 
 describe(`useCollection`, () => {
-  it(`should handle insert, update, and delete operations`, async () => {
+  it.only(`should handle insert, update, and delete operations`, async () => {
     const emitter = mitt()
     const persistMock = vi.fn().mockResolvedValue(undefined)
 
@@ -16,13 +16,13 @@ describe(`useCollection`, () => {
         sync: {
           id: `mock`,
           sync: ({ begin, write, commit }) => {
-            emitter.on(`*`, (type, { changes }) => {
+            emitter.on(`*`, (type, mutations) => {
               begin()
-              changes.map((change) =>
+              mutations.forEach((mutation) =>
                 write({
-                  key: change.key,
-                  type: change.type as string,
-                  value: change.value,
+                  key: mutation.key,
+                  type: mutation.type as string,
+                  value: mutation.changes,
                 })
               )
               commit()
@@ -31,7 +31,9 @@ describe(`useCollection`, () => {
         },
         mutationFn: {
           persist: persistMock,
-          awaitSync: async () => {},
+          awaitSync: async ({ transaction }) => {
+            emitter.emit(`update`, transaction.mutations)
+          },
         },
       })
     )
@@ -41,7 +43,7 @@ describe(`useCollection`, () => {
 
     // Test insert
     await act(async () => {
-      await result.current.insert({
+      result.current.insert({
         key: `user1`,
         data: { name: `Alice` },
       })

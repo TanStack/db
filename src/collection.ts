@@ -93,24 +93,25 @@ export class Collection {
     this.derivedState = new Derived({
       // prevVal, prevDepVals,
       fn: ({ currDepVals }) => {
+        const combined = new Map(currDepVals[0])
         // Apply the optimistic operations on top of the synced state.
         for (const operation of currDepVals[1]) {
           switch (operation.type) {
             case `insert`:
-              currDepVals[0].set(operation.key, operation.value)
+              combined.set(operation.key, operation.value)
               break
             case `update`:
-              currDepVals[0].set(operation.key, {
+              combined.set(operation.key, {
                 ...currDepVals[0].get(operation.key)!,
                 ...operation.value,
               })
               break
             case `delete`:
-              currDepVals[0].delete(operation.key)
+              combined.delete(operation.key)
               break
           }
         }
-        return new Map(currDepVals[0])
+        return combined
       },
       deps: [this.syncedData, this.optimisticOperations],
     })

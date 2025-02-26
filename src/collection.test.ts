@@ -70,11 +70,15 @@ describe(`Collection`, () => {
       sync: {
         id: `mock`,
         sync: ({ begin, write, commit }) => {
-          emitter.on(`*`, (type, { changes }) => {
+          emitter.on(`*`, (type, changes) => {
             begin()
-            changes.map((change) =>
-              write({ key: `key`, type: `insert`, value: change })
-            )
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes,
+              })
+            })
             commit()
           })
         },
@@ -131,6 +135,7 @@ describe(`Collection`, () => {
           // Store the data for later assertion
           syncMock({ transaction: redactedTransaction })
 
+          emitter.emit(`update`, transaction.mutations)
           return Promise.resolve()
         },
       },
@@ -190,8 +195,6 @@ describe(`Collection`, () => {
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
-    // TODO do same with update & delete & withMutation
-    //
     // update
     // Reset the mocks for update test
     persistMock.mockClear()
