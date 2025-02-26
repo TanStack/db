@@ -5,7 +5,7 @@ import mitt from "mitt"
 import "fake-indexeddb/auto"
 
 describe(`useCollection`, () => {
-  it.only(`should handle insert, update, and delete operations`, async () => {
+  it(`should handle insert, update, and delete operations`, async () => {
     const emitter = mitt()
     const persistMock = vi.fn().mockResolvedValue(undefined)
 
@@ -53,13 +53,14 @@ describe(`useCollection`, () => {
     expect(result.current.data).toEqual(new Map([[`user1`, { name: `Alice` }]]))
 
     // Test update
-    await act(async () => {
-      await result.current.update({
+    const updateTransaction = await act(async () => {
+      return result.current.update({
         key: `user1`,
         data: { name: `Alice Smith` },
       })
     })
 
+    await updateTransaction.isSynced.promise
     // Verify update
     expect(result.current.data).toEqual(
       new Map([[`user1`, { name: `Alice Smith` }]])

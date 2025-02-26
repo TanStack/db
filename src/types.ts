@@ -65,7 +65,7 @@ type Value<Extensions = never> =
   | Value<Extensions>[]
   | { [key: string]: Value<Extensions> }
 
-type Row<Extensions = never> = Record<string, Value<Extensions>>
+export type Row<Extensions = never> = Record<string, Value<Extensions>>
 
 type OperationType = `insert` | `update` | `delete`
 

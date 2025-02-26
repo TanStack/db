@@ -5,6 +5,8 @@ import {
   ChangeMessage,
   PendingMutation,
   Row,
+  Transaction,
+  TransactionState,
 } from "./types"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
@@ -12,6 +14,11 @@ import { TransactionStore } from "./TransactionStore"
 interface CollectionConfig {
   sync: SyncConfig
   mutationFn: MutationFn
+}
+
+interface PendingSyncedTransaction {
+  committed: boolean
+  operations: ChangeMessage[]
 }
 
 interface UpdateParams {
@@ -47,7 +54,7 @@ export class Collection {
   public derivedState: Derived<Map<string, unknown>>
 
   private syncedData = new Store(new Map<string, unknown>())
-  private pendingOperations: ChangeMessage[] = []
+  private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig
 
   constructor(config?: CollectionConfig) {
@@ -124,14 +131,71 @@ export class Collection {
     config.sync.sync({
       collection: this,
       begin: () => {
-        this.pendingOperations = []
+        this.pendingSyncedTransactions.push({
+          committed: false,
+          operations: [],
+        })
       },
       write: (message: ChangeMessage) => {
-        this.pendingOperations.push(message)
+        const pendingTransaction =
+          this.pendingSyncedTransactions[
+            this.pendingSyncedTransactions.length - 1
+          ]
+        if (pendingTransaction.committed) {
+          throw new Error(
+            `The pending sync transaction is already committed, you can't still write to it.`
+          )
+        }
+        pendingTransaction.operations.push(message)
       },
       commit: () => {
-        batch(() => {
-          for (const operation of this.pendingOperations) {
+        const pendingTransaction =
+          this.pendingSyncedTransactions[
+            this.pendingSyncedTransactions.length - 1
+          ]
+        if (pendingTransaction.committed) {
+          throw new Error(
+            `The pending sync transaction is already committed, you can't commit it again.`
+          )
+        }
+
+        pendingTransaction.committed = true
+
+        this.tryToCommitPendingSyncedTransactions()
+      },
+    })
+
+    // Listen to transactions and re-run tryToCommitPendingSyncedTransactions on changes
+    // this.transactionManager.transactions.subscribe(
+    //   this.tryToCommitPendingSyncedTransactions
+    // )
+  }
+
+  tryToCommitPendingSyncedTransactions = () => {
+    // Check if there's any transactions that aren't finished.
+    // If not, proceed.
+    // If so, subscribe to transactions and keep checking if can proceed.
+    //
+    // The plan is to have a finer-grained locking but just blocking applying
+    // synced data until a persisting transaction is finished seems fine.
+    // We also don't yet have support for transactions that don't immediately
+    // persist so right now, blocking sync only delays their application for a
+    // few hundred milliseconds. So not the worse thing in th world.
+    // But something to fix in the future.
+    // Create a Set with only the terminal states
+    const terminalStates = new Set<TransactionState>([`completed`, `failed`])
+
+    // Function to check if a state is NOT a terminal state
+    function isNotTerminalState({ state }: Transaction): boolean {
+      return !terminalStates.has(state as TransactionState)
+    }
+    if (
+      this.transactions.size === 0 ||
+      !Array.from(this.transactions.values()).some(isNotTerminalState)
+    ) {
+      batch(() => {
+        for (const transaction of this.pendingSyncedTransactions) {
+          for (const operation of transaction.operations) {
             this.syncedData.setState((prevData) => {
               switch (operation.type) {
                 case `insert`:
@@ -150,11 +214,11 @@ export class Collection {
               return prevData
             })
           }
-        })
+        }
+      })
 
-        this.pendingOperations = []
-      },
-    })
+      this.pendingSyncedTransactions = []
+    }
   }
 
   update = ({ key, data, metadata }: UpdateParams) => {

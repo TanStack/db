@@ -28,8 +28,6 @@ router.post(`/api/mutations`, async (req, res) => {
       // TODO handle 64-bit numbers
       const txid = Number(txidResult.txid)
 
-      console.log({ pendingMutations })
-
       // Process each mutation in order
       for (const mutation of pendingMutations) {
         // Validate and process based on operation type

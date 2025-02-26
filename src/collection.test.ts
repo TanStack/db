@@ -329,6 +329,75 @@ describe(`Collection`, () => {
     expect(collection.value).toEqual(new Map())
   })
 
+  it(`synced updates shouldn't be applied while there's an ongoing transaction`, async () => {
+    const emitter = mitt()
+
+    // new collection w/ mock sync/mutation
+    const collection = new Collection({
+      sync: {
+        id: `mock`,
+        sync: ({ begin, write, commit }) => {
+          emitter.on(`*`, (type, changes) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes,
+              })
+            })
+            commit()
+          })
+        },
+      },
+      mutationFn: {
+        persist() {
+          // Sync something and check that that it isn't applied because
+          // we're still in the middle of persisting a transaction.
+          emitter.emit(`update`, [
+            { key: `the-key`, type: `insert`, changes: { bar: `value` } },
+          ])
+          expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+          // Remove it so we don't have to assert against it below
+          emitter.emit(`update`, [{ key: `the-key`, type: `delete` }])
+          return Promise.resolve()
+        },
+        awaitSync({ transaction }) {
+          emitter.emit(`update`, transaction.mutations)
+          return Promise.resolve()
+        },
+      },
+    })
+
+    // insert
+    const transaction = collection.insert({
+      key: `foo`,
+      data: { value: `bar` },
+    })
+
+    // The merged value should immediately contain the new insert
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+
+    // check there's a transaction in peristing state
+    expect(
+      Array.from(collection.transactions.values())[0].mutations[0].changes
+    ).toEqual({
+      value: `bar`,
+    })
+
+    // Check the optimistic operation is there
+    const insertOperation: ChangeMessage = {
+      key: `foo`,
+      value: { value: `bar` },
+      type: `insert`,
+    }
+    expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
+
+    await transaction.isSynced?.promise
+
+    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+  })
+
   // Skip until e2e working
   it(`If the mutationFn throws error, it get retried`, () => {
     // new collection w/ mock sync/mutation

@@ -71,6 +71,8 @@ export class TransactionManager {
       sortedMap.set(transaction.id, transaction)
       return sortedMap
     })
+
+    this.collection.tryToCommitPendingSyncedTransactions()
   }
 
   /**
