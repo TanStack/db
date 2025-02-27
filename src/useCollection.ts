@@ -127,18 +127,52 @@ export function useCollection<T = unknown, R = Map<string, T>>(
   config: UseCollectionConfig<T>,
   selector: (d: Map<string, T>) => R = (d) => d as unknown as R
 ): {
+  /**
+   * The collection data, transformed by the optional selector function
+   */
   data: R
-  update: (params: {
+  /**
+   * Updates an existing item in the collection
+   *
+   * @param params - Object containing update parameters: key, data, and optional metadata
+   * @returns {Transaction} A Transaction object representing the update operation. The transaction includes the mutation details and status tracking.
+   * @throws {SchemaValidationError} If the updated data fails schema validation
+   */
+  update(params: {
+    /** The unique identifier for the item to update */
     key: string
+    /** The partial data to update the item with */
     data: Partial<T>
+    /** Optional metadata to associate with the update */
     metadata?: unknown
-  }) => Promise<void>
-  insert: (params: {
+  }): Transaction
+  /**
+   * Inserts a new item into the collection
+   *
+   * @param params - Object containing insert parameters: key, data, and optional metadata
+   * @returns {Transaction} A Transaction object representing the insert operation. The transaction includes the mutation details and status tracking.
+   * @throws {SchemaValidationError} If the data fails schema validation
+   */
+  insert(params: {
+    /** The unique identifier for the new optimistic item. It'll be replaced by a server-generated key once the server write syncs back. */
     key: string
+    /** The complete data for the new item */
     data: T
+    /** Optional metadata to associate with the insert */
     metadata?: unknown
-  }) => Promise<void>
-  delete: (params: { key: string; metadata?: unknown }) => Promise<void>
+  }): Transaction
+  /**
+   * Deletes an item from the collection
+   *
+   * @param params - Object containing delete parameters: key and optional metadata
+   * @returns {Transaction} A Transaction object representing the delete operation. The transaction includes the mutation details and status tracking.
+   */
+  delete(params: {
+    /** The unique identifier for the item to delete */
+    key: string
+    /** Optional metadata to associate with the delete */
+    metadata?: unknown
+  }): Transaction
 } {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {

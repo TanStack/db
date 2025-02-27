@@ -408,11 +408,19 @@ export class Collection<T = unknown> {
    * Inserts a new item into the collection
    *
    * @param params - Object containing insert parameters
-   * @param params.key - The unique identifier for the new item
-   * @param params.data - The complete data for the new item
-   * @param params.metadata - Optional metadata to associate with the insert
+   * @param params.key - The unique identifier for the new item. This is an optimistic ID that will be replaced by a server-generated ID when the operation syncs.
+   * @param params.data - The complete data for the new item. Must conform to the collection's schema if one is defined.
+   * @param params.metadata - Optional metadata to associate with the insert. This can be used for tracking purposes.
    * @returns A Transaction object representing the insert operation
-   * @throws SchemaValidationError if the data fails schema validation
+   * @throws {SchemaValidationError} If the data fails schema validation
+   * @example
+   * ```typescript
+   * // Insert a new todo item
+   * collection.insert({
+   *   key: Date.now().toString(),
+   *   data: { text: "Buy milk", completed: false },
+   * });
+   * ```
    */
   insert = ({ key, data, metadata }: InsertParams<T>) => {
     // Validate the data against the schema if one exists

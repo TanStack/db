@@ -196,7 +196,7 @@ export default function App() {
     e.preventDefault()
     if (!newTodo.trim()) return
 
-    await insert({
+    insert({
       key: Date.now().toString(),
       data: { text: newTodo, completed: false },
     })
@@ -204,7 +204,7 @@ export default function App() {
   }
 
   const toggleTodo = async (key: string, todo: Todo) => {
-    await update({
+    update({
       key,
       data: { completed: !todo.completed },
     })
@@ -255,7 +255,7 @@ export default function App() {
                   onClick={async () => {
                     const allCompleted = completedTodos.length === todos.size
                     for (const [key, todo] of todos) {
-                      await update({
+                      update({
                         key,
                         data: { ...todo, completed: !allCompleted },
                       })
@@ -320,7 +320,7 @@ export default function App() {
                     <button
                       onClick={async () => {
                         for (const [key] of completedTodos) {
-                          await deleteTodo({ key })
+                          deleteTodo({ key })
                         }
                       }}
                       className="text-inherit hover:underline"
