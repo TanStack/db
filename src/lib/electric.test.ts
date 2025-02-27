@@ -342,12 +342,9 @@ describe(`Electric Integration`, () => {
             const txid = await fakeBackend.persist(transaction.mutations)
 
             // Store the txid in the transaction metadata using the collection's transactionManager
-            collection.transactionManager.updateTransactionMetadata(
-              transaction.id,
-              {
-                txid,
-              }
-            )
+            collection.transactionManager.setMetadata(transaction.id, {
+              txid,
+            })
 
             // Return the txid (which will be passed to awaitSync)
             return txid
@@ -455,10 +452,9 @@ describe(`Electric Integration`, () => {
     expect(modifiedTransaction.metadata.testKey).toBe(`testValue`)
 
     // Update the transaction metadata
-    testCollection.transactionManager.updateTransactionMetadata(
-      transaction.id,
-      { anotherKey: `anotherValue` }
-    )
+    testCollection.transactionManager.setMetadata(transaction.id, {
+      anotherKey: `anotherValue`,
+    })
 
     // Verify the live reference is updated
     expect(transaction.metadata.anotherKey).toBe(`anotherValue`)

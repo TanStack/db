@@ -46,7 +46,6 @@ export default function App() {
     schema: insertTodoSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
-        console.log(`persisting...`, transaction.toObject())
         const response = await fetch(`http://localhost:3001/api/mutations`, {
           method: `POST`,
           headers: {
@@ -59,26 +58,15 @@ export default function App() {
         }
 
         const result = await response.json()
-        console.log(`Success:`, result)
-        collection.transactionManager.updateTransactionMetadata(
-          transaction.id,
-          {
-            txid: result.txid,
-          }
-        )
+        collection.transactionManager.setMetadata(transaction.id, {
+          txid: result.txid,
+        })
       },
       awaitSync: async ({ transaction }) => {
-        // Get the txid from the transaction metadata
-        const txid = transaction.metadata?.txid as string
-
-        if (!txid) {
-          throw new Error(`No txid found in transaction metadata`)
-        }
-        console.log(`awaiting txid`, txid)
-
         // Start waiting for the txid
-        await electricSync.current.awaitTxid(txid)
-        console.log(`got it`)
+        await electricSync.current.awaitTxid(
+          transaction.metadata?.txid as number
+        )
       },
     },
   })
@@ -93,7 +81,6 @@ export default function App() {
     schema: insertConfigSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
-        console.log(`persisting config...`, transaction.toObject())
         const response = await fetch(`http://localhost:3001/api/mutations`, {
           method: `POST`,
           headers: {
@@ -106,26 +93,13 @@ export default function App() {
         }
 
         const result = await response.json()
-        console.log(`Config Success:`, result)
-        collection.transactionManager.updateTransactionMetadata(
-          transaction.id,
-          {
-            txid: result.txid,
-          }
-        )
+        collection.transactionManager.setMetadata(transaction.id, {
+          txid: result.txid,
+        })
       },
       awaitSync: async ({ transaction }) => {
-        // Get the txid from the transaction metadata
-        const txid = transaction.metadata?.txid as string
-
-        if (!txid) {
-          throw new Error(`No txid found in transaction metadata`)
-        }
-        console.log(`awaiting config txid`, txid)
-
         // Start waiting for the txid
-        await configSync.current.awaitTxid(txid)
-        console.log(`got config txid`)
+        await configSync.current.awaitTxid(transaction.metadata?.txid as number)
       },
     },
   })
@@ -161,14 +135,10 @@ export default function App() {
 
   const backgroundColor = getConfigValue(`backgroundColor`)
 
-  console.log({ configData, backgroundColor })
-
   const handleColorChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newColor = e.target.value
     setConfigValue(`backgroundColor`, newColor)
   }
-
-  console.log({ todos })
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

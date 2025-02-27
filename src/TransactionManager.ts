@@ -114,9 +114,9 @@ export class TransactionManager {
         },
         set() {
           // We don't allow direct setting of properties on the transaction
-          // Use updateTransactionState or updateTransactionMetadata instead
+          // Use updateTransactionState or setMetadata instead
           console.warn(
-            `Direct modification of transaction properties is not allowed. Use updateTransactionState or updateTransactionMetadata instead.`
+            `Direct modification of transaction properties is not allowed. Use updateTransactionState or setMetadata instead.`
           )
           return true
         },
@@ -327,10 +327,7 @@ export class TransactionManager {
    * @param metadata Metadata to update or add
    * @returns The updated transaction
    */
-  updateTransactionMetadata(
-    id: string,
-    metadata: Record<string, unknown>
-  ): Transaction {
+  setMetadata(id: string, metadata: Record<string, unknown>): Transaction {
     const transaction = this.getTransaction(id)
     if (!transaction) {
       throw new Error(`Transaction ${id} not found`)

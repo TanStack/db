@@ -20,7 +20,7 @@ export interface ElectricSync extends SyncConfig {
    * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
    * @returns Promise that resolves when the txid is synced
    */
-  awaitTxid: (txid: string, timeout?: number) => Promise<boolean>
+  awaitTxid: (txid: number, timeout?: number) => Promise<boolean>
 }
 
 function isUpToDateMessage<T extends Row<unknown> = Row>(
@@ -32,7 +32,7 @@ function isUpToDateMessage<T extends Row<unknown> = Row>(
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown> = Row>(
   message: Message<T>
-): message is Message<T> & { headers: { txids?: string[] } } {
+): message is Message<T> & { headers: { txids?: number[] } } {
   return (
     `headers` in message &&
     `txids` in message.headers &&
@@ -44,15 +44,15 @@ export function createElectricSync<T extends Row<unknown> = Row>(
   streamOptions: ShapeStreamOptions
 ): ElectricSync {
   // Create a store to track seen txids
-  const seenTxids = new Store<Set<string>>(new Set())
+  const seenTxids = new Store<Set<number>>(new Set())
 
   // Function to check if a txid has been seen
-  const hasTxid = (txid: string): boolean => {
+  const hasTxid = (txid: number): boolean => {
     return seenTxids.state.has(txid)
   }
 
   // Function to await a specific txid
-  const awaitTxid = async (txid: string, timeout = 30000): Promise<boolean> => {
+  const awaitTxid = async (txid: number, timeout = 30000): Promise<boolean> => {
     // If we've already seen this txid, resolve immediately
     if (hasTxid(txid)) {
       return true
@@ -82,7 +82,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
     sync: ({ begin, write, commit }) => {
       const stream = new ShapeStream(streamOptions)
       let transactionStarted = false
-      let newTxids = new Set<string>()
+      let newTxids = new Set<number>()
 
       stream.subscribe((messages: Message<T>[]) => {
         let hasUpToDate = false
