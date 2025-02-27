@@ -114,9 +114,9 @@ export class TransactionManager {
         },
         set() {
           // We don't allow direct setting of properties on the transaction
-          // Use updateTransactionState or setMetadata instead
+          // Use setTransactionState or setMetadata instead
           console.warn(
-            `Direct modification of transaction properties is not allowed. Use updateTransactionState or setMetadata instead.`
+            `Direct modification of transaction properties is not allowed. Use setTransactionState or setMetadata instead.`
           )
           return true
         },
@@ -201,7 +201,7 @@ export class TransactionManager {
 
             tx.isPersisted?.resolve(true)
             if (this.collection.config.mutationFn.awaitSync) {
-              this.updateTransactionState(
+              this.setTransactionState(
                 transaction.id,
                 `persisted_awaiting_sync`
               )
@@ -218,10 +218,10 @@ export class TransactionManager {
                   if (!updatedTx) return
 
                   updatedTx.isSynced?.resolve(true)
-                  this.updateTransactionState(transaction.id, `completed`)
+                  this.setTransactionState(transaction.id, `completed`)
                 })
             } else {
-              this.updateTransactionState(transaction.id, `completed`)
+              this.setTransactionState(transaction.id, `completed`)
             }
           })
       }
@@ -235,7 +235,7 @@ export class TransactionManager {
     return this.createLiveTransactionReference(transaction.id)
   }
 
-  updateTransactionState(id: string, newState: TransactionState): void {
+  setTransactionState(id: string, newState: TransactionState): void {
     const transaction = this.getTransaction(id)
     if (!transaction) {
       throw new Error(`Transaction ${id} not found`)
@@ -278,7 +278,7 @@ export class TransactionManager {
       for (const queuedTransaction of queuedTransactions) {
         queuedTransaction.queuedBehind = undefined
         this.setTransaction(queuedTransaction)
-        this.updateTransactionState(queuedTransaction.id, `persisting`)
+        this.setTransactionState(queuedTransaction.id, `persisting`)
         this.collection.config.mutationFn
           .persist({
             transaction: this.createLiveTransactionReference(
@@ -293,7 +293,7 @@ export class TransactionManager {
 
             tx.isPersisted?.resolve(true)
             if (this.collection.config.mutationFn.awaitSync) {
-              this.updateTransactionState(
+              this.setTransactionState(
                 queuedTransaction.id,
                 `persisted_awaiting_sync`
               )
@@ -310,10 +310,10 @@ export class TransactionManager {
                   if (!updatedTx) return
 
                   updatedTx.isSynced?.resolve(true)
-                  this.updateTransactionState(queuedTransaction.id, `completed`)
+                  this.setTransactionState(queuedTransaction.id, `completed`)
                 })
             } else {
-              this.updateTransactionState(queuedTransaction.id, `completed`)
+              this.setTransactionState(queuedTransaction.id, `completed`)
             }
           })
       }

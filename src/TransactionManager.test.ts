@@ -67,7 +67,7 @@ describe(`TransactionManager`, () => {
 
       // Add a small delay to ensure timestamps are different
       const beforeUpdate = transaction.updatedAt
-      manager.updateTransactionState(transaction.id, `persisting`)
+      manager.setTransactionState(transaction.id, `persisting`)
 
       const updated = manager.getTransaction(transaction.id)
       expect(updated?.state).toBe(`persisting`)
@@ -78,7 +78,7 @@ describe(`TransactionManager`, () => {
 
     it(`should throw when updating non-existent transaction`, () => {
       expect(() =>
-        manager.updateTransactionState(`non-existent`, `completed`)
+        manager.setTransactionState(`non-existent`, `completed`)
       ).toThrow(`Transaction non-existent not found`)
     })
   })
@@ -171,7 +171,7 @@ describe(`TransactionManager`, () => {
       expect(tx3.queuedBehind).toBeUndefined()
 
       // Complete first transaction
-      manager.updateTransactionState(tx1.id, `completed`)
+      manager.setTransactionState(tx1.id, `completed`)
 
       // Check that second transaction is now pending
       const updatedTx2 = manager.getTransaction(tx2.id)!
@@ -229,7 +229,7 @@ describe(`TransactionManager`, () => {
       expect(ordered2.queuedBehind).toBe(ordered1.id)
 
       // Complete ordered1, ordered2 should become pending
-      manager.updateTransactionState(ordered1.id, `completed`)
+      manager.setTransactionState(ordered1.id, `completed`)
 
       const updatedOrdered2 = manager.getTransaction(ordered2.id)!
       expect(updatedOrdered2.state).toBe(`persisting`)
@@ -432,7 +432,7 @@ describe(`TransactionManager`, () => {
       // Create a transaction and mark it as completed
       const mutation1 = createMockMutation(`completed-key`)
       const tx1 = manager.applyTransaction([mutation1], orderedStrategy)
-      manager.updateTransactionState(tx1.id, `completed`)
+      manager.setTransactionState(tx1.id, `completed`)
 
       // Apply a new transaction with the same key
       const mutation2 = {
@@ -467,7 +467,7 @@ describe(`TransactionManager`, () => {
       expect(transactions[0].id).toBe(tx.id)
 
       // Update to 'completed' state (terminal)
-      manager.updateTransactionState(tx.id, `completed`)
+      manager.setTransactionState(tx.id, `completed`)
 
       // Verify transaction is deleted from IndexedDB
       transactions = await store.getTransactions()
@@ -485,7 +485,7 @@ describe(`TransactionManager`, () => {
       expect(transactions[0].id).toBe(tx2.id)
 
       // Update to 'failed' state (terminal)
-      manager.updateTransactionState(tx2.id, `failed`)
+      manager.setTransactionState(tx2.id, `failed`)
 
       // Verify transaction is deleted from IndexedDB
       transactions = await store.getTransactions()
