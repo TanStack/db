@@ -16,6 +16,11 @@ let snapshotCache: Map<
   { state: Map<unknown, unknown>; transactions: Transaction[] }
 > | null = null
 
+/**
+ * Hook that provides access to all collections
+ *
+ * @returns A Map of all collections with their states and transactions
+ */
 export function useCollections() {
   return useSyncExternalStoreWithSelector(
     (callback) => {
@@ -109,6 +114,15 @@ export function useCollections() {
   )
 }
 
+/**
+ * Hook to use a specific collection with React
+ *
+ * @template T - Type of items in the collection
+ * @template R - Return type of the selector function
+ * @param config - Configuration for the collection
+ * @param selector - Optional selector function to transform the collection data
+ * @returns Object containing collection data and CRUD operations
+ */
 export function useCollection<T = unknown, R = Map<string, T>>(
   config: UseCollectionConfig<T>,
   selector: (d: Map<string, T>) => R = (d) => d as unknown as R
@@ -160,6 +174,15 @@ export function useCollection<T = unknown, R = Map<string, T>>(
   }
 }
 
+/**
+ * Performs a shallow comparison between two objects
+ * Used for equality checking in React hooks
+ *
+ * @template T - Type of objects to compare
+ * @param objA - First object
+ * @param objB - Second object
+ * @returns True if objects are shallowly equal, false otherwise
+ */
 export function shallow<T>(objA: T, objB: T) {
   if (Object.is(objA, objB)) {
     return true

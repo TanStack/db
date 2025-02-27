@@ -84,6 +84,12 @@ export class Collection<T = unknown> {
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig<T>
 
+  /**
+   * Creates a new Collection instance
+   *
+   * @param config - Configuration object for the collection
+   * @throws Error if sync config or mutationFn is missing
+   */
   constructor(config?: CollectionConfig<T>) {
     if (!config?.sync) {
       throw new Error(`Collection requires a sync config`)
@@ -188,17 +194,21 @@ export class Collection<T = unknown> {
 
         pendingTransaction.committed = true
 
-        this.tryToCommitPendingSyncedTransactions()
+        this.commitPendingTransactions()
       },
     })
 
-    // Listen to transactions and re-run tryToCommitPendingSyncedTransactions on changes
+    // Listen to transactions and re-run commitPendingTransactions on changes
     // this.transactionManager.transactions.subscribe(
-    //   this.tryToCommitPendingSyncedTransactions
+    //   this.commitPendingTransactions
     // )
   }
 
-  tryToCommitPendingSyncedTransactions = () => {
+  /**
+   * Attempts to commit pending synced transactions if there are no active transactions
+   * This method processes operations from pending transactions and applies them to the synced data
+   */
+  commitPendingTransactions = () => {
     // Check if there's any transactions that aren't finished.
     // If not, proceed.
     // If so, subscribe to transactions and keep checking if can proceed.
@@ -356,6 +366,16 @@ export class Collection<T = unknown> {
     return result.value as T
   }
 
+  /**
+   * Updates an existing item in the collection
+   *
+   * @param params - Object containing update parameters
+   * @param params.key - The unique identifier for the item
+   * @param params.data - The data to update (partial object)
+   * @param params.metadata - Optional metadata to associate with the update
+   * @returns A Transaction object representing the update operation
+   * @throws SchemaValidationError if the updated data fails schema validation
+   */
   update = ({ key, data, metadata }: UpdateParams<T>) => {
     // Validate the data against the schema if one exists
     const validatedData = this.validateData(data, `update`, key)
@@ -384,6 +404,16 @@ export class Collection<T = unknown> {
     })
   }
 
+  /**
+   * Inserts a new item into the collection
+   *
+   * @param params - Object containing insert parameters
+   * @param params.key - The unique identifier for the new item
+   * @param params.data - The complete data for the new item
+   * @param params.metadata - Optional metadata to associate with the insert
+   * @returns A Transaction object representing the insert operation
+   * @throws SchemaValidationError if the data fails schema validation
+   */
   insert = ({ key, data, metadata }: InsertParams<T>) => {
     // Validate the data against the schema if one exists
     const validatedData = this.validateData(data, `insert`)
@@ -409,6 +439,14 @@ export class Collection<T = unknown> {
     })
   }
 
+  /**
+   * Deletes an item from the collection
+   *
+   * @param params - Object containing delete parameters
+   * @param params.key - The unique identifier for the item to delete
+   * @param params.metadata - Optional metadata to associate with the delete
+   * @returns A Transaction object representing the delete operation
+   */
   delete = ({ key, metadata }: DeleteParams) => {
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
@@ -454,10 +492,20 @@ export class Collection<T = unknown> {
   //   this.transactionManager.applyTransaction(mutations, { type: `ordered` })
   // }
 
+  /**
+   * Gets the current value of the collection as a Map
+   *
+   * @returns A Map containing all items in the collection, with keys as identifiers
+   */
   get value() {
     return this.derivedState.state as Map<string, T>
   }
 
+  /**
+   * Gets the current transactions in the collection
+   *
+   * @returns A SortedMap of all transactions in the collection
+   */
   get transactions() {
     return this.transactionManager.transactions.state
   }

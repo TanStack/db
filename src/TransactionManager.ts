@@ -41,6 +41,12 @@ export class TransactionManager {
   private collection: Collection
   public transactions: Store<SortedMap<string, Transaction>>
 
+  /**
+   * Creates a new TransactionManager instance
+   *
+   * @param store - The transaction store for persistence
+   * @param collection - The collection this manager is associated with
+   */
   constructor(store: TransactionStore, collection: Collection) {
     this.store = store
     this.collection = collection
@@ -62,6 +68,12 @@ export class TransactionManager {
     })
   }
 
+  /**
+   * Retrieves a transaction by its ID
+   *
+   * @param id - The unique identifier of the transaction
+   * @returns The transaction if found, undefined otherwise
+   */
   getTransaction(id: string): Transaction | undefined {
     return this.transactions.state.get(id)
   }
@@ -72,7 +84,7 @@ export class TransactionManager {
       return sortedMap
     })
 
-    this.collection.tryToCommitPendingSyncedTransactions()
+    this.collection.commitPendingTransactions()
   }
 
   /**
@@ -124,6 +136,13 @@ export class TransactionManager {
     )
   }
 
+  /**
+   * Applies a transaction with the given mutations using the specified strategy
+   *
+   * @param mutations - Array of pending mutations to apply
+   * @param strategy - Strategy to use when applying the transaction
+   * @returns A live reference to the created or updated transaction
+   */
   applyTransaction(
     mutations: PendingMutation[],
     strategy: MutationStrategy
@@ -235,6 +254,13 @@ export class TransactionManager {
     return this.createLiveTransactionReference(transaction.id)
   }
 
+  /**
+   * Updates the state of a transaction
+   *
+   * @param id - The unique identifier of the transaction
+   * @param newState - The new state to set
+   * @throws Error if the transaction is not found
+   */
   setTransactionState(id: string, newState: TransactionState): void {
     const transaction = this.getTransaction(id)
     if (!transaction) {
@@ -321,11 +347,11 @@ export class TransactionManager {
   }
 
   /**
-   * Update transaction metadata and persist the changes
+   * Sets metadata for a transaction
    *
-   * @param id Transaction ID
-   * @param metadata Metadata to update or add
-   * @returns The updated transaction
+   * @param id - The unique identifier of the transaction
+   * @param metadata - The metadata to set or merge with existing metadata
+   * @throws Error if the transaction is not found
    */
   setMetadata(id: string, metadata: Record<string, unknown>): Transaction {
     const transaction = this.getTransaction(id)
@@ -356,6 +382,12 @@ export class TransactionManager {
     return this.createLiveTransactionReference(id)
   }
 
+  /**
+   * Schedules a retry for a failed transaction
+   *
+   * @param id - The unique identifier of the transaction
+   * @param attemptNumber - The attempt number for this retry
+   */
   scheduleRetry(id: string, attemptNumber: number): void {
     const transaction = this.getTransaction(id)
     if (!transaction) {
@@ -396,18 +428,30 @@ export class TransactionManager {
     this.store.putTransaction(updatedTransaction)
   }
 
-  private hasOverlappingMutations(
+  /**
+   * Gets all active transactions (those not in completed or failed state)
+   *
+   * @returns Array of active transactions
+   */
+  getActiveTransactions(): Transaction[] {
+    return Array.from(this.transactions.state.values()).filter(
+      (tx) => tx.state !== `completed` && tx.state !== `failed`
+    )
+  }
+
+  /**
+   * Checks if two sets of mutations have overlapping keys
+   *
+   * @param mutations1 - First set of mutations
+   * @param mutations2 - Second set of mutations
+   * @returns True if there are overlapping mutations, false otherwise
+   */
+  hasOverlappingMutations(
     mutations1: PendingMutation[],
     mutations2: PendingMutation[]
   ): boolean {
     const ids1 = new Set(mutations1.map((m) => m.original.id))
     const ids2 = new Set(mutations2.map((m) => m.original.id))
     return Array.from(ids1).some((id) => ids2.has(id))
-  }
-
-  private getActiveTransactions(): Transaction[] {
-    return Array.from(this.transactions.state.values()).filter(
-      (tx) => tx.state !== `completed` && tx.state !== `failed`
-    )
   }
 }
