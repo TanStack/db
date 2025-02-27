@@ -449,4 +449,47 @@ describe(`TransactionManager`, () => {
       expect(tx2.mutations[0].modified.value).toBe(`new-value`)
     })
   })
+
+  describe(`Terminal State Handling`, () => {
+    it(`should delete transactions from IndexedDB when they reach a terminal state`, async () => {
+      // Clear all existing transactions first
+      await store.clearAll()
+
+      // Create a transaction
+      const tx = manager.applyTransaction(
+        [createMockMutation(`test-object`)],
+        parallelStrategy
+      )
+
+      // Verify transaction exists in IndexedDB
+      let transactions = await store.getTransactions()
+      expect(transactions.length).toBe(1)
+      expect(transactions[0].id).toBe(tx.id)
+
+      // Update to 'completed' state (terminal)
+      manager.updateTransactionState(tx.id, `completed`)
+
+      // Verify transaction is deleted from IndexedDB
+      transactions = await store.getTransactions()
+      expect(transactions.length).toBe(0)
+
+      // Create another transaction
+      const tx2 = manager.applyTransaction(
+        [createMockMutation(`test-object-2`)],
+        parallelStrategy
+      )
+
+      // Verify transaction exists in IndexedDB
+      transactions = await store.getTransactions()
+      expect(transactions.length).toBe(1)
+      expect(transactions[0].id).toBe(tx2.id)
+
+      // Update to 'failed' state (terminal)
+      manager.updateTransactionState(tx2.id, `failed`)
+
+      // Verify transaction is deleted from IndexedDB
+      transactions = await store.getTransactions()
+      expect(transactions.length).toBe(0)
+    })
+  })
 })

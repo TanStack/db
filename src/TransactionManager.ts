@@ -140,7 +140,6 @@ export class TransactionManager {
 
     // If there's a map, overwrite matching mutations.
     if (transaction) {
-      console.log(`found overlapping transaction`, transaction)
       for (const newMutation of mutations) {
         const existingIndex = transaction.mutations.findIndex(
           (m) => m.key === newMutation.key
@@ -250,8 +249,15 @@ export class TransactionManager {
     }
 
     this.setTransaction(updatedTransaction)
-    // Persist async
-    this.store.putTransaction(updatedTransaction)
+
+    // Check if the transaction is in a terminal state
+    if (newState === `completed` || newState === `failed`) {
+      // Delete from IndexedDB if in terminal state
+      this.store.deleteTransaction(id)
+    } else {
+      // Persist async only if not in terminal state
+      this.store.putTransaction(updatedTransaction)
+    }
 
     // If this transaction is completing, check if any are queued behind it
     if (
