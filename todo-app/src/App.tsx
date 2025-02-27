@@ -135,6 +135,52 @@ export default function App() {
 
   const backgroundColor = getConfigValue(`backgroundColor`)
 
+  // Function to generate a complementary color
+  const getComplementaryColor = (hexColor: string): string => {
+    // Default to a nice blue if no color is provided
+    if (!hexColor) return `#3498db`
+
+    // Remove the hash if it exists
+    const color = hexColor.replace(`#`, ``)
+
+    // Convert hex to RGB
+    const r = parseInt(color.substr(0, 2), 16)
+    const g = parseInt(color.substr(2, 2), 16)
+    const b = parseInt(color.substr(4, 2), 16)
+
+    // Calculate complementary color (inverting the RGB values)
+    const compR = 255 - r
+    const compG = 255 - g
+    const compB = 255 - b
+
+    // Convert back to hex
+    const compHex =
+      `#` +
+      ((1 << 24) + (compR << 16) + (compG << 8) + compB).toString(16).slice(1)
+
+    // Calculate brightness of the background
+    const brightness = r * 0.299 + g * 0.587 + b * 0.114
+
+    // If the complementary color doesn't have enough contrast, adjust it
+    const compBrightness = compR * 0.299 + compG * 0.587 + compB * 0.114
+    const brightnessDiff = Math.abs(brightness - compBrightness)
+
+    if (brightnessDiff < 128) {
+      // Not enough contrast, use a more vibrant alternative
+      if (brightness > 128) {
+        // Dark color for light background
+        return `#8e44ad` // Purple
+      } else {
+        // Light color for dark background
+        return `#f1c40f` // Yellow
+      }
+    }
+
+    return compHex
+  }
+
+  const titleColor = getComplementaryColor(backgroundColor)
+
   const handleColorChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newColor = e.target.value
     setConfigValue(`backgroundColor`, newColor)
@@ -168,7 +214,10 @@ export default function App() {
         style={{ backgroundColor }}
       >
         <div style={{ width: 550 }} className="mx-auto relative">
-          <h1 className="text-[100px] text-[rgba(175,47,47,0.15)] font-thin text-center mb-8">
+          <h1
+            className="text-[100px] font-bold text-center mb-8"
+            style={{ color: titleColor }}
+          >
             todos
           </h1>
 
@@ -176,7 +225,8 @@ export default function App() {
             <div className="flex items-center">
               <label
                 htmlFor="colorPicker"
-                className="mr-2 text-sm text-gray-700"
+                className="mr-2 text-sm font-medium text-gray-700"
+                style={{ color: titleColor }}
               >
                 Background Color:
               </label>
