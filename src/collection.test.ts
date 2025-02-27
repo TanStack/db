@@ -3,6 +3,8 @@ import { Collection } from "./collection"
 import type { ChangeMessage } from "./types"
 import "fake-indexeddb/auto"
 import mitt from "mitt"
+import { z } from "zod"
+import { SchemaValidationError } from "./collection"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -410,5 +412,104 @@ describe(`Collection`, () => {
     // new collection w/ mock sync/mutation
     // insert
     // mutationFn fails w/ NonRetriableError and the check that optimistic state is rolledback.
+  })
+})
+
+describe(`Collection with schema validation`, () => {
+  it(`should validate data against schema on insert`, async () => {
+    // Create a Zod schema for a user
+    const userSchema = z.object({
+      name: z.string().min(1),
+      age: z.number().int().positive(),
+      email: z.string().email().optional(),
+    })
+
+    // Create a collection with the schema
+    const collection = new Collection<z.infer<typeof userSchema>>({
+      sync: {
+        id: `test`,
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      mutationFn: {
+        persist: async () => {},
+      },
+      schema: userSchema,
+    })
+
+    // Valid data should work
+    const validUser = {
+      name: `Alice`,
+      age: 30,
+      email: `alice@example.com`,
+    }
+
+    collection.insert({
+      key: `user1`,
+      data: validUser,
+    })
+
+    // Invalid data should throw SchemaValidationError
+    const invalidUser = {
+      name: ``, // Empty name (fails min length)
+      age: -5, // Negative age (fails positive)
+      email: `not-an-email`, // Invalid email
+    }
+
+    try {
+      collection.insert({
+        key: `user2`,
+        data: invalidUser,
+      })
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`insert`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        // Check that we have validation errors for each invalid field
+        expect(error.issues.some((issue) => issue?.path.includes(`name`))).toBe(
+          true
+        )
+        expect(error.issues.some((issue) => issue?.path.includes(`age`))).toBe(
+          true
+        )
+        expect(
+          error.issues.some((issue) => issue?.path.includes(`email`))
+        ).toBe(true)
+      }
+    }
+
+    // Partial updates should work with valid data
+    collection.update({
+      key: `user1`,
+      data: {
+        age: 31,
+      },
+    })
+
+    // Partial updates should fail with invalid data
+    try {
+      collection.update({
+        key: `user1`,
+        data: {
+          age: -1,
+        },
+      })
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`update`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        expect(error.issues.some((issue) => issue?.path.includes(`age`))).toBe(
+          true
+        )
+      }
+    }
   })
 })

@@ -1,12 +1,10 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
-import type { SyncConfig, MutationFn, Transaction } from "./types"
-import { Collection } from "./collection"
+import type { Transaction } from "./types"
+import { Collection, CollectionConfig } from "./collection"
 import { Store } from "@tanstack/store"
 
-interface UseCollectionConfig {
+export interface UseCollectionConfig<T = unknown> extends CollectionConfig<T> {
   id: string
-  sync: SyncConfig
-  mutationFn: MutationFn
 }
 
 // Store collections in memory using Tanstack store
@@ -111,31 +109,45 @@ export function useCollections() {
   )
 }
 
-export function useCollection(
-  config: UseCollectionConfig,
-  selector = (d) => d as unknown
-) {
+export function useCollection<T = unknown, R = Map<string, T>>(
+  config: UseCollectionConfig<T>,
+  selector: (d: Map<string, T>) => R = (d) => d as unknown as R
+): {
+  data: R
+  update: (params: {
+    key: string
+    data: Partial<T>
+    metadata?: unknown
+  }) => Promise<void>
+  insert: (params: {
+    key: string
+    data: T
+    metadata?: unknown
+  }) => Promise<void>
+  delete: (params: { key: string; metadata?: unknown }) => Promise<void>
+} {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
     collectionsStore.setState((prev) => {
       const next = new Map(prev)
       next.set(
         config.id,
-        new Collection({
+        new Collection<T>({
           sync: config.sync,
           mutationFn: config.mutationFn,
+          schema: config.schema,
         })
       )
       return next
     })
   }
-  const collection = collectionsStore.state.get(config.id)!
+  const collection = collectionsStore.state.get(config.id)! as Collection<T>
 
   // Subscribe to collection's derivedState
   const data = useSyncExternalStoreWithSelector(
     collection.derivedState.subscribe,
-    () => collection.derivedState.state,
-    () => collection.derivedState.state,
+    () => collection.derivedState.state as Map<string, T>,
+    () => collection.derivedState.state as Map<string, T>,
     selector,
     shallow
   )

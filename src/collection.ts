@@ -7,13 +7,16 @@ import {
   Row,
   Transaction,
   TransactionState,
+  StandardSchema,
 } from "./types"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
+import { z } from "zod"
 
-interface CollectionConfig {
+export interface CollectionConfig<T = unknown> {
   sync: SyncConfig
   mutationFn: MutationFn
+  schema?: StandardSchema<T>
 }
 
 interface PendingSyncedTransaction {
@@ -21,17 +24,17 @@ interface PendingSyncedTransaction {
   operations: ChangeMessage[]
 }
 
-interface UpdateParams {
+interface UpdateParams<T = unknown> {
   key: string
-  // eslint-disable-next-line
-  data: Record<string, any>
+
+  data: Partial<T>
   metadata?: unknown
 }
 
-interface InsertParams {
+interface InsertParams<T = unknown> {
   key: string
-  // eslint-disable-next-line
-  data: Record<string, any>
+
+  data: T
   metadata?: unknown
 }
 
@@ -46,19 +49,42 @@ interface DeleteParams {
 //   metadata?: unknown
 // }
 
-export class Collection {
+/**
+ * Custom error class for schema validation errors
+ */
+export class SchemaValidationError extends Error {
+  type: `insert` | `update`
+  issues: Array<{ message: string; path?: Array<string | number | symbol> }>
+
+  constructor(
+    type: `insert` | `update`,
+    issues: Array<{ message: string; path?: Array<string | number | symbol> }>,
+    message?: string
+  ) {
+    const defaultMessage = `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
+      .map((issue) => issue.message)
+      .join(`, `)}`
+
+    super(message || defaultMessage)
+    this.name = `SchemaValidationError`
+    this.type = type
+    this.issues = issues
+  }
+}
+
+export class Collection<T = unknown> {
   public transactionManager: TransactionManager
   private transactionStore: TransactionStore
 
   public optimisticOperations: Derived<ChangeMessage[]>
-  public derivedState: Derived<Map<string, unknown>>
+  public derivedState: Derived<Map<string, T>>
 
-  private syncedData = new Store(new Map<string, unknown>())
+  private syncedData = new Store(new Map<string, T>())
   private syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
-  public config: CollectionConfig
+  public config: CollectionConfig<T>
 
-  constructor(config?: CollectionConfig) {
+  constructor(config?: CollectionConfig<T>) {
     if (!config?.sync) {
       throw new Error(`Collection requires a sync config`)
     }
@@ -239,12 +265,109 @@ export class Collection {
     }
   }
 
-  update = ({ key, data, metadata }: UpdateParams) => {
+  private ensureStandardSchema(schema: unknown): StandardSchema<T> {
+    // If the schema already implements the standard-schema interface, return it
+    if (schema && typeof schema === `object` && `~standard` in schema) {
+      return schema as StandardSchema<T>
+    }
+
+    // If it's a Zod schema, create a wrapper that implements the standard-schema interface
+    if (schema instanceof z.ZodType) {
+      return {
+        "~standard": {
+          version: 1,
+          vendor: `zod`,
+          validate: (value: unknown) => {
+            try {
+              const result = schema.parse(value)
+              return { value: result }
+            } catch (error) {
+              if (error instanceof z.ZodError) {
+                return {
+                  issues: error.errors.map((err) => ({
+                    message: err.message,
+                    path: err.path,
+                  })),
+                }
+              }
+              return {
+                issues: [{ message: String(error) }],
+              }
+            }
+          },
+          types: {
+            input: {} as T,
+            output: {} as T,
+          },
+        },
+      }
+    }
+
+    throw new Error(
+      `Schema must either implement the standard-schema interface or be a Zod schema`
+    )
+  }
+
+  private validateData(
+    data: unknown,
+    type: `insert` | `update`,
+    key?: string
+  ): T | never {
+    if (!this.config.schema) return data as T
+
+    const standardSchema = this.ensureStandardSchema(this.config.schema)
+
+    // For updates, we need to merge with the existing data before validation
+    if (type === `update` && key) {
+      // Get the existing data for this key
+      const existingData = this.value.get(key)
+
+      if (
+        existingData &&
+        data &&
+        typeof data === `object` &&
+        typeof existingData === `object`
+      ) {
+        // Merge the update with the existing data
+        const mergedData = { ...existingData, ...data }
+
+        // Validate the merged data
+        const result = standardSchema[`~standard`].validate(mergedData)
+
+        // If validation fails, throw a SchemaValidationError with the issues
+        if (`issues` in result) {
+          throw new SchemaValidationError(type, result.issues)
+        }
+
+        // Return the original update data, not the merged data
+        // We only used the merged data for validation
+        return data as T
+      }
+    }
+
+    // For inserts or updates without existing data, validate the data directly
+    const result = standardSchema[`~standard`].validate(data)
+
+    // If validation fails, throw a SchemaValidationError with the issues
+    if (`issues` in result) {
+      throw new SchemaValidationError(type, result.issues)
+    }
+
+    return result.value as T
+  }
+
+  update = ({ key, data, metadata }: UpdateParams<T>) => {
+    // Validate the data against the schema if one exists
+    const validatedData = this.validateData(data, `update`, key)
+
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
       original: (this.value.get(key) || {}) as Record<string, unknown>,
-      modified: { ...(this.value.get(key) || {}), ...data },
-      changes: data,
+      modified: { ...(this.value.get(key) || {}), ...validatedData } as Record<
+        string,
+        unknown
+      >,
+      changes: validatedData as Record<string, unknown>,
       key,
       metadata,
       syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
@@ -261,12 +384,15 @@ export class Collection {
     })
   }
 
-  insert = ({ key, data, metadata }: InsertParams) => {
+  insert = ({ key, data, metadata }: InsertParams<T>) => {
+    // Validate the data against the schema if one exists
+    const validatedData = this.validateData(data, `insert`)
+
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
       original: {},
-      modified: data,
-      changes: data,
+      modified: validatedData as Record<string, unknown>,
+      changes: validatedData as Record<string, unknown>,
       key,
       metadata,
       syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
@@ -329,7 +455,7 @@ export class Collection {
   // }
 
   get value() {
-    return this.derivedState.state
+    return this.derivedState.state as Map<string, T>
   }
 
   get transactions() {

@@ -2,6 +2,12 @@ import React, { useState, FormEvent, useRef } from "react"
 import { useCollection } from "../../src/useCollection"
 import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
+import {
+  InsertTodo,
+  insertTodoSchema,
+  insertConfigSchema,
+  InsertConfig,
+} from "./db/validation"
 
 interface Todo {
   text: string
@@ -34,9 +40,10 @@ export default function App() {
     insert,
     update,
     delete: deleteTodo,
-  } = useCollection({
+  } = useCollection<InsertTodo>({
     id: `todos`,
     sync: electricSync.current,
+    schema: insertTodoSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
         console.log(`persisting...`, transaction.toObject())
@@ -76,9 +83,14 @@ export default function App() {
     },
   })
 
-  const { data: configData, update: updateConfig } = useCollection({
+  const {
+    data: configData,
+    update: updateConfig,
+    insert: insertConfig,
+  } = useCollection<InsertConfig>({
     id: `config`,
     sync: configSync.current,
+    schema: insertConfigSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
         console.log(`persisting config...`, transaction.toObject())
@@ -118,25 +130,42 @@ export default function App() {
     },
   })
 
-  const backgroundColor =
-    [...configData.values()].find((v) => v.key === `backgroundColor`)?.value ||
-    ``
+  // Define a more robust type-safe helper function to get config values
+  const getConfigValue = (key: string): string => {
+    // eslint-disable-next-line
+    for (const [_, config] of configData) {
+      if (config.key === key) {
+        return config.value
+      }
+    }
+    return ``
+  }
+
+  // Define a helper function to update config values
+  const setConfigValue = (key: string, value: string): void => {
+    for (const [entryKey, config] of configData.entries()) {
+      if (config.key === key) {
+        updateConfig({
+          key: entryKey,
+          data: { value },
+        })
+        return
+      }
+    }
+    // If the config doesn't exist yet, create it
+    insertConfig({
+      key: Date.now().toString(),
+      data: { key, value },
+    })
+  }
+
+  const backgroundColor = getConfigValue(`backgroundColor`)
 
   console.log({ configData, backgroundColor })
 
   const handleColorChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const newColor = e.target.value
-
-    // Find the config entry for backgroundColor
-    for (const [key, config] of configData.entries()) {
-      if (config.key === `backgroundColor`) {
-        updateConfig({
-          key,
-          data: { value: newColor },
-        })
-        break
-      }
-    }
+    setConfigValue(`backgroundColor`, newColor)
   }
 
   console.log({ todos })
@@ -159,12 +188,8 @@ export default function App() {
     })
   }
 
-  const activeTodos = Array.from(todos).filter(
-    ([, todo]) => !(todo as Todo).completed
-  )
-  const completedTodos = Array.from(todos).filter(
-    ([, todo]) => (todo as Todo).completed
-  )
+  const activeTodos = Array.from(todos).filter(([, todo]) => !todo.completed)
+  const completedTodos = Array.from(todos).filter(([, todo]) => todo.completed)
 
   return (
     <>
@@ -206,7 +231,7 @@ export default function App() {
                     for (const [key, todo] of todos) {
                       await update({
                         key,
-                        data: { ...(todo as Todo), completed: !allCompleted },
+                        data: { ...todo, completed: !allCompleted },
                       })
                     }
                   }}
@@ -237,18 +262,16 @@ export default function App() {
                       <div className="flex items-center h-[58px] pl-[60px]">
                         <input
                           type="checkbox"
-                          checked={(todo as Todo).completed}
-                          onChange={() => toggleTodo(key, todo as Todo)}
+                          checked={todo.completed}
+                          onChange={() => toggleTodo(key, todo)}
                           className="absolute left-[12px] top-0 bottom-0 my-auto h-[40px] w-[40px] cursor-pointer"
                         />
                         <label
                           className={`block leading-[1.2] py-[15px] px-[15px] text-2xl transition-colors ${
-                            (todo as Todo).completed
-                              ? `text-[#d9d9d9] line-through`
-                              : ``
+                            todo.completed ? `text-[#d9d9d9] line-through` : ``
                           }`}
                         >
-                          {(todo as Todo).text}
+                          {todo.text}
                         </label>
                         <button
                           onClick={() => deleteTodo({ key })}

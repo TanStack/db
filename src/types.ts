@@ -106,3 +106,38 @@ export interface MutationStrategy {
     pendingMutations: PendingMutation[]
   ) => Record<string, unknown>
 }
+
+/**
+ * The Standard Schema interface.
+ * This follows the standard-schema specification: https://github.com/standard-schema/standard-schema
+ */
+export interface StandardSchema<T = unknown> {
+  /** The Standard Schema properties. */
+  readonly "~standard": {
+    /** The version number of the standard. */
+    readonly version: 1
+    /** The vendor name of the schema library. */
+    readonly vendor: string
+    /** Validates unknown input values. */
+    readonly validate: (value: unknown) =>
+      | { value: T; issues?: undefined }
+      | {
+          issues: Array<{
+            message: string
+            path?: Array<string | number | symbol>
+          }>
+        }
+    /** Inferred types associated with the schema. */
+    readonly types?: {
+      /** The input type of the schema. */
+      readonly input: T
+      /** The output type of the schema. */
+      readonly output: T
+    }
+  }
+}
+
+/**
+ * Type alias for StandardSchema
+ */
+export type StandardSchemaAlias<T = unknown> = StandardSchema<T>
