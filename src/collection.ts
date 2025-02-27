@@ -80,7 +80,7 @@ export class Collection<T = unknown> {
   public derivedState: Derived<Map<string, T>>
 
   private syncedData = new Store(new Map<string, T>())
-  private syncedMetadata = new Store(new Map<string, unknown>())
+  public syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig<T>
 
@@ -425,10 +425,7 @@ export class Collection<T = unknown> {
       changes: validatedData as Record<string, unknown>,
       key,
       metadata,
-      syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
-        string,
-        unknown
-      >,
+      syncMetadata: this.config.sync.getSyncMetadata?.() || {},
       type: `insert`,
       createdAt: new Date(),
       updatedAt: new Date(),

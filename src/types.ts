@@ -84,6 +84,12 @@ export interface SyncConfig {
     write: (message: ChangeMessage) => void
     commit: () => void
   }) => void
+
+  /**
+   * Get the sync metadata for insert operations
+   * @returns Record containing primaryKey and relation information
+   */
+  getSyncMetadata?: () => Record<string, unknown>
 }
 
 export interface MutationFn {

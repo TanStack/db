@@ -12,6 +12,54 @@ import express from "express"
 const router = express.Router()
 
 /**
+ * Get the table name from the relation metadata
+ * @param relation - The relation array from syncMetadata
+ * @returns The table name
+ */
+function getTableName(relation?: string[]): string {
+  if (!relation || relation.length < 2) {
+    console.log({ relation })
+    throw new Error(`could not find the table name`)
+  }
+
+  // The table name is typically the second element in the relation array
+  // e.g. ['public', 'todos'] -> 'todos'
+  return relation[1]
+}
+
+/**
+ * Build a where clause based on primary key columns
+ * @param trx - The transaction object
+ * @param tableName - The name of the table
+ * @param primaryKey - Array of primary key column names
+ * @param data - The data object containing primary key values
+ * @returns A query builder with where clauses applied
+ */
+function buildWhereClause(
+  query: unknown,
+  primaryKey: string[],
+  data: Record<string, unknown>
+) {
+  let whereQuery = query
+
+  primaryKey.forEach((key, index) => {
+    const value = data[key]
+    if (value === undefined) {
+      throw new Error(`Primary key column "${key}" not found in data`)
+    }
+
+    // First condition uses where, subsequent conditions use andWhere
+    if (index === 0) {
+      whereQuery = whereQuery.where(key, `=`, value)
+    } else {
+      whereQuery = whereQuery.andWhere(key, `=`, value)
+    }
+  })
+
+  return whereQuery
+}
+
+/**
  * Process an array of PendingMutations, validate them, and write to the database
  */
 router.post(`/api/mutations`, async (req, res) => {
@@ -36,93 +84,59 @@ router.post(`/api/mutations`, async (req, res) => {
       console.log(`mutations`, pendingMutations)
       // Process each mutation in order
       for (const mutation of pendingMutations) {
+        // Get the table name from the relation metadata
+        const tableName = getTableName(mutation.syncMetadata.relation)
+
+        // Get the primary key columns from metadata
+        const primaryKey = (mutation.syncMetadata.primaryKey || [
+          `id`,
+        ]) as string[]
+
         // Validate and process based on operation type
         switch (mutation.type) {
           case `insert`: {
-            // Check which table we're working with based on the collection name
-            if (mutation.syncMetadata.relation?.includes(`config`)) {
-              // Validate the data using our validation helpers
-              const insertData = validateInsertConfig(mutation.modified)
+            let insertData
 
-              // Insert the new config
-              await trx.insertInto(`config`).values(insertData).execute()
+            // Validate the data based on the table
+            if (tableName === `config`) {
+              insertData = validateInsertConfig(mutation.modified)
             } else {
               // Default to todos table
-              // Validate the data using our validation helpers
-              const insertData = validateInsertTodo(mutation.modified)
-
-              // Insert the new todo
-              await trx.insertInto(`todos`).values(insertData).execute()
+              insertData = validateInsertTodo(mutation.modified)
             }
+
+            // Insert the data into the appropriate table
+            await trx.insertInto(tableName).values(insertData).execute()
             break
           }
 
           case `update`: {
-            // Check which table we're working with based on the collection name
-            if (mutation.syncMetadata.relation?.includes(`config`)) {
-              // Validate the update data
-              const updateData = validateUpdateConfig(mutation.changes)
+            let updateData
 
-              // Get the ID from the key
-              const updateId = Number(mutation.original.id)
-              if (isNaN(updateId)) {
-                throw new Error(`Invalid config ID: ${mutation}`)
-              }
-
-              // Update the config
-              await trx
-                .updateTable(`config`)
-                .set(updateData)
-                .where(`id`, `=`, updateId)
-                .execute()
+            // Validate the data based on the table
+            if (tableName === `config`) {
+              updateData = validateUpdateConfig(mutation.changes)
             } else {
               // Default to todos table
-              // Validate the update data
-              const updateData = validateUpdateTodo(mutation.changes)
-
-              // Get the ID from the key
-              const updateId = Number(mutation.original.id)
-              if (isNaN(updateId)) {
-                throw new Error(`Invalid todo ID: ${mutation.key}`)
-              }
-
-              console.log({ updateId, updateData })
-
-              // Update the todo
-              await trx
-                .updateTable(`todos`)
-                .set(updateData)
-                .where(`id`, `=`, updateId)
-                .execute()
+              updateData = validateUpdateTodo(mutation.changes)
             }
+
+            // Build a query with where clauses for all primary key columns
+            let query = trx.updateTable(tableName).set(updateData)
+            query = buildWhereClause(query, primaryKey, mutation.original)
+
+            // Execute the update
+            await query.execute()
             break
           }
 
           case `delete`: {
-            // Check which table we're working with based on the collection name
-            if (mutation.syncMetadata.relation?.includes(`config`)) {
-              // Get the ID from the key
-              const deleteId = Number(mutation.key)
-              if (isNaN(deleteId)) {
-                throw new Error(`Invalid config ID: ${mutation.key}`)
-              }
+            // Build a query with where clauses for all primary key columns
+            let query = trx.deleteFrom(tableName)
+            query = buildWhereClause(query, primaryKey, mutation.original)
 
-              // Delete the config
-              await trx
-                .deleteFrom(`config`)
-                .where(`id`, `=`, deleteId)
-                .execute()
-            } else {
-              // Default to todos table
-              // Get the ID from the key
-              const deleteId = Number(mutation.key)
-              if (isNaN(deleteId)) {
-                throw new Error(`Invalid todo ID: ${mutation.key}`)
-              }
-
-              // Delete the todo
-              await trx.deleteFrom(`todos`).where(`id`, `=`, deleteId).execute()
-            }
+            // Execute the delete
+            await query.execute()
             break
           }
 

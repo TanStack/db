@@ -1,6 +1,6 @@
 import {
   ShapeStream,
-  ShapeStreamOptions,
+  ShapeStreamOptions as BaseShapeStreamOptions,
   Message,
   Row,
   ControlMessage,
@@ -9,6 +9,31 @@ import {
 } from "@electric-sql/client"
 import { SyncConfig } from "../types"
 import { Store } from "@tanstack/store"
+
+/**
+ * Extended ShapeStreamOptions with table parameter
+ */
+export interface ShapeStreamOptions extends BaseShapeStreamOptions {
+  params?: {
+    table?: string
+    [key: string]: unknown
+  }
+}
+
+/**
+ * Extended Message headers with schema information
+ */
+interface MessageHeaders {
+  schema?: string
+  [key: string]: unknown
+}
+
+/**
+ * Extended Message with schema information in headers
+ */
+interface ExtendedMessage<T> extends Message<T> {
+  headers: MessageHeaders
+}
 
 /**
  * Extended SyncConfig interface with ElectricSQL-specific functionality
@@ -21,18 +46,24 @@ export interface ElectricSync extends SyncConfig {
    * @returns Promise that resolves when the txid is synced
    */
   awaitTxid: (txid: number, timeout?: number) => Promise<boolean>
+
+  /**
+   * Get the sync metadata for insert operations
+   * @returns Record containing primaryKey and relation information
+   */
+  getSyncMetadata: () => Record<string, unknown>
 }
 
 function isUpToDateMessage<T extends Row<unknown> = Row>(
-  message: Message<T>
+  message: ExtendedMessage<T>
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown> = Row>(
-  message: Message<T>
-): message is Message<T> & { headers: { txids?: number[] } } {
+  message: ExtendedMessage<T>
+): message is ExtendedMessage<T> & { headers: { txids?: number[] } } {
   return (
     `headers` in message &&
     `txids` in message.headers &&
@@ -40,11 +71,24 @@ function hasTxids<T extends Row<unknown> = Row>(
   )
 }
 
+/**
+ * Creates an ElectricSQL sync configuration
+ *
+ * @param streamOptions - Configuration options for the ShapeStream
+ * @param options - Options for the ElectricSync configuration
+ * @returns ElectricSync configuration
+ */
 export function createElectricSync<T extends Row<unknown> = Row>(
-  streamOptions: ShapeStreamOptions
+  streamOptions: ShapeStreamOptions,
+  options: ElectricSyncOptions
 ): ElectricSync {
+  const { primaryKey } = options
+
   // Create a store to track seen txids
   const seenTxids = new Store<Set<number>>(new Set())
+
+  // Store for the relation schema information
+  const relationSchema = new Store<string | undefined>(undefined)
 
   // Function to check if a txid has been seen
   const hasTxid = (txid: number): boolean => {
@@ -77,6 +121,43 @@ export function createElectricSync<T extends Row<unknown> = Row>(
     })
   }
 
+  /**
+   * Generate a key from a row using the primaryKey columns
+   * @param row - The row data
+   * @returns A string key formed from the primary key values
+   */
+  const generateKeyFromRow = (row: T): string => {
+    if (!primaryKey || primaryKey.length === 0) {
+      throw new Error(`Primary key is required for Electric sync`)
+    }
+
+    return primaryKey
+      .map((key) => {
+        const value = row[key]
+        if (value === undefined) {
+          throw new Error(`Primary key column "${key}" not found in row`)
+        }
+        return String(value)
+      })
+      .join(`|`)
+  }
+
+  /**
+   * Get the sync metadata for insert operations
+   * @returns Record containing primaryKey and relation information
+   */
+  const getSyncMetadata = (): Record<string, unknown> => {
+    // Use the stored schema if available, otherwise default to 'public'
+    const schema = relationSchema.state || `public`
+
+    return {
+      primaryKey,
+      relation: streamOptions.params?.table
+        ? [schema, streamOptions.params.table]
+        : undefined,
+    }
+  }
+
   return {
     id: `electric`,
     sync: ({ begin, write, commit }) => {
@@ -84,7 +165,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
       let transactionStarted = false
       let newTxids = new Set<number>()
 
-      stream.subscribe((messages: Message<T>[]) => {
+      stream.subscribe((messages: ExtendedMessage<T>[]) => {
         let hasUpToDate = false
 
         for (const message of messages) {
@@ -93,16 +174,32 @@ export function createElectricSync<T extends Row<unknown> = Row>(
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
+          // Check if the message contains schema information
+          if (isChangeMessage(message) && message.headers.schema) {
+            // Store the schema for future use
+            relationSchema.setState(message.headers.schema)
+          }
+
           if (isChangeMessage(message)) {
             if (!transactionStarted) {
               begin()
               transactionStarted = true
             }
+
+            // Use the message's key if available, otherwise generate one from the row using primaryKey
+            const key = message.key || generateKeyFromRow(message.value)
+
+            // Include the primary key and relation info in the metadata
+            const enhancedMetadata = {
+              ...message.headers,
+              primaryKey,
+            }
+
             write({
-              key: message.key,
+              key,
               type: message.headers.operation,
               value: message.value,
-              metadata: message.headers,
+              metadata: enhancedMetadata,
             })
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
@@ -124,5 +221,17 @@ export function createElectricSync<T extends Row<unknown> = Row>(
     },
     // Expose the awaitTxid function
     awaitTxid,
+    // Expose the getSyncMetadata function
+    getSyncMetadata,
   }
+}
+
+/**
+ * Configuration options for ElectricSync
+ */
+export interface ElectricSyncOptions {
+  /**
+   * Array of column names that form the primary key of the shape
+   */
+  primaryKey: string[]
 }

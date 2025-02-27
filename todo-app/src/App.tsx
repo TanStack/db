@@ -18,21 +18,27 @@ export default function App() {
   const [newTodo, setNewTodo] = useState(``)
 
   const electricSync = useRef(
-    createElectricSync({
-      url: `http://localhost:3000/v1/shape`,
-      params: {
-        table: `todos`,
+    createElectricSync(
+      {
+        url: `http://localhost:3000/v1/shape`,
+        params: {
+          table: `todos`,
+        },
       },
-    })
+      { primaryKey: [`id`] }
+    )
   )
 
   const configSync = useRef(
-    createElectricSync({
-      url: `http://localhost:3000/v1/shape`,
-      params: {
-        table: `config`,
+    createElectricSync(
+      {
+        url: `http://localhost:3000/v1/shape`,
+        params: {
+          table: `config`,
+        },
       },
-    })
+      { primaryKey: [`id`] }
+    )
   )
 
   const {

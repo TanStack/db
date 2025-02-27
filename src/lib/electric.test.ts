@@ -33,13 +33,16 @@ describe(`Electric Integration`, () => {
       return () => {}
     })
 
-    // Create Electric sync config
-    electricSync = createElectricSync({
-      url: `http://test-url`,
-      params: {
-        table: `test_table`,
+    // Create Electric sync config with primary key
+    electricSync = createElectricSync(
+      {
+        url: `http://test-url`,
+        params: {
+          table: `test_table`,
+        },
       },
-    })
+      { primaryKey: [`id`] }
+    ) // Using 'id' as the primary key column
 
     // Create collection with Electric sync
     collection = new Collection({
@@ -56,7 +59,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Test User` },
+        value: { id: 1, name: `Test User` },
         headers: { operation: `insert` },
       },
     ])
@@ -68,7 +71,9 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(new Map([[`1`, { name: `Test User` }]]))
+    expect(collection.value).toEqual(
+      new Map([[`1`, { id: 1, name: `Test User` }]])
+    )
   })
 
   it(`should handle multiple changes before committing`, () => {
@@ -76,7 +81,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Test User` },
+        value: { id: 1, name: `Test User` },
         headers: { operation: `insert` },
       },
     ])
@@ -85,7 +90,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `2`,
-        value: { name: `Another User` },
+        value: { id: 2, name: `Another User` },
         headers: { operation: `insert` },
       },
     ])
@@ -99,8 +104,8 @@ describe(`Electric Integration`, () => {
 
     expect(collection.value).toEqual(
       new Map([
-        [`1`, { name: `Test User` }],
-        [`2`, { name: `Another User` }],
+        [`1`, { id: 1, name: `Test User` }],
+        [`2`, { id: 2, name: `Another User` }],
       ])
     )
   })
@@ -110,7 +115,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Test User` },
+        value: { id: 1, name: `Test User` },
         headers: { operation: `insert` },
       },
     ])
@@ -119,7 +124,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Updated User` },
+        value: { id: 1, name: `Updated User` },
         headers: { operation: `update` },
       },
     ])
@@ -131,7 +136,9 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(new Map([[`1`, { name: `Updated User` }]]))
+    expect(collection.value).toEqual(
+      new Map([[`1`, { id: 1, name: `Updated User` }]])
+    )
   })
 
   it(`should handle delete operations`, () => {
@@ -139,7 +146,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Test User` },
+        value: { id: 1, name: `Test User` },
         headers: { operation: `insert` },
       },
       {
@@ -167,7 +174,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { name: `Test User` },
+        value: { id: 1, name: `Test User` },
         headers: { operation: `insert` },
       },
     ])
@@ -192,7 +199,7 @@ describe(`Electric Integration`, () => {
       subscriber([
         {
           key: `1`,
-          value: { name: `Test User` },
+          value: { id: 1, name: `Test User` },
           headers: {
             operation: `insert`,
             txids: [testTxid],
@@ -215,7 +222,7 @@ describe(`Electric Integration`, () => {
       subscriber([
         {
           key: `1`,
-          value: { name: `Test User` },
+          value: { id: 1, name: `Test User` },
           headers: {
             operation: `insert`,
             txids: [txid1, txid2],
@@ -256,7 +263,7 @@ describe(`Electric Integration`, () => {
         subscriber([
           {
             key: `foo`,
-            value: { bar: true },
+            value: { id: 1, bar: true },
             headers: {
               operation: `insert`,
             },
@@ -389,7 +396,7 @@ describe(`Electric Integration`, () => {
 
       let transaction = testCollection.insert({
         key: `item1`,
-        data: { name: `Test item 1` },
+        data: { id: 1, name: `Test item 1` },
       })
 
       await transaction.isPersisted?.promise
@@ -413,10 +420,35 @@ describe(`Electric Integration`, () => {
     })
   })
 
+  it(`should include primaryKey in the metadata`, () => {
+    // Simulate incoming insert message
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Test User` },
+        headers: { operation: `insert` },
+      },
+    ])
+
+    // Send up-to-date control message to commit transaction
+    subscriber([
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Get the metadata for the inserted item
+    const metadata = collection.syncedMetadata.state.get(`1`)
+
+    // Verify that the primaryKey is included in the metadata
+    expect(metadata).toHaveProperty(`primaryKey`)
+    expect(metadata.primaryKey).toEqual([`id`])
+  })
+
   it(`Transaction proxy with toObject method works correctly`, () => {
     // Create a collection with a simple mutation function
     const testCollection = new Collection({
-      sync: createElectricSync({}),
+      sync: createElectricSync({}, { primaryKey: [`id`] }), // Add primary key
       mutationFn: {
         persist: async () => {},
         awaitSync: async () => {},
