@@ -231,23 +231,6 @@ describe(`Electric Integration`, () => {
       await expect(electricSync.awaitTxid(txid2)).resolves.toBe(true)
     })
 
-    it(`should handle txids in control messages`, async () => {
-      const controlTxid = `control-txid`
-
-      // Send a control message with a txid
-      subscriber([
-        {
-          headers: {
-            control: `up-to-date`,
-            txids: [controlTxid],
-          },
-        },
-      ])
-
-      // The txid should be tracked
-      await expect(electricSync.awaitTxid(controlTxid)).resolves.toBe(true)
-    })
-
     it(`should reject with timeout when waiting for unknown txid`, async () => {
       // Set a short timeout for the test
       const unknownTxid = `unknown-txid`
@@ -272,9 +255,21 @@ describe(`Electric Integration`, () => {
       setTimeout(() => {
         subscriber([
           {
+            key: `foo`,
+            value: { bar: true },
+            headers: {
+              operation: `insert`,
+            },
+          },
+          {
             headers: {
               control: `info`,
               txids: [laterTxid],
+            },
+          },
+          {
+            headers: {
+              control: `up-to-date`,
             },
           },
         ])
@@ -325,7 +320,6 @@ describe(`Electric Integration`, () => {
           messages.push({
             headers: {
               control: `up-to-date`,
-              txids: [txid],
             },
           })
 

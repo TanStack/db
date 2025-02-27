@@ -82,6 +82,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
     sync: ({ begin, write, commit }) => {
       const stream = new ShapeStream(streamOptions)
       let transactionStarted = false
+      let newTxids = new Set<string>()
 
       stream.subscribe((messages: Message<T>[]) => {
         let hasUpToDate = false
@@ -89,11 +90,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
         for (const message of messages) {
           // Check for txids in the message and add them to our store
           if (hasTxids(message) && message.headers.txids) {
-            seenTxids.setState((currentTxids) => {
-              const newTxids = new Set(currentTxids)
-              message.headers.txids?.forEach((txid) => newTxids.add(txid))
-              return newTxids
-            })
+            message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
           if (isChangeMessage(message)) {
@@ -114,6 +111,13 @@ export function createElectricSync<T extends Row<unknown> = Row>(
 
         if (hasUpToDate && transactionStarted) {
           commit()
+          seenTxids.setState((currentTxids) => {
+            const clonedSeen = new Set(currentTxids)
+            newTxids.forEach((txid) => clonedSeen.add(txid))
+
+            newTxids = new Set()
+            return clonedSeen
+          })
           transactionStarted = false
         }
       })
