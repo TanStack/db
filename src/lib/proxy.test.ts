@@ -999,12 +999,65 @@ describe(`Proxy Library`, () => {
       const { proxy, getChanges } = createChangeProxy(obj)
 
       // Make many changes to the same property
-      for (let i = 0; i < 1000; i++) {
+      for (let i = 0; i < 10000; i++) {
         proxy.count = i
       }
 
       // Should only track the final change
-      expect(getChanges()).toEqual({ count: 999 })
+      expect(getChanges()).toEqual({ count: 9999 })
+    })
+  })
+
+  describe(`TypedArray Support`, () => {
+    it(`should track changes to TypedArrays`, () => {
+      const obj = {
+        int8: new Int8Array([1, 2, 3]),
+        uint8: new Uint8Array([4, 5, 6]),
+        float32: new Float32Array([1.1, 2.2, 3.3]),
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values
+      proxy.int8[0] = 10
+      proxy.uint8[1] = 50
+      proxy.float32[2] = 33.3
+
+      const changes = getChanges()
+      expect(changes.int8[0]).toBe(10)
+      expect(changes.uint8[1]).toBe(50)
+      expect(changes.float32[2]).toBeCloseTo(33.3)
+
+      // Verify original object was modified
+      expect(obj.int8[0]).toBe(10)
+      expect(obj.uint8[1]).toBe(50)
+      expect(obj.float32[2]).toBeCloseTo(33.3)
+    })
+
+    it(`should handle replacing entire TypedArrays`, () => {
+      const obj = { data: new Uint8Array([1, 2, 3]) }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace entire array
+      proxy.data = new Uint8Array([4, 5, 6])
+
+      const changes = getChanges()
+      expect(changes.data instanceof Uint8Array).toBe(true)
+      expect(Array.from(changes.data)).toEqual([4, 5, 6])
+
+      // Verify original was modified
+      expect(Array.from(obj.data)).toEqual([4, 5, 6])
+    })
+
+    it(`should detect when TypedArray values are the same`, () => {
+      const obj = { data: new Uint8Array([1, 2, 3]) }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Set to same values
+      proxy.data = new Uint8Array([1, 2, 3])
+
+      // Should have no changes
+      expect(getChanges()).toEqual({})
     })
   })
 })

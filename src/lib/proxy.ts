@@ -48,6 +48,21 @@ function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
     return clone as T
   }
 
+  // Handle TypedArrays
+  if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
+    // Get the constructor to create a new instance of the same type
+    const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
+    clone = new TypedArrayConstructor((obj as unknown as TypedArray).length)
+    visited.set(obj as object, clone)
+
+    // Copy the values
+    for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
+      clone[i] = (obj as unknown as TypedArray)[i]
+    }
+
+    return clone as unknown as T
+  }
+
   if (obj instanceof Map) {
     clone = new Map()
     visited.set(obj as object, clone)
@@ -87,6 +102,12 @@ function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
   }
 
   return clone as T
+}
+
+// Add TypedArray interface
+interface TypedArray {
+  length: number
+  [index: number]: number
 }
 
 /**
@@ -153,6 +174,22 @@ function deepEqual<T>(a: T, b: T): boolean {
 
     for (let i = 0; i < a.length; i++) {
       if (!deepEqual(a[i], b[i])) return false
+    }
+
+    return true
+  }
+
+  // Handle TypedArrays
+  if (
+    ArrayBuffer.isView(a) &&
+    ArrayBuffer.isView(b) &&
+    !(a instanceof DataView) &&
+    !(b instanceof DataView)
+  ) {
+    if (a.length !== b.length) return false
+
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
     }
 
     return true
