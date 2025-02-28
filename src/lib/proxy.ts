@@ -429,6 +429,127 @@ export function createChangeProxy<T extends object>(
                 return result
               }
             }
+
+            // Handle iterator methods for Map and Set
+            const iteratorMethods = new Set([
+              `entries`,
+              `keys`,
+              `values`,
+              `forEach`,
+              Symbol.iterator,
+            ])
+
+            if (iteratorMethods.has(methodName) || prop === Symbol.iterator) {
+              return function (...args: unknown[]) {
+                const result = value.apply(target, args)
+
+                // For forEach, we need to wrap the callback to track changes
+                if (methodName === `forEach`) {
+                  const callback = args[0]
+                  if (typeof callback === `function`) {
+                    // Replace the original callback with our wrapped version
+                    const wrappedCallback = function (
+                      value: unknown,
+                      key: unknown,
+                      collection: unknown
+                    ) {
+                      // Call the original callback
+                      const result = callback.call(this, value, key, collection)
+                      // Mark as changed since the callback might have modified the value
+                      markChanged(changeTracker)
+                      return result
+                    }
+                    // Call forEach with our wrapped callback
+                    return value.apply(target, [
+                      wrappedCallback,
+                      ...args.slice(1),
+                    ])
+                  }
+                }
+
+                // For iterators (entries, keys, values, Symbol.iterator)
+                if (
+                  methodName === `entries` ||
+                  methodName === `values` ||
+                  methodName === Symbol.iterator ||
+                  prop === Symbol.iterator
+                ) {
+                  // If it's an iterator, we need to wrap the returned iterator
+                  // to track changes when the values are accessed and potentially modified
+                  const originalIterator = result
+
+                  // Create a proxy for the iterator that will mark changes when next() is called
+                  return {
+                    next() {
+                      const nextResult = originalIterator.next()
+
+                      // If we have a value and it's an object, we need to track it
+                      if (
+                        !nextResult.done &&
+                        nextResult.value &&
+                        typeof nextResult.value === `object`
+                      ) {
+                        // For entries, the value is a [key, value] pair
+                        if (
+                          methodName === `entries` &&
+                          Array.isArray(nextResult.value) &&
+                          nextResult.value.length === 2
+                        ) {
+                          // The value is at index 1 in the [key, value] pair
+                          if (
+                            nextResult.value[1] &&
+                            typeof nextResult.value[1] === `object`
+                          ) {
+                            // Create a proxy for the value and replace it in the result
+                            const { proxy: valueProxy } = createChangeProxy(
+                              nextResult.value[1],
+                              {
+                                tracker: changeTracker,
+                                prop:
+                                  typeof nextResult.value[0] === `symbol`
+                                    ? nextResult.value[0]
+                                    : String(nextResult.value[0]),
+                              }
+                            )
+                            nextResult.value[1] = valueProxy
+                          }
+                        } else if (
+                          methodName === `values` ||
+                          methodName === Symbol.iterator ||
+                          prop === Symbol.iterator
+                        ) {
+                          // If the value is an object, create a proxy for it
+                          if (
+                            typeof nextResult.value === `object` &&
+                            nextResult.value !== null
+                          ) {
+                            // For Set, we need to track the whole object
+                            // For Map, we would need the key, but we don't have it here
+                            // So we'll use a symbol as a placeholder
+                            const tempKey = Symbol(`iterator-value`)
+                            const { proxy: valueProxy } = createChangeProxy(
+                              nextResult.value,
+                              {
+                                tracker: changeTracker,
+                                prop: tempKey,
+                              }
+                            )
+                            nextResult.value = valueProxy
+                          }
+                        }
+                      }
+
+                      return nextResult
+                    },
+                    [Symbol.iterator]() {
+                      return this
+                    },
+                  }
+                }
+
+                return result
+              }
+            }
           }
           return value.bind(target)
         }

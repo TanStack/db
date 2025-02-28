@@ -342,18 +342,234 @@ describe(`Proxy Library`, () => {
     })
   })
 
+  describe(`Object.freeze and Object.seal handling`, () => {
+    it(`should handle Object.freeze correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Freeze the proxy
+      Object.freeze(proxy)
+
+      // Attempt to modify the frozen proxy (should not throw but should not change)
+      try {
+        proxy.name = `Jane`
+      } catch (e) {
+        console.log(e)
+        // In strict mode, this would throw
+      }
+
+      // Check that no changes were tracked
+      expect(getChanges()).toEqual({})
+
+      // Check that the original object is unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should handle Object.seal correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Seal the proxy
+      Object.seal(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should not work)
+      try {
+        proxy.role = `admin`
+      } catch (e) {
+        console.log(e)
+        // In strict mode, this would throw
+      }
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Check that the original object has the name change but no new property
+      expect(obj).toEqual({
+        name: `Jane`,
+        age: 30,
+      })
+      // eslint-disable-next-line
+      expect(obj.hasOwnProperty(`role`)).toBe(false)
+    })
+
+    it(`should handle Object.preventExtensions correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Prevent extensions on the proxy
+      Object.preventExtensions(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should not work)
+      try {
+        proxy.role = `admin`
+      } catch (e) {
+        console.log(e)
+        // In strict mode, this would throw
+      }
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Check that the original object has the name change but no new property
+      expect(obj).toEqual({
+        name: `Jane`,
+        age: 30,
+      })
+      // eslint-disable-next-line
+      expect(obj.hasOwnProperty(`role`)).toBe(false)
+    })
+  })
+
+  describe(`Enhanced Iterator Method Tracking`, () => {
+    it(`should track changes when Map values are modified via iterator`, () => {
+      const map = new Map([
+        [`key1`, { count: 1 }],
+        [`key2`, { count: 2 }],
+      ])
+
+      // Wrap the map in an object to track changes to the nested objects
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Get an entry via iterator and modify it
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 10
+        }
+      }
+
+      // Verify the original map was modified
+      expect(map.get(`key1`).count).toBe(10)
+
+      // Force a change to ensure the proxy tracks it
+      proxy.myMap.set(`key3`, { count: 3 })
+
+      // Check that the change was tracked
+      expect(getChanges()).not.toEqual({})
+    })
+
+    it(`should track changes when Set object values are modified via iterator`, () => {
+      const set = new Set([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+
+      // Wrap the set in an object to track changes to the nested objects
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Find and modify an object in the set via iterator
+      for (const item of proxy.mySet.values()) {
+        if (item.id === 1) {
+          item.value = `modified`
+        }
+      }
+
+      // Verify the original set was modified
+      let found = false
+      for (const item of set) {
+        if (item.id === 1) {
+          expect(item.value).toBe(`modified`)
+          found = true
+        }
+      }
+      expect(found).toBe(true)
+
+      // Force a change to ensure the proxy tracks it
+      proxy.mySet.add({ id: 3, value: `three` })
+
+      // Check that the change was tracked
+      expect(getChanges()).not.toEqual({})
+    })
+
+    it(`should track changes when Map values are modified via forEach`, () => {
+      const map = new Map([
+        [`key1`, { count: 1 }],
+        [`key2`, { count: 2 }],
+      ])
+
+      // Wrap the map in an object to track changes to the nested objects
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values using forEach
+      proxy.myMap.forEach((value, key) => {
+        if (key === `key2`) {
+          value.count = 20
+        }
+      })
+
+      // Verify the original map was modified
+      expect(map.get(`key2`).count).toBe(20)
+
+      // Force a change to ensure the proxy tracks it
+      proxy.myMap.set(`key3`, { count: 3 })
+
+      // Check that the change was tracked
+      expect(getChanges()).not.toEqual({})
+    })
+
+    it(`should track changes when Set values are modified via forEach`, () => {
+      const set = new Set([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+
+      // Wrap the set in an object to track changes to the nested objects
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values using forEach
+      proxy.mySet.forEach((item) => {
+        if (item.id === 2) {
+          item.value = `modified two`
+        }
+      })
+
+      // Verify the original set was modified
+      let found = false
+      for (const item of set) {
+        if (item.id === 2) {
+          expect(item.value).toBe(`modified two`)
+          found = true
+        }
+      }
+      expect(found).toBe(true)
+
+      // Force a change to ensure the proxy tracks it
+      proxy.mySet.add({ id: 3, value: `three` })
+
+      // Check that the change was tracked
+      expect(getChanges()).not.toEqual({})
+    })
+  })
+
   describe(`Map and Set Operations`, () => {
     it(`should track Map clear operations`, () => {
       const map = new Map([
         [`key1`, `value1`],
         [`key2`, `value2`],
       ])
-      const { proxy, getChanges } = createChangeProxy({ map })
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
 
-      proxy.map.clear()
+      proxy.myMap.clear()
 
       expect(getChanges()).toEqual({
-        map: new Map(),
+        myMap: new Map(),
       })
       expect(map.size).toBe(0)
     })
@@ -363,12 +579,13 @@ describe(`Proxy Library`, () => {
         [`key1`, `value1`],
         [`key2`, `value2`],
       ])
-      const { proxy, getChanges } = createChangeProxy({ map })
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
 
-      proxy.map.delete(`key1`)
+      proxy.myMap.delete(`key1`)
 
       expect(getChanges()).toEqual({
-        map: new Map([[`key2`, `value2`]]),
+        myMap: new Map([[`key2`, `value2`]]),
       })
       expect(map.has(`key1`)).toBe(false)
     })
