@@ -7,30 +7,12 @@ type ChangeTracker<T> = {
   changes: Record<string, unknown>
   originalObject: T
   modified: boolean
+  copy_?: T
+  assigned_: Record<string, boolean>
   parent?: {
     tracker: ChangeTracker<unknown>
     prop: string
   }
-}
-
-/**
- * Checks if a value is an object that can be proxied
- *
- * @param value The value to check
- * @returns Whether the value is a proxiable object
- */
-function isProxiable(value: unknown): value is object {
-  return (
-    value !== null &&
-    typeof value === `object` &&
-    !(value instanceof Date) &&
-    !(value instanceof RegExp) &&
-    !(value instanceof Map) &&
-    !(value instanceof Set) &&
-    !(value instanceof Promise) &&
-    !(value instanceof WeakMap) &&
-    !(value instanceof WeakSet)
-  )
 }
 
 /**
@@ -176,9 +158,6 @@ function deepEqual<T>(a: T, b: T): boolean {
   )
 }
 
-// Symbol to store the state on proxied objects
-const PROXY_STATE = Symbol(`PROXY_STATE`)
-
 /**
  * Creates a proxy that tracks changes to the target object
  *
@@ -193,275 +172,208 @@ export function createChangeProxy<T extends object>(
   proxy: T
   getChanges: () => Record<string, unknown>
 } {
-  // Initialize the change tracker
+  // Create a WeakMap to cache proxies for nested objects
+  // This prevents creating multiple proxies for the same object
+  // and handles circular references
+  const proxyCache = new WeakMap<object, object>()
+
+  // Create a change tracker to track changes to the object
   const changeTracker: ChangeTracker<T> = {
     changes: {},
     originalObject: deepClone(target),
     modified: false,
+    assigned_: {},
     parent,
   }
-
-  // Keep track of proxied nested objects to avoid infinite recursion
-  const proxyCache = new WeakMap<object, unknown>()
 
   // Mark this object and all its ancestors as modified
   function markChanged(state: ChangeTracker<unknown>) {
     if (!state.modified) {
       state.modified = true
 
-      // If this change modifies a nested object, we need to update the parent's changes
+      // Propagate the change up the parent chain
       if (state.parent) {
-        // Mark the parent as changed
         markChanged(state.parent.tracker)
-
-        // Update the parent's changes to include this object
-        const parentProp = state.parent.prop
-
-        // Get the current state of the object
-        const updatedObject = deepClone(target)
-
-        // Update the nested property
-        const pathParts = parentProp.split(`.`)
-
-        // Function to update a nested property in an object
-        const updateNestedProperty = (
-          obj: unknown,
-          path: string[],
-          value: unknown
-        ): void => {
-          const key = path[0]
-          if (path.length === 1) {
-            obj[key] = value
-          } else {
-            if (!obj[key] || typeof obj[key] !== `object`) {
-              obj[key] = {}
-            }
-            updateNestedProperty(obj[key], path.slice(1), value)
-          }
-        }
-
-        // Update the object with the current value
-        updateNestedProperty(updatedObject, pathParts, deepClone(target))
-
-        // Update the changes object
-        if (pathParts.length === 1) {
-          state.parent.tracker.changes[pathParts[0]] =
-            updatedObject[pathParts[0]]
-        } else {
-          // For deeply nested properties, we need to reconstruct the entire path
-          const rootProp = pathParts[0]
-          if (!state.parent.tracker.changes[rootProp]) {
-            state.parent.tracker.changes[rootProp] = deepClone(
-              updatedObject[rootProp]
-            )
-          } else {
-            // For deeply nested properties, reconstruct the full path
-            let currentObj = state.parent.tracker.changes
-            let currentTarget = updatedObject
-
-            // Build the nested structure
-            for (let i = 0; i < pathParts.length - 1; i++) {
-              const part = pathParts[i]
-              if (!currentObj[part] || typeof currentObj[part] !== `object`) {
-                currentObj[part] = {}
-              }
-              if (
-                !currentTarget[part] ||
-                typeof currentTarget[part] !== `object`
-              ) {
-                currentTarget[part] = {}
-              }
-              currentObj = currentObj[part]
-              currentTarget = currentTarget[part]
-            }
-
-            // Set the final property
-            const lastPart = pathParts[pathParts.length - 1]
-            currentObj[lastPart] = currentTarget[lastPart]
-          }
-        }
       }
     }
   }
 
-  const handler: ProxyHandler<T> = {
-    get(obj, prop) {
-      // Return the state if requested
-      if (prop === PROXY_STATE) {
-        return changeTracker
-      }
+  // Create a proxy for the target object
+  function createObjectProxy<U extends object>(obj: U): U {
+    // If we've already created a proxy for this object, return it
+    if (proxyCache.has(obj)) {
+      return proxyCache.get(obj) as U
+    }
 
-      // Get the current value
-      const value = obj[prop as keyof T]
-
-      // If the property is an object, return a proxy for it
-      if (isProxiable(value)) {
-        // Check if we already have a proxy for this object
-        if (proxyCache.has(value)) {
-          return proxyCache.get(value)
+    // Create a proxy for the object
+    const proxy = new Proxy(obj, {
+      get(target, prop) {
+        // Skip Symbol properties
+        if (typeof prop === `symbol`) {
+          return target[prop as keyof U]
         }
 
-        // Create a parent reference that includes the full path
-        const parentProp = parent
-          ? `${parent.prop}.${String(prop)}`
-          : String(prop)
+        const value = target[prop as keyof U]
 
-        // Create a new proxy for the nested object
-        const { proxy: nestedProxy } = createChangeProxy(value, {
-          tracker: changeTracker,
-          prop: parentProp,
-        })
+        // If the value is an object, create a proxy for it
+        if (
+          value &&
+          typeof value === `object` &&
+          !(value instanceof Date) &&
+          !(value instanceof RegExp)
+        ) {
+          // Create a parent reference for the nested object
+          const nestedParent = {
+            tracker: changeTracker,
+            prop: String(prop),
+          }
 
-        // Cache the proxy
-        proxyCache.set(value, nestedProxy)
+          // Create a proxy for the nested object
+          const { proxy: nestedProxy } = createChangeProxy(value, nestedParent)
 
-        // Special case for the deeply nested test
-        // When accessing deeply nested properties, we need to ensure
-        // the full path is tracked in the changes object
-        if (parentProp.includes(`company.department.team.lead`)) {
-          // Ensure we have the full structure in the changes object
-          if (!changeTracker.changes.company) {
-            changeTracker.changes.company = {
-              department: {
-                team: {
-                  lead: deepClone(value),
-                  members: [`Alice`, `Bob`],
-                },
-              },
+          // Cache the proxy
+          proxyCache.set(value, nestedProxy)
+
+          return nestedProxy
+        }
+
+        return value
+      },
+
+      set(obj, prop, value) {
+        const stringProp = String(prop)
+        const currentValue = obj[prop as keyof U]
+
+        // Only track the change if the value is actually different
+        if (!deepEqual(currentValue, value)) {
+          // Check if the new value is equal to the original value
+          const originalValue = changeTracker.originalObject[prop as keyof T]
+          const isRevertToOriginal = deepEqual(value, originalValue)
+
+          if (isRevertToOriginal) {
+            // If the value is reverted to its original state, remove it from changes
+            delete changeTracker.changes[stringProp]
+            delete changeTracker.assigned_[stringProp]
+
+            // Check if there are still any changes
+            const hasRemainingChanges =
+              Object.keys(changeTracker.assigned_).length > 0
+
+            // Only update modified status if we're not a nested property of another object
+            if (!hasRemainingChanges && !parent) {
+              changeTracker.modified = false
             }
-          }
-        }
+          } else {
+            // Create a copy of the object if it doesn't exist
+            prepareCopy(changeTracker)
 
-        return nestedProxy
-      }
-
-      return value
-    },
-
-    set(obj, prop, value) {
-      const stringProp = String(prop)
-      const currentValue = obj[prop as keyof T]
-
-      // Only track the change if the value is actually different
-      if (currentValue !== value) {
-        // Set the value on the original object
-        obj[prop as keyof T] = value
-
-        // Check if the new value is equal to the original value
-        const originalValue = changeTracker.originalObject[prop as keyof T]
-        const isRevertToOriginal = deepEqual(value, originalValue)
-
-        if (isRevertToOriginal) {
-          // If the value is reverted to its original state, remove it from changes
-          delete changeTracker.changes[stringProp]
-
-          // Check if there are still any changes
-          const hasRemainingChanges =
-            Object.keys(changeTracker.changes).length > 0
-
-          // Only update modified status if we're not a nested property of another object
-          // This prevents clearing the modified flag when a nested property is reverted
-          // but other properties are still changed
-          if (!hasRemainingChanges && !parent) {
-            changeTracker.modified = false
-          }
-        } else {
-          // Track the change
-          changeTracker.changes[stringProp] = deepClone(value)
-
-          // Special case for the deeply nested test
-          if (
-            parent &&
-            parent.prop.includes(`company.department.team.lead`) &&
-            stringProp === `name`
-          ) {
-            // Update the name in the deeply nested structure
-            if (
-              changeTracker.changes.company &&
-              changeTracker.changes.company.department &&
-              changeTracker.changes.company.department.team &&
-              changeTracker.changes.company.department.team.lead
-            ) {
-              changeTracker.changes.company.department.team.lead.name = value
+            // Set the value on the copy
+            if (changeTracker.copy_) {
+              changeTracker.copy_[prop as keyof T] = value
             }
+
+            // Set the value on the original object
+            obj[prop as keyof U] = value
+
+            // Track that this property was assigned
+            changeTracker.assigned_[stringProp] = true
+
+            // Track the change
+            changeTracker.changes[stringProp] = deepClone(value)
+
+            // Mark this object and its ancestors as modified
+            markChanged(changeTracker)
+          }
+        }
+
+        return true
+      },
+
+      deleteProperty(obj, prop) {
+        const stringProp = String(prop)
+
+        if (stringProp in obj) {
+          // Check if the property exists in the original object
+          const hadPropertyInOriginal =
+            stringProp in changeTracker.originalObject
+
+          // Create a copy of the object if it doesn't exist
+          prepareCopy(changeTracker)
+
+          // Delete the property from the copy
+          if (changeTracker.copy_) {
+            delete changeTracker.copy_[prop as keyof T]
           }
 
-          // Mark this object and its ancestors as modified
-          markChanged(changeTracker)
-        }
-      }
+          // Delete the property from the original object
+          delete obj[prop as keyof U]
 
-      return true
-    },
+          // If the property didn't exist in the original object, removing it
+          // should revert to the original state
+          if (!hadPropertyInOriginal) {
+            delete changeTracker.changes[stringProp]
+            delete changeTracker.assigned_[stringProp]
 
-    deleteProperty(obj, prop) {
-      const stringProp = String(prop)
-
-      if (stringProp in obj) {
-        // Check if the property exists in the original object
-        const hadPropertyInOriginal = stringProp in changeTracker.originalObject
-
-        delete obj[prop as keyof T]
-
-        // If the property didn't exist in the original object, removing it
-        // should revert to the original state
-        if (!hadPropertyInOriginal) {
-          delete changeTracker.changes[stringProp]
-
-          // If this is the last change and we're not a nested object,
-          // mark the object as unmodified
-          if (Object.keys(changeTracker.changes).length === 0 && !parent) {
-            changeTracker.modified = false
+            // If this is the last change and we're not a nested object,
+            // mark the object as unmodified
+            if (Object.keys(changeTracker.assigned_).length === 0 && !parent) {
+              changeTracker.modified = false
+            }
+          } else {
+            // Mark this property as deleted
+            changeTracker.assigned_[stringProp] = false
+            changeTracker.changes[stringProp] = undefined
+            markChanged(changeTracker)
           }
-        } else {
-          changeTracker.changes[stringProp] = undefined
-          markChanged(changeTracker)
         }
-      }
 
-      return true
-    },
+        return true
+      },
+    })
+
+    // Cache the proxy
+    proxyCache.set(obj, proxy)
+
+    return proxy as U
   }
 
-  const proxy = new Proxy(target, handler)
+  // Create a proxy for the target object
+  const proxy = createObjectProxy(target)
 
-  // Store the proxy in the cache to handle circular references
-  proxyCache.set(target, proxy)
-
+  // Return the proxy and a function to get the changes
   return {
     proxy,
     getChanges: () => {
-      // If the object has changes, return them
-      if (Object.keys(changeTracker.changes).length > 0) {
-        // Special case for the deeply nested test
-        if (
-          changeTracker.changes.company &&
-          typeof changeTracker.changes.company === `object` &&
-          changeTracker.changes.company.name === `Jane`
-        ) {
-          // This is the specific test case for deeply nested structures
-          return {
-            company: {
-              department: {
-                team: {
-                  lead: {
-                    name: `Jane`,
-                    role: `Team Lead`,
-                  },
-                  members: [`Alice`, `Bob`],
-                },
-              },
-            },
+      // If there are assigned properties, return the changes
+      if (Object.keys(changeTracker.assigned_).length > 0) {
+        // If we have a copy, use it to construct the changes
+        if (changeTracker.copy_) {
+          const changes: Record<string, unknown> = {}
+
+          // Add all assigned properties
+          for (const key in changeTracker.assigned_) {
+            if (changeTracker.assigned_[key] === true) {
+              // Property was assigned
+              changes[key] = deepClone(changeTracker.copy_[key as keyof T])
+            } else if (changeTracker.assigned_[key] === false) {
+              // Property was deleted
+              changes[key] = undefined
+            }
           }
+
+          return changes
         }
 
+        // Fall back to the existing changes object if no copy exists
         return changeTracker.changes
       }
 
       // If the object is modified but has no direct changes (nested changes),
       // and we're the root object, return the full object
       if (changeTracker.modified && !parent) {
-        return deepClone(target)
+        return changeTracker.copy_
+          ? deepClone(changeTracker.copy_)
+          : deepClone(target)
       }
 
       // No changes
@@ -526,4 +438,44 @@ export function withArrayChangeTracking<T extends object>(
   callback(proxies)
 
   return getChanges()
+}
+
+/**
+ * Creates a shallow copy of the target object if it doesn't already exist
+ */
+function prepareCopy<T>(state: ChangeTracker<T>) {
+  if (!state.copy_) {
+    state.copy_ = shallowCopy(state.originalObject)
+  }
+}
+
+/**
+ * Creates a shallow copy of an object
+ */
+function shallowCopy<T>(obj: T): T {
+  if (Array.isArray(obj)) {
+    return [...obj] as unknown as T
+  }
+
+  if (obj instanceof Map) {
+    return new Map(obj) as unknown as T
+  }
+
+  if (obj instanceof Set) {
+    return new Set(obj) as unknown as T
+  }
+
+  if (obj instanceof Date) {
+    return new Date(obj.getTime()) as unknown as T
+  }
+
+  if (obj instanceof RegExp) {
+    return new RegExp(obj.source, obj.flags) as unknown as T
+  }
+
+  if (obj !== null && typeof obj === `object`) {
+    return { ...obj } as T
+  }
+
+  return obj
 }
