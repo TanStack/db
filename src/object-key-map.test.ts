@@ -36,9 +36,12 @@ describe(`Object-Key Association`, () => {
 
     const item = collection.value.get(`user1`)
 
+    // Make sure item exists before using it as a key
+    expect(item).toBeDefined()
+
     // Update using the object reference
     collection.update({
-      key: item,
+      key: item!,
       callback: (item) => {
         item.age = 31
       },

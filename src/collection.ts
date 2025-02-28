@@ -27,10 +27,8 @@ interface PendingSyncedTransaction {
 
 interface UpdateParams<T extends object = Record<string, unknown>> {
   key: string | T
-
-  data: Partial<T>
   metadata?: unknown
-  callback?: (proxy: T) => void
+  callback: (proxy: T) => void
 }
 
 interface UpdateArrayParams<T extends object = Record<string, unknown>> {
@@ -377,7 +375,6 @@ export class Collection<T extends object = Record<string, unknown>> {
    *
    * @param params - Object containing update parameters
    * @param params.key - The unique identifier for the item, or the item object itself, or an array of keys or objects
-   * @param params.data - The data to update (partial object) - use either this or callback
    * @param params.callback - Function that receives a proxy of the object and can modify it directly
    * @param params.metadata - Optional metadata to associate with the update
    * @returns A Transaction object representing the update operation
@@ -463,7 +460,6 @@ export class Collection<T extends object = Record<string, unknown>> {
     else {
       const {
         key: keyOrObject,
-        data,
         metadata,
         callback,
       } = params as UpdateParams<T1>
@@ -480,26 +476,17 @@ export class Collection<T extends object = Record<string, unknown>> {
         key = keyOrObject as string
       }
 
-      let validatedData: Partial<T1>
+      // Get the current object or an empty object if it doesn't exist
+      const currentObject = (this.value.get(key) || {}) as T1
 
-      if (callback && typeof callback === `function`) {
-        // Get the current object or an empty object if it doesn't exist
-        const currentObject = (this.value.get(key) || {}) as T1
+      // Use the proxy to track changes
+      const changes = withChangeTracking(
+        { ...currentObject }, // Create a copy to avoid modifying the original directly
+        callback
+      )
 
-        // Use the proxy to track changes
-        const changes = withChangeTracking(
-          { ...currentObject }, // Create a copy to avoid modifying the original directly
-          callback
-        )
-
-        // Validate the changes
-        validatedData = this.validateData(changes, `update`, key)
-      } else if (data) {
-        // Use the traditional approach with data object
-        validatedData = this.validateData(data, `update`, key)
-      } else {
-        throw new Error(`Either data or callback must be provided to update`)
-      }
+      // Validate the changes
+      const validatedData = this.validateData(changes, `update`, key)
 
       const mutation: PendingMutation = {
         mutationId: crypto.randomUUID(),

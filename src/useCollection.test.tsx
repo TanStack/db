@@ -56,7 +56,9 @@ describe(`useCollection`, () => {
     const updateTransaction = await act(async () => {
       return result.current.update({
         key: `user1`,
-        data: { name: `Alice Smith` },
+        callback: (item) => {
+          item.name = `Alice Smith`
+        },
       })
     })
 

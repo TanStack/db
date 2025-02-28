@@ -170,14 +170,16 @@ describe(`Collection`, () => {
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
-    // update with data object
+    // update with callback
     // Reset the mocks for update test
     persistMock.mockClear()
     syncMock.mockClear()
 
     const updateTransaction = collection.update({
       key: `foo`,
-      data: { value: `bar2` },
+      callback: (item) => {
+        item.value = `bar2`
+      },
     })
 
     // The merged value should immediately contain the new update
@@ -566,8 +568,8 @@ describe(`Collection with schema validation`, () => {
     // Partial updates should work with valid data
     collection.update({
       key: `user1`,
-      data: {
-        age: 31,
+      callback: (item) => {
+        item.age = 31
       },
     })
 
@@ -575,8 +577,8 @@ describe(`Collection with schema validation`, () => {
     try {
       collection.update({
         key: `user1`,
-        data: {
-          age: -1,
+        callback: (item) => {
+          item.age = -1
         },
       })
       // Should not reach here
