@@ -13,6 +13,7 @@ type ChangeTracker<T> = {
     tracker: ChangeTracker<unknown>
     prop: string | symbol
   }
+  target: T
 }
 
 /**
@@ -192,10 +193,11 @@ export function createChangeProxy<T extends object>(
   // Create a change tracker to track changes to the object
   const changeTracker: ChangeTracker<T> = {
     changes: {},
-    originalObject: deepClone(target),
+    originalObject: deepClone(target), // Create a deep clone to preserve the original state
     modified: false,
     assigned_: {},
     parent,
+    target, // Store reference to the target object
   }
 
   // Mark this object and all its ancestors as modified
@@ -206,6 +208,142 @@ export function createChangeProxy<T extends object>(
       // Propagate the change up the parent chain
       if (state.parent) {
         markChanged(state.parent.tracker)
+      }
+    }
+  }
+
+  // Check if all properties in the current state have reverted to original values
+  function checkIfReverted(state: ChangeTracker<unknown>): boolean {
+    console.log(
+      `checkIfReverted called with assigned keys:`,
+      Object.keys(state.assigned_)
+    )
+
+    // If there are no assigned properties, object is unchanged
+    if (
+      Object.keys(state.assigned_).length === 0 &&
+      Object.getOwnPropertySymbols(state.assigned_).length === 0
+    ) {
+      console.log(`No assigned properties, returning true`)
+      return true
+    }
+
+    // Check each assigned regular property
+    for (const prop in state.assigned_) {
+      // If this property is marked as assigned
+      if (state.assigned_[prop] === true) {
+        const currentValue = state.copy_
+          ? state.copy_[prop as keyof typeof state.copy_]
+          : null
+        const originalValue =
+          state.originalObject[prop as keyof typeof state.originalObject]
+
+        console.log(
+          `Checking property ${String(prop)}, current:`,
+          currentValue,
+          `original:`,
+          originalValue
+        )
+
+        // If the value is not equal to original, something is still changed
+        if (!deepEqual(currentValue, originalValue)) {
+          console.log(`Property ${String(prop)} is different, returning false`)
+          return false
+        }
+      } else if (state.assigned_[prop] === false) {
+        // Property was deleted, so it's different from original
+        console.log(`Property ${String(prop)} was deleted, returning false`)
+        return false
+      }
+    }
+
+    // Check each assigned symbol property
+    const symbolProps = Object.getOwnPropertySymbols(state.assigned_)
+    for (const sym of symbolProps) {
+      if (state.assigned_[sym as unknown] === true) {
+        const currentValue = state.copy_ ? state.copy_[sym as unknown] : null
+        const originalValue = state.originalObject[sym as unknown]
+
+        // If the value is not equal to original, something is still changed
+        if (!deepEqual(currentValue, originalValue)) {
+          console.log(`Symbol property is different, returning false`)
+          return false
+        }
+      } else if (state.assigned_[sym as unknown] === false) {
+        // Property was deleted, so it's different from original
+        console.log(`Symbol property was deleted, returning false`)
+        return false
+      }
+    }
+
+    console.log(`All properties match original values, returning true`)
+    // All assigned properties match their original values
+    return true
+  }
+
+  // Recursively check and update modified status based on child objects
+  function updateModifiedStatus(state: ChangeTracker<unknown>): boolean {
+    console.log(
+      `updateModifiedStatus called, assigned keys:`,
+      Object.keys(state.assigned_)
+    )
+
+    // Only check for reverts if we actually have changes
+    if (
+      Object.keys(state.assigned_).length === 0 &&
+      Object.getOwnPropertySymbols(state.assigned_).length === 0
+    ) {
+      console.log(`No assigned properties, returning false`)
+      return false
+    }
+
+    // If this object has direct changes that aren't reverted, it's modified
+    const isReverted = checkIfReverted(state)
+    console.log(`checkIfReverted returned:`, isReverted)
+
+    if (!isReverted) {
+      console.log(`Object has changes that aren't reverted, returning true`)
+      return true
+    }
+
+    console.log(`All changes reverted, clearing tracking`)
+    // All changes have been reverted, clear the tracking
+    state.modified = false
+    state.changes = {}
+    state.assigned_ = {}
+
+    // If we have a parent, update its status too
+    if (state.parent) {
+      console.log(`Checking parent status for prop:`, state.parent.prop)
+      // Tell the parent this child has reverted
+      checkParentStatus(state.parent.tracker, state.parent.prop)
+    }
+
+    return false
+  }
+
+  // Update parent status based on child changes
+  function checkParentStatus(
+    parentState: ChangeTracker<unknown>,
+    childProp: string | symbol
+  ) {
+    console.log(`checkParentStatus called for child prop:`, childProp)
+
+    // Check if all properties of the parent are reverted
+    const isReverted = checkIfReverted(parentState)
+    console.log(`Parent checkIfReverted returned:`, isReverted)
+
+    if (isReverted) {
+      console.log(`Parent is fully reverted, clearing tracking`)
+      // If everything is reverted, clear the tracking
+      parentState.modified = false
+      parentState.changes = {}
+      parentState.assigned_ = {}
+
+      // Continue up the chain
+      if (parentState.parent) {
+        console.log(`Continuing up the parent chain`)
+        checkParentStatus(parentState.parent.tracker, parentState.parent.prop)
       }
     }
   }
@@ -284,8 +422,13 @@ export function createChangeProxy<T extends object>(
       },
 
       set(obj, prop, value) {
-        const stringProp = String(prop)
         const currentValue = obj[prop as keyof U]
+        console.log(
+          `set called for property ${String(prop)}, current:`,
+          currentValue,
+          `new:`,
+          value
+        )
 
         // Special handling for array length changes
         if (Array.isArray(obj) && prop === `length`) {
@@ -312,23 +455,56 @@ export function createChangeProxy<T extends object>(
         // Only track the change if the value is actually different
         if (!deepEqual(currentValue, value)) {
           // Check if the new value is equal to the original value
+          // Important: Use the originalObject to get the true original value
           const originalValue = changeTracker.originalObject[prop as keyof T]
           const isRevertToOriginal = deepEqual(value, originalValue)
+          console.log(
+            `Value different, original:`,
+            originalValue,
+            `isRevertToOriginal:`,
+            isRevertToOriginal
+          )
 
           if (isRevertToOriginal) {
+            console.log(`Reverting property ${String(prop)} to original value`)
             // If the value is reverted to its original state, remove it from changes
-            delete changeTracker.changes[stringProp]
-            delete changeTracker.assigned_[stringProp]
+            delete changeTracker.changes[prop as unknown]
+            delete changeTracker.assigned_[prop as unknown]
 
-            // Check if there are still any changes
-            const hasRemainingChanges =
-              Object.keys(changeTracker.assigned_).length > 0
+            // Make sure the copy is updated with the original value
+            if (changeTracker.copy_) {
+              console.log(
+                `Updating copy with original value for ${String(prop)}`
+              )
+              changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
+            }
 
-            // Only update modified status if we're not a nested property of another object
-            if (!hasRemainingChanges && !parent) {
+            // Check if all properties in this object have been reverted
+            console.log(`Checking if all properties reverted`)
+            const allReverted = checkIfReverted(changeTracker)
+            console.log(`All reverted:`, allReverted)
+
+            if (allReverted) {
+              console.log(`All properties reverted, clearing tracking`)
+              // If all have been reverted, clear tracking
               changeTracker.modified = false
+              changeTracker.changes = {}
+              changeTracker.assigned_ = {}
+
+              // If we're a nested object, check if the parent needs updating
+              if (parent) {
+                console.log(`Updating parent for property:`, parent.prop)
+                checkParentStatus(parent.tracker, parent.prop)
+              }
+            } else {
+              // Some properties are still changed
+              console.log(
+                `Some properties still changed, keeping modified flag`
+              )
+              changeTracker.modified = true
             }
           } else {
+            console.log(`Setting new value for property ${String(prop)}`)
             // Create a copy of the object if it doesn't exist
             prepareCopy(changeTracker)
 
@@ -340,27 +516,25 @@ export function createChangeProxy<T extends object>(
             // Set the value on the original object
             obj[prop as keyof U] = value
 
-            // Track that this property was assigned
-            changeTracker.assigned_[stringProp] = true
+            // Track that this property was assigned - store using the actual property (symbol or string)
+            changeTracker.assigned_[prop as unknown] = true
 
-            // Track the change - handle both normal and symbol properties
-            if (typeof prop === `symbol`) {
-              changeTracker.changes[prop as unknown as string] =
-                deepClone(value)
-            } else {
-              changeTracker.changes[stringProp] = deepClone(value)
-            }
+            // Track the change directly with the property as the key
+            changeTracker.changes[prop as unknown] = deepClone(value)
 
             // Mark this object and its ancestors as modified
+            console.log(`Marking object and ancestors as modified`)
             markChanged(changeTracker)
           }
+        } else {
+          console.log(`Value unchanged, not tracking`)
         }
 
         return true
       },
 
       defineProperty(target, prop, descriptor) {
-        const stringProp = String(prop)
+        const stringProp = typeof prop === `symbol` ? prop : String(prop)
 
         // Define the property on the target
         const result = Object.defineProperty(target, prop, descriptor)
@@ -383,7 +557,7 @@ export function createChangeProxy<T extends object>(
       },
 
       deleteProperty(obj, prop) {
-        const stringProp = String(prop)
+        const stringProp = typeof prop === `symbol` ? prop : String(prop)
 
         if (stringProp in obj) {
           // Check if the property exists in the original object
@@ -409,8 +583,14 @@ export function createChangeProxy<T extends object>(
 
             // If this is the last change and we're not a nested object,
             // mark the object as unmodified
-            if (Object.keys(changeTracker.assigned_).length === 0 && !parent) {
+            if (
+              Object.keys(changeTracker.assigned_).length === 0 &&
+              Object.getOwnPropertySymbols(changeTracker.assigned_).length === 0
+            ) {
               changeTracker.modified = false
+            } else {
+              // We still have changes, keep as modified
+              changeTracker.modified = true
             }
           } else {
             // Mark this property as deleted
@@ -437,8 +617,76 @@ export function createChangeProxy<T extends object>(
   return {
     proxy,
     getChanges: () => {
+      console.log(
+        `getChanges called, modified:`,
+        changeTracker.modified,
+        `assigned keys:`,
+        Object.keys(changeTracker.assigned_)
+      )
+
+      // First, check if the object is still considered modified
+      if (!changeTracker.modified) {
+        console.log(`Object not modified, returning empty object`)
+        return {}
+      }
+
+      // For deeply nested changes, we need to verify explicitly
+      if (
+        Object.keys(changeTracker.assigned_).length === 0 &&
+        Object.getOwnPropertySymbols(changeTracker.assigned_).length === 0
+      ) {
+        console.log(`No assigned properties, checking deep equality`)
+
+        // If there are no assigned properties but the object is still marked as modified,
+        // we should check deep equality with the original object
+        if (changeTracker.copy_) {
+          console.log(`Comparing copy with original`)
+          if (deepEqual(changeTracker.copy_, changeTracker.originalObject)) {
+            console.log(`Copy equals original, returning empty object`)
+            changeTracker.modified = false
+            return {}
+          }
+        } else if (deepEqual(target, changeTracker.originalObject)) {
+          console.log(`Target equals original, returning empty object`)
+          changeTracker.modified = false
+          changeTracker.changes = {}
+          changeTracker.assigned_ = {}
+          return {}
+        }
+      }
+
+      console.log(`Forcing full check for reverted state`)
+      // Force a full check for reverted state, which will update the modified flag accordingly
+      updateModifiedStatus(changeTracker)
+
+      // If we're no longer modified after the check, return empty changes
+      if (!changeTracker.modified) {
+        console.log(`No longer modified after check, returning empty object`)
+        return {}
+      }
+
+      // Handle optimization case - if the object is marked modified but actually is equal to original
+      if (changeTracker.modified) {
+        const objToCheck = changeTracker.copy_ || target
+        console.log(
+          `Checking if object is equal to original:`,
+          objToCheck,
+          changeTracker.originalObject
+        )
+        if (deepEqual(objToCheck, changeTracker.originalObject)) {
+          console.log(`Object equals original, returning empty object`)
+          changeTracker.modified = false
+          changeTracker.changes = {}
+          changeTracker.assigned_ = {}
+          return {}
+        }
+      }
+
       // If there are assigned properties, return the changes
-      if (Object.keys(changeTracker.assigned_).length > 0) {
+      if (
+        Object.keys(changeTracker.assigned_).length > 0 ||
+        Object.getOwnPropertySymbols(changeTracker.assigned_).length > 0
+      ) {
         // If we have a copy, use it to construct the changes
         if (changeTracker.copy_) {
           const changes: Record<string | symbol, unknown> = {}
@@ -454,10 +702,15 @@ export function createChangeProxy<T extends object>(
             }
           }
 
-          // Handle symbol properties
-          const symbolProps = Object.getOwnPropertySymbols(changeTracker.copy_)
+          // Handle symbol properties - this needs special handling
+          const symbolProps = Object.getOwnPropertySymbols(
+            changeTracker.assigned_
+          )
           for (const sym of symbolProps) {
-            changes[sym] = deepClone(changeTracker.copy_[sym as keyof T])
+            if (changeTracker.assigned_[sym as unknown] === true) {
+              const value = changeTracker.copy_[sym as unknown]
+              changes[sym] = deepClone(value)
+            }
           }
 
           return changes
@@ -468,14 +721,81 @@ export function createChangeProxy<T extends object>(
       }
 
       // If the object is modified but has no direct changes (nested changes),
-      // and we're the root object, return the full object
+      // but we're the root object, recursively check if unknown changes exist
       if (changeTracker.modified && !parent) {
+        console.log(`Root object with nested changes, checking deep equality`)
+        const currentState = changeTracker.copy_ || target
+
+        console.log(
+          `Comparing current state with original:`,
+          currentState,
+          changeTracker.originalObject
+        )
+        if (deepEqual(currentState, changeTracker.originalObject)) {
+          // The entire object has been reverted to its original state
+          console.log(`Current state equals original, returning empty object`)
+          changeTracker.modified = false
+          return {}
+        }
+
+        // One more deep check - compare the actual values
+        // This is needed for the case where nested properties are modified and then reverted
+        console.log(
+          `Comparing target with original:`,
+          target,
+          changeTracker.originalObject
+        )
+        if (deepEqual(target, changeTracker.originalObject)) {
+          console.log(`Target equals original, returning empty object`)
+          changeTracker.modified = false
+          changeTracker.changes = {}
+          changeTracker.assigned_ = {}
+          return {}
+        }
+
+        // Special case for nested object reverts
+        // If we're here, we need to check if the nested objects have been reverted
+        // even if the parent object still shows as modified
+        if (typeof target === `object` && target !== null) {
+          let allNestedReverted = true
+
+          // Check each property to see if it's been reverted to original
+          for (const key in target) {
+            if (Object.prototype.hasOwnProperty.call(target, key)) {
+              const currentValue = target[key]
+              const originalValue = changeTracker.originalObject[key as keyof T]
+
+              // If this property is different from original, not all are reverted
+              if (!deepEqual(currentValue, originalValue)) {
+                allNestedReverted = false
+                break
+              }
+            }
+          }
+
+          // If all nested properties match original values, return empty changes
+          if (allNestedReverted) {
+            console.log(
+              `All nested properties match original values, returning empty object`
+            )
+            changeTracker.modified = false
+            changeTracker.changes = {}
+            changeTracker.assigned_ = {}
+            return {}
+          }
+        }
+
+        console.log(
+          `Changes detected, returning full object:`,
+          changeTracker.copy_ || target
+        )
         return changeTracker.copy_
           ? deepClone(changeTracker.copy_)
           : deepClone(target)
       }
 
       // No changes
+      console.log(`No changes detected, returning empty object`)
       return {}
     },
   }
