@@ -228,6 +228,36 @@ export function createChangeProxy<T extends object>(
           return value
         }
 
+        // If the value is a function, bind it to the target
+        if (typeof value === `function`) {
+          // For Map and Set methods that modify the collection
+          if (target instanceof Map || target instanceof Set) {
+            const methodName = prop.toString()
+            const modifyingMethods = new Set([
+              `set`,
+              `delete`,
+              `clear`,
+              `add`,
+              `pop`,
+              `push`,
+              `shift`,
+              `unshift`,
+              `splice`,
+              `sort`,
+              `reverse`,
+            ])
+
+            if (modifyingMethods.has(methodName)) {
+              return function (...args: unknown[]) {
+                const result = value.apply(target, args)
+                markChanged(changeTracker)
+                return result
+              }
+            }
+          }
+          return value.bind(target)
+        }
+
         // If the value is an object, create a proxy for it
         if (
           value &&

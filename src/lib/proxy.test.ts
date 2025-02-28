@@ -325,6 +325,87 @@ describe(`Proxy Library`, () => {
     })
   })
 
+  describe(`Map and Set Operations`, () => {
+    it(`should track Map clear operations`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      proxy.map.clear()
+
+      expect(getChanges()).toEqual({
+        map: new Map(),
+      })
+      expect(map.size).toBe(0)
+    })
+
+    it(`should track Map delete operations`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      proxy.map.delete(`key1`)
+
+      expect(getChanges()).toEqual({
+        map: new Map([[`key2`, `value2`]]),
+      })
+      expect(map.has(`key1`)).toBe(false)
+    })
+
+    it(`should track Map set operations with object keys`, () => {
+      const objKey = { id: 1 }
+      const map = new Map([[objKey, `value1`]])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      const newObjKey = { id: 2 }
+      proxy.map.set(newObjKey, `value2`)
+
+      const changes = getChanges()
+      expect(changes.map.get(newObjKey)).toBe(`value2`)
+      expect(map.get(newObjKey)).toBe(`value2`)
+    })
+
+    it(`should track Set add and delete operations`, () => {
+      const set = new Set([1, 2, 3])
+      const { proxy, getChanges } = createChangeProxy({ set })
+
+      proxy.set.add(4)
+      proxy.set.delete(2)
+
+      expect(getChanges()).toEqual({
+        set: new Set([1, 3, 4]),
+      })
+      expect(set.has(4)).toBe(true)
+      expect(set.has(2)).toBe(false)
+    })
+
+    it(`should handle iteration over collections during modification`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      // Modify during iteration
+      for (const [key] of proxy.map) {
+        proxy.map.set(key, `modified`)
+      }
+
+      expect(getChanges()).toEqual({
+        map: new Map([
+          [`key1`, `modified`],
+          [`key2`, `modified`],
+        ]),
+      })
+      expect(map.get(`key1`)).toBe(`modified`)
+      expect(map.get(`key2`)).toBe(`modified`)
+    })
+  })
+
   describe(`createArrayChangeProxy`, () => {
     it(`should track changes to an array of objects`, () => {
       const objs = [
