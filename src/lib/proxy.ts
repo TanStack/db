@@ -287,6 +287,28 @@ export function createChangeProxy<T extends object>(
         const stringProp = String(prop)
         const currentValue = obj[prop as keyof U]
 
+        // Special handling for array length changes
+        if (Array.isArray(obj) && prop === `length`) {
+          const newLength = Number(value)
+          const oldLength = obj.length
+
+          // Create a new array with the desired length
+          const newArray = Array.from({ length: newLength }, (_, i) =>
+            i < oldLength ? obj[i] : undefined
+          )
+
+          // Track the change in the parent object since 'arr' is the property name
+          if (parent) {
+            parent.tracker.changes[parent.prop] = newArray
+            parent.tracker.assigned_[parent.prop] = true
+            markChanged(parent.tracker)
+          }
+
+          // Update the original array
+          obj.length = newLength
+          return true
+        }
+
         // Only track the change if the value is actually different
         if (!deepEqual(currentValue, value)) {
           // Check if the new value is equal to the original value
@@ -335,6 +357,29 @@ export function createChangeProxy<T extends object>(
         }
 
         return true
+      },
+
+      defineProperty(target, prop, descriptor) {
+        const stringProp = String(prop)
+
+        // Define the property on the target
+        const result = Object.defineProperty(target, prop, descriptor)
+
+        if (result) {
+          // Track the change if the property has a value
+          if (`value` in descriptor) {
+            changeTracker.changes[stringProp] = deepClone(descriptor.value)
+            changeTracker.assigned_[stringProp] = true
+            markChanged(changeTracker)
+          }
+        }
+
+        return result
+      },
+
+      setPrototypeOf(target, proto) {
+        // Allow setting prototype but don't track it as a change
+        return Object.setPrototypeOf(target, proto)
       },
 
       deleteProperty(obj, prop) {

@@ -173,7 +173,6 @@ describe(`Proxy Library`, () => {
       }
 
       const { proxy, getChanges } = createChangeProxy(obj)
-
       proxy.person = new Person(`Jane`, 25)
 
       expect(getChanges()).toEqual({
@@ -322,6 +321,23 @@ describe(`Proxy Library`, () => {
         hidden: `modified`,
       })
       expect(obj.hidden).toBe(`modified`)
+    })
+
+    it(`should prevent prototype pollution`, () => {
+      const obj = { constructor: { prototype: {} } }
+      const { proxy } = createChangeProxy(obj)
+
+      // Attempt to modify Object.prototype through the proxy
+      proxy.__proto__ = { malicious: true }
+      proxy.constructor.prototype.malicious = true
+
+      // Verify that Object.prototype wasn't polluted
+      expect({}.malicious).toBeUndefined()
+      expect(Object.prototype.malicious).toBeUndefined()
+
+      // The changes should only affect the proxy's own prototype chain
+      expect(proxy.__proto__.malicious).toBe(true)
+      expect(proxy.constructor.prototype.malicious).toBe(true)
     })
   })
 
@@ -752,6 +768,115 @@ describe(`Proxy Library`, () => {
         // No changes should be tracked for nested
         expect(getChanges()).toEqual({})
       })
+    })
+  })
+
+  describe(`Array Edge Cases`, () => {
+    it(`should track array length changes through truncation`, () => {
+      const arr = [1, 2, 3, 4, 5]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      proxy.arr.length = 3
+
+      expect(getChanges()).toEqual({
+        arr: [1, 2, 3],
+      })
+      expect(arr.length).toBe(3)
+      expect(arr).toEqual([1, 2, 3])
+    })
+
+    it(`should track array length changes through extension`, () => {
+      const arr = [1, 2, 3]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      proxy.arr.length = 5
+
+      expect(getChanges()).toEqual({
+        arr: [1, 2, 3, undefined, undefined],
+      })
+      expect(arr.length).toBe(5)
+      expect(arr[3]).toBe(undefined)
+      expect(arr[4]).toBe(undefined)
+    })
+
+    it(`should handle sparse arrays`, () => {
+      const arr = [1, 2, 3, 4, 5]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      delete proxy.arr[2]
+
+      expect(getChanges()).toEqual({
+        // eslint-disable-next-line
+        arr: [1, 2, , 4, 5],
+      })
+      expect(2 in arr).toBe(false)
+      expect(arr.length).toBe(5)
+    })
+
+    it(`should handle out-of-bounds array assignments`, () => {
+      const arr = [1, 2, 3]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      proxy.arr[5] = 6
+
+      expect(getChanges()).toEqual({
+        arr: [1, 2, 3, undefined, undefined, 6],
+      })
+      expect(arr.length).toBe(6)
+      expect(arr[5]).toBe(6)
+    })
+  })
+
+  describe(`Object.defineProperty and Meta Operations`, () => {
+    it(`should track changes made through Object.defineProperty`, () => {
+      const obj = { name: `John` }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.defineProperty(proxy, `age`, {
+        value: 30,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      })
+
+      expect(getChanges()).toEqual({
+        age: 30,
+      })
+      expect(obj.age).toBe(30)
+    })
+
+    it(`should handle Object.setPrototypeOf`, () => {
+      const obj = { name: `John` }
+      const proto = {
+        greet() {
+          return `Hello, ${this.name}!`
+        },
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.setPrototypeOf(proxy, proto)
+
+      expect(proxy.greet()).toBe(`Hello, John!`)
+      // The prototype change itself isn't tracked, but any changes to
+      // properties from the new prototype chain will be
+      expect(getChanges()).toEqual({})
+    })
+
+    it(`should prevent prototype pollution`, () => {
+      const obj = { constructor: { prototype: {} } }
+      const { proxy } = createChangeProxy(obj)
+
+      // Attempt to modify Object.prototype through the proxy
+      proxy.__proto__ = { malicious: true }
+      proxy.constructor.prototype.malicious = true
+
+      // Verify that Object.prototype wasn't polluted
+      expect({}.malicious).toBeUndefined()
+      expect(Object.prototype.malicious).toBeUndefined()
+
+      // The changes should only affect the proxy's own prototype chain
+      expect(proxy.__proto__.malicious).toBe(true)
+      expect(proxy.constructor.prototype.malicious).toBe(true)
     })
   })
 })
