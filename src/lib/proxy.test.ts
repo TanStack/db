@@ -994,29 +994,6 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({})
     })
 
-    // it(`should handle large objects efficiently`, () => {
-    //   // Create a large object with nested structures
-    //   const largeObj = {
-    //     array: Array.from({ length: 1000 }, (_, i) => ({ id: i, value: `value${i}` })),
-    //     map: new Map(Array.from({ length: 1000 }, (_, i) => [`key${i}`, i])),
-    //     set: new Set(Array.from({ length: 1000 }, (_, i) => i)),
-    //     nested: Array.from({ length: 100 }, (_, i) => ({
-    //       id: i,
-    //       items: Array.from({ length: 10 }, (_, j) => ({ sub: j }))
-    //     }))
-    //   }
-    //
-    //   const { proxy, getChanges } = createChangeProxy(largeObj)
-    //
-    //   // Modify a single nested value
-    //   proxy.nested[50].items[5].sub = 999
-    //
-    //   // Should only track the specific change
-    //   const changes = getChanges()
-    //   expect(Object.keys(changes)).toHaveLength(1)
-    //   expect(changes.nested[50].items[5].sub).toBe(999)
-    // })
-
     it(`should efficiently handle repeated changes to the same property`, () => {
       const obj = { count: 0 }
       const { proxy, getChanges } = createChangeProxy(obj)
