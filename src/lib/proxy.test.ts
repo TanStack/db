@@ -270,6 +270,59 @@ describe(`Proxy Library`, () => {
         date: new Date(`2023-06-01`),
       })
     })
+
+    it(`should handle property descriptors with getters and setters`, () => {
+      const obj = {
+        _name: `John`,
+        get name() {
+          return this._name
+        },
+        set name(value) {
+          this._name = value
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      proxy.name = `Jane`
+
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+      expect(obj._name).toBe(`Jane`)
+      expect(obj.name).toBe(`Jane`)
+    })
+
+    it(`should handle symbolic properties`, () => {
+      const symbolKey = Symbol(`test`)
+      const obj = {
+        [symbolKey]: `value`,
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      proxy[symbolKey] = `new value`
+
+      const changes = getChanges()
+      expect(changes[symbolKey]).toBe(`new value`)
+      expect(obj[symbolKey]).toBe(`new value`)
+    })
+
+    it(`should handle non-enumerable properties`, () => {
+      const obj = {}
+      Object.defineProperty(obj, `hidden`, {
+        value: `original`,
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      })
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      proxy.hidden = `modified`
+
+      expect(getChanges()).toEqual({
+        hidden: `modified`,
+      })
+      expect(obj.hidden).toBe(`modified`)
+    })
   })
 
   describe(`createArrayChangeProxy`, () => {
@@ -544,6 +597,30 @@ describe(`Proxy Library`, () => {
         { id: 1, name: `John` },
         { id: 2, name: `Jane` },
       ])
+    })
+  })
+
+  describe(`Proxy revocation and cleanup`, () => {
+    it(`should handle accessing proxies after tracking function completes`, () => {
+      const obj = { name: `John`, age: 30 }
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.name = `Jane`
+      })
+
+      expect(changes).toEqual({ name: `Jane` })
+      expect(obj.name).toBe(`Jane`)
+    })
+
+    it(`should handle nested proxy access after tracking`, () => {
+      const obj = { user: { name: `John`, age: 30 } }
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.user.name = `Jane`
+      })
+
+      expect(changes).toEqual({
+        user: { name: `Jane`, age: 30 },
+      })
+      expect(obj.user.name).toBe(`Jane`)
     })
   })
 

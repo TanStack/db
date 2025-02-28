@@ -4,14 +4,14 @@
  */
 
 type ChangeTracker<T> = {
-  changes: Record<string, unknown>
+  changes: Record<string | symbol, unknown>
   originalObject: T
   modified: boolean
   copy_?: T
-  assigned_: Record<string, boolean>
+  assigned_: Record<string | symbol, boolean>
   parent?: {
     tracker: ChangeTracker<unknown>
-    prop: string
+    prop: string | symbol
   }
 }
 
@@ -65,14 +65,26 @@ function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
     return clone as unknown as T
   }
 
-  clone = {} as Record<string, unknown>
+  clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      clone[key] = deepClone((obj as Record<string, unknown>)[key], visited)
+      clone[key] = deepClone(
+        (obj as Record<string | symbol, unknown>)[key],
+        visited
+      )
     }
   }
+
+  const symbolProps = Object.getOwnPropertySymbols(obj)
+  for (const sym of symbolProps) {
+    clone[sym] = deepClone(
+      (obj as Record<string | symbol, unknown>)[sym],
+      visited
+    )
+  }
+
   return clone as T
 }
 
@@ -167,10 +179,10 @@ function deepEqual<T>(a: T, b: T): boolean {
  */
 export function createChangeProxy<T extends object>(
   target: T,
-  parent?: { tracker: ChangeTracker<unknown>; prop: string }
+  parent?: { tracker: ChangeTracker<unknown>; prop: string | symbol }
 ): {
   proxy: T
-  getChanges: () => Record<string, unknown>
+  getChanges: () => Record<string | symbol, unknown>
 } {
   // Create a WeakMap to cache proxies for nested objects
   // This prevents creating multiple proxies for the same object
@@ -208,12 +220,13 @@ export function createChangeProxy<T extends object>(
     // Create a proxy for the object
     const proxy = new Proxy(obj, {
       get(target, prop) {
-        // Skip Symbol properties
-        if (typeof prop === `symbol`) {
-          return target[prop as keyof U]
-        }
-
         const value = target[prop as keyof U]
+
+        // If it's a getter, return the value directly
+        const desc = Object.getOwnPropertyDescriptor(target, prop)
+        if (desc?.get) {
+          return value
+        }
 
         // If the value is an object, create a proxy for it
         if (
@@ -278,8 +291,13 @@ export function createChangeProxy<T extends object>(
             // Track that this property was assigned
             changeTracker.assigned_[stringProp] = true
 
-            // Track the change
-            changeTracker.changes[stringProp] = deepClone(value)
+            // Track the change - handle both normal and symbol properties
+            if (typeof prop === `symbol`) {
+              changeTracker.changes[prop as unknown as string] =
+                deepClone(value)
+            } else {
+              changeTracker.changes[stringProp] = deepClone(value)
+            }
 
             // Mark this object and its ancestors as modified
             markChanged(changeTracker)
@@ -348,7 +366,7 @@ export function createChangeProxy<T extends object>(
       if (Object.keys(changeTracker.assigned_).length > 0) {
         // If we have a copy, use it to construct the changes
         if (changeTracker.copy_) {
-          const changes: Record<string, unknown> = {}
+          const changes: Record<string | symbol, unknown> = {}
 
           // Add all assigned properties
           for (const key in changeTracker.assigned_) {
@@ -359,6 +377,12 @@ export function createChangeProxy<T extends object>(
               // Property was deleted
               changes[key] = undefined
             }
+          }
+
+          // Handle symbol properties
+          const symbolProps = Object.getOwnPropertySymbols(changeTracker.copy_)
+          for (const sym of symbolProps) {
+            changes[sym] = deepClone(changeTracker.copy_[sym as keyof T])
           }
 
           return changes
@@ -392,7 +416,7 @@ export function createArrayChangeProxy<T extends object>(
   targets: T[]
 ): {
   proxies: T[]
-  getChanges: () => Record<string, unknown>[]
+  getChanges: () => Record<string | symbol, unknown>[]
 } {
   const proxiesWithChanges = targets.map((target) => createChangeProxy(target))
 
@@ -413,7 +437,7 @@ export function createArrayChangeProxy<T extends object>(
 export function withChangeTracking<T extends object>(
   target: T,
   callback: (proxy: T) => void
-): Record<string, unknown> {
+): Record<string | symbol, unknown> {
   const { proxy, getChanges } = createChangeProxy(target)
 
   callback(proxy)
@@ -432,7 +456,7 @@ export function withChangeTracking<T extends object>(
 export function withArrayChangeTracking<T extends object>(
   targets: T[],
   callback: (proxies: T[]) => void
-): Record<string, unknown>[] {
+): Record<string | symbol, unknown>[] {
   const { proxies, getChanges } = createArrayChangeProxy(targets)
 
   callback(proxies)
