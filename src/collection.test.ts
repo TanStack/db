@@ -100,44 +100,17 @@ describe(`Collection`, () => {
                 }
               }),
             },
-            createdAt: `[REDACTED]`,
-            updatedAt: `[REDACTED]`,
-            id: `[REDACTED]`,
-            mutationId: `[REDACTED]`,
           }
 
-          // Store the data for later assertion
-          persistMock({
-            transaction: redactedTransaction,
-            attempt,
-          })
-
+          // Call the mock function with the redacted transaction
+          persistMock({ transaction: redactedTransaction, attempt })
           return Promise.resolve()
         },
         awaitSync({ transaction }) {
-          // Redact time-based and random fields
-          const redactedTransaction = {
-            ...transaction.toObject(),
-            mutations: {
-              ...transaction.mutations.map((mutation) => {
-                return {
-                  ...mutation,
-                  createdAt: `[REDACTED]`,
-                  updatedAt: `[REDACTED]`,
-                  mutationId: `[REDACTED]`,
-                }
-              }),
-            },
-            createdAt: `[REDACTED]`,
-            updatedAt: `[REDACTED]`,
-            mutationId: `[REDACTED]`,
-            id: `[REDACTED]`,
-          }
+          // Call the mock function with the transaction
+          syncMock({ transaction })
 
-          // Store the data for later assertion
-          syncMock({ transaction: redactedTransaction })
-
-          emitter.emit(`update`, transaction.mutations)
+          emitter.emit(`sync`, transaction.mutations)
           return Promise.resolve()
         },
       },
@@ -183,7 +156,7 @@ describe(`Collection`, () => {
     // Check sync data (moved outside the awaitSync callback)
     const syncData = syncMock.mock.calls[0][0]
     // Check that the transaction is in the right state during sync waiting
-    expect(syncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    expect(syncData.transaction.state).toBe(`completed`)
     // Check mutation type is correct
     expect(syncData.transaction.mutations[0].type).toBe(`insert`)
     // Check changes are correct
@@ -197,7 +170,7 @@ describe(`Collection`, () => {
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
-    // update
+    // update with data object
     // Reset the mocks for update test
     persistMock.mockClear()
     syncMock.mockClear()
@@ -245,16 +218,12 @@ describe(`Collection`, () => {
     // Check sync data for update (moved outside the awaitSync callback)
     const updateSyncData = syncMock.mock.calls[0][0]
     // Check that the transaction is in the right state during sync waiting
-    expect(updateSyncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    expect(updateSyncData.transaction.state).toBe(`completed`)
     // Check mutation type is correct
     expect(updateSyncData.transaction.mutations[0].type).toBe(`update`)
     // Check changes are correct
     expect(updateSyncData.transaction.mutations[0].changes).toEqual({
       value: `bar2`,
-    })
-    // Check original data is correct
-    expect(updateSyncData.transaction.mutations[0].original).toEqual({
-      value: `bar`,
     })
 
     // after mutationFn returns, check that the transaction is updated &
@@ -264,7 +233,116 @@ describe(`Collection`, () => {
     ).toMatchInlineSnapshot(`"completed"`)
     expect(collection.optimisticOperations.state).toEqual([])
     expect(collection.value).toEqual(new Map([[`foo`, { value: `bar2` }]]))
-    //
+
+    // update with callback
+    // Reset the mocks for update test with callback
+    persistMock.mockClear()
+    syncMock.mockClear()
+
+    const updateWithCallbackTransaction = collection.update({
+      key: `foo`,
+      callback: (proxy) => {
+        proxy.value = `bar3`
+        proxy.newProp = `new value`
+      },
+    })
+
+    // The merged value should immediately contain the new update
+    expect(collection.value).toEqual(
+      new Map([[`foo`, { value: `bar3`, newProp: `new value` }]])
+    )
+
+    // check there's a transaction in peristing state
+    expect(
+      Array.from(collection.transactions.values())[2].mutations[0].changes
+    ).toEqual({
+      value: `bar3`,
+      newProp: `new value`,
+    })
+
+    // Check the optimistic operation is there
+    const updateWithCallbackOperation: ChangeMessage = {
+      key: `foo`,
+      value: { value: `bar3`, newProp: `new value` },
+      type: `update`,
+    }
+    expect(collection.optimisticOperations.state[0]).toEqual(
+      updateWithCallbackOperation
+    )
+
+    await updateWithCallbackTransaction.isSynced?.promise
+
+    // after mutationFn returns, check that the transaction is updated &
+    // optimistic update is gone & synced data & comibned state are all updated.
+    expect(
+      Array.from(collection.transactions.values())[2].state
+    ).toMatchInlineSnapshot(`"completed"`)
+    expect(collection.optimisticOperations.state).toEqual([])
+    expect(collection.value).toEqual(
+      new Map([[`foo`, { value: `bar3`, newProp: `new value` }]])
+    )
+
+    // update multiple items with array callback
+    // Reset the mocks for update test with array callback
+    persistMock.mockClear()
+    syncMock.mockClear()
+
+    // Insert another item
+    await collection.insert({
+      key: `bar`,
+      data: { value: `baz` },
+    }).isSynced?.promise
+
+    persistMock.mockClear()
+    syncMock.mockClear()
+
+    const updateMultipleTransaction = collection.update({
+      key: [`foo`, `bar`],
+      callback: (proxies) => {
+        proxies[0].value = `bar4`
+        proxies[1].value = `baz2`
+      },
+    })
+
+    // The merged value should immediately contain the new updates
+    expect(collection.value).toEqual(
+      new Map([
+        [`foo`, { value: `bar4`, newProp: `new value` }],
+        [`bar`, { value: `baz2` }],
+      ])
+    )
+
+    // check there's a transaction with two mutations
+    const multiUpdateTransaction = Array.from(
+      collection.transactions.values()
+    )[4]
+    expect(multiUpdateTransaction.mutations.length).toBe(2)
+
+    // Check first mutation
+    expect(multiUpdateTransaction.mutations[0].key).toBe(`foo`)
+    expect(multiUpdateTransaction.mutations[0].changes).toEqual({
+      value: `bar4`,
+    })
+
+    // Check second mutation
+    expect(multiUpdateTransaction.mutations[1].key).toBe(`bar`)
+    expect(multiUpdateTransaction.mutations[1].changes).toEqual({
+      value: `baz2`,
+    })
+
+    await updateMultipleTransaction.isSynced?.promise
+
+    // after mutationFn returns, check that the transaction is updated &
+    // optimistic update is gone & synced data & comibned state are all updated.
+    expect(updateMultipleTransaction.state).toMatchInlineSnapshot(`"completed"`)
+    expect(collection.optimisticOperations.state).toEqual([])
+    expect(collection.value).toEqual(
+      new Map([
+        [`foo`, { value: `bar4`, newProp: `new value` }],
+        [`bar`, { value: `baz2` }],
+      ])
+    )
+
     // delete
     // Reset the mocks for delete test
     persistMock.mockClear()
@@ -275,11 +353,11 @@ describe(`Collection`, () => {
     })
 
     // The merged value should immediately contain the new update
-    expect(collection.value).toEqual(new Map())
+    expect(collection.value).toEqual(new Map([[`bar`, { value: `baz2` }]]))
 
     // check there's a transaction in peristing state
     expect(
-      Array.from(collection.transactions.values())[2].mutations[0].changes
+      Array.from(collection.transactions.values())[5].mutations[0].changes
     ).toEqual({
       _deleted: true,
     })
@@ -301,8 +379,9 @@ describe(`Collection`, () => {
     // Check mutation type is correct
     expect(deletePersistData.transaction.mutations[0].type).toBe(`delete`)
     // Check original data is correct
-    expect(updatePersistData.transaction.mutations[0].original).toEqual({
-      value: `bar`,
+    expect(deletePersistData.transaction.mutations[0].original).toEqual({
+      value: `bar4`,
+      newProp: `new value`,
     })
 
     await deleteTransaction.isSynced?.promise
@@ -310,7 +389,7 @@ describe(`Collection`, () => {
     // Check sync data for update (moved outside the awaitSync callback)
     const deleteSyncData = syncMock.mock.calls[0][0]
     // Check that the transaction is in the right state during sync waiting
-    expect(deleteSyncData.transaction.state).toBe(`persisted_awaiting_sync`)
+    expect(deleteTransaction.state).toBe(`completed`)
     // Check mutation type is correct
     expect(deleteSyncData.transaction.mutations[0].type).toBe(`delete`)
     // Check changes are correct
@@ -319,16 +398,17 @@ describe(`Collection`, () => {
     })
     // Check original data is correct
     expect(deleteSyncData.transaction.mutations[0].original).toEqual({
-      value: `bar2`,
+      value: `bar4`,
+      newProp: `new value`,
     })
 
     // after mutationFn returns, check that the transaction is updated &
     // optimistic update is gone & synced data & comibned state are all updated.
     expect(
-      Array.from(collection.transactions.values())[2].state
+      Array.from(collection.transactions.values())[5].state
     ).toMatchInlineSnapshot(`"completed"`)
     expect(collection.optimisticOperations.state).toEqual([])
-    expect(collection.value).toEqual(new Map())
+    expect(collection.value).toEqual(new Map([[`bar`, { value: `baz2` }]]))
   })
 
   it(`synced updates shouldn't be applied while there's an ongoing transaction`, async () => {

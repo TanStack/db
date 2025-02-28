@@ -9,11 +9,12 @@ import {
   TransactionState,
   StandardSchema,
 } from "./types"
+import { withChangeTracking, withArrayChangeTracking } from "./lib/proxy"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
 import { z } from "zod"
 
-export interface CollectionConfig<T = unknown> {
+export interface CollectionConfig<T extends object = Record<string, unknown>> {
   sync: SyncConfig
   mutationFn: MutationFn
   schema?: StandardSchema<T>
@@ -24,14 +25,22 @@ interface PendingSyncedTransaction {
   operations: ChangeMessage[]
 }
 
-interface UpdateParams<T = unknown> {
-  key: string
+interface UpdateParams<T extends object = Record<string, unknown>> {
+  key: string | T
 
   data: Partial<T>
   metadata?: unknown
+  callback?: (proxy: T) => void
 }
 
-interface InsertParams<T = unknown> {
+interface UpdateArrayParams<T extends object = Record<string, unknown>> {
+  key: Array<string | T>
+
+  metadata?: unknown
+  callback: (proxies: T[]) => void
+}
+
+interface InsertParams<T extends object = Record<string, unknown>> {
   key: string
 
   data: T
@@ -39,15 +48,9 @@ interface InsertParams<T = unknown> {
 }
 
 interface DeleteParams {
-  key: string
+  key: string | object
   metadata?: unknown
 }
-
-// interface WithMutationParams {
-//   // eslint-disable-next-line
-//   changes: Record<string, any>[]
-//   metadata?: unknown
-// }
 
 /**
  * Custom error class for schema validation errors
@@ -72,7 +75,7 @@ export class SchemaValidationError extends Error {
   }
 }
 
-export class Collection<T = unknown> {
+export class Collection<T extends object = Record<string, unknown>> {
   public transactionManager: TransactionManager
   private transactionStore: TransactionStore
 
@@ -83,6 +86,9 @@ export class Collection<T = unknown> {
   public syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig<T>
+
+  // WeakMap to associate objects with their keys
+  private objectKeyMap = new WeakMap<object, string>()
 
   /**
    * Creates a new Collection instance
@@ -370,38 +376,154 @@ export class Collection<T = unknown> {
    * Updates an existing item in the collection
    *
    * @param params - Object containing update parameters
-   * @param params.key - The unique identifier for the item
-   * @param params.data - The data to update (partial object)
+   * @param params.key - The unique identifier for the item, or the item object itself, or an array of keys or objects
+   * @param params.data - The data to update (partial object) - use either this or callback
+   * @param params.callback - Function that receives a proxy of the object and can modify it directly
    * @param params.metadata - Optional metadata to associate with the update
    * @returns A Transaction object representing the update operation
    * @throws SchemaValidationError if the updated data fails schema validation
    */
-  update = ({ key, data, metadata }: UpdateParams<T>) => {
-    // Validate the data against the schema if one exists
-    const validatedData = this.validateData(data, `update`, key)
+  update = <T1 extends object = T>(
+    params: UpdateParams<T1> | UpdateArrayParams<T1>
+  ) => {
+    // Handle array update case
+    if (
+      Array.isArray(params.key) &&
+      params.callback &&
+      typeof params.callback === `function`
+    ) {
+      const keys = params.key.map((keyOrObject) => {
+        // If it's an object, get its key from the WeakMap
+        if (typeof keyOrObject === `object` && keyOrObject !== null) {
+          const key = this.objectKeyMap.get(keyOrObject as object)
+          if (!key) {
+            throw new Error(`Object not found in collection`)
+          }
+          return key
+        }
+        // Otherwise, assume it's a key string
+        return keyOrObject as string
+      })
 
-    const mutation: PendingMutation = {
-      mutationId: crypto.randomUUID(),
-      original: (this.value.get(key) || {}) as Record<string, unknown>,
-      modified: { ...(this.value.get(key) || {}), ...validatedData } as Record<
-        string,
-        unknown
-      >,
-      changes: validatedData as Record<string, unknown>,
-      key,
-      metadata,
-      syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
-        string,
-        unknown
-      >,
-      type: `update`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      const metadata = params.metadata
+      const callback = params.callback as (proxies: T1[]) => void
+
+      // Get the current objects or empty objects if they don't exist
+      const currentObjects = keys.map((key) => ({
+        ...(this.value.get(key) || {}),
+      })) as T1[]
+
+      // Use the proxy to track changes for all objects
+      const changesArray = withArrayChangeTracking(currentObjects, callback)
+
+      // Create mutations for each object that has changes
+      const mutations: PendingMutation[] = keys
+        .map((key, index) => {
+          const changes = changesArray[index]
+
+          // Skip items with no changes
+          if (Object.keys(changes).length === 0) {
+            return null
+          }
+
+          // Validate the changes for this item
+          const validatedData = this.validateData(changes, `update`, key)
+
+          return {
+            mutationId: crypto.randomUUID(),
+            original: (this.value.get(key) || {}) as Record<string, unknown>,
+            modified: {
+              ...(this.value.get(key) || {}),
+              ...validatedData,
+            } as Record<string, unknown>,
+            changes: validatedData as Record<string, unknown>,
+            key,
+            metadata,
+            syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+              string,
+              unknown
+            >,
+            type: `update`,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }
+        })
+        .filter(Boolean) as PendingMutation[]
+
+      // If no changes were made, return early
+      if (mutations.length === 0) {
+        throw new Error(`No changes were made to any of the objects`)
+      }
+
+      return this.transactionManager.applyTransaction(mutations, {
+        type: `ordered`,
+      })
     }
+    // Handle single object update case
+    else {
+      const {
+        key: keyOrObject,
+        data,
+        metadata,
+        callback,
+      } = params as UpdateParams<T1>
 
-    return this.transactionManager.applyTransaction([mutation], {
-      type: `ordered`,
-    })
+      // Determine the key - either directly provided or from the WeakMap
+      let key: string
+      if (typeof keyOrObject === `object` && keyOrObject !== null) {
+        const objectKey = this.objectKeyMap.get(keyOrObject as object)
+        if (!objectKey) {
+          throw new Error(`Object not found in collection`)
+        }
+        key = objectKey
+      } else {
+        key = keyOrObject as string
+      }
+
+      let validatedData: Partial<T1>
+
+      if (callback && typeof callback === `function`) {
+        // Get the current object or an empty object if it doesn't exist
+        const currentObject = (this.value.get(key) || {}) as T1
+
+        // Use the proxy to track changes
+        const changes = withChangeTracking(
+          { ...currentObject }, // Create a copy to avoid modifying the original directly
+          callback
+        )
+
+        // Validate the changes
+        validatedData = this.validateData(changes, `update`, key)
+      } else if (data) {
+        // Use the traditional approach with data object
+        validatedData = this.validateData(data, `update`, key)
+      } else {
+        throw new Error(`Either data or callback must be provided to update`)
+      }
+
+      const mutation: PendingMutation = {
+        mutationId: crypto.randomUUID(),
+        original: (this.value.get(key) || {}) as Record<string, unknown>,
+        modified: {
+          ...(this.value.get(key) || {}),
+          ...validatedData,
+        } as Record<string, unknown>,
+        changes: validatedData as Record<string, unknown>,
+        key,
+        metadata,
+        syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+          string,
+          unknown
+        >,
+        type: `update`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+
+      return this.transactionManager.applyTransaction([mutation], {
+        type: `ordered`,
+      })
+    }
   }
 
   /**
@@ -439,20 +561,40 @@ export class Collection<T = unknown> {
       updatedAt: new Date(),
     }
 
-    return this.transactionManager.applyTransaction([mutation], {
+    const transaction = this.transactionManager.applyTransaction([mutation], {
       type: `ordered`,
     })
+
+    // After insertion, associate the object with its key in the WeakMap
+    const object = this.value.get(key)
+    if (object && typeof object === `object`) {
+      this.objectKeyMap.set(object as object, key)
+    }
+
+    return transaction
   }
 
   /**
    * Deletes an item from the collection
    *
    * @param params - Object containing delete parameters
-   * @param params.key - The unique identifier for the item to delete
+   * @param params.key - The unique identifier for the item to delete, or the item object itself
    * @param params.metadata - Optional metadata to associate with the delete
    * @returns A Transaction object representing the delete operation
    */
-  delete = ({ key, metadata }: DeleteParams) => {
+  delete = ({ key: keyOrObject, metadata }: DeleteParams) => {
+    // Determine the key - either directly provided or from the WeakMap
+    let key: string
+    if (typeof keyOrObject === `object` && keyOrObject !== null) {
+      const objectKey = this.objectKeyMap.get(keyOrObject as object)
+      if (!objectKey) {
+        throw new Error(`Object not found in collection`)
+      }
+      key = objectKey
+    } else {
+      key = keyOrObject as string
+    }
+
     const mutation: PendingMutation = {
       mutationId: crypto.randomUUID(),
       original: (this.value.get(key) || {}) as Record<string, unknown>,
