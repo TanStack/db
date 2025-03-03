@@ -350,15 +350,24 @@ describe(`Proxy Library`, () => {
       // Freeze the proxy
       Object.freeze(proxy)
 
-      // Attempt to modify the frozen proxy (should not throw but should not change)
+      // Attempt to modify the frozen proxy (should throw in strict mode)
+      let errorThrown = false
+      let errorMessage = ``
       try {
         proxy.name = `Jane`
       } catch (e) {
-        console.log(e)
-        // In strict mode, this would throw
+        // Expected error
+        errorThrown = true
+        errorMessage = e instanceof Error ? e.message : String(e)
       }
 
-      // Check that no changes were tracked
+      // In strict mode, an error should be thrown
+      if (errorThrown) {
+        // Verify the error message contains expected text about the property being read-only
+        expect(errorMessage).toContain(`read only property`)
+      }
+
+      // Either way, no changes should be tracked
       expect(getChanges()).toEqual({})
 
       // Check that the original object is unchanged
@@ -379,11 +388,20 @@ describe(`Proxy Library`, () => {
       proxy.name = `Jane`
 
       // Attempt to add a new property (should not work)
+      let errorThrown = false
+      let errorMessage = ``
       try {
         proxy.role = `admin`
       } catch (e) {
-        console.log(e)
-        // In strict mode, this would throw
+        // Expected error
+        errorThrown = true
+        errorMessage = e instanceof Error ? e.message : String(e)
+      }
+
+      // In strict mode, an error should be thrown
+      if (errorThrown) {
+        // Verify the error message contains expected text about the object not being extensible
+        expect(errorMessage).toContain(`object is not extensible`)
       }
 
       // Check that only the name change was tracked
@@ -411,11 +429,20 @@ describe(`Proxy Library`, () => {
       proxy.name = `Jane`
 
       // Attempt to add a new property (should not work)
+      let errorThrown = false
+      let errorMessage = ``
       try {
         proxy.role = `admin`
       } catch (e) {
-        console.log(e)
-        // In strict mode, this would throw
+        // Expected error
+        errorThrown = true
+        errorMessage = e instanceof Error ? e.message : String(e)
+      }
+
+      // In strict mode, an error should be thrown
+      if (errorThrown) {
+        // Verify the error message contains expected text about the object not being extensible
+        expect(errorMessage).toContain(`object is not extensible`)
       }
 
       // Check that only the name change was tracked
