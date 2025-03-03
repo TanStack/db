@@ -5,11 +5,6 @@ import { DevTools } from "./DevTools"
 import { UpdateTodo, UpdateConfig } from "./db/validation"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
 
-interface Todo {
-  text: string
-  completed: boolean
-}
-
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
 
@@ -208,7 +203,7 @@ export default function App() {
     setNewTodo(``)
   }
 
-  const toggleTodo = async (key: string, todo: Todo) => {
+  const toggleTodo = (todo: UpdateTodo) => {
     update(todo, (draft) => {
       draft.completed = !draft.completed
     })
@@ -298,7 +293,7 @@ export default function App() {
                         <input
                           type="checkbox"
                           checked={todo.completed}
-                          onChange={() => toggleTodo(key, todo)}
+                          onChange={() => toggleTodo(todo)}
                           className="absolute left-[12px] top-0 bottom-0 my-auto h-[40px] w-[40px] cursor-pointer"
                         />
                         <label

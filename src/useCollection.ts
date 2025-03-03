@@ -123,9 +123,79 @@ export function useCollections() {
  * @param selector - Optional selector function to transform the collection data
  * @returns Object containing collection data and CRUD operations
  */
-export function useCollection<T = unknown, R = Map<string, T>>(
+// Overload for when selector is not provided
+export function useCollection<T>(config: UseCollectionConfig<T>): {
+  /**
+   * The collection data, transformed by the optional selector function
+   */
+  data: Map<string, T>
+  /**
+   * Updates an existing item in the collection
+   *
+   * @param item - The item to update (must exist in collection)
+   * @param configOrCallback - Update configuration or callback function
+   * @param maybeCallback - Callback function if config was provided
+   * @returns {Transaction} A Transaction object representing the update operation
+   * @throws {SchemaValidationError} If the updated data fails schema validation
+   * @example
+   * // Update a single item
+   * update(todo, (draft) => { draft.completed = true })
+   *
+   * // Update multiple items
+   * update([todo1, todo2], (drafts) => {
+   *   drafts.forEach(draft => { draft.completed = true })
+   * })
+   *
+   * // Update with metadata
+   * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
+   */
+  update: Collection<T>[`update`]
+  /**
+   * Inserts a new item or items into the collection
+   *
+   * @param data - Single item or array of items to insert
+   * @param config - Optional configuration including key(s) and metadata
+   * @returns {Transaction} A Transaction object representing the insert operation
+   * @throws {SchemaValidationError} If the data fails schema validation
+   * @throws {Error} If more keys provided than items to insert
+   * @example
+   * // Insert a single item
+   * insert({ text: "Buy groceries", completed: false })
+   *
+   * // Insert multiple items
+   * insert([
+   *   { text: "Buy groceries", completed: false },
+   *   { text: "Walk dog", completed: false }
+   * ])
+   *
+   * // Insert with custom key
+   * insert({ text: "Buy groceries" }, { key: "grocery-task" })
+   */
+  insert: Collection<T>[`insert`]
+  /**
+   * Deletes an item or items from the collection
+   *
+   * @param items - Item(s) to delete (must exist in collection) or their key(s)
+   * @param config - Optional configuration including metadata
+   * @returns {Transaction} A Transaction object representing the delete operation
+   * @example
+   * // Delete a single item
+   * delete(todo)
+   *
+   * // Delete multiple items
+   * delete([todo1, todo2])
+   *
+   * // Delete with metadata
+   * delete(todo, { metadata: { reason: "completed" } })
+   */
+  delete: Collection<T>[`delete`]
+}
+
+// Overload for when selector is provided
+// eslint-disable-next-line
+export function useCollection<T, R>(
   config: UseCollectionConfig<T>,
-  selector: (d: Map<string, T>) => R = (d) => d as unknown as R
+  selector: (d: Map<string, T>) => R
 ): {
   /**
    * The collection data, transformed by the optional selector function
@@ -191,7 +261,14 @@ export function useCollection<T = unknown, R = Map<string, T>>(
    * delete(todo, { metadata: { reason: "completed" } })
    */
   delete: Collection<T>[`delete`]
-} {
+}
+
+// Implementation
+// eslint-disable-next-line
+export function useCollection<T, R = Map<string, T>>(
+  config: UseCollectionConfig<T>,
+  selector?: (d: Map<string, T>) => R
+) {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
     collectionsStore.setState((prev) => {
@@ -210,11 +287,11 @@ export function useCollection<T = unknown, R = Map<string, T>>(
   const collection = collectionsStore.state.get(config.id)! as Collection<T>
 
   // Subscribe to collection's derivedState
-  const data = useSyncExternalStoreWithSelector(
+  const data = useSyncExternalStoreWithSelector<Map<string, T>, R>(
     collection.derivedState.subscribe,
     () => collection.derivedState.state as Map<string, T>,
     () => collection.derivedState.state as Map<string, T>,
-    selector,
+    selector ?? ((d: Map<string, T>) => d as unknown as R),
     shallow
   )
 

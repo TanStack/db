@@ -63,7 +63,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   public optimisticOperations: Derived<ChangeMessage[]>
   public derivedState: Derived<Map<string, T>>
 
-  private syncedData = new Store(new Map<string, T>())
+  private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction[] = []
   public config: CollectionConfig<T>
@@ -117,21 +117,20 @@ export class Collection<T extends object = Record<string, unknown>> {
     })
     this.optimisticOperations.mount()
     // Combine together synced data & optimistic operations.
-    this.derivedState = new Derived({
-      // prevVal, prevDepVals,
+    this.derivedState = new Derived<Map<string, T>>({
       fn: ({ currDepVals }) => {
-        const combined = new Map(currDepVals[0])
+        const combined = new Map<string, T>(currDepVals[0] as Map<string, T>)
         // Apply the optimistic operations on top of the synced state.
         for (const operation of currDepVals[1]) {
           switch (operation.type) {
             case `insert`:
-              combined.set(operation.key, operation.value)
+              combined.set(operation.key, operation.value as T)
               break
             case `update`:
               combined.set(operation.key, {
                 ...currDepVals[0].get(operation.key)!,
                 ...operation.value,
-              })
+              } as T)
               break
             case `delete`:
               combined.delete(operation.key)
@@ -140,14 +139,14 @@ export class Collection<T extends object = Record<string, unknown>> {
         }
 
         // Update object => key mappings
-        const optimisticKeys = new Set()
+        const optimisticKeys = new Set<string>()
         for (const operation of currDepVals[1]) {
           optimisticKeys.add(operation.key)
         }
 
         optimisticKeys.forEach((key) => {
           if (combined.has(key)) {
-            this.objectKeyMap.set(combined.get(key), key)
+            this.objectKeyMap.set(combined.get(key)!, key)
           }
         })
 
