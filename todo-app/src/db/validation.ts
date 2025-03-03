@@ -7,12 +7,12 @@ export const insertTodoSchema = createInsertSchema(todos)
 export const selectTodoSchema = createSelectSchema(todos)
 
 // Partial schema for updates
-export const updateTodoSchema = insertTodoSchema.partial()
+export const updateTodoSchema = insertTodoSchema.partial().strict()
 
 // Config schemas
-export const insertConfigSchema = createInsertSchema(config)
+export const insertConfigSchema = createInsertSchema(config).strict()
 export const selectConfigSchema = createSelectSchema(config)
-export const updateConfigSchema = insertConfigSchema.partial()
+export const updateConfigSchema = insertConfigSchema.partial().strict()
 
 // Type inference
 export type InsertTodo = z.infer<typeof insertTodoSchema>

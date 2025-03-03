@@ -394,10 +394,10 @@ describe(`Electric Integration`, () => {
         mutationFn: testMutationFn,
       })
 
-      let transaction = testCollection.insert({
-        key: `item1`,
-        data: { id: 1, name: `Test item 1` },
-      })
+      let transaction = testCollection.insert(
+        { id: 1, name: `Test item 1` },
+        { key: `item1` }
+      )
 
       await transaction.isPersisted?.promise
 

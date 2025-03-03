@@ -134,45 +134,63 @@ export function useCollection<T = unknown, R = Map<string, T>>(
   /**
    * Updates an existing item in the collection
    *
-   * @param params - Object containing update parameters: key, data, and optional metadata
-   * @returns {Transaction} A Transaction object representing the update operation. The transaction includes the mutation details and status tracking.
+   * @param item - The item to update (must exist in collection)
+   * @param configOrCallback - Update configuration or callback function
+   * @param maybeCallback - Callback function if config was provided
+   * @returns {Transaction} A Transaction object representing the update operation
    * @throws {SchemaValidationError} If the updated data fails schema validation
-   */
-  update(params: {
-    /** The unique identifier for the item to update */
-    key: string
-    /** The partial data to update the item with */
-    data: Partial<T>
-    /** Optional metadata to associate with the update */
-    metadata?: unknown
-  }): Transaction
-  /**
-   * Inserts a new item into the collection
+   * @example
+   * // Update a single item
+   * update(todo, (draft) => { draft.completed = true })
    *
-   * @param params - Object containing insert parameters: key, data, and optional metadata
-   * @returns {Transaction} A Transaction object representing the insert operation. The transaction includes the mutation details and status tracking.
+   * // Update multiple items
+   * update([todo1, todo2], (drafts) => {
+   *   drafts.forEach(draft => { draft.completed = true })
+   * })
+   *
+   * // Update with metadata
+   * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
+   */
+  update: Collection<T>[`update`]
+  /**
+   * Inserts a new item or items into the collection
+   *
+   * @param data - Single item or array of items to insert
+   * @param config - Optional configuration including key(s) and metadata
+   * @returns {Transaction} A Transaction object representing the insert operation
    * @throws {SchemaValidationError} If the data fails schema validation
-   */
-  insert(params: {
-    /** The unique identifier for the new optimistic item. It'll be replaced by a server-generated key once the server write syncs back. */
-    key: string
-    /** The complete data for the new item */
-    data: T
-    /** Optional metadata to associate with the insert */
-    metadata?: unknown
-  }): Transaction
-  /**
-   * Deletes an item from the collection
+   * @throws {Error} If more keys provided than items to insert
+   * @example
+   * // Insert a single item
+   * insert({ text: "Buy groceries", completed: false })
    *
-   * @param params - Object containing delete parameters: key and optional metadata
-   * @returns {Transaction} A Transaction object representing the delete operation. The transaction includes the mutation details and status tracking.
+   * // Insert multiple items
+   * insert([
+   *   { text: "Buy groceries", completed: false },
+   *   { text: "Walk dog", completed: false }
+   * ])
+   *
+   * // Insert with custom key
+   * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
-  delete(params: {
-    /** The unique identifier for the item to delete */
-    key: string
-    /** Optional metadata to associate with the delete */
-    metadata?: unknown
-  }): Transaction
+  insert: Collection<T>[`insert`]
+  /**
+   * Deletes an item or items from the collection
+   *
+   * @param items - Item(s) to delete (must exist in collection) or their key(s)
+   * @param config - Optional configuration including metadata
+   * @returns {Transaction} A Transaction object representing the delete operation
+   * @example
+   * // Delete a single item
+   * delete(todo)
+   *
+   * // Delete multiple items
+   * delete([todo1, todo2])
+   *
+   * // Delete with metadata
+   * delete(todo, { metadata: { reason: "completed" } })
+   */
+  delete: Collection<T>[`delete`]
 } {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
@@ -202,8 +220,8 @@ export function useCollection<T = unknown, R = Map<string, T>>(
 
   return {
     data,
-    update: collection.update.bind(collection),
     insert: collection.insert.bind(collection),
+    update: collection.update.bind(collection),
     delete: collection.delete.bind(collection),
   }
 }

@@ -4,10 +4,10 @@ export const todos = pgTable(`todos`, {
   id: serial(`id`).primaryKey(),
   text: text(`text`).notNull(),
   completed: boolean(`completed`).notNull().default(false),
-  createdAt: timestamp(`created_at`, { withTimezone: true })
+  created_at: timestamp(`created_at`, { withTimezone: true })
     .defaultNow()
     .notNull(),
-  updatedAt: timestamp(`updated_at`, { withTimezone: true })
+  updated_at: timestamp(`updated_at`, { withTimezone: true })
     .notNull()
     .defaultNow(),
 })
@@ -19,10 +19,10 @@ export const config = pgTable(`config`, {
   id: serial(`id`).primaryKey(),
   key: text(`key`).notNull().unique(),
   value: text(`value`).notNull(),
-  createdAt: timestamp(`created_at`, { withTimezone: true })
+  created_at: timestamp(`created_at`, { withTimezone: true })
     .notNull()
     .defaultNow(),
-  updatedAt: timestamp(`updated_at`, { withTimezone: true })
+  updated_at: timestamp(`updated_at`, { withTimezone: true })
     .notNull()
     .defaultNow(),
 })

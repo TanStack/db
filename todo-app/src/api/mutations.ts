@@ -18,7 +18,6 @@ const router = express.Router()
  */
 function getTableName(relation?: string[]): string {
   if (!relation || relation.length < 2) {
-    console.log({ relation })
     throw new Error(`could not find the table name`)
   }
 

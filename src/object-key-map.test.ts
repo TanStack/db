@@ -29,10 +29,7 @@ describe(`Object-Key Association`, () => {
   it(`should associate an object with its key after insert`, async () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
-    collection.insert({
-      key: `user1`,
-      data,
-    })
+    collection.insert(data, { key: `user1` })
 
     const item = collection.value.get(`user1`)
 
@@ -40,11 +37,8 @@ describe(`Object-Key Association`, () => {
     expect(item).toBeDefined()
 
     // Update using the object reference
-    collection.update({
-      key: item!,
-      callback: (item) => {
-        item.age = 31
-      },
+    collection.update(item!, (item) => {
+      item.age = 31
     })
 
     // Verify the update worked
@@ -57,26 +51,17 @@ describe(`Object-Key Association`, () => {
     const johnData = { name: `John`, age: 30 }
     const janeData = { name: `Jane`, age: 28 }
 
-    collection.insert({
-      key: `user1`,
-      data: johnData,
-    })
-
-    collection.insert({
-      key: `user2`,
-      data: janeData,
+    collection.insert([johnData, janeData], {
+      key: [`user1`, `user2`],
     })
 
     const john = collection.value.get(`user1`)
     const jane = collection.value.get(`user2`)
 
     // Update multiple objects using their references
-    collection.update({
-      key: [john, jane],
-      callback: ([johnProxy, janeProxy]) => {
-        johnProxy.age = 31
-        janeProxy.name = `Jane Doe`
-      },
+    collection.update([john!, jane!], (items) => {
+      items[0].age = 31
+      items[1].name = `Jane Doe`
     })
 
     // Verify updates
@@ -87,17 +72,12 @@ describe(`Object-Key Association`, () => {
   it(`should handle delete with object reference`, async () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
-    collection.insert({
-      key: `user1`,
-      data,
-    })
+    collection.insert(data, { key: `user1` })
 
     const john = collection.value.get(`user1`)
 
     // Delete using the object reference
-    collection.delete({
-      key: john,
-    })
+    collection.delete(john!)
 
     // Verify deletion
     expect(collection.value.get(`user1`)).toBeUndefined()
@@ -106,27 +86,18 @@ describe(`Object-Key Association`, () => {
   it(`should maintain object-key association after updates`, async () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
-    collection.insert({
-      key: `user1`,
-      data,
-    })
+    collection.insert(data, { key: `user1` })
 
     const john = collection.value.get(`user1`)
 
     // First update
-    collection.update({
-      key: john,
-      callback: (proxy) => {
-        proxy.age = 31
-      },
+    collection.update(john!, (item) => {
+      item.age = 31
     })
 
     // Second update using the same object reference
-    collection.update({
-      key: john,
-      callback: (proxy) => {
-        proxy.name = `John Doe`
-      },
+    collection.update(john!, (item) => {
+      item.name = `John Doe`
     })
 
     // Verify both updates worked
@@ -139,12 +110,29 @@ describe(`Object-Key Association`, () => {
 
     // Try to update using an object that wasn't inserted
     expect(() => {
-      collection.update({
-        key: unknownObject,
-        callback: (proxy) => {
-          proxy.age = 26
-        },
+      collection.update(unknownObject, (item) => {
+        item.age = 26
       })
     }).toThrow()
+  })
+
+  it(`should support bulk insert with multiple keys`, async () => {
+    // Insert multiple objects
+    const johnData = { name: `John`, age: 30 }
+    const janeData = { name: `Jane`, age: 28 }
+    const bobData = { name: `Bob`, age: 35 }
+
+    collection.insert([johnData, janeData, bobData], {
+      key: [`user1`, `user2`, `user3`],
+    })
+
+    const john = collection.value.get(`user1`)
+    const jane = collection.value.get(`user2`)
+    const bob = collection.value.get(`user3`)
+
+    // Verify inserts
+    expect(john).toEqual({ name: `John`, age: 30 })
+    expect(jane).toEqual({ name: `Jane`, age: 28 })
+    expect(bob).toEqual({ name: `Bob`, age: 35 })
   })
 })

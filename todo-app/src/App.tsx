@@ -2,12 +2,8 @@ import React, { useState, FormEvent, useRef } from "react"
 import { useCollection } from "../../src/useCollection"
 import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
-import {
-  InsertTodo,
-  insertTodoSchema,
-  insertConfigSchema,
-  InsertConfig,
-} from "./db/validation"
+import { UpdateTodo, UpdateConfig } from "./db/validation"
+import { updateConfigSchema, updateTodoSchema } from "./db/validation"
 
 interface Todo {
   text: string
@@ -24,6 +20,10 @@ export default function App() {
         params: {
           table: `todos`,
         },
+        parser: {
+          // Parse timestamp columns into JavaScript Date objects
+          timestamptz: (date: string) => new Date(date),
+        },
       },
       { primaryKey: [`id`] }
     )
@@ -36,6 +36,12 @@ export default function App() {
         params: {
           table: `config`,
         },
+        parser: {
+          // Parse timestamp columns into JavaScript Date objects
+          timestamptz: (date: string) => {
+            return new Date(date)
+          },
+        },
       },
       { primaryKey: [`id`] }
     )
@@ -46,10 +52,10 @@ export default function App() {
     insert,
     update,
     delete: deleteTodo,
-  } = useCollection<InsertTodo>({
+  } = useCollection<UpdateTodo>({
     id: `todos`,
     sync: electricSync.current,
-    schema: insertTodoSchema,
+    schema: updateTodoSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
         const response = await fetch(`http://localhost:3001/api/mutations`, {
@@ -81,10 +87,10 @@ export default function App() {
     data: configData,
     update: updateConfig,
     insert: insertConfig,
-  } = useCollection<InsertConfig>({
+  } = useCollection<UpdateConfig>({
     id: `config`,
     sync: configSync.current,
-    schema: insertConfigSchema,
+    schema: updateConfigSchema,
     mutationFn: {
       persist: async ({ transaction, collection }) => {
         const response = await fetch(`http://localhost:3001/api/mutations`, {
@@ -123,13 +129,12 @@ export default function App() {
 
   // Define a helper function to update config values
   const setConfigValue = (key: string, value: string): void => {
-    for (const [entryKey, config] of configData.entries()) {
+    // eslint-disable-next-line
+    for (const [_, config] of configData.entries()) {
       if (config.key === key) {
-        updateConfig({
-          key: entryKey,
-          data: { value },
+        return updateConfig(config, (draft) => {
+          draft.value = value
         })
-        return
       }
     }
     // If the config doesn't exist yet, create it
@@ -197,21 +202,24 @@ export default function App() {
     if (!newTodo.trim()) return
 
     insert({
-      key: Date.now().toString(),
-      data: { text: newTodo, completed: false },
+      text: newTodo,
+      completed: false,
     })
     setNewTodo(``)
   }
 
   const toggleTodo = async (key: string, todo: Todo) => {
-    update({
-      key,
-      data: { completed: !todo.completed },
+    update(todo, (draft) => {
+      draft.completed = !draft.completed
     })
   }
 
-  const activeTodos = Array.from(todos).filter(([, todo]) => !todo.completed)
-  const completedTodos = Array.from(todos).filter(([, todo]) => todo.completed)
+  const activeTodos = Array.from(todos.values()).filter(
+    (todo) => !todo.completed
+  )
+  const completedTodos = Array.from(todos.values()).filter(
+    (todo) => todo.completed
+  )
 
   return (
     <>
@@ -254,12 +262,13 @@ export default function App() {
                   className="absolute left-0 w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
                   onClick={async () => {
                     const allCompleted = completedTodos.length === todos.size
-                    for (const [key, todo] of todos) {
-                      update({
-                        key,
-                        data: { ...todo, completed: !allCompleted },
-                      })
-                    }
+                    update(
+                      allCompleted ? completedTodos : activeTodos,
+                      (drafts) =>
+                        drafts.forEach(
+                          (draft) => (draft.completed = !allCompleted)
+                        )
+                    )
                   }}
                 >
                   ❯
@@ -300,7 +309,7 @@ export default function App() {
                           {todo.text}
                         </label>
                         <button
-                          onClick={() => deleteTodo({ key })}
+                          onClick={() => deleteTodo(todo)}
                           className="hidden group-hover:block absolute right-[10px] w-[40px] h-[40px] my-auto top-0 bottom-0 text-[30px] text-[#cc9a9a] hover:text-[#af5b5e] transition-colors"
                         >
                           ×
@@ -319,9 +328,7 @@ export default function App() {
                   {completedTodos.length > 0 && (
                     <button
                       onClick={async () => {
-                        for (const [key] of completedTodos) {
-                          deleteTodo({ key })
-                        }
+                        deleteTodo(completedTodos)
                       }}
                       className="text-inherit hover:underline"
                     >
