@@ -1,18 +1,14 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
 import type { Transaction } from "./types"
-import { Collection, CollectionConfig } from "./collection"
+import {
+  Collection,
+  CollectionConfig,
+  preloadCollection,
+  collectionsStore,
+} from "./collection"
 import { SortedMap } from "./SortedMap"
-import { Store } from "@tanstack/store"
 
-export interface UseCollectionConfig<T extends object = Record<string, unknown>>
-  extends CollectionConfig<T> {
-  id: string
-}
-
-// Store collections in memory using Tanstack store
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const collectionsStore = new Store(new Map<string, Collection<any>>())
-/* eslint-enable @typescript-eslint/no-explicit-any */
+export { preloadCollection }
 
 // Cache for snapshots to prevent infinite loops
 let snapshotCache: Map<
@@ -135,7 +131,7 @@ export function useCollections() {
  */
 // Overload for when selector is not provided
 export function useCollection<T extends object>(
-  config: UseCollectionConfig<T>
+  config: CollectionConfig<T>
 ): {
   /**
    * The collection data, transformed by the optional selector function
@@ -206,7 +202,7 @@ export function useCollection<T extends object>(
 // Overload for when selector is provided
 // eslint-disable-next-line
 export function useCollection<T extends object, R>(
-  config: UseCollectionConfig<T>,
+  config: CollectionConfig<T>,
   selector: (d: Map<string, T>) => R
 ): {
   /**
@@ -278,11 +274,13 @@ export function useCollection<T extends object, R>(
 // Implementation
 // eslint-disable-next-line
 export function useCollection<T extends object, R = Map<string, T>>(
-  config: UseCollectionConfig<T>,
+  config: CollectionConfig<T>,
   selector?: (d: Map<string, T>) => R
 ) {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
+    // If collection doesn't exist yet, create it
+    // This will reuse any existing collection created by preloadCollection
     collectionsStore.setState((prev) => {
       const next = new Map(prev)
       next.set(
@@ -296,6 +294,7 @@ export function useCollection<T extends object, R = Map<string, T>>(
       return next
     })
   }
+
   const collection = collectionsStore.state.get(config.id)! as Collection<T>
 
   // Subscribe to collection's derivedState

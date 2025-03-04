@@ -15,14 +15,105 @@ import { getTransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
 
 export interface CollectionConfig<T extends object = Record<string, unknown>> {
+  id: string
   sync: SyncConfig<T>
   mutationFn: MutationFn<T>
   schema?: StandardSchema<T>
 }
 
+// Store collections in memory using Tanstack store
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export const collectionsStore = new Store(new Map<string, Collection<any>>())
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// Map to track loading collections
+
+const loadingCollections = new Map<string, Promise<void>>()
+
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: ChangeMessage<T>[]
+}
+
+/**
+ * Preloads a collection with the given configuration
+ * Returns a promise that resolves once the sync tool has done its first commit (initial sync is finished)
+ * If the collection has already loaded, it resolves immediately
+ *
+ * This function is useful in route loaders or similar pre-rendering scenarios where you want
+ * to ensure data is available before a route transition completes. It uses the same shared collection
+ * instance that will be used by useCollection, ensuring data consistency.
+ *
+ * @example
+ * ```typescript
+ * // In a route loader
+ * async function loader({ params }) {
+ *   await preloadCollection({
+ *     id: `users-${params.userId}`,
+ *     sync: { ... },
+ *     mutationFn: { ... }
+ *   });
+ *
+ *   return null;
+ * }
+ * ```
+ *
+ * @template T - The type of items in the collection
+ * @param config - Configuration for the collection, including id, sync, and mutationFn
+ * @returns Promise that resolves when the initial sync is finished
+ */
+export function preloadCollection<T extends object = Record<string, unknown>>(
+  config: CollectionConfig<T>
+): Promise<void> {
+  // If the collection is already fully loaded, return a resolved promise
+  if (
+    collectionsStore.state.has(config.id) &&
+    !loadingCollections.has(config.id)
+  ) {
+    return Promise.resolve()
+  }
+
+  // If the collection is in the process of loading, return its promise
+  if (loadingCollections.has(config.id)) {
+    return loadingCollections.get(config.id)!
+  }
+
+  // Create a new collection instance if it doesn't exist
+  if (!collectionsStore.state.has(config.id)) {
+    collectionsStore.setState((prev) => {
+      const next = new Map(prev)
+      next.set(
+        config.id,
+        new Collection<T>({
+          sync: config.sync,
+          mutationFn: config.mutationFn,
+          schema: config.schema,
+        })
+      )
+      return next
+    })
+  }
+
+  const collection = collectionsStore.state.get(config.id)! as Collection<T>
+
+  // Create a promise that will resolve after the first commit
+  let resolveFirstCommit: () => void
+  const firstCommitPromise = new Promise<void>((resolve) => {
+    resolveFirstCommit = resolve
+  })
+
+  // Register a one-time listener for the first commit
+  collection.onFirstCommit(() => {
+    if (loadingCollections.has(config.id)) {
+      loadingCollections.delete(config.id)
+      resolveFirstCommit()
+    }
+  })
+
+  // Store the loading promise
+  loadingCollections.set(config.id, firstCommitPromise)
+
+  return firstCommitPromise
 }
 
 /**
@@ -68,6 +159,18 @@ export class Collection<T extends object = Record<string, unknown>> {
 
   // WeakMap to associate objects with their keys
   public objectKeyMap = new WeakMap<object, string>()
+
+  // Array to store one-time commit listeners
+  private onFirstCommitCallbacks: (() => void)[] = []
+
+  /**
+   * Register a callback to be executed on the next commit
+   * Useful for preloading collections
+   * @param callback Function to call after the next commit
+   */
+  public onFirstCommit(callback: () => void): void {
+    this.onFirstCommitCallbacks.push(callback)
+  }
 
   public id = crypto.randomUUID()
 
@@ -290,6 +393,11 @@ export class Collection<T extends object = Record<string, unknown>> {
       })
 
       this.pendingSyncedTransactions = []
+
+      // Call any registered one-time commit listeners
+      const callbacks = [...this.onFirstCommitCallbacks]
+      this.onFirstCommitCallbacks = []
+      callbacks.forEach((callback) => callback())
     }
   }
 
