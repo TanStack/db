@@ -123,13 +123,14 @@ export function useCollections() {
 /**
  * Hook to use a specific collection with React
  *
- * @template T - Type of items in the collection
+ * @template T - Type of data in the collection
  * @template R - Return type of the selector function
  * @param config - Configuration for the collection
  * @param selector - TODO Optional selector function to transform the collection data
  * @returns Object containing collection data and CRUD operations
  */
 // Overload for when selector is not provided
+
 export function useCollection<T extends object>(
   config: CollectionConfig<T>
 ): {
@@ -138,9 +139,9 @@ export function useCollection<T extends object>(
    */
   state: Map<string, T>
   /**
-   * The collection data as an Array of items
+   * The collection data as an Array of data
    */
-  items: T[]
+  data: T[]
   /**
    * Updates an existing item in the collection
    *
@@ -206,8 +207,8 @@ export function useCollection<T extends object>(
 // Overload for when selector is provided
 // eslint-disable-next-line
 export function useCollection<T extends object, R>(
-  config: CollectionConfig<T>
-  // selector: (d: Map<string, T>) => R
+  config: CollectionConfig<T>,
+  selector: (d: Map<string, T>) => R
 ): {
   /**
    * The collection data as a Map with keys as identifiers
@@ -216,11 +217,7 @@ export function useCollection<T extends object, R>(
   /**
    * The collection data as an Array of items
    */
-  items: T[]
-  /**
-   * The collection data, transformed by the selector function
-   */
-  data: R
+  data: T[]
   /**
    * Updates an existing item in the collection
    *
@@ -285,10 +282,13 @@ export function useCollection<T extends object, R>(
 
 // Implementation
 // eslint-disable-next-line
-export function useCollection<T extends object, R = Map<string, T>>(
-  config: CollectionConfig<T>
-  // selector?: (d: Map<string, T>) => R
+export function useCollection<T extends object, R = any>(
+  config: CollectionConfig<T>,
+  selector?: (d: Map<string, T>) => R
 ) {
+  if (selector) {
+    console.log(`selector support not yet implemented`, selector)
+  }
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
     // If collection doesn't exist yet, create it

@@ -265,7 +265,7 @@ describe(`useCollection`, () => {
       `Charlie`,
     ])
 
-    // Verify state and items are still available
+    // Verify state and data are still available
     expect(result.current.state.size).toBe(3)
     expect(result.current.data.length).toBe(3)
   })
