@@ -1,9 +1,38 @@
 {
   "name": "@kylemathews/sync",
   "version": "0.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sync library for client-side data management",
+  "type": "module",
+  "exports": {
+    "./useCollection": {
+      "types": "./dist/useCollection.d.ts",
+      "import": "./dist/useCollection.mjs",
+      "require": "./dist/cjs/useCollection.cjs"
+    },
+    "./collection": {
+      "types": "./dist/collection.d.ts",
+      "import": "./dist/collection.mjs",
+      "require": "./dist/cjs/collection.cjs"
+    },
+    "./electric": {
+      "types": "./dist/lib/electric.d.ts",
+      "import": "./dist/lib/electric.mjs",
+      "require": "./dist/cjs/lib/electric.cjs"
+    },
+    "./write-to-pg": {
+      "types": "./dist/lib/write-to-pg.d.ts",
+      "import": "./dist/lib/write-to-pg.mjs",
+      "require": "./dist/cjs/lib/write-to-pg.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
+    "build": "shx rm -rf dist && tsup && tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "test": "vitest --run",
     "lint": "eslint . --fix",
     "prepare": "husky"
@@ -25,6 +54,7 @@
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@types/use-sync-external-store": "^0.0.6",
     "@typescript-eslint/eslint-plugin": "^8.24.1",
     "@typescript-eslint/parser": "^8.24.1",
     "@vitejs/plugin-react": "^4.3.4",
@@ -40,15 +70,19 @@
     "prettier": "^3.5.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "shx": "^0.3.4",
+    "tsup": "^8.0.2",
     "typescript": "^5.7.3",
     "vitest": "^3.0.6",
     "zod": "^3.24.2"
   },
   "dependencies": {
     "@electric-sql/client": "1.0.0-beta.3",
+    "@standard-schema/spec": "^1.0.0",
     "@tanstack/store": "^0.7.0",
     "diff": "^7.0.0",
     "idb": "^8.0.2",
+    "postgres": "^3.4.5",
     "use-sync-external-store": "^1.4.0"
   }
 }

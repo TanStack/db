@@ -116,7 +116,7 @@ export default function App() {
     // eslint-disable-next-line
     for (const [_, config] of configData) {
       if (config.key === key) {
-        return config.value
+        return config.value!
       }
     }
     return ``
@@ -127,15 +127,18 @@ export default function App() {
     // eslint-disable-next-line
     for (const [_, config] of configData.entries()) {
       if (config.key === key) {
-        return updateConfig(config, (draft) => {
+        updateConfig(config, (draft) => {
           draft.value = value
         })
+
+        return
       }
     }
+
     // If the config doesn't exist yet, create it
     insertConfig({
-      key: Date.now().toString(),
-      data: { key, value },
+      key,
+      value,
     })
   }
 

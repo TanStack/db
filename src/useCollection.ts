@@ -1,19 +1,23 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
 import type { Transaction } from "./types"
 import { Collection, CollectionConfig } from "./collection"
+import { SortedMap } from "./SortedMap"
 import { Store } from "@tanstack/store"
 
-export interface UseCollectionConfig<T = unknown> extends CollectionConfig<T> {
+export interface UseCollectionConfig<T extends object = Record<string, unknown>>
+  extends CollectionConfig<T> {
   id: string
 }
 
 // Store collections in memory using Tanstack store
-const collectionsStore = new Store(new Map<string, Collection>())
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const collectionsStore = new Store(new Map<string, Collection<any>>())
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Cache for snapshots to prevent infinite loops
 let snapshotCache: Map<
   string,
-  { state: Map<unknown, unknown>; transactions: Transaction[] }
+  { state: Map<unknown, unknown>; transactions: SortedMap<string, Transaction> }
 > | null = null
 
 /**
@@ -62,7 +66,10 @@ export function useCollections() {
 
       const snapshot = new Map<
         string,
-        { state: Map<unknown, unknown>; transactions: Transaction[] }
+        {
+          state: Map<unknown, unknown>
+          transactions: SortedMap<string, Transaction>
+        }
       >()
       for (const [id, collection] of collectionsStore.state) {
         snapshot.set(id, {
@@ -81,7 +88,10 @@ export function useCollections() {
 
       const snapshot = new Map<
         string,
-        { state: Map<unknown, unknown>; transactions: Transaction[] }
+        {
+          state: Map<unknown, unknown>
+          transactions: SortedMap<string, Transaction>
+        }
       >()
       for (const [id, collection] of collectionsStore.state) {
         snapshot.set(id, {
@@ -124,7 +134,9 @@ export function useCollections() {
  * @returns Object containing collection data and CRUD operations
  */
 // Overload for when selector is not provided
-export function useCollection<T>(config: UseCollectionConfig<T>): {
+export function useCollection<T extends object>(
+  config: UseCollectionConfig<T>
+): {
   /**
    * The collection data, transformed by the optional selector function
    */
@@ -193,7 +205,7 @@ export function useCollection<T>(config: UseCollectionConfig<T>): {
 
 // Overload for when selector is provided
 // eslint-disable-next-line
-export function useCollection<T, R>(
+export function useCollection<T extends object, R>(
   config: UseCollectionConfig<T>,
   selector: (d: Map<string, T>) => R
 ): {
@@ -265,7 +277,7 @@ export function useCollection<T, R>(
 
 // Implementation
 // eslint-disable-next-line
-export function useCollection<T, R = Map<string, T>>(
+export function useCollection<T extends object, R = Map<string, T>>(
   config: UseCollectionConfig<T>,
   selector?: (d: Map<string, T>) => R
 ) {

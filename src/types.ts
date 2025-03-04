@@ -1,5 +1,6 @@
 import { Collection } from "./collection"
 import { Deferred } from "./deferred"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 export type TransactionState =
   | `queued`
@@ -52,7 +53,7 @@ export interface Transaction {
    * Get a plain object representation of the transaction
    * This is useful for creating clones or serializing the transaction
    */
-  toObject(): Omit<Transaction, `toObject`>
+  toObject?: () => Omit<Transaction, `toObject`>
 }
 
 type Value<Extensions = never> =
@@ -69,19 +70,12 @@ export type Row<Extensions = never> = Record<string, Value<Extensions>>
 
 type OperationType = `insert` | `update` | `delete`
 
-export type ChangeMessage<T extends Row<unknown> = Row> = {
-  key: string
-  value: T
-  type: OperationType
-  metadata?: Record<string, unknown>
-}
-
-export interface SyncConfig {
+export interface SyncConfig<T extends object = Record<string, unknown>> {
   id: string
   sync: (params: {
-    collection: Collection
+    collection: Collection<T>
     begin: () => void
-    write: (message: ChangeMessage) => void
+    write: (message: ChangeMessage<T>) => void
     commit: () => void
   }) => void
 
@@ -92,16 +86,23 @@ export interface SyncConfig {
   getSyncMetadata?: () => Record<string, unknown>
 }
 
-export interface MutationFn {
+export interface ChangeMessage<T extends object = Record<string, unknown>> {
+  key: string
+  value: T
+  type: OperationType
+  metadata?: Record<string, unknown>
+}
+
+export interface MutationFn<T extends object = Record<string, unknown>> {
   persist: (params: {
     attempt: number
     transaction: Transaction
-    collection: Collection
+    collection: Collection<T>
   }) => Promise<void>
 
   awaitSync?: (params: {
     transaction: Transaction
-    collection: Collection
+    collection: Collection<T>
   }) => Promise<void>
 }
 
@@ -117,28 +118,11 @@ export interface MutationStrategy {
  * The Standard Schema interface.
  * This follows the standard-schema specification: https://github.com/standard-schema/standard-schema
  */
-export interface StandardSchema<T = unknown> {
-  /** The Standard Schema properties. */
-  readonly "~standard": {
-    /** The version number of the standard. */
-    readonly version: 1
-    /** The vendor name of the schema library. */
-    readonly vendor: string
-    /** Validates unknown input values. */
-    readonly validate: (value: unknown) =>
-      | { value: T; issues?: undefined }
-      | {
-          issues: Array<{
-            message: string
-            path?: Array<string | number | symbol>
-          }>
-        }
-    /** Inferred types associated with the schema. */
-    readonly types?: {
-      /** The input type of the schema. */
-      readonly input: T
-      /** The output type of the schema. */
-      readonly output: T
+export type StandardSchema<T> = StandardSchemaV1 & {
+  "~standard": {
+    types?: {
+      input: T
+      output: T
     }
   }
 }
@@ -147,3 +131,12 @@ export interface StandardSchema<T = unknown> {
  * Type alias for StandardSchema
  */
 export type StandardSchemaAlias<T = unknown> = StandardSchema<T>
+
+export interface OperationConfig {
+  metadata?: Record<string, unknown>
+}
+
+export interface InsertConfig {
+  key?: string | (string | undefined)[]
+  metadata?: Record<string, unknown>
+}

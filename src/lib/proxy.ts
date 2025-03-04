@@ -26,14 +26,21 @@ function debugLog(...args: unknown[]): void {
   }
 }
 
-type ChangeTracker<T> = {
+// Add TypedArray interface with proper type
+interface TypedArray {
+  length: number
+  [index: number]: number
+}
+
+// Update type for ChangeTracker
+interface ChangeTracker<T extends object> {
   changes: Record<string | symbol, unknown>
   originalObject: T
   modified: boolean
   copy_?: T
   assigned_: Record<string | symbol, boolean>
   parent?: {
-    tracker: ChangeTracker<unknown>
+    tracker: ChangeTracker<object>
     prop: string | symbol
   }
   target: T
@@ -42,14 +49,24 @@ type ChangeTracker<T> = {
 /**
  * Deep clones an object while preserving special types like Date and RegExp
  */
-function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
-  if (obj === null || typeof obj !== `object`) {
+/* eslint-disable @typescript-eslint/no-unnecessary-type-constraint */
+function deepClone<T extends unknown>(
+  obj: T,
+  visited = new WeakMap<object, unknown>()
+): T {
+  // Handle null and undefined
+  if (obj === null || obj === undefined) {
     return obj
   }
 
-  // Handle circular references
+  // Handle primitive types
+  if (typeof obj !== `object`) {
+    return obj
+  }
+
+  // If we've already cloned this object, return the cached clone
   if (visited.has(obj as object)) {
-    return visited.get(obj as object)
+    return visited.get(obj as object) as T
   }
 
   if (obj instanceof Date) {
@@ -60,51 +77,51 @@ function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
     return new RegExp(obj.source, obj.flags) as unknown as T
   }
 
-  let clone: unknown
-
   if (Array.isArray(obj)) {
-    clone = []
-    visited.set(obj as object, clone)
+    const arrayClone = [] as unknown[]
+    visited.set(obj as object, arrayClone)
     obj.forEach((item, index) => {
-      clone[index] = deepClone(item, visited)
+      arrayClone[index] = deepClone(item, visited)
     })
-    return clone as T
+    return arrayClone as unknown as T
   }
 
   // Handle TypedArrays
   if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
     // Get the constructor to create a new instance of the same type
     const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
-    clone = new TypedArrayConstructor((obj as unknown as TypedArray).length)
+    const clone = new TypedArrayConstructor(
+      (obj as unknown as TypedArray).length
+    ) as unknown as TypedArray
     visited.set(obj as object, clone)
 
     // Copy the values
     for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
-      clone[i] = (obj as unknown as TypedArray)[i]
+      ;(clone as TypedArray)[i] = (obj as unknown as TypedArray)[i]
     }
 
     return clone as unknown as T
   }
 
   if (obj instanceof Map) {
-    clone = new Map()
+    const clone = new Map() as Map<unknown, unknown>
     visited.set(obj as object, clone)
     obj.forEach((value, key) => {
-      clone.set(key, deepClone(value, visited))
+      ;(clone as Map<unknown, unknown>).set(key, deepClone(value, visited))
     })
     return clone as unknown as T
   }
 
   if (obj instanceof Set) {
-    clone = new Set()
+    const clone = new Set() as Set<unknown>
     visited.set(obj as object, clone)
     obj.forEach((value) => {
-      clone.add(deepClone(value, visited))
+      ;(clone as Set<unknown>).add(deepClone(value, visited))
     })
     return clone as unknown as T
   }
 
-  clone = {} as Record<string | symbol, unknown>
+  const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
   for (const key in obj) {
@@ -125,12 +142,6 @@ function deepClone<T>(obj: T, visited = new WeakMap<object, unknown>()): T {
   }
 
   return clone as T
-}
-
-// Add TypedArray interface
-interface TypedArray {
-  length: number
-  [index: number]: number
 }
 
 /**
@@ -164,7 +175,8 @@ function deepEqual<T>(a: T, b: T): boolean {
   if (a instanceof Map && b instanceof Map) {
     if (a.size !== b.size) return false
 
-    for (const [key, val] of a.entries()) {
+    const entries = Array.from(a.entries())
+    for (const [key, val] of entries) {
       if (!b.has(key) || !deepEqual(val, b.get(key))) {
         return false
       }
@@ -209,25 +221,29 @@ function deepEqual<T>(a: T, b: T): boolean {
     !(a instanceof DataView) &&
     !(b instanceof DataView)
   ) {
-    if (a.length !== b.length) return false
+    const typedA = a as unknown as TypedArray
+    const typedB = b as unknown as TypedArray
+    if (typedA.length !== typedB.length) return false
 
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
+    for (let i = 0; i < typedA.length; i++) {
+      if (typedA[i] !== typedB[i]) return false
     }
 
     return true
   }
 
   // Handle plain objects
-  const keysA = Object.keys(a)
-  const keysB = Object.keys(b)
+  const keysA = Object.keys(a as object)
+  const keysB = Object.keys(b as object)
 
   if (keysA.length !== keysB.length) return false
 
   return keysA.every(
     (key) =>
       Object.prototype.hasOwnProperty.call(b, key) &&
-      deepEqual((a as unknown)[key], (b as unknown)[key])
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      deepEqual((a as any)[key], (b as any)[key])
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   )
 }
 
@@ -240,10 +256,12 @@ function deepEqual<T>(a: T, b: T): boolean {
  */
 export function createChangeProxy<T extends object>(
   target: T,
-  parent?: { tracker: ChangeTracker<unknown>; prop: string | symbol }
+  parent?: { tracker: ChangeTracker<object>; prop: string | symbol }
 ): {
   proxy: T
-  getChanges: () => Record<string | symbol, unknown>
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  getChanges: () => Record<string | symbol, any>
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 } {
   // Create a WeakMap to cache proxies for nested objects
   // This prevents creating multiple proxies for the same object
@@ -261,7 +279,7 @@ export function createChangeProxy<T extends object>(
   }
 
   // Mark this object and all its ancestors as modified
-  function markChanged(state: ChangeTracker<unknown>) {
+  function markChanged(state: ChangeTracker<object>) {
     if (!state.modified) {
       state.modified = true
 
@@ -273,7 +291,7 @@ export function createChangeProxy<T extends object>(
   }
 
   // Check if all properties in the current state have reverted to original values
-  function checkIfReverted(state: ChangeTracker<unknown>): boolean {
+  function checkIfReverted(state: ChangeTracker<object>): boolean {
     debugLog(
       `checkIfReverted called with assigned keys:`,
       Object.keys(state.assigned_)
@@ -292,11 +310,10 @@ export function createChangeProxy<T extends object>(
     for (const prop in state.assigned_) {
       // If this property is marked as assigned
       if (state.assigned_[prop] === true) {
-        const currentValue = state.copy_
-          ? state.copy_[prop as keyof typeof state.copy_]
-          : null
-        const originalValue =
-          state.originalObject[prop as keyof typeof state.originalObject]
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const currentValue = state.copy_ ? (state.copy_ as any)[prop] : null
+        const originalValue = (state.originalObject as any)[prop]
+        /* eslint-enable @typescript-eslint/no-explicit-any */
 
         debugLog(
           `Checking property ${String(prop)}, current:`,
@@ -320,16 +337,18 @@ export function createChangeProxy<T extends object>(
     // Check each assigned symbol property
     const symbolProps = Object.getOwnPropertySymbols(state.assigned_)
     for (const sym of symbolProps) {
-      if (state.assigned_[sym as unknown] === true) {
-        const currentValue = state.copy_ ? state.copy_[sym as unknown] : null
-        const originalValue = state.originalObject[sym as unknown]
+      if (state.assigned_[sym.toString()] === true) {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const currentValue = state.copy_ ? (state.copy_ as any)[sym] : null
+        const originalValue = (state.originalObject as any)[sym]
+        /* eslint-enable @typescript-eslint/no-explicit-any */
 
         // If the value is not equal to original, something is still changed
         if (!deepEqual(currentValue, originalValue)) {
           debugLog(`Symbol property is different, returning false`)
           return false
         }
-      } else if (state.assigned_[sym as unknown] === false) {
+      } else if (state.assigned_[sym.toString()] === false) {
         // Property was deleted, so it's different from original
         debugLog(`Symbol property was deleted, returning false`)
         return false
@@ -342,7 +361,7 @@ export function createChangeProxy<T extends object>(
   }
 
   // Recursively check and update modified status based on child objects
-  function updateModifiedStatus(state: ChangeTracker<unknown>): boolean {
+  function updateModifiedStatus(state: ChangeTracker<object>): boolean {
     debugLog(
       `updateModifiedStatus called, assigned keys:`,
       Object.keys(state.assigned_)
@@ -384,7 +403,7 @@ export function createChangeProxy<T extends object>(
 
   // Update parent status based on child changes
   function checkParentStatus(
-    parentState: ChangeTracker<unknown>,
+    parentState: ChangeTracker<object>,
     childProp: string | symbol
   ) {
     debugLog(`checkParentStatus called for child prop:`, childProp)
@@ -463,7 +482,7 @@ export function createChangeProxy<T extends object>(
             ])
 
             if (iteratorMethods.has(methodName) || prop === Symbol.iterator) {
-              return function (...args: unknown[]) {
+              return function (this: unknown, ...args: unknown[]) {
                 const result = value.apply(target, args)
 
                 // For forEach, we need to wrap the callback to track changes
@@ -472,6 +491,7 @@ export function createChangeProxy<T extends object>(
                   if (typeof callback === `function`) {
                     // Replace the original callback with our wrapped version
                     const wrappedCallback = function (
+                      this: unknown,
                       value: unknown,
                       key: unknown,
                       collection: unknown
@@ -494,7 +514,7 @@ export function createChangeProxy<T extends object>(
                 if (
                   methodName === `entries` ||
                   methodName === `values` ||
-                  methodName === Symbol.iterator ||
+                  methodName === Symbol.iterator.toString() ||
                   prop === Symbol.iterator
                 ) {
                   // If it's an iterator, we need to wrap the returned iterator
@@ -538,7 +558,7 @@ export function createChangeProxy<T extends object>(
                           }
                         } else if (
                           methodName === `values` ||
-                          methodName === Symbol.iterator ||
+                          methodName === Symbol.iterator.toString() ||
                           prop === Symbol.iterator
                         ) {
                           // If the value is an object, create a proxy for it
@@ -649,8 +669,8 @@ export function createChangeProxy<T extends object>(
           if (isRevertToOriginal) {
             debugLog(`Reverting property ${String(prop)} to original value`)
             // If the value is reverted to its original state, remove it from changes
-            delete changeTracker.changes[prop as unknown]
-            delete changeTracker.assigned_[prop as unknown]
+            delete changeTracker.changes[prop.toString()]
+            delete changeTracker.assigned_[prop.toString()]
 
             // Make sure the copy is updated with the original value
             if (changeTracker.copy_) {
@@ -694,10 +714,10 @@ export function createChangeProxy<T extends object>(
             obj[prop as keyof U] = value
 
             // Track that this property was assigned - store using the actual property (symbol or string)
-            changeTracker.assigned_[prop as unknown] = true
+            changeTracker.assigned_[prop.toString()] = true
 
             // Track the change directly with the property as the key
-            changeTracker.changes[prop as unknown] = deepClone(value)
+            changeTracker.changes[prop.toString()] = deepClone(value)
 
             // Mark this object and its ancestors as modified
             debugLog(`Marking object and ancestors as modified`)
@@ -711,20 +731,15 @@ export function createChangeProxy<T extends object>(
       },
 
       defineProperty(target, prop, descriptor) {
-        const stringProp = typeof prop === `symbol` ? prop : String(prop)
-
-        // Define the property on the target
-        const result = Object.defineProperty(target, prop, descriptor)
-
+        const result = Reflect.defineProperty(target, prop, descriptor)
         if (result) {
           // Track the change if the property has a value
           if (`value` in descriptor) {
-            changeTracker.changes[stringProp] = deepClone(descriptor.value)
-            changeTracker.assigned_[stringProp] = true
+            changeTracker.changes[prop.toString()] = deepClone(descriptor.value)
+            changeTracker.assigned_[prop.toString()] = true
             markChanged(changeTracker)
           }
         }
-
         return result
       },
 
@@ -734,7 +749,7 @@ export function createChangeProxy<T extends object>(
       },
 
       deleteProperty(obj, prop) {
-        const stringProp = typeof prop === `symbol` ? prop : String(prop)
+        const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
         if (stringProp in obj) {
           // Check if the property exists in the original object
@@ -884,9 +899,12 @@ export function createChangeProxy<T extends object>(
             changeTracker.assigned_
           )
           for (const sym of symbolProps) {
-            if (changeTracker.assigned_[sym as unknown] === true) {
-              const value = changeTracker.copy_[sym as unknown]
-              changes[sym] = deepClone(value)
+            if (changeTracker.assigned_[sym.toString()] === true) {
+              // Use the symbol directly instead of its string representation
+              /* eslint-disable @typescript-eslint/no-explicit-any */
+              const value = (changeTracker.copy_ as any)[sym]
+              /* eslint-enable @typescript-eslint/no-explicit-any */
+              changes[sym.toString()] = deepClone(value)
             }
           }
 
@@ -901,8 +919,9 @@ export function createChangeProxy<T extends object>(
       // but we're the root object, recursively check if unknown changes exist
       if (changeTracker.modified && !parent) {
         debugLog(`Root object with nested changes, checking deep equality`)
-        const currentState = changeTracker.copy_ || target
-
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        const currentState = changeTracker.copy_ || (target as any)
+        /* eslint-enable @typescript-eslint/no-explicit-any */
         debugLog(
           `Comparing current state with original:`,
           currentState,
@@ -966,9 +985,9 @@ export function createChangeProxy<T extends object>(
           `Changes detected, returning full object:`,
           changeTracker.copy_ || target
         )
-        return changeTracker.copy_
-          ? deepClone(changeTracker.copy_)
-          : deepClone(target)
+        // Convert the copy or target to a Record type before returning
+        const result = changeTracker.copy_ || target
+        return result as unknown as Record<string | symbol, unknown>
       }
 
       // No changes
@@ -1039,7 +1058,7 @@ export function withArrayChangeTracking<T extends object>(
 /**
  * Creates a shallow copy of the target object if it doesn't already exist
  */
-function prepareCopy<T>(state: ChangeTracker<T>) {
+function prepareCopy<T extends object>(state: ChangeTracker<T>) {
   if (!state.copy_) {
     state.copy_ = shallowCopy(state.originalObject)
   }

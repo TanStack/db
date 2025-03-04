@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { TransactionStore } from "./TransactionStore"
-import type { Transaction } from "./types"
+import type { Transaction, TransactionState } from "./types"
 import "fake-indexeddb/auto"
 
 describe(`TransactionStore`, () => {
@@ -12,15 +12,22 @@ describe(`TransactionStore`, () => {
     await store.clearAll()
   })
 
-  const createMockTransaction = (id: string): Transaction => ({
-    id,
-    state: `pending`,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    mutations: [],
-    attempts: [],
-    currentAttempt: 0,
-  })
+  function createMockTransaction(id: string): Transaction {
+    return {
+      id,
+      state: `pending` as TransactionState,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      mutations: [],
+      attempts: [],
+      currentAttempt: 0,
+      strategy: { type: `ordered` },
+      metadata: {},
+      toObject: () => {
+        return {} as Transaction
+      },
+    }
+  }
 
   it(`should store and retrieve a transaction`, async () => {
     const tx = createMockTransaction(`test-1`)

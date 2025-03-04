@@ -111,9 +111,9 @@ export class SortedMap<K, V> {
    *
    * @returns An iterator for the map's entries
    */
-  *[Symbol.iterator](): Iterator<[K, V]> {
+  *[Symbol.iterator](): IterableIterator<[K, V]> {
     for (const key of this.sortedKeys) {
-      yield [key, this.map.get(key)!]
+      yield [key, this.map.get(key)!] as [K, V]
     }
   }
 

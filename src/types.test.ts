@@ -53,6 +53,15 @@ describe(`Type definitions`, () => {
   it(`should allow creation of SyncConfig object`, () => {
     const config: SyncConfig = {
       id: `123`,
+      sync: ({ begin, write, commit }) => {
+        begin()
+        write({
+          key: `test`,
+          value: {},
+          type: `insert`,
+        })
+        commit()
+      },
       setup: async ({ onUpdate }) => {
         onUpdate({})
         return { data: {} }
@@ -82,7 +91,7 @@ describe(`Type definitions`, () => {
   })
 
   it(`should return empty Set from getLockedObjects`, () => {
-    const result = getLockedObjects([])
+    const result = getLockedObjects()
     expect(result).toBeInstanceOf(Set)
     expect(result.size).toBe(0)
   })

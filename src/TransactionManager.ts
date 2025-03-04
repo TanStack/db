@@ -4,41 +4,46 @@ import type {
   TransactionState,
   PendingMutation,
   MutationStrategy,
+  Attempt,
 } from "./types"
 import { TransactionStore } from "./TransactionStore"
 import { SortedMap } from "./SortedMap"
 import { Collection } from "./collection"
 import { createDeferred } from "./deferred"
 
-// Singleton instance of TransactionManager
-let transactionManagerInstance: TransactionManager | null = null
+// Singleton instance of TransactionManager with type map
+// eslint-disable-next-line
+const transactionManagerInstances = new Map<string, TransactionManager<any>>()
 
 /**
- * Get the global TransactionManager instance
- * Creates a new instance if one doesn't exist
+ * Get the global TransactionManager instance for a specific type
+ * Creates a new instance if one doesn't exist for that type
  *
- * @param store Optional TransactionStore instance
- * @param collection Optional Collection instance
+ * @param store - The transaction store for persistence
+ * @param collection - The collection this manager is associated with
  * @returns The TransactionManager instance
  */
-export function getTransactionManager(
-  store?: TransactionStore,
-  collection?: Collection
-): TransactionManager {
-  if (!transactionManagerInstance) {
-    if (!store || !collection) {
-      throw new Error(
-        `TransactionManager not initialized. You must provide store and collection parameters on first call.`
-      )
-    }
-    transactionManagerInstance = new TransactionManager(store, collection)
+export function getTransactionManager<
+  T extends object = Record<string, unknown>,
+>(store?: TransactionStore, collection?: Collection<T>): TransactionManager<T> {
+  if (!store || !collection) {
+    throw new Error(
+      `TransactionManager not initialized. You must provide store and collection parameters on first call.`
+    )
   }
-  return transactionManagerInstance
+
+  if (!transactionManagerInstances.has(collection.id)) {
+    transactionManagerInstances.set(
+      collection.id,
+      new TransactionManager(store, collection)
+    )
+  }
+  return transactionManagerInstances.get(collection.id) as TransactionManager<T>
 }
 
-export class TransactionManager {
+export class TransactionManager<T extends object = Record<string, unknown>> {
   private store: TransactionStore
-  private collection: Collection
+  private collection: Collection<T>
   public transactions: Store<SortedMap<string, Transaction>>
 
   /**
@@ -47,7 +52,7 @@ export class TransactionManager {
    * @param store - The transaction store for persistence
    * @param collection - The collection this manager is associated with
    */
-  constructor(store: TransactionStore, collection: Collection) {
+  constructor(store: TransactionStore, collection: Collection<T>) {
     this.store = store
     this.collection = collection
     // Initialize store with SortedMap that sorts by createdAt
@@ -94,7 +99,7 @@ export class TransactionManager {
    */
   createLiveTransactionReference(id: string): Transaction {
     // eslint-disable-next-line
-    const self: TransactionManager = this
+    const self: TransactionManager<T> = this
     return new Proxy(
       {
         // Implement the toObject method directly on the proxy target
@@ -409,10 +414,10 @@ export class TransactionManager {
 
     const retryTime = new Date(Date.now() + delay)
 
-    const attempt = {
+    const attempt: Attempt = {
       id: crypto.randomUUID(),
-      started_at: new Date(),
-      retry_scheduled_for: retryTime,
+      startedAt: new Date(),
+      retryScheduledFor: retryTime,
     }
 
     const updatedTransaction: Transaction = {

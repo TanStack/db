@@ -4,33 +4,25 @@ import {
   MutationFn,
   ChangeMessage,
   PendingMutation,
-  Row,
   Transaction,
   TransactionState,
   StandardSchema,
+  InsertConfig,
+  OperationConfig,
 } from "./types"
 import { withChangeTracking, withArrayChangeTracking } from "./lib/proxy"
-import { TransactionManager } from "./TransactionManager"
+import { getTransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
-import { z } from "zod"
 
 export interface CollectionConfig<T extends object = Record<string, unknown>> {
-  sync: SyncConfig
-  mutationFn: MutationFn
+  sync: SyncConfig<T>
+  mutationFn: MutationFn<T>
   schema?: StandardSchema<T>
 }
 
-interface PendingSyncedTransaction {
+interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
-  operations: ChangeMessage[]
-}
-
-interface OperationConfig {
-  metadata?: unknown
-}
-
-interface InsertConfig extends OperationConfig {
-  key?: string | string[]
+  operations: ChangeMessage<T>[]
 }
 
 /**
@@ -38,11 +30,17 @@ interface InsertConfig extends OperationConfig {
  */
 export class SchemaValidationError extends Error {
   type: `insert` | `update`
-  issues: Array<{ message: string; path?: Array<string | number | symbol> }>
+  issues: ReadonlyArray<{
+    message: string
+    path?: ReadonlyArray<string | number | symbol>
+  }>
 
   constructor(
     type: `insert` | `update`,
-    issues: Array<{ message: string; path?: Array<string | number | symbol> }>,
+    issues: ReadonlyArray<{
+      message: string
+      path?: ReadonlyArray<string | number | symbol>
+    }>,
     message?: string
   ) {
     const defaultMessage = `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
@@ -57,19 +55,21 @@ export class SchemaValidationError extends Error {
 }
 
 export class Collection<T extends object = Record<string, unknown>> {
-  public transactionManager: TransactionManager
+  public transactionManager!: ReturnType<typeof getTransactionManager<T>>
   private transactionStore: TransactionStore
 
-  public optimisticOperations: Derived<ChangeMessage[]>
+  public optimisticOperations: Derived<ChangeMessage<T>[]>
   public derivedState: Derived<Map<string, T>>
 
   private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())
-  private pendingSyncedTransactions: PendingSyncedTransaction[] = []
+  private pendingSyncedTransactions: PendingSyncedTransaction<T>[] = []
   public config: CollectionConfig<T>
 
   // WeakMap to associate objects with their keys
   public objectKeyMap = new WeakMap<object, string>()
+
+  public id = crypto.randomUUID()
 
   /**
    * Creates a new Collection instance
@@ -86,15 +86,15 @@ export class Collection<T extends object = Record<string, unknown>> {
     }
 
     this.transactionStore = new TransactionStore()
-    this.transactionManager = new TransactionManager(
+    this.transactionManager = getTransactionManager<T>(
       this.transactionStore,
       this
     )
 
     // Copies of live mutations are stored here and removed once the transaction completes.
     this.optimisticOperations = new Derived({
-      fn: ({ currDepVals }) => {
-        const result = Array.from(currDepVals[0].values())
+      fn: ({ currDepVals: [transactions] }) => {
+        const result = Array.from(transactions.values())
           .filter(
             (transaction) =>
               transaction.state !== `completed` &&
@@ -102,11 +102,18 @@ export class Collection<T extends object = Record<string, unknown>> {
           )
           .map((transaction) =>
             transaction.mutations.map((mutation) => {
-              return {
+              const message: ChangeMessage<T> = {
                 type: mutation.type,
                 key: mutation.key,
-                value: mutation.modified as Row,
-              } satisfies ChangeMessage
+                value: mutation.modified as T,
+              }
+              if (
+                mutation.metadata !== undefined &&
+                mutation.metadata !== null
+              ) {
+                message.metadata = mutation.metadata as Record<string, unknown>
+              }
+              return message
             })
           )
           .flat()
@@ -116,19 +123,22 @@ export class Collection<T extends object = Record<string, unknown>> {
       deps: [this.transactionManager.transactions],
     })
     this.optimisticOperations.mount()
+
     // Combine together synced data & optimistic operations.
-    this.derivedState = new Derived<Map<string, T>>({
-      fn: ({ currDepVals }) => {
-        const combined = new Map<string, T>(currDepVals[0] as Map<string, T>)
+    this.derivedState = new Derived({
+      fn: ({ currDepVals: [syncedData, operations] }) => {
+        const combined = new Map<string, T>(syncedData)
         // Apply the optimistic operations on top of the synced state.
-        for (const operation of currDepVals[1]) {
+        for (const operation of operations) {
+          let existingValue
           switch (operation.type) {
             case `insert`:
-              combined.set(operation.key, operation.value as T)
+              combined.set(operation.key, operation.value)
               break
             case `update`:
+              existingValue = syncedData.get(operation.key)
               combined.set(operation.key, {
-                ...currDepVals[0].get(operation.key)!,
+                ...(existingValue || {}),
                 ...operation.value,
               } as T)
               break
@@ -140,7 +150,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
         // Update object => key mappings
         const optimisticKeys = new Set<string>()
-        for (const operation of currDepVals[1]) {
+        for (const operation of operations) {
           optimisticKeys.add(operation.key)
         }
 
@@ -168,7 +178,7 @@ export class Collection<T extends object = Record<string, unknown>> {
           operations: [],
         })
       },
-      write: (message: ChangeMessage) => {
+      write: (message: ChangeMessage<T>) => {
         const pendingTransaction =
           this.pendingSyncedTransactions[
             this.pendingSyncedTransactions.length - 1
@@ -229,7 +239,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       this.transactions.size === 0 ||
       !Array.from(this.transactions.values()).some(isNotTerminalState)
     ) {
-      const keys = new Set()
+      const keys = new Set<string>()
       batch(() => {
         for (const transaction of this.pendingSyncedTransactions) {
           for (const operation of transaction.operations) {
@@ -273,8 +283,9 @@ export class Collection<T extends object = Record<string, unknown>> {
       })
 
       keys.forEach((key) => {
-        if (this.value.has(key)) {
-          this.objectKeyMap.set(this.value.get(key), key)
+        const curValue = this.value.get(key)
+        if (curValue) {
+          this.objectKeyMap.set(curValue, key)
         }
       })
 
@@ -286,38 +297,6 @@ export class Collection<T extends object = Record<string, unknown>> {
     // If the schema already implements the standard-schema interface, return it
     if (schema && typeof schema === `object` && `~standard` in schema) {
       return schema as StandardSchema<T>
-    }
-
-    // If it's a Zod schema, create a wrapper that implements the standard-schema interface
-    if (schema instanceof z.ZodType) {
-      return {
-        "~standard": {
-          version: 1,
-          vendor: `zod`,
-          validate: (value: unknown) => {
-            try {
-              const result = schema.parse(value)
-              return { value: result }
-            } catch (error) {
-              if (error instanceof z.ZodError) {
-                return {
-                  issues: error.errors.map((err) => ({
-                    message: err.message,
-                    path: err.path,
-                  })),
-                }
-              }
-              return {
-                issues: [{ message: String(error) }],
-              }
-            }
-          },
-          types: {
-            input: {} as T,
-            output: {} as T,
-          },
-        },
-      }
     }
 
     throw new Error(
@@ -351,9 +330,18 @@ export class Collection<T extends object = Record<string, unknown>> {
         // Validate the merged data
         const result = standardSchema[`~standard`].validate(mergedData)
 
+        // Ensure validation is synchronous
+        if (result instanceof Promise) {
+          throw new TypeError(`Schema validation must be synchronous`)
+        }
+
         // If validation fails, throw a SchemaValidationError with the issues
-        if (`issues` in result) {
-          throw new SchemaValidationError(type, result.issues)
+        if (`issues` in result && result.issues) {
+          const typedIssues = result.issues.map((issue) => ({
+            message: issue.message,
+            path: issue.path?.map((p) => String(p)),
+          }))
+          throw new SchemaValidationError(type, typedIssues)
         }
 
         // Return the original update data, not the merged data
@@ -365,9 +353,18 @@ export class Collection<T extends object = Record<string, unknown>> {
     // For inserts or updates without existing data, validate the data directly
     const result = standardSchema[`~standard`].validate(data)
 
+    // Ensure validation is synchronous
+    if (result instanceof Promise) {
+      throw new TypeError(`Schema validation must be synchronous`)
+    }
+
     // If validation fails, throw a SchemaValidationError with the issues
-    if (`issues` in result) {
-      throw new SchemaValidationError(type, result.issues)
+    if (`issues` in result && result.issues) {
+      const typedIssues = result.issues.map((issue) => ({
+        message: issue.message,
+        path: issue.path?.map((p) => String(p)),
+      }))
+      throw new SchemaValidationError(type, typedIssues)
     }
 
     return result.value as T
@@ -467,11 +464,26 @@ export class Collection<T extends object = Record<string, unknown>> {
    * // Update with metadata
    * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
-  update = <T1 extends object = T>(
-    items: T1 | T1[],
+
+  update<T1 extends object = T>(
+    item: T1,
     configOrCallback: ((draft: T1) => void) | OperationConfig,
     maybeCallback?: (draft: T1) => void
-  ) => {
+  ): Transaction
+
+  // eslint-disable-next-line no-dupe-class-members
+  update<T1 extends object = T>(
+    items: T1[],
+    configOrCallback: ((draft: T1[]) => void) | OperationConfig,
+    maybeCallback?: (draft: T1[]) => void
+  ): Transaction
+
+  // eslint-disable-next-line no-dupe-class-members
+  update<T1 extends object = T>(
+    items: T1 | T1[],
+    configOrCallback: ((draft: T1 | T1[]) => void) | OperationConfig,
+    maybeCallback?: (draft: T1 | T1[]) => void
+  ) {
     const itemsArray = Array.isArray(items) ? items : [items]
     const callback =
       typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
@@ -497,9 +509,15 @@ export class Collection<T extends object = Record<string, unknown>> {
     let changesArray
     if (currentObjects.length > 1) {
       // Use the proxy to track changes for all objects
-      changesArray = withArrayChangeTracking(currentObjects, callback)
+      changesArray = withArrayChangeTracking(
+        currentObjects,
+        callback as (draft: T1[]) => void
+      )
     } else {
-      const result = withChangeTracking(currentObjects[0], callback)
+      const result = withChangeTracking(
+        currentObjects[0],
+        callback as (draft: T1) => void
+      )
       changesArray = [result]
     }
 
@@ -603,7 +621,10 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     // Delete object => key mapping.
     mutations.forEach((mutation) => {
-      this.objectKeyMap.delete(this.value.get(mutation.key))
+      const curValue = this.value.get(mutation.key)
+      if (curValue) {
+        this.objectKeyMap.delete(curValue)
+      }
     })
 
     return this.transactionManager.applyTransaction(mutations, {

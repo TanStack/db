@@ -1,10 +1,11 @@
 import { describe, it, vi, expect } from "vitest"
 import { Collection } from "./collection"
-import type { ChangeMessage } from "./types"
+import type { ChangeMessage, PendingMutation } from "./types"
 import "fake-indexeddb/auto"
 import mitt from "mitt"
 import { z } from "zod"
 import { SchemaValidationError } from "./collection"
+import { Row } from "@electric-sql/client"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -14,6 +15,7 @@ describe(`Collection`, () => {
   it(`should throw if there's no mutationFn`, () => {
     expect(
       () =>
+        // @ts-expect-error Property 'mutationFn' is missing but required in type 'CollectionConfig'
         new Collection({
           sync: { id: `test`, sync: async () => {} },
         })
@@ -22,7 +24,7 @@ describe(`Collection`, () => {
 
   it(`It shouldn't expose any state until the initial sync is finished`, async () => {
     // Create a collection with a mock sync plugin
-    new Collection({
+    new Collection<{ value: string }>({
       sync: {
         id: `test`,
         sync: ({ collection, begin, write, commit }) => {
@@ -68,17 +70,18 @@ describe(`Collection`, () => {
     const syncMock = vi.fn()
 
     // new collection w/ mock sync/mutation
-    const collection = new Collection({
+    const collection = new Collection<{ value: string; newProp?: string }>({
       sync: {
         id: `mock`,
         sync: ({ begin, write, commit }) => {
-          emitter.on(`*`, (type, changes) => {
+          // @ts-expect-error don't trust mitt's typing
+          emitter.on(`*`, (_, changes: PendingMutation[]) => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
-                type: change.type,
-                value: change.changes,
+                key: change.key!,
+                type: change.type!,
+                value: change.changes as Row,
               })
             })
             commit()
@@ -119,7 +122,7 @@ describe(`Collection`, () => {
     // Test insert with auto-generated key
     const data = { value: `bar` }
     const transaction = collection.insert(data)
-    const insertedKey = transaction.mutations[0].key
+    const insertedKey = transaction.mutations[0].key ?? ``
 
     // The merged value should immediately contain the new insert
     expect(collection.value).toEqual(new Map([[insertedKey, { value: `bar` }]]))
@@ -244,17 +247,18 @@ describe(`Collection`, () => {
     const emitter = mitt()
 
     // new collection w/ mock sync/mutation
-    const collection = new Collection({
+    const collection = new Collection<{ value: string }>({
       sync: {
         id: `mock`,
         sync: ({ begin, write, commit }) => {
-          emitter.on(`*`, (type, changes) => {
+          // @ts-expect-error don't trust Mitt's typing and this works.
+          emitter.on(`*`, (_, changes: PendingMutation[]) => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
-                type: change.type,
-                value: change.changes,
+                key: change.key!,
+                type: change.type!,
+                value: change.changes as Row,
               })
             })
             commit()
@@ -326,7 +330,7 @@ describe(`Collection`, () => {
   })
 
   it(`should handle sparse key arrays for bulk inserts`, async () => {
-    const collection = new Collection({
+    const collection = new Collection<{ value: string }>({
       sync: {
         id: `test`,
         sync: ({ begin, commit }) => {
@@ -428,26 +432,26 @@ describe(`Collection with schema validation`, () => {
         expect(error.type).toBe(`insert`)
         expect(error.issues.length).toBeGreaterThan(0)
         // Check that we have validation errors for each invalid field
-        expect(error.issues.some((issue) => issue?.path.includes(`name`))).toBe(
-          true
-        )
-        expect(error.issues.some((issue) => issue?.path.includes(`age`))).toBe(
+        expect(
+          error.issues.some((issue) => issue?.path?.includes(`name`))
+        ).toBe(true)
+        expect(error.issues.some((issue) => issue?.path?.includes(`age`))).toBe(
           true
         )
         expect(
-          error.issues.some((issue) => issue?.path.includes(`email`))
+          error.issues.some((issue) => issue?.path?.includes(`email`))
         ).toBe(true)
       }
     }
 
     // Partial updates should work with valid data
-    collection.update(collection.value.get(`user1`), (draft) => {
+    collection.update(collection.value.get(`user1`)!, (draft) => {
       draft.age = 31
     })
 
     // Partial updates should fail with invalid data
     try {
-      collection.update(collection.value.get(`user1`), (draft) => {
+      collection.update(collection.value.get(`user1`)!, (draft) => {
         draft.age = -1
       })
       // Should not reach here
@@ -457,7 +461,7 @@ describe(`Collection with schema validation`, () => {
       if (error instanceof SchemaValidationError) {
         expect(error.type).toBe(`update`)
         expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue?.path.includes(`age`))).toBe(
+        expect(error.issues.some((issue) => issue?.path?.includes(`age`))).toBe(
           true
         )
       }

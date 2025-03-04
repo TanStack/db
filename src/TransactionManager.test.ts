@@ -98,11 +98,11 @@ describe(`TransactionManager`, () => {
       const attempt = updated?.attempts[0]
 
       expect(attempt?.id).toBeDefined()
-      expect(attempt?.started_at).toBeDefined()
-      expect(attempt?.retry_scheduled_for).toBeDefined()
+      expect(attempt?.startedAt).toBeDefined()
+      expect(attempt?.retryScheduledFor).toBeDefined()
 
       // Should be between 1-1.3 seconds for first retry (with jitter)
-      const delay = attempt!.retry_scheduled_for.getTime() - now
+      const delay = attempt!.retryScheduledFor.getTime() - now
       expect(delay).toBeGreaterThanOrEqual(1000)
       expect(delay).toBeLessThanOrEqual(1300)
 
@@ -124,7 +124,7 @@ describe(`TransactionManager`, () => {
         manager.scheduleRetry(transaction.id, i)
         const updated = manager.getTransaction(transaction.id)
         const attempt = updated?.attempts[i]
-        delays.push(attempt!.retry_scheduled_for.getTime() - now)
+        delays.push(attempt!.retryScheduledFor.getTime() - now)
       }
 
       // Each delay should be at least double the previous one

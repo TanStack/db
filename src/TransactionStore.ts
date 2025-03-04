@@ -57,7 +57,7 @@ export class TransactionStore {
   async putTransaction(tx: Transaction): Promise<void> {
     const db = await this.getDB()
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { isSynced, isPersisted, ...restOfTx } = tx
+    const { isSynced, isPersisted, toObject, ...restOfTx } = tx
     await db.put(`transactions`, restOfTx)
   }
 

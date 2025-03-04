@@ -8,6 +8,7 @@ import globals from "globals"
 import stylisticPlugin from "@stylistic/eslint-plugin"
 
 export default [
+  { ignores: ["dist/"] },
   js.configs.recommended,
   {
     files: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],

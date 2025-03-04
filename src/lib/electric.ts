@@ -1,6 +1,6 @@
 import {
   ShapeStream,
-  ShapeStreamOptions as BaseShapeStreamOptions,
+  ShapeStreamOptions,
   Message,
   Row,
   ControlMessage,
@@ -9,31 +9,6 @@ import {
 } from "@electric-sql/client"
 import { SyncConfig } from "../types"
 import { Store } from "@tanstack/store"
-
-/**
- * Extended ShapeStreamOptions with table parameter
- */
-export interface ShapeStreamOptions extends BaseShapeStreamOptions {
-  params?: {
-    table?: string
-    [key: string]: unknown
-  }
-}
-
-/**
- * Extended Message headers with schema information
- */
-interface MessageHeaders {
-  schema?: string
-  [key: string]: unknown
-}
-
-/**
- * Extended Message with schema information in headers
- */
-interface ExtendedMessage<T> extends Message<T> {
-  headers: MessageHeaders
-}
 
 /**
  * Extended SyncConfig interface with ElectricSQL-specific functionality
@@ -55,15 +30,15 @@ export interface ElectricSync extends SyncConfig {
 }
 
 function isUpToDateMessage<T extends Row<unknown> = Row>(
-  message: ExtendedMessage<T>
+  message: Message<T>
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown> = Row>(
-  message: ExtendedMessage<T>
-): message is ExtendedMessage<T> & { headers: { txids?: number[] } } {
+  message: Message<T>
+): message is Message<T> & { headers: { txids?: number[] } } {
   return (
     `headers` in message &&
     `txids` in message.headers &&
@@ -165,7 +140,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
       let transactionStarted = false
       let newTxids = new Set<number>()
 
-      stream.subscribe((messages: ExtendedMessage<T>[]) => {
+      stream.subscribe((messages: Message<Row>[]) => {
         let hasUpToDate = false
 
         for (const message of messages) {
@@ -176,8 +151,11 @@ export function createElectricSync<T extends Row<unknown> = Row>(
 
           // Check if the message contains schema information
           if (isChangeMessage(message) && message.headers.schema) {
-            // Store the schema for future use
-            relationSchema.setState(message.headers.schema)
+            // Store the schema for future use if it's a valid string
+            if (typeof message.headers.schema === `string`) {
+              const schema: string = message.headers.schema
+              relationSchema.setState(() => schema)
+            }
           }
 
           if (isChangeMessage(message)) {
@@ -187,7 +165,8 @@ export function createElectricSync<T extends Row<unknown> = Row>(
             }
 
             // Use the message's key if available, otherwise generate one from the row using primaryKey
-            const key = message.key || generateKeyFromRow(message.value)
+            const key =
+              message.key || generateKeyFromRow(message.value as unknown as T)
 
             // Include the primary key and relation info in the metadata
             const enhancedMetadata = {
