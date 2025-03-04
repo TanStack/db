@@ -313,7 +313,7 @@ export function useCollection<T extends object, R = Map<string, T>>(
   // Use a single subscription to get all the data we need
   const result = useSyncExternalStoreWithSelector<
     Map<string, T>,
-    { state: Map<string, T>; items: T[] }
+    { state: Map<string, T>; data: T[] }
   >(
     collection.derivedState.subscribe,
     () => collection.derivedState.state as Map<string, T>,
@@ -322,7 +322,7 @@ export function useCollection<T extends object, R = Map<string, T>>(
       return {
         state: stateMap,
         // derivedState & derivedArray are recomputed at the same time.
-        items: collection.derivedArray.state,
+        data: collection.derivedArray.state,
       }
     },
     (a, b) => {
@@ -336,18 +336,18 @@ export function useCollection<T extends object, R = Map<string, T>>(
           shallow(a.state.get(key), b.state.get(key))
         )
 
-      // Check if items arrays are equal
-      const itemsEqual =
-        a.items.length === b.items.length &&
-        a.items.every((item, i) => shallow(item, b.items[i]))
+      // Check if data arrays are equal
+      const dataEqual =
+        a.data.length === b.data.length &&
+        a.data.every((datum, i) => shallow(datum, b.data[i]))
 
-      return stateEqual && itemsEqual
+      return stateEqual && dataEqual
     }
   )
 
   const returnValue = {
     state: result.state,
-    items: result.items,
+    data: result.data,
     insert: collection.insert.bind(collection),
     update: collection.update.bind(collection),
     delete: collection.delete.bind(collection),

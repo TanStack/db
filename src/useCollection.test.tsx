@@ -40,7 +40,7 @@ describe(`useCollection`, () => {
 
     // Initial state should be empty
     expect(result.current.state.size).toBe(0)
-    expect(result.current.items).toEqual([])
+    expect(result.current.data).toEqual([])
 
     // Test single insert with explicit key
     await act(async () => {
@@ -50,7 +50,7 @@ describe(`useCollection`, () => {
     // Verify insert
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`user1`)).toEqual({ name: `Alice` })
-    expect(result.current.items).toEqual([{ name: `Alice` }])
+    expect(result.current.data).toEqual([{ name: `Alice` }])
 
     // Test bulk insert with sparse keys
     await act(async () => {
@@ -66,9 +66,9 @@ describe(`useCollection`, () => {
     expect(result.current.state.size).toBe(3)
     expect(result.current.state.get(`user2`)).toEqual({ name: `Bob` })
     expect(result.current.state.get(charlieKey)).toEqual({ name: `Charlie` })
-    expect(result.current.items.length).toBe(3)
-    expect(result.current.items).toContainEqual({ name: `Bob` })
-    expect(result.current.items).toContainEqual({ name: `Charlie` })
+    expect(result.current.data.length).toBe(3)
+    expect(result.current.data).toContainEqual({ name: `Bob` })
+    expect(result.current.data).toContainEqual({ name: `Charlie` })
 
     // Test update with callback
     const updateTransaction = await act(async () => {
@@ -83,7 +83,7 @@ describe(`useCollection`, () => {
     await updateTransaction.isSynced?.promise
     // Verify update
     expect(result.current.state.get(`user1`)).toEqual({ name: `Alice Smith` })
-    expect(result.current.items).toContainEqual({ name: `Alice Smith` })
+    expect(result.current.data).toContainEqual({ name: `Alice Smith` })
 
     // Test bulk update with metadata
     await act(async () => {
@@ -106,8 +106,8 @@ describe(`useCollection`, () => {
       name: `Alice Smith Jr.`,
     })
     expect(result.current.state.get(`user2`)).toEqual({ name: `Bob Sr.` })
-    expect(result.current.items).toContainEqual({ name: `Alice Smith Jr.` })
-    expect(result.current.items).toContainEqual({ name: `Bob Sr.` })
+    expect(result.current.data).toContainEqual({ name: `Alice Smith Jr.` })
+    expect(result.current.data).toContainEqual({ name: `Bob Sr.` })
 
     // Test single delete
     await act(async () => {
@@ -116,7 +116,7 @@ describe(`useCollection`, () => {
 
     // Verify single delete
     expect(result.current.state.has(`user1`)).toBe(false)
-    expect(result.current.items).not.toContainEqual({ name: `Alice Smith Jr.` })
+    expect(result.current.data).not.toContainEqual({ name: `Alice Smith Jr.` })
 
     // Test bulk delete with metadata
     await act(async () => {
@@ -129,7 +129,7 @@ describe(`useCollection`, () => {
 
     // Verify all items are deleted
     expect(result.current.state.size).toBe(0)
-    expect(result.current.items.length).toBe(0)
+    expect(result.current.data.length).toBe(0)
 
     // Verify persist was called for each operation
     expect(persistMock).toHaveBeenCalledTimes(6) // 2 inserts + 2 updates + 2 deletes
@@ -170,8 +170,8 @@ describe(`useCollection`, () => {
     // Initial state should be empty
     expect(result.current.state).toBeInstanceOf(Map)
     expect(result.current.state.size).toBe(0)
-    expect(result.current.items).toBeInstanceOf(Array)
-    expect(result.current.items.length).toBe(0)
+    expect(result.current.data).toBeInstanceOf(Array)
+    expect(result.current.data.length).toBe(0)
 
     // Insert some test data
     await act(async () => {
@@ -197,10 +197,10 @@ describe(`useCollection`, () => {
     expect(result.current.state.get(`key3`)).toEqual({ id: 3, name: `Item 3` })
 
     // Verify items property (Array)
-    expect(result.current.items.length).toBe(3)
-    expect(result.current.items).toContainEqual({ id: 1, name: `Item 1` })
-    expect(result.current.items).toContainEqual({ id: 2, name: `Item 2` })
-    expect(result.current.items).toContainEqual({ id: 3, name: `Item 3` })
+    expect(result.current.data.length).toBe(3)
+    expect(result.current.data).toContainEqual({ id: 1, name: `Item 1` })
+    expect(result.current.data).toContainEqual({ id: 2, name: `Item 2` })
+    expect(result.current.data).toContainEqual({ id: 3, name: `Item 3` })
   })
 
   it(`should work with a selector function`, async () => {
@@ -238,8 +238,8 @@ describe(`useCollection`, () => {
     // Initial state
     expect(result.current.state).toBeInstanceOf(Map)
     expect(result.current.state.size).toBe(0)
-    expect(result.current.items).toBeInstanceOf(Array)
-    expect(result.current.items.length).toBe(0)
+    expect(result.current.data).toBeInstanceOf(Array)
+    expect(result.current.data.length).toBe(0)
 
     // Insert some test data
     await act(async () => {
@@ -259,7 +259,7 @@ describe(`useCollection`, () => {
     })
 
     // Verify selector result
-    expect(result.current.items.map((item) => item.name)).toEqual([
+    expect(result.current.data.map((item) => item.name)).toEqual([
       `Alice`,
       `Bob`,
       `Charlie`,
@@ -267,6 +267,6 @@ describe(`useCollection`, () => {
 
     // Verify state and items are still available
     expect(result.current.state.size).toBe(3)
-    expect(result.current.items.length).toBe(3)
+    expect(result.current.data.length).toBe(3)
   })
 })
