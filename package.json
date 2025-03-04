@@ -1,6 +1,6 @@
 {
   "name": "@kylemathews/sync",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Sync library for client-side data management",
   "type": "module",
   "exports": {
