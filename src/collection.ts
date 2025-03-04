@@ -152,7 +152,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
   public optimisticOperations: Derived<ChangeMessage<T>[]>
   public derivedState: Derived<Map<string, T>>
-  private derivedArray: Derived<T[]>
+  public derivedArray: Derived<T[]>
 
   private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())

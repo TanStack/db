@@ -43,7 +43,7 @@ export default function App() {
   )
 
   const {
-    data: todos,
+    items: todos,
     insert,
     update,
     delete: deleteTodo,
@@ -79,7 +79,7 @@ export default function App() {
   })
 
   const {
-    data: configData,
+    items: configData,
     update: updateConfig,
     insert: insertConfig,
   } = useCollection<UpdateConfig>({
@@ -113,8 +113,7 @@ export default function App() {
 
   // Define a more robust type-safe helper function to get config values
   const getConfigValue = (key: string): string => {
-    // eslint-disable-next-line
-    for (const [_, config] of configData) {
+    for (const config of configData) {
       if (config.key === key) {
         return config.value!
       }
@@ -124,8 +123,7 @@ export default function App() {
 
   // Define a helper function to update config values
   const setConfigValue = (key: string, value: string): void => {
-    // eslint-disable-next-line
-    for (const [_, config] of configData.entries()) {
+    for (const config of configData) {
       if (config.key === key) {
         updateConfig(config, (draft) => {
           draft.value = value
@@ -212,12 +210,8 @@ export default function App() {
     })
   }
 
-  const activeTodos = Array.from(todos.values()).filter(
-    (todo) => !todo.completed
-  )
-  const completedTodos = Array.from(todos.values()).filter(
-    (todo) => todo.completed
-  )
+  const activeTodos = todos.filter((todo) => !todo.completed)
+  const completedTodos = todos.filter((todo) => todo.completed)
 
   return (
     <>
@@ -254,12 +248,12 @@ export default function App() {
 
           <div className="bg-white shadow-[0_2px_4px_0_rgba(0,0,0,0.2),0_25px_50px_0_rgba(0,0,0,0.1)] relative">
             <form onSubmit={handleSubmit} className="relative">
-              {todos.size > 0 && (
+              {todos.length > 0 && (
                 <button
                   type="button"
                   className="absolute left-0 w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
                   onClick={async () => {
-                    const allCompleted = completedTodos.length === todos.size
+                    const allCompleted = completedTodos.length === todos.length
                     update(
                       allCompleted ? completedTodos : activeTodos,
                       (drafts) =>
@@ -284,12 +278,12 @@ export default function App() {
               />
             </form>
 
-            {todos.size > 0 && (
+            {todos.length > 0 && (
               <>
                 <ul className="my-0 mx-0 p-0 list-none">
-                  {Array.from(todos).map(([key, todo]) => (
+                  {todos.map((todo) => (
                     <li
-                      key={key}
+                      key={todo.id}
                       className="relative border-b border-[#ededed] last:border-none group"
                     >
                       <div className="flex items-center h-[58px] pl-[60px]">

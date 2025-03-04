@@ -126,7 +126,7 @@ export function useCollections() {
  * @template T - Type of items in the collection
  * @template R - Return type of the selector function
  * @param config - Configuration for the collection
- * @param selector - Optional selector function to transform the collection data
+ * @param selector - TODO Optional selector function to transform the collection data
  * @returns Object containing collection data and CRUD operations
  */
 // Overload for when selector is not provided
@@ -134,9 +134,13 @@ export function useCollection<T extends object>(
   config: CollectionConfig<T>
 ): {
   /**
-   * The collection data, transformed by the optional selector function
+   * The collection data as a Map with keys as identifiers
    */
-  data: Map<string, T>
+  state: Map<string, T>
+  /**
+   * The collection data as an Array of items
+   */
+  items: T[]
   /**
    * Updates an existing item in the collection
    *
@@ -202,11 +206,19 @@ export function useCollection<T extends object>(
 // Overload for when selector is provided
 // eslint-disable-next-line
 export function useCollection<T extends object, R>(
-  config: CollectionConfig<T>,
-  selector: (d: Map<string, T>) => R
+  config: CollectionConfig<T>
+  // selector: (d: Map<string, T>) => R
 ): {
   /**
-   * The collection data, transformed by the optional selector function
+   * The collection data as a Map with keys as identifiers
+   */
+  state: Map<string, T>
+  /**
+   * The collection data as an Array of items
+   */
+  items: T[]
+  /**
+   * The collection data, transformed by the selector function
    */
   data: R
   /**
@@ -274,8 +286,8 @@ export function useCollection<T extends object, R>(
 // Implementation
 // eslint-disable-next-line
 export function useCollection<T extends object, R = Map<string, T>>(
-  config: CollectionConfig<T>,
-  selector?: (d: Map<string, T>) => R
+  config: CollectionConfig<T>
+  // selector?: (d: Map<string, T>) => R
 ) {
   // Get or create collection instance
   if (!collectionsStore.state.has(config.id)) {
@@ -298,21 +310,50 @@ export function useCollection<T extends object, R = Map<string, T>>(
 
   const collection = collectionsStore.state.get(config.id)! as Collection<T>
 
-  // Subscribe to collection's derivedState
-  const data = useSyncExternalStoreWithSelector<Map<string, T>, R>(
+  // Use a single subscription to get all the data we need
+  const result = useSyncExternalStoreWithSelector<
+    Map<string, T>,
+    { state: Map<string, T>; items: T[] }
+  >(
     collection.derivedState.subscribe,
     () => collection.derivedState.state as Map<string, T>,
     () => collection.derivedState.state as Map<string, T>,
-    selector ?? ((d: Map<string, T>) => d as unknown as R),
-    shallow
+    (stateMap) => {
+      return {
+        state: stateMap,
+        // derivedState & derivedArray are recomputed at the same time.
+        items: collection.derivedArray.state,
+      }
+    },
+    (a, b) => {
+      // Custom equality function that checks each property
+      if (a === b) return true
+
+      // Check if state maps are equal
+      const stateEqual =
+        a.state.size === b.state.size &&
+        Array.from(a.state.keys()).every((key) =>
+          shallow(a.state.get(key), b.state.get(key))
+        )
+
+      // Check if items arrays are equal
+      const itemsEqual =
+        a.items.length === b.items.length &&
+        a.items.every((item, i) => shallow(item, b.items[i]))
+
+      return stateEqual && itemsEqual
+    }
   )
 
-  return {
-    data,
+  const returnValue = {
+    state: result.state,
+    items: result.items,
     insert: collection.insert.bind(collection),
     update: collection.update.bind(collection),
     delete: collection.delete.bind(collection),
   }
+
+  return returnValue
 }
 
 /**
