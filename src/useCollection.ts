@@ -286,6 +286,7 @@ export function useCollection<T extends object, R = Map<string, T>>(
       next.set(
         config.id,
         new Collection<T>({
+          id: config.id,
           sync: config.sync,
           mutationFn: config.mutationFn,
           schema: config.schema,

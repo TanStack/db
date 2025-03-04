@@ -134,7 +134,6 @@ export function createElectricSync<T extends Row<unknown> = Row>(
   }
 
   return {
-    id: `electric`,
     sync: ({ begin, write, commit }) => {
       const stream = new ShapeStream(streamOptions)
       let transactionStarted = false

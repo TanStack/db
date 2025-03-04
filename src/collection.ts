@@ -85,6 +85,7 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
       next.set(
         config.id,
         new Collection<T>({
+          id: config.id,
           sync: config.sync,
           mutationFn: config.mutationFn,
           schema: config.schema,
