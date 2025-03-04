@@ -151,11 +151,13 @@ export class Collection<T extends object = Record<string, unknown>> {
 
   public optimisticOperations: Derived<ChangeMessage<T>[]>
   public derivedState: Derived<Map<string, T>>
+  private derivedArray: Derived<T[]>
 
   private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: PendingSyncedTransaction<T>[] = []
   public config: CollectionConfig<T>
+  private hasReceivedFirstCommit: boolean = false
 
   // WeakMap to associate objects with their keys
   public objectKeyMap = new WeakMap<object, string>()
@@ -267,6 +269,15 @@ export class Collection<T extends object = Record<string, unknown>> {
       },
       deps: [this.syncedData, this.optimisticOperations],
     })
+
+    // Create a derived array from the map to avoid recalculating it
+    this.derivedArray = new Derived({
+      fn: ({ currDepVals: [stateMap] }) => {
+        return Array.from(stateMap.values())
+      },
+      deps: [this.derivedState],
+    })
+    this.derivedArray.mount()
 
     this.config = config
 
@@ -386,7 +397,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       })
 
       keys.forEach((key) => {
-        const curValue = this.value.get(key)
+        const curValue = this.state.get(key)
         if (curValue) {
           this.objectKeyMap.set(curValue, key)
         }
@@ -395,9 +406,12 @@ export class Collection<T extends object = Record<string, unknown>> {
       this.pendingSyncedTransactions = []
 
       // Call any registered one-time commit listeners
-      const callbacks = [...this.onFirstCommitCallbacks]
-      this.onFirstCommitCallbacks = []
-      callbacks.forEach((callback) => callback())
+      if (!this.hasReceivedFirstCommit) {
+        this.hasReceivedFirstCommit = true
+        const callbacks = [...this.onFirstCommitCallbacks]
+        this.onFirstCommitCallbacks = []
+        callbacks.forEach((callback) => callback())
+      }
     }
   }
 
@@ -424,7 +438,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     // For updates, we need to merge with the existing data before validation
     if (type === `update` && key) {
       // Get the existing data for this key
-      const existingData = this.value.get(key)
+      const existingData = this.state.get(key)
 
       if (
         existingData &&
@@ -611,7 +625,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keys.map((key) => ({
-      ...(this.value.get(key) || {}),
+      ...(this.state.get(key) || {}),
     })) as T1[]
 
     let changesArray
@@ -644,9 +658,9 @@ export class Collection<T extends object = Record<string, unknown>> {
 
         return {
           mutationId: crypto.randomUUID(),
-          original: (this.value.get(key) || {}) as Record<string, unknown>,
+          original: (this.state.get(key) || {}) as Record<string, unknown>,
           modified: {
-            ...(this.value.get(key) || {}),
+            ...(this.state.get(key) || {}),
             ...validatedData,
           } as Record<string, unknown>,
           changes: validatedData as Record<string, unknown>,
@@ -710,7 +724,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
       const mutation: PendingMutation = {
         mutationId: crypto.randomUUID(),
-        original: (this.value.get(key) || {}) as Record<string, unknown>,
+        original: (this.state.get(key) || {}) as Record<string, unknown>,
         modified: { _deleted: true },
         changes: { _deleted: true },
         key,
@@ -729,7 +743,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     // Delete object => key mapping.
     mutations.forEach((mutation) => {
-      const curValue = this.value.get(mutation.key)
+      const curValue = this.state.get(mutation.key)
       if (curValue) {
         this.objectKeyMap.delete(curValue)
       }
@@ -740,36 +754,62 @@ export class Collection<T extends object = Record<string, unknown>> {
     })
   }
 
-  // TODO should be withTransaction & it shouldn't start saving until it's explicitly started?
-  // Not critical for now so we can defer this.
-  // withMutation = ({ changes, metadata }: WithMutationParams) => {
-  //   const mutations = changes.map((change) => ({
-  //     mutationId: crypto.randomUUID(),
-  //     original:
-  //       changes.map((change) => this.syncedData.state.get(change.key)) || [],
-  //     modified: changes.map((change) => {
-  //       return {
-  //         ...(this.syncedData.state.get(change.key) || {}),
-  //         ...change.data,
-  //       }
-  //     }),
-  //     changes: change,
-  //     metadata,
-  //     createdAt: new Date(),
-  //     updatedAt: new Date(),
-  //     state: `created` as const,
-  //   }))
-  //
-  //   this.transactionManager.applyTransaction(mutations, { type: `ordered` })
-  // }
-
   /**
-   * Gets the current value of the collection as a Map
+   * Gets the current state of the collection as a Map
    *
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
-  get value() {
+  get state() {
     return this.derivedState.state as Map<string, T>
+  }
+
+  /**
+   * Gets the current state of the collection as a Map, but only resolves when data is available
+   * Waits for the first sync commit to complete before resolving
+   *
+   * @returns Promise that resolves to a Map containing all items in the collection
+   */
+  stateWhenReady(): Promise<Map<string, T>> {
+    // If we already have data or there are no loading collections, resolve immediately
+    if (this.state.size > 0 || this.hasReceivedFirstCommit === true) {
+      return Promise.resolve(this.state)
+    }
+
+    // Otherwise, wait for the first commit
+    return new Promise<Map<string, T>>((resolve) => {
+      this.onFirstCommit(() => {
+        resolve(this.state)
+      })
+    })
+  }
+
+  /**
+   * Gets the current state of the collection as an Array
+   *
+   * @returns An Array containing all items in the collection
+   */
+  get toArray() {
+    return this.derivedArray.state as T[]
+  }
+
+  /**
+   * Gets the current state of the collection as an Array, but only resolves when data is available
+   * Waits for the first sync commit to complete before resolving
+   *
+   * @returns Promise that resolves to an Array containing all items in the collection
+   */
+  toArrayWhenReady(): Promise<T[]> {
+    // If we already have data or there are no loading collections, resolve immediately
+    if (this.toArray.length > 0 || this.hasReceivedFirstCommit === true) {
+      return Promise.resolve(this.toArray)
+    }
+
+    // Otherwise, wait for the first commit
+    return new Promise<T[]>((resolve) => {
+      this.onFirstCommit(() => {
+        resolve(this.toArray)
+      })
+    })
   }
 
   /**

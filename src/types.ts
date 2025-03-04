@@ -71,7 +71,6 @@ export type Row<Extensions = never> = Record<string, Value<Extensions>>
 type OperationType = `insert` | `update` | `delete`
 
 export interface SyncConfig<T extends object = Record<string, unknown>> {
-  id: string
   sync: (params: {
     collection: Collection<T>
     begin: () => void

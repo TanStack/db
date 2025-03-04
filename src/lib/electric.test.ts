@@ -71,7 +71,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(
+    expect(collection.state).toEqual(
       new Map([[`1`, { id: 1, name: `Test User` }]])
     )
   })
@@ -102,7 +102,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(
+    expect(collection.state).toEqual(
       new Map([
         [`1`, { id: 1, name: `Test User` }],
         [`2`, { id: 2, name: `Another User` }],
@@ -136,7 +136,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(
+    expect(collection.state).toEqual(
       new Map([[`1`, { id: 1, name: `Updated User` }]])
     )
   })
@@ -166,7 +166,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.value).toEqual(new Map())
+    expect(collection.state).toEqual(new Map())
   })
 
   it(`should not commit changes without up-to-date message`, () => {
@@ -187,7 +187,7 @@ describe(`Electric Integration`, () => {
     ])
 
     // Changes should still be pending until up-to-date is received
-    expect(collection.value).toEqual(new Map())
+    expect(collection.state).toEqual(new Map())
   })
 
   // Tests for txid tracking functionality
@@ -416,7 +416,7 @@ describe(`Electric Integration`, () => {
       // Note: In a real implementation, the collection would be updated by the sync process
       // This is just verifying our test setup worked correctly
       expect(fakeBackend.data.has(`item1`)).toBe(true)
-      expect(testCollection.value.has(`item1`)).toBe(true)
+      expect(testCollection.state.has(`item1`)).toBe(true)
     })
   })
 

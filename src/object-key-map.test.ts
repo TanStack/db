@@ -31,7 +31,7 @@ describe(`Object-Key Association`, () => {
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
 
-    const item = collection.value.get(`user1`)
+    const item = collection.state.get(`user1`)
 
     // Make sure item exists before using it as a key
     expect(item).toBeDefined()
@@ -42,7 +42,7 @@ describe(`Object-Key Association`, () => {
     })
 
     // Verify the update worked
-    const updated = collection.value.get(`user1`)
+    const updated = collection.state.get(`user1`)
     expect(updated).toEqual({ name: `John`, age: 31 })
   })
 
@@ -55,8 +55,8 @@ describe(`Object-Key Association`, () => {
       key: [`user1`, `user2`],
     })
 
-    const john = collection.value.get(`user1`)
-    const jane = collection.value.get(`user2`)
+    const john = collection.state.get(`user1`)
+    const jane = collection.state.get(`user2`)
 
     // Update multiple objects using their references
     collection.update([john!, jane!], (items) => {
@@ -65,8 +65,8 @@ describe(`Object-Key Association`, () => {
     })
 
     // Verify updates
-    expect(collection.value.get(`user1`)).toEqual({ name: `John`, age: 31 })
-    expect(collection.value.get(`user2`)).toEqual({ name: `Jane Doe`, age: 28 })
+    expect(collection.state.get(`user1`)).toEqual({ name: `John`, age: 31 })
+    expect(collection.state.get(`user2`)).toEqual({ name: `Jane Doe`, age: 28 })
   })
 
   it(`should handle delete with object reference`, async () => {
@@ -74,13 +74,13 @@ describe(`Object-Key Association`, () => {
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
 
-    const john = collection.value.get(`user1`)
+    const john = collection.state.get(`user1`)
 
     // Delete using the object reference
     collection.delete(john!)
 
     // Verify deletion
-    expect(collection.value.get(`user1`)).toBeUndefined()
+    expect(collection.state.get(`user1`)).toBeUndefined()
   })
 
   it(`should maintain object-key association after updates`, async () => {
@@ -88,7 +88,7 @@ describe(`Object-Key Association`, () => {
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
 
-    const john = collection.value.get(`user1`)
+    const john = collection.state.get(`user1`)
 
     // First update
     collection.update(john!, (item) => {
@@ -101,7 +101,7 @@ describe(`Object-Key Association`, () => {
     })
 
     // Verify both updates worked
-    const updated = collection.value.get(`user1`)
+    const updated = collection.state.get(`user1`)
     expect(updated).toEqual({ name: `John Doe`, age: 31 })
   })
 
@@ -126,9 +126,9 @@ describe(`Object-Key Association`, () => {
       key: [`user1`, `user2`, `user3`],
     })
 
-    const john = collection.value.get(`user1`)
-    const jane = collection.value.get(`user2`)
-    const bob = collection.value.get(`user3`)
+    const john = collection.state.get(`user1`)
+    const jane = collection.state.get(`user2`)
+    const bob = collection.state.get(`user3`)
 
     // Verify inserts
     expect(john).toEqual({ name: `John`, age: 30 })

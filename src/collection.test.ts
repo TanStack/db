@@ -29,7 +29,7 @@ describe(`Collection`, () => {
         id: `test`,
         sync: ({ collection, begin, write, commit }) => {
           // Initial state should be empty
-          expect(collection.value).toEqual(new Map())
+          expect(collection.state).toEqual(new Map())
 
           // Start a batch of operations
           begin()
@@ -43,7 +43,7 @@ describe(`Collection`, () => {
           for (const op of operations) {
             write(op)
             // Data should still be empty during writes
-            expect(collection.value).toEqual(new Map())
+            expect(collection.state).toEqual(new Map())
           }
 
           // Commit the changes
@@ -54,7 +54,7 @@ describe(`Collection`, () => {
             [`user1`, { name: `Alice` }],
             [`user2`, { name: `Bob` }],
           ])
-          expect(collection.value).toEqual(expectedData)
+          expect(collection.state).toEqual(expectedData)
         },
       },
       mutationFn: {
@@ -125,7 +125,7 @@ describe(`Collection`, () => {
     const insertedKey = transaction.mutations[0].key ?? ``
 
     // The merged value should immediately contain the new insert
-    expect(collection.value).toEqual(new Map([[insertedKey, { value: `bar` }]]))
+    expect(collection.state).toEqual(new Map([[insertedKey, { value: `bar` }]]))
 
     // check there's a transaction in peristing state
     expect(
@@ -170,30 +170,30 @@ describe(`Collection`, () => {
       Array.from(collection.transactions.values())[0].state
     ).toMatchInlineSnapshot(`"completed"`)
     expect(collection.optimisticOperations.state).toEqual([])
-    expect(collection.value).toEqual(new Map([[insertedKey, { value: `bar` }]]))
+    expect(collection.state).toEqual(new Map([[insertedKey, { value: `bar` }]]))
 
     // Test insert with provided key
     collection.insert({ value: `baz` }, { key: `custom-key` })
-    expect(collection.value.get(`custom-key`)).toEqual({ value: `baz` })
+    expect(collection.state.get(`custom-key`)).toEqual({ value: `baz` })
 
     // Test bulk insert
     const bulkData = [{ value: `item1` }, { value: `item2` }]
     collection.insert(bulkData)
-    const keys = Array.from(collection.value.keys())
-    expect(collection.value.get(keys[2])).toEqual(bulkData[0])
-    expect(collection.value.get(keys[3])).toEqual(bulkData[1])
+    const keys = Array.from(collection.state.keys())
+    expect(collection.state.get(keys[2])).toEqual(bulkData[0])
+    expect(collection.state.get(keys[3])).toEqual(bulkData[1])
 
     // Test update with callback
-    collection.update(collection.value.get(insertedKey)!, (item) => {
+    collection.update(collection.state.get(insertedKey)!, (item) => {
       item.value = `bar2`
     })
 
     // The merged value should contain the update.
-    expect(collection.value.get(insertedKey)).toEqual({ value: `bar2` })
+    expect(collection.state.get(insertedKey)).toEqual({ value: `bar2` })
 
     // Test update with config and callback
     collection.update(
-      collection.value.get(insertedKey)!,
+      collection.state.get(insertedKey)!,
       { metadata: { updated: true } },
       (item) => {
         item.value = `bar3`
@@ -202,15 +202,15 @@ describe(`Collection`, () => {
     )
 
     // The merged value should contain the update
-    expect(collection.value.get(insertedKey)).toEqual({
+    expect(collection.state.get(insertedKey)).toEqual({
       value: `bar3`,
       newProp: `new value`,
     })
 
     // Test bulk update
     const items = [
-      collection.value.get(keys[2])!,
-      collection.value.get(keys[3])!,
+      collection.state.get(keys[2])!,
+      collection.state.get(keys[3])!,
     ]
     collection.update(items, { metadata: { bulkUpdate: true } }, (items) => {
       items.forEach((item) => {
@@ -219,28 +219,28 @@ describe(`Collection`, () => {
     })
 
     // Check bulk updates
-    expect(collection.value.get(keys[2])).toEqual({ value: `item1-updated` })
-    expect(collection.value.get(keys[3])).toEqual({ value: `item2-updated` })
+    expect(collection.state.get(keys[2])).toEqual({ value: `item1-updated` })
+    expect(collection.state.get(keys[3])).toEqual({ value: `item2-updated` })
 
-    const toBeDeleted = collection.value.get(insertedKey)!
+    const toBeDeleted = collection.state.get(insertedKey)!
     // Test delete single item
     collection.delete(toBeDeleted)
-    expect(collection.value.has(insertedKey)).toBe(false)
+    expect(collection.state.has(insertedKey)).toBe(false)
     expect(collection.objectKeyMap.has(toBeDeleted)).toBe(false)
 
     // Test delete with metadata
-    collection.delete(collection.value.get(`custom-key`)!, {
+    collection.delete(collection.state.get(`custom-key`)!, {
       metadata: { reason: `test` },
     })
-    expect(collection.value.has(`custom-key`)).toBe(false)
+    expect(collection.state.has(`custom-key`)).toBe(false)
 
     // Test bulk delete
     collection.delete([
-      collection.value.get(keys[2])!,
-      collection.value.get(keys[3])!,
+      collection.state.get(keys[2])!,
+      collection.state.get(keys[3])!,
     ])
-    expect(collection.value.has(keys[2])).toBe(false)
-    expect(collection.value.has(keys[3])).toBe(false)
+    expect(collection.state.has(keys[2])).toBe(false)
+    expect(collection.state.has(keys[3])).toBe(false)
   })
 
   it(`synced updates shouldn't be applied while there's an ongoing transaction`, async () => {
@@ -272,7 +272,7 @@ describe(`Collection`, () => {
           emitter.emit(`update`, [
             { key: `the-key`, type: `insert`, changes: { bar: `value` } },
           ])
-          expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+          expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
           // Remove it so we don't have to assert against it below
           emitter.emit(`update`, [{ key: `the-key`, type: `delete` }])
           return Promise.resolve()
@@ -293,7 +293,7 @@ describe(`Collection`, () => {
     )
 
     // The merged value should immediately contain the new insert
-    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+    expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
 
     // check there's a transaction in peristing state
     expect(
@@ -312,7 +312,7 @@ describe(`Collection`, () => {
 
     await transaction.isSynced?.promise
 
-    expect(collection.value).toEqual(new Map([[`foo`, { value: `bar` }]]))
+    expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
   })
 
   // Skip until e2e working
@@ -368,10 +368,10 @@ describe(`Collection`, () => {
     expect(keys[3]).toHaveLength(6)
 
     // Verify all items were inserted with correct values
-    expect(collection.value.get(keys[0])).toEqual({ value: `item1` })
-    expect(collection.value.get(keys[1])).toEqual({ value: `item2` })
-    expect(collection.value.get(keys[2])).toEqual({ value: `item3` })
-    expect(collection.value.get(keys[3])).toEqual({ value: `item4` })
+    expect(collection.state.get(keys[0])).toEqual({ value: `item1` })
+    expect(collection.state.get(keys[1])).toEqual({ value: `item2` })
+    expect(collection.state.get(keys[2])).toEqual({ value: `item3` })
+    expect(collection.state.get(keys[3])).toEqual({ value: `item4` })
 
     // Test error case: more keys than items
     expect(() => {
@@ -445,13 +445,13 @@ describe(`Collection with schema validation`, () => {
     }
 
     // Partial updates should work with valid data
-    collection.update(collection.value.get(`user1`)!, (draft) => {
+    collection.update(collection.state.get(`user1`)!, (draft) => {
       draft.age = 31
     })
 
     // Partial updates should fail with invalid data
     try {
-      collection.update(collection.value.get(`user1`)!, (draft) => {
+      collection.update(collection.state.get(`user1`)!, (draft) => {
         draft.age = -1
       })
       // Should not reach here
