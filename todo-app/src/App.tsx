@@ -43,7 +43,7 @@ export default function App() {
   )
 
   const {
-    items: todos,
+    data: todos,
     insert,
     update,
     delete: deleteTodo,
@@ -79,7 +79,7 @@ export default function App() {
   })
 
   const {
-    items: configData,
+    data: configData,
     update: updateConfig,
     insert: insertConfig,
   } = useCollection<UpdateConfig>({
