@@ -1,5 +1,5 @@
 {
-  "name": "@kylemathews/sync",
+  "name": "@kylemathews-testing/sync",
   "version": "0.0.1",
   "description": "Sync library for client-side data management",
   "type": "module",
