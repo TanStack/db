@@ -1,63 +1,257 @@
-# sync
-Sync in data, mutate the data, sync back the changes
+# @kylemathews/sync
 
-## Features
+A library for fast optimistic updates with flexible backend support that pairs seamlessly with sync engines like ElectricSQL.
 
-### Preloading Collections
+## Installation
 
-The `preloadCollection` function allows you to preload data for collections before rendering routes or components. This is useful when you want to ensure that data is available immediately when a component renders, improving the user experience by preventing loading states.
+```bash
+npm i @kylemathews/sync
+# or with pnpm (recommended)
+pnpm add @kylemathews/sync
+```
+
+## Overview
+
+`@kylemathews/sync` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
+
+- **Optimistic Updates**: Apply changes instantly in the UI while syncing in the background
+- **Flexible Backend Support**: Works with any backend or sync engine
+- **Immutable Snapshots**: Create immutable snapshots of updates that can be persisted and rolled back
+- **React Integration**: Seamless integration with React applications
+
+## Core Concepts
+
+### Collections
+
+Collections are the central concept in `@kylemathews/sync`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
+
+- Has a unique identifier
+- Contains data items accessible via keys
+- Provides CRUD operations (insert, update, delete)
+- Manages its own sync and persistence logic
+
+### Transactions
+
+All mutations in `@kylemathews/sync` are handled through transactions. Transactions:
+
+- Group related changes together
+- Track the state of mutations (pending, persisting, completed, failed)
+- Support rollback in case of errors
+- Provide optimistic updates to the UI
+
+### Proxies
+
+The library uses proxies to create immutable snapshots and track changes:
+
+- Deep change tracking at any level of object nesting
+- Special handling for various types (Date, RegExp, Map, Set)
+- Circular reference handling with WeakMap cache
+
+## API Reference
+
+### React Hooks
+
+#### `useCollection`
+
+The primary hook for interacting with collections in React components.
 
 ```typescript
-// collections/users.ts - Shared collection configuration
-import { CollectionConfig } from '@kylemathews/sync';
+const { data, insert, update, delete: deleteFn } = useCollection({
+  id: 'todos',
+  sync: { /* sync configuration */ },
+  mutationFn: { /* mutation functions */ },
+  schema: /* optional schema */
+});
+```
 
-// Create a cached configuration for the users collection
-export const usersCollectionConfig: CollectionConfig = {
-  id: 'users',
-  sync: {
-    id: 'users-sync',
-    sync: ({ begin, write, commit }) => {
-      // Your sync implementation
-      // ...
+Returns:
+- `data`: An array of all items in the collection
+- `state`: A Map containing all items in the collection with their keys
+- `insert`: Function to add new items to the collection
+- `update`: Function to modify existing items
+- `delete`: Function to remove items from the collection
+
+#### `preloadCollection`
+
+Preloads data for a collection before rendering components.
+
+```typescript
+await preloadCollection({
+  id: 'todos',
+  sync: { /* sync configuration */ },
+  mutationFn: { /* mutation functions */ },
+  schema: /* optional schema */
+});
+```
+
+Features:
+1. Returns a promise that resolves when the first sync commit is complete
+2. Shares the same collection instance with `useCollection`
+3. Handles already-loaded collections by returning immediately
+4. Avoids duplicate initialization when called multiple times with the same ID
+
+### Data Operations
+
+#### Insert
+
+```typescript
+// Insert a single item
+insert({ text: "Buy groceries", completed: false });
+
+// Insert multiple items
+insert([
+  { text: "Buy groceries", completed: false },
+  { text: "Walk dog", completed: false }
+]);
+
+// Insert with custom key
+insert({ text: "Buy groceries" }, { key: "grocery-task" });
+```
+
+#### Update
+
+```typescript
+// Update a single item
+update(todo, (draft) => { draft.completed = true });
+
+// Update multiple items
+update([todo1, todo2], (drafts) => {
+  drafts.forEach(draft => { draft.completed = true });
+});
+
+// Update with metadata
+update(todo, { metadata: { reason: "user update" } }, (draft) => { 
+  draft.text = "Updated text";
+});
+```
+
+#### Delete
+
+```typescript
+// Delete a single item
+delete(todo);
+
+// Delete multiple items
+delete([todo1, todo2]);
+
+// Delete with metadata
+delete(todo, { metadata: { reason: "completed" } });
+```
+
+## Transaction Management
+
+The library includes a robust transaction management system:
+
+- `TransactionManager`: Handles transaction lifecycle, persistence, and retry logic
+- `TransactionStore`: Provides persistent storage for transactions using IndexedDB
+
+Transactions progress through several states:
+1. `pending`: Initial state when a transaction is created
+2. `persisting`: Transaction is being persisted to the backend
+3. `completed`: Transaction has been successfully persisted
+4. `failed`: Transaction failed to persist after all retry attempts
+
+## Implementing Backend Integration with ElectricSQL
+
+The `mutationFn` property is where you define how your application interacts with your backend. Here's a comprehensive example of integrating with ElectricSQL:
+
+```typescript
+import { useCollection } from "@kylemathews/sync/useCollection"
+import { createElectricSync } from '@kylemathews/sync/electric';
+
+// Create a collection configuration for todos
+const todosConfig = {
+  id: 'todos',
+  // Create an ElectricSQL sync configuration
+  sync: createElectricSync(
+    {
+      // ShapeStream options
+      url: `http://localhost:3000/v1/shape`,
+      params: {
+        table: 'todos',
+      },
+    },
+    {
+      // Primary key for the todos table
+      primaryKey: ['id'],
     }
-  },
+  ),
   mutationFn: {
-    persist: async () => {
-      // Your mutation implementation
-      // ...
-    }
-    awaitSync: async () => {
-      // Your awaitSync implementation
-      // ...
-    }
-  }
+    // Persist mutations to ElectricSQL
+    persist: async (mutations, transaction) => {
+      const response = await fetch(`http://localhost:3001/api/mutations`, {
+        method: `POST`,
+        headers: {
+          "Content-Type": `application/json`,
+        },
+        body: JSON.stringify(transaction.mutations),
+      })
+      if (!response.ok) {
+        // Throwing an error will rollback the optimistic state.
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      collection.transactionManager.setMetadata(transaction.id, {
+        txid: result.txid,
+      })
+    },
+    // Wait for a transaction to be synced
+    awaitSync: async ({ config }) => {
+      try {
+        // Use the awaitTxid function from the ElectricSync configuration
+        // This waits for the specific transaction to be synced to the server
+        // The second parameter is an optional timeout in milliseconds
+        await config.sync.awaitTxid(transaction.metadata?.txid as number, 10000)
+        return true;
+      } catch (error) {
+        console.error('Error waiting for transaction to sync:', error);
+        // Throwing an error will rollback the optimistic state.
+        throw error;
+      }
+    },
+  },
 };
 
-// routes/users.ts - Route loader
-import { preloadCollection } from '@kylemathews/sync';
-import { usersCollectionConfig } from '../collections/users';
-
+// In a route loader
 export async function loader() {
-  // Preload the collection data using the shared cached config
-  await preloadCollection(usersCollectionConfig);
+  // Preload todos before rendering
+  await preloadCollection(todosConfig);
   return null;
 }
 
-// components/Users.tsx - Component using the collection
-import { useCollection } from '@kylemathews/sync';
-import { usersCollectionConfig } from '../collections/users';
-
-export function UsersComponent() {
-  // Uses the same cached collection config, ensuring consistency
-  const { data } = useCollection(usersCollectionConfig);
+// Example usage in a component
+function TodoList() {
+  const { data, insert, update, delete: remove } = useCollection(todosConfig);
   
-  // Data is already loaded, no need for loading states
+  const addTodo = () => {
+    insert({ title: 'New todo', completed: false });
+  };
+  
+  const toggleTodo = (todo) => {
+    update(todo, (draft) => {
+      draft.completed = !draft.completed;
+    });
+  };
+  
+  const removeTodo = (todo) => {
+    remove(todo);
+  };
+  
   return (
     <div>
-      <h1>Users</h1>
+      <button onClick={addTodo}>Add Todo</button>
       <ul>
-        {Array.from(data.values()).map(user => (
-          <li key={user.id}>{user.name}</li>
+        {data.map(todo => (
+          <li key={todo.id}>
+            <input 
+              type="checkbox" 
+              checked={todo.completed} 
+              onChange={() => toggleTodo(todo)} 
+            />
+            {todo.title}
+            <button onClick={() => removeTodo(todo)}>Delete</button>
+          </li>
         ))}
       </ul>
     </div>
@@ -65,9 +259,39 @@ export function UsersComponent() {
 }
 ```
 
-When you call `preloadCollection`, it:
-1. Returns a promise that resolves once the initial sync is complete
-2. Makes the data immediately available to any `useCollection` hooks with the same ID
-3. Ensures that duplicate calls with the same ID return the same promise
+This implementation:
 
-This allows route transitions to pause until needed data is loaded, creating a smoother user experience.
+1. **Creates an ElectricSQL sync configuration** using the `createElectricSync` helper
+2. **Handles mutations** by POSTing them to a backend API.
+3. **Uses transactions** to ensure data consistency
+4. **Tracks sync status** with the `awaitTxid` function
+5. **Provides proper error handling** throughout the process
+
+## Advanced Features
+
+### Schema Validation
+
+Collections can optionally include a schema for data validation:
+
+```typescript
+const todoCollection = useCollection({
+  id: 'todos',
+  sync: { /* sync config */ },
+  mutationFn: { /* mutation functions */ },
+  schema: todoSchema // Standard schema interface
+});
+```
+
+### Deep Change Tracking
+
+The library implements deep change tracking in the proxy system by:
+
+1. Using a parent reference system to track relationships between nested objects
+2. Implementing a "markChanged" function that propagates changes up the object hierarchy
+3. Properly handling circular references with a WeakMap cache
+4. Using deep cloning to ensure changes are properly tracked at all levels
+5. Adding special handling for various types (Date, RegExp, Map, Set)
+
+## License
+
+MIT
