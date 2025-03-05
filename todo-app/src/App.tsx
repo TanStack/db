@@ -256,10 +256,11 @@ export default function App() {
                     const allCompleted = completedTodos.length === todos.length
                     update(
                       allCompleted ? completedTodos : activeTodos,
-                      (drafts) =>
+                      (drafts) => {
                         drafts.forEach(
                           (draft) => (draft.completed = !allCompleted)
                         )
+                      }
                     )
                   }}
                 >
@@ -283,7 +284,7 @@ export default function App() {
                 <ul className="my-0 mx-0 p-0 list-none">
                   {todos.map((todo) => (
                     <li
-                      key={todo.id}
+                      key={`todo-${todo.id}`}
                       className="relative border-b border-[#ededed] last:border-none group"
                     >
                       <div className="flex items-center h-[58px] pl-[60px]">

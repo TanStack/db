@@ -184,8 +184,8 @@ describe(`Collection`, () => {
     expect(collection.state.get(keys[3])).toEqual(bulkData[1])
 
     // Test update with callback
-    collection.update(collection.state.get(insertedKey)!, (item) => {
-      item.value = `bar2`
+    collection.update([collection.state.get(insertedKey)!], (item) => {
+      item[0].value = `bar2`
     })
 
     // The merged value should contain the update.

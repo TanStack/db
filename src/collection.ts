@@ -607,6 +607,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     configOrCallback: ((draft: T1 | T1[]) => void) | OperationConfig,
     maybeCallback?: (draft: T1 | T1[]) => void
   ) {
+    const isArray = Array.isArray(items)
     const itemsArray = Array.isArray(items) ? items : [items]
     const callback =
       typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
@@ -630,7 +631,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     })) as T1[]
 
     let changesArray
-    if (currentObjects.length > 1) {
+    if (isArray) {
       // Use the proxy to track changes for all objects
       changesArray = withArrayChangeTracking(
         currentObjects,
