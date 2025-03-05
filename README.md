@@ -110,6 +110,8 @@ insert({ text: "Buy groceries" }, { key: "grocery-task" });
 
 #### Update
 
+We use a proxy to capture updates as immutable draft optimistic updates.
+
 ```typescript
 // Update a single item
 update(todo, (draft) => { draft.completed = true });
@@ -150,16 +152,6 @@ const todoCollection = useCollection({
   schema: todoSchema // Standard schema interface
 });
 ```
-
-### Deep Change Tracking
-
-The library implements deep change tracking in the proxy system by:
-
-1. Using a parent reference system to track relationships between nested objects
-2. Implementing a "markChanged" function that propagates changes up the object hierarchy
-3. Properly handling circular references with a WeakMap cache
-4. Using deep cloning to ensure changes are properly tracked at all levels
-5. Adding special handling for various types (Date, RegExp, Map, Set)
 
 ## Transaction Management
 
