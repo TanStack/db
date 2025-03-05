@@ -138,6 +138,29 @@ delete([todo1, todo2]);
 delete(todo, { metadata: { reason: "completed" } });
 ```
 
+### Schema Validation
+
+Collections can optionally include a schema for data validation:
+
+```typescript
+const todoCollection = useCollection({
+  id: 'todos',
+  sync: { /* sync config */ },
+  mutationFn: { /* mutation functions */ },
+  schema: todoSchema // Standard schema interface
+});
+```
+
+### Deep Change Tracking
+
+The library implements deep change tracking in the proxy system by:
+
+1. Using a parent reference system to track relationships between nested objects
+2. Implementing a "markChanged" function that propagates changes up the object hierarchy
+3. Properly handling circular references with a WeakMap cache
+4. Using deep cloning to ensure changes are properly tracked at all levels
+5. Adding special handling for various types (Date, RegExp, Map, Set)
+
 ## Transaction Management
 
 The library includes a robust transaction management system:
@@ -266,31 +289,6 @@ This implementation:
 3. **Uses transactions** to ensure data consistency
 4. **Tracks sync status** with the `awaitTxid` function
 5. **Provides proper error handling** throughout the process
-
-## Advanced Features
-
-### Schema Validation
-
-Collections can optionally include a schema for data validation:
-
-```typescript
-const todoCollection = useCollection({
-  id: 'todos',
-  sync: { /* sync config */ },
-  mutationFn: { /* mutation functions */ },
-  schema: todoSchema // Standard schema interface
-});
-```
-
-### Deep Change Tracking
-
-The library implements deep change tracking in the proxy system by:
-
-1. Using a parent reference system to track relationships between nested objects
-2. Implementing a "markChanged" function that propagates changes up the object hierarchy
-3. Properly handling circular references with a WeakMap cache
-4. Using deep cloning to ensure changes are properly tracked at all levels
-5. Adding special handling for various types (Date, RegExp, Map, Set)
 
 ## License
 
