@@ -1,18 +1,16 @@
-# @kylemathews/sync
+# @kylemathews/optimistic
 
-A library for fast optimistic updates with flexible backend support that pairs seamlessly with sync engines like ElectricSQL.
+A library for creating fast optimistic updates with flexible backend support that pairs seamlessly with sync engines like ElectricSQL.
 
 ## Installation
 
 ```bash
-npm i @kylemathews/sync
-# or with pnpm (recommended)
-pnpm add @kylemathews/sync
+npm i @kylemathews/optimistic
 ```
 
 ## Overview
 
-`@kylemathews/sync` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
+`@kylemathews/optimistic` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
 
 - **Optimistic Updates**: Apply changes instantly in the UI while syncing in the background
 - **Flexible Backend Support**: Works with any backend or sync engine
@@ -23,7 +21,7 @@ pnpm add @kylemathews/sync
 
 ### Collections
 
-Collections are the central concept in `@kylemathews/sync`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
+Collections are the central concept in `@kylemathews/optimistic`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
 
 - Has a unique identifier
 - Contains data items accessible via keys
@@ -32,7 +30,7 @@ Collections are the central concept in `@kylemathews/sync`. A collection represe
 
 ### Transactions
 
-All mutations in `@kylemathews/sync` are handled through transactions. Transactions:
+All mutations in `@kylemathews/optimistic` are handled through transactions. Transactions:
 
 - Group related changes together
 - Track the state of mutations (pending, persisting, completed, failed)
@@ -171,8 +169,8 @@ Transactions progress through several states:
 The `mutationFn` property is where you define how your application interacts with your backend. Here's a comprehensive example of integrating with ElectricSQL:
 
 ```typescript
-import { useCollection } from "@kylemathews/sync/useCollection"
-import { createElectricSync } from '@kylemathews/sync/electric';
+import { useCollection } from "@kylemathews/optimistic/useCollection"
+import { createElectricSync } from '@kylemathews/optimistic/electric';
 
 // Create a collection configuration for todos
 const todosConfig = {

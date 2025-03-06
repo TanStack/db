@@ -1,7 +1,7 @@
 {
-  "name": "@kylemathews/sync",
+  "name": "@kylemathews/optimistic",
   "version": "0.0.5",
-  "description": "Sync library for client-side data management",
+  "description": "Optimistic UI library for Sync Engines",
   "type": "module",
   "exports": {
     "./useCollection": {
