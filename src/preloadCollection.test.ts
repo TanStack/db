@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { preloadCollection } from "./useCollection"
-import type { CollectionConfig } from "./collection"
+import type { CollectionConfig } from "./types"
 import "fake-indexeddb/auto"
 
 describe(`preloadCollection`, () => {

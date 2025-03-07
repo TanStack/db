@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { Collection, CollectionConfig } from "./collection"
-import { ChangeMessage } from "./types"
+import { Collection } from "./collection"
+import { ChangeMessage, CollectionConfig } from "./types"
 import "fake-indexeddb/auto"
 
 describe(`Collection getters`, () => {

@@ -1,7 +1,6 @@
 import { Store, Derived, batch } from "@tanstack/store"
 import {
-  SyncConfig,
-  MutationFn,
+  CollectionConfig,
   ChangeMessage,
   PendingMutation,
   Transaction,
@@ -13,13 +12,6 @@ import {
 import { withChangeTracking, withArrayChangeTracking } from "./lib/proxy"
 import { getTransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
-
-export interface CollectionConfig<T extends object = Record<string, unknown>> {
-  id: string
-  sync: SyncConfig<T>
-  mutationFn: MutationFn<T>
-  schema?: StandardSchema<T>
-}
 
 // Store collections in memory using Tanstack store
 /* eslint-disable @typescript-eslint/no-explicit-any */

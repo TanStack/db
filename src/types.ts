@@ -133,3 +133,10 @@ export interface InsertConfig {
   key?: string | (string | undefined)[]
   metadata?: Record<string, unknown>
 }
+
+export interface CollectionConfig<T extends object = Record<string, unknown>> {
+  id: string
+  sync: SyncConfig<T>
+  mutationFn: MutationFn<T>
+  schema?: StandardSchema<T>
+}
