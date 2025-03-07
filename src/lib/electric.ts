@@ -10,6 +10,10 @@ import {
 import { SyncConfig } from "../types"
 import { Store } from "@tanstack/store"
 
+// Re-exports
+export type * from "../types"
+export * from "../useCollection"
+
 /**
  * Extended SyncConfig interface with ElectricSQL-specific functionality
  */

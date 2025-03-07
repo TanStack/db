@@ -4,17 +4,7 @@
   "description": "Optimistic UI library for Sync Engines",
   "type": "module",
   "exports": {
-    "./useCollection": {
-      "types": "./dist/useCollection.d.ts",
-      "import": "./dist/useCollection.mjs",
-      "require": "./dist/cjs/useCollection.cjs"
-    },
-    "./collection": {
-      "types": "./dist/collection.d.ts",
-      "import": "./dist/collection.mjs",
-      "require": "./dist/cjs/collection.cjs"
-    },
-    "./electric": {
+    "./react-electric": {
       "types": "./dist/lib/electric.d.ts",
       "import": "./dist/lib/electric.mjs",
       "require": "./dist/cjs/lib/electric.cjs"

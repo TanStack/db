@@ -4,8 +4,8 @@ import { defineConfig } from "tsup"
 export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
     entry: {
-      useCollection: `src/useCollection.ts`,
-      collection: `src/collection.ts`,
+      // useCollection: `src/useCollection.ts`,
+      // collection: `src/collection.ts`,
       "lib/electric": `src/lib/electric.ts`,
     },
     tsconfig: `./tsconfig.build.json`,

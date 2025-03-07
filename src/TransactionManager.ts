@@ -208,7 +208,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         transaction.queuedBehind = conflictingTransaction.id
       } else {
         this.setTransaction(transaction)
-        this.processTransaction(transaction.id, 1)
+        this.processTransaction(transaction.id)
       }
     }
 
@@ -360,7 +360,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
       for (const queuedTransaction of queuedTransactions) {
         queuedTransaction.queuedBehind = undefined
         this.setTransaction(queuedTransaction)
-        this.processTransaction(queuedTransaction.id, 1)
+        this.processTransaction(queuedTransaction.id)
       }
     }
   }

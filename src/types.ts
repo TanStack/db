@@ -84,7 +84,6 @@ export interface ChangeMessage<T extends object = Record<string, unknown>> {
 
 export interface MutationFn<T extends object = Record<string, unknown>> {
   persist: (params: {
-    attempt: number
     transaction: Transaction
     collection: Collection<T>
     // eslint-disable-next-line

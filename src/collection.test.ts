@@ -89,7 +89,7 @@ describe(`Collection`, () => {
         },
       },
       mutationFn: {
-        persist({ transaction, attempt }) {
+        persist({ transaction }) {
           // Redact time-based and random fields
           const redactedTransaction = {
             ...transaction.toObject(),
@@ -106,7 +106,7 @@ describe(`Collection`, () => {
           }
 
           // Call the mock function with the redacted transaction
-          persistMock({ transaction: redactedTransaction, attempt })
+          persistMock({ transaction: redactedTransaction })
           return Promise.resolve()
         },
         awaitSync({ transaction }) {

@@ -162,7 +162,7 @@ Transactions progress through several states:
 1. `pending`: Initial state when a transaction is created
 2. `persisting`: Transaction is being persisted to the backend
 3. `completed`: Transaction has been successfully persisted
-4. `failed`: Transaction failed to persist after all retry attempts
+4. `failed`: An error was thrown while persisting or syncing back the Transaction
 
 ## Implementing Backend Integration with ElectricSQL
 
