@@ -10,14 +10,6 @@ export type TransactionState =
   | `completed`
   | `failed`
 
-export interface Attempt {
-  id: string
-  startedAt: Date
-  completedAt?: Date
-  error?: Error
-  retryScheduledFor?: Date
-}
-
 export interface PendingMutation {
   mutationId: string
   original: Record<string, unknown>
@@ -37,8 +29,6 @@ export interface Transaction {
   createdAt: Date
   updatedAt: Date
   mutations: PendingMutation[]
-  attempts: Attempt[]
-  currentAttempt: number
   strategy: MutationStrategy
   metadata: Record<string, unknown>
   queuedBehind?: string

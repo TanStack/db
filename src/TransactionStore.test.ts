@@ -19,8 +19,6 @@ describe(`TransactionStore`, () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       mutations: [],
-      attempts: [],
-      currentAttempt: 0,
       strategy: { type: `ordered` },
       metadata: {},
       toObject: () => {

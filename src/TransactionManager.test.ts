@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
 import type { PendingMutation, MutationStrategy } from "./types"
@@ -57,8 +57,6 @@ describe(`TransactionManager`, () => {
       expect(transaction.id).toBeDefined()
       expect(transaction.state).toBe(`pending`)
       expect(transaction.mutations).toEqual(mutations)
-      expect(transaction.attempts).toEqual([])
-      expect(transaction.currentAttempt).toBe(0)
     })
 
     it(`should update transaction state`, () => {
@@ -80,67 +78,6 @@ describe(`TransactionManager`, () => {
       expect(() =>
         manager.setTransactionState(`non-existent`, `completed`)
       ).toThrow(`Transaction non-existent not found`)
-    })
-  })
-
-  describe(`Retry Scheduling`, () => {
-    it(`should schedule retry with exponential backoff`, () => {
-      const mutations = [createMockMutation(`test-3`)]
-      const transaction = manager.applyTransaction(mutations, orderedStrategy)
-
-      const now = Date.now()
-      const originalNow = Date.now
-      Date.now = vi.fn(() => now)
-
-      manager.scheduleRetry(transaction.id, 0) // First retry
-
-      const updated = manager.getTransaction(transaction.id)
-      const attempt = updated?.attempts[0]
-
-      expect(attempt?.id).toBeDefined()
-      expect(attempt?.startedAt).toBeDefined()
-      expect(attempt?.retryScheduledFor).toBeDefined()
-
-      // Should be between 1-1.3 seconds for first retry (with jitter)
-      const delay = attempt!.retryScheduledFor.getTime() - now
-      expect(delay).toBeGreaterThanOrEqual(1000)
-      expect(delay).toBeLessThanOrEqual(1300)
-
-      Date.now = originalNow
-    })
-
-    it(`should increase delay with each retry attempt`, () => {
-      const mutations = [createMockMutation(`test-4`)]
-      const transaction = manager.applyTransaction(mutations, orderedStrategy)
-
-      const now = Date.now()
-      const originalNow = Date.now
-      Date.now = vi.fn(() => now)
-
-      // Test first 3 retries
-      const delays: number[] = []
-
-      for (let i = 0; i < 3; i++) {
-        manager.scheduleRetry(transaction.id, i)
-        const updated = manager.getTransaction(transaction.id)
-        const attempt = updated?.attempts[i]
-        delays.push(attempt!.retryScheduledFor.getTime() - now)
-      }
-
-      // Each delay should be at least double the previous one
-      // (even with max jitter, 2x - 30% will be > 1.4x)
-      expect(delays[1]).toBeGreaterThan(delays[0] * 1.4)
-      expect(delays[2]).toBeGreaterThan(delays[1] * 1.4)
-
-      // Verify each delay has expected bounds
-      expect(delays[0]).toBeGreaterThanOrEqual(1000) // 1s base
-      expect(delays[0]).toBeLessThanOrEqual(1300) // 1s + 30% jitter
-      expect(delays[1]).toBeGreaterThanOrEqual(2000) // 2s base
-      expect(delays[1]).toBeLessThanOrEqual(2600) // 2s + 30% jitter
-      expect(delays[2]).toBeGreaterThanOrEqual(4000) // 4s base
-      expect(delays[2]).toBeLessThanOrEqual(5200) // 4s + 30% jitter
-
-      Date.now = originalNow
     })
   })
 
@@ -279,8 +216,6 @@ describe(`TransactionManager`, () => {
       expect(transaction.id).toBeDefined()
       expect(transaction.state).toBe(`pending`)
       expect(transaction.mutations).toEqual(mutations)
-      expect(transaction.attempts).toEqual([])
-      expect(transaction.currentAttempt).toBe(0)
     })
 
     it(`should overwrite mutations for the same key in existing pending transactions`, () => {

@@ -4,7 +4,6 @@ import type {
   TransactionState,
   PendingMutation,
   MutationStrategy,
-  Attempt,
 } from "./types"
 import { TransactionStore } from "./TransactionStore"
 import { SortedMap } from "./SortedMap"
@@ -186,8 +185,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         updatedAt: new Date(),
         mutations,
         metadata: {},
-        attempts: [],
-        currentAttempt: 0,
         strategy,
         isSynced: createDeferred(),
         isPersisted: createDeferred(),
@@ -227,13 +224,9 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
    * Process a transaction through persist and awaitSync
    *
    * @param transactionId - The ID of the transaction to process
-   * @param attemptNumber - The attempt number for this transaction
    * @private
    */
-  private processTransaction(
-    transactionId: string,
-    attemptNumber: number
-  ): void {
+  private processTransaction(transactionId: string): void {
     const transaction = this.getTransaction(transactionId)
     if (!transaction) return
 
@@ -242,7 +235,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     this.collection.config.mutationFn
       .persist({
         transaction: this.createLiveTransactionReference(transactionId),
-        attempt: attemptNumber,
         collection: this.collection,
       })
       .then((persistResult) => {
@@ -371,57 +363,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         this.processTransaction(queuedTransaction.id, 1)
       }
     }
-  }
-
-  /**
-   * Schedules a retry for a failed transaction
-   *
-   * @param id - The unique identifier of the transaction
-   * @param attemptNumber - The attempt number for this retry
-   */
-  scheduleRetry(id: string, attemptNumber: number): void {
-    const transaction = this.getTransaction(id)
-    if (!transaction) {
-      throw new Error(`Transaction ${id} not found`)
-    }
-
-    // Exponential backoff with jitter
-    // Base delay is 1 second, max delay is 30 seconds
-    const baseDelay = 1000
-    const maxDelay = 30000
-    const exponentialDelay = Math.min(
-      baseDelay * Math.pow(2, attemptNumber),
-      maxDelay
-    )
-
-    // Add jitter by increasing delay up to 30%
-    const jitterAmount = exponentialDelay * 0.3 // 30% jitter
-    const delay = exponentialDelay + Math.random() * jitterAmount
-
-    const retryTime = new Date(Date.now() + delay)
-
-    const attempt: Attempt = {
-      id: crypto.randomUUID(),
-      startedAt: new Date(),
-      retryScheduledFor: retryTime,
-    }
-
-    const updatedTransaction: Transaction = {
-      ...transaction,
-      attempts: [...transaction.attempts, attempt],
-      currentAttempt: transaction.currentAttempt + 1,
-      updatedAt: new Date(Date.now() + 1),
-    }
-
-    this.setTransaction(updatedTransaction)
-
-    // Persist async
-    this.store.putTransaction(updatedTransaction)
-
-    // Schedule the actual retry using setTimeout
-    setTimeout(() => {
-      this.processTransaction(id, attemptNumber + 1)
-    }, delay)
   }
 
   /**
