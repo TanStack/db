@@ -97,11 +97,16 @@ export interface MutationFn<T extends object = Record<string, unknown>> {
     attempt: number
     transaction: Transaction
     collection: Collection<T>
-  }) => Promise<void>
+    // eslint-disable-next-line
+  }) => Promise<any>
 
+  // Set timeout for awaiting sync (default is 2 seconds)
+  awaitSyncTimeoutMs?: number
   awaitSync?: (params: {
     transaction: Transaction
     collection: Collection<T>
+    // eslint-disable-next-line
+    persistResult: any
   }) => Promise<void>
 }
 

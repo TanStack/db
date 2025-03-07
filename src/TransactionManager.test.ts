@@ -55,7 +55,7 @@ describe(`TransactionManager`, () => {
       const transaction = manager.applyTransaction(mutations, orderedStrategy)
 
       expect(transaction.id).toBeDefined()
-      expect(transaction.state).toBe(`persisting`)
+      expect(transaction.state).toBe(`pending`)
       expect(transaction.mutations).toEqual(mutations)
       expect(transaction.attempts).toEqual([])
       expect(transaction.currentAttempt).toBe(0)
@@ -67,10 +67,10 @@ describe(`TransactionManager`, () => {
 
       // Add a small delay to ensure timestamps are different
       const beforeUpdate = transaction.updatedAt
-      manager.setTransactionState(transaction.id, `persisting`)
+      manager.setTransactionState(transaction.id, `pending`)
 
       const updated = manager.getTransaction(transaction.id)
-      expect(updated?.state).toBe(`persisting`)
+      expect(updated?.state).toBe(`pending`)
       expect(updated?.updatedAt.getTime()).toBeGreaterThan(
         beforeUpdate.getTime()
       )
@@ -151,7 +151,7 @@ describe(`TransactionManager`, () => {
         [createMockMutation(`object-1`)],
         orderedStrategy
       )
-      expect(tx1.state).toBe(`persisting`)
+      expect(tx1.state).toBe(`pending`)
       expect(tx1.queuedBehind).toBeUndefined()
 
       // Create second transaction also modifying object 1 - should be queued
@@ -167,7 +167,7 @@ describe(`TransactionManager`, () => {
         [createMockMutation(`object-2`)],
         orderedStrategy
       )
-      expect(tx3.state).toBe(`persisting`)
+      expect(tx3.state).toBe(`pending`)
       expect(tx3.queuedBehind).toBeUndefined()
 
       // Complete first transaction
@@ -221,7 +221,7 @@ describe(`TransactionManager`, () => {
         orderedStrategy
       )
 
-      expect(ordered1.state).toBe(`persisting`)
+      expect(ordered1.state).toBe(`pending`)
       expect(ordered1.queuedBehind).toBeUndefined()
       expect(parallel1.state).toBe(`pending`)
       expect(parallel1.queuedBehind).toBeUndefined()
@@ -277,7 +277,7 @@ describe(`TransactionManager`, () => {
 
       // Verify transaction was created with the expected properties
       expect(transaction.id).toBeDefined()
-      expect(transaction.state).toBe(`persisting`)
+      expect(transaction.state).toBe(`pending`)
       expect(transaction.mutations).toEqual(mutations)
       expect(transaction.attempts).toEqual([])
       expect(transaction.currentAttempt).toBe(0)
@@ -490,18 +490,30 @@ describe(`TransactionManager`, () => {
     })
 
     it(`should reject the isSynced promise when awaitSync fails`, async () => {
+      // Define the type for our persist result
+      type PersistResult = { testData: string }
+
       // Create a collection with an awaitSync function that throws an error
       const syncErrorCollection = new Collection({
         id: `failing-sync`,
         sync: {
           sync: () => {},
         },
+        // Explicitly specify the MutationFn with proper generic types
         mutationFn: {
           persist: async () => {
-            return Promise.resolve()
+            // Return some test data that should be passed to awaitSync
+            return { testData: `persist-data` }
           },
-          awaitSync: async () => {
-            return Promise.reject(new Error(`Sync promise error`))
+          awaitSync: async ({
+            persistResult,
+          }: {
+            persistResult: PersistResult
+          }) => {
+            // Now TypeScript knows that persistResult has a testData property
+            return Promise.reject(
+              new Error(`Sync promise error - ${persistResult.testData}`)
+            )
           },
         },
       })
@@ -518,12 +530,119 @@ describe(`TransactionManager`, () => {
       )
 
       await expect(transaction.isSynced?.promise).rejects.toThrow(
-        `Sync promise error`
+        `Sync promise error - persist-data`
       )
 
       // Verify the transaction state
       expect(transaction?.state).toBe(`failed`)
-      expect(transaction?.error?.message).toBe(`Sync promise error`)
+      expect(transaction?.error?.message).toBe(
+        `Sync promise error - persist-data`
+      )
+    })
+
+    it(`should timeout and reject the isSynced promise when awaitSync takes too long`, async () => {
+      // Create a collection with an awaitSync function that takes longer than the timeout
+      const timeoutCollection = new Collection({
+        id: `timeout-sync`,
+        sync: {
+          sync: () => {},
+        },
+        mutationFn: {
+          persist: async () => {
+            return { testData: `persist-data` }
+          },
+          awaitSyncTimeoutMs: 10,
+          awaitSync: async () => {
+            // This promise will never resolve within the timeout period
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                return resolve()
+              }, 10000)
+            })
+          },
+        },
+      })
+      const timeoutManager = new TransactionManager(store, timeoutCollection)
+
+      // Apply a transaction
+      const mutations = [createMockMutation(`timeout-test`)]
+      const transaction = timeoutManager.applyTransaction(
+        mutations,
+        orderedStrategy
+      )
+
+      // The promise should reject with a timeout error
+      await expect(transaction.isSynced?.promise).rejects.toThrow(
+        `Sync operation timed out after 2 seconds`
+      )
+
+      // Verify the transaction state
+      expect(transaction?.state).toBe(`failed`)
+      expect(transaction?.error?.message).toBe(
+        `Sync operation timed out after 2 seconds`
+      )
+    })
+
+    it(`should capture errors from queued transactions when they're persisted`, async () => {
+      // Define the type for our persist result
+      type PersistResult = { testData: string }
+
+      let transactionCount = 0
+      // Create a collection with an awaitSync function that throws an error
+      const syncErrorCollection = new Collection({
+        id: `failing-sync`,
+        sync: {
+          sync: () => {},
+        },
+        // Explicitly specify the MutationFn with proper generic types
+        mutationFn: {
+          persist: async () => {
+            // Return some test data that should be passed to awaitSync
+            return { testData: `persist-data` }
+          },
+          awaitSync: async ({
+            persistResult,
+          }: {
+            persistResult: PersistResult
+          }) => {
+            if (transactionCount === 1) {
+              // Now TypeScript knows that persistResult has a testData property
+              return Promise.reject(
+                new Error(`Sync promise error - ${persistResult.testData}`)
+              )
+            }
+
+            transactionCount += 1
+          },
+        },
+      })
+      const syncErrorManager = new TransactionManager(
+        store,
+        syncErrorCollection
+      )
+
+      // Apply a transaction
+      const mutations = [createMockMutation(`object-1`)]
+      const tx1 = syncErrorManager.applyTransaction(mutations, orderedStrategy)
+
+      expect(tx1.state).toBe(`pending`)
+      expect(tx1.queuedBehind).toBeUndefined()
+
+      // Create second transaction also modifying object 1 - should be queued
+      const tx2 = syncErrorManager.applyTransaction(
+        [createMockMutation(`object-1`)],
+        orderedStrategy
+      )
+      expect(tx2.state).toBe(`queued`)
+      expect(tx2.queuedBehind).toBe(tx1.id)
+
+      await expect(tx2.isSynced?.promise).rejects.toThrow(
+        `Sync promise error - persist-data`
+      )
+
+      // Verify the transaction state
+      expect(tx2?.state).toBe(`failed`)
+      expect(tx2?.error?.message).toBe(`Sync promise error - persist-data`)
     })
   })
 

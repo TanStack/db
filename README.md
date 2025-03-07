@@ -205,17 +205,18 @@ const todosConfig = {
       }
 
       const result = await response.json()
-      collection.transactionManager.setMetadata(transaction.id, {
+
+      return {
         txid: result.txid,
-      })
+      }
     },
     // Wait for a transaction to be synced
-    awaitSync: async ({ config }) => {
+    awaitSync: async ({ config, persistResult: { txid: number } }) => {
       try {
         // Use the awaitTxid function from the ElectricSync configuration
         // This waits for the specific transaction to be synced to the server
         // The second parameter is an optional timeout in milliseconds
-        await config.sync.awaitTxid(transaction.metadata?.txid as number, 10000)
+        await config.sync.awaitTxid(persistResult.txid, 10000)
         return true;
       } catch (error) {
         console.error('Error waiting for transaction to sync:', error);

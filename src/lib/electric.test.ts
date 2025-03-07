@@ -193,7 +193,7 @@ describe(`Electric Integration`, () => {
   // Tests for txid tracking functionality
   describe(`txid tracking`, () => {
     it(`should track txids from incoming messages`, async () => {
-      const testTxid = `test-txid-123`
+      const testTxid = 123
 
       // Send a message with a txid
       subscriber([
@@ -215,8 +215,8 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should handle multiple txids in a single message`, async () => {
-      const txid1 = `txid-1`
-      const txid2 = `txid-2`
+      const txid1 = 1
+      const txid2 = 2
 
       // Send a message with multiple txids
       subscriber([
@@ -240,7 +240,7 @@ describe(`Electric Integration`, () => {
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {
       // Set a short timeout for the test
-      const unknownTxid = `unknown-txid`
+      const unknownTxid = 0
       const shortTimeout = 100
 
       // Attempt to await a txid that hasn't been seen with a short timeout
@@ -253,7 +253,7 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should resolve when a txid arrives after awaitTxid is called`, async () => {
-      const laterTxid = `later-txid`
+      const laterTxid = 1000
 
       // Start waiting for a txid that hasn't arrived yet
       const promise = electricSync.awaitTxid(laterTxid, 1000)
@@ -292,8 +292,8 @@ describe(`Electric Integration`, () => {
       const fakeBackend = {
         data: new Map<string, unknown>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: async (mutations: PendingMutation[]): Promise<string> => {
-          const txid = `txid-${Date.now()}`
+        persist: async (mutations: PendingMutation[]): Promise<number> => {
+          const txid = Date.now()
 
           // Store the changes with the txid
           mutations.forEach((mutation) => {
@@ -306,7 +306,7 @@ describe(`Electric Integration`, () => {
           return txid
         },
         // Simulates the server sending sync messages with txids
-        simulateSyncMessage: (txid: string) => {
+        simulateSyncMessage: (txid: number) => {
           // Create messages for each item in the store that has this txid
           const messages: Message<Row>[] = []
 
@@ -338,38 +338,22 @@ describe(`Electric Integration`, () => {
       // Create a test mutation function that uses our fake backend
       const testMutationFn = {
         persist: vi.fn(
-          async ({
-            transaction,
-            collection,
-          }: {
-            transaction: Transaction
-            collection: Collection
-          }) => {
+          async ({ transaction }: { transaction: Transaction }) => {
             // Persist to fake backend and get txid
             const txid = await fakeBackend.persist(transaction.mutations)
 
-            // Store the txid in the transaction metadata using the collection's transactionManager
-            collection.transactionManager.setMetadata(transaction.id, {
-              txid,
-            })
-
             // Return the txid (which will be passed to awaitSync)
-            return txid
+            return { txid }
           }
         ),
 
         awaitSync: vi.fn(
-          async ({
-            transaction,
-          }: {
-            transaction: Transaction
-            sync: ElectricSync
-          }) => {
+          async ({ persistResult }: { persistResult: { txid: number } }) => {
             // Get the txid from the transaction metadata
-            const txid = transaction.metadata?.txid as string
+            const txid = persistResult?.txid
 
             if (!txid) {
-              throw new Error(`No txid found in transaction metadata`)
+              throw new Error(`No txid found`)
             }
 
             // Start waiting for the txid
@@ -402,9 +386,6 @@ describe(`Electric Integration`, () => {
       await transaction.isPersisted?.promise
 
       transaction = testCollection.transactions.get(transaction.id)!
-
-      // Verify txid was stored in metadata
-      expect(transaction.metadata?.txid).toBeTruthy()
 
       await transaction.isSynced?.promise
 
@@ -463,7 +444,7 @@ describe(`Electric Integration`, () => {
 
     // Test that we can access properties
     expect(transaction.id).toBeDefined()
-    expect(transaction.state).toBe(`persisting`)
+    expect(transaction.state).toBe(`pending`)
 
     // Test the toObject method
     const transactionObj = transaction.toObject()
@@ -482,16 +463,5 @@ describe(`Electric Integration`, () => {
 
     expect(modifiedTransaction.id).toBe(transaction.id)
     expect(modifiedTransaction.metadata.testKey).toBe(`testValue`)
-
-    // Update the transaction metadata
-    testCollection.transactionManager.setMetadata(transaction.id, {
-      anotherKey: `anotherValue`,
-    })
-
-    // Verify the live reference is updated
-    expect(transaction.metadata.anotherKey).toBe(`anotherValue`)
-
-    // But our clone is not affected
-    expect(modifiedTransaction.metadata.anotherKey).toBeUndefined()
   })
 })

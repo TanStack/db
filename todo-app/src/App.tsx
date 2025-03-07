@@ -52,7 +52,7 @@ export default function App() {
     sync: electricSync.current,
     schema: updateTodoSchema,
     mutationFn: {
-      persist: async ({ transaction, collection }) => {
+      persist: async ({ transaction }) => {
         const response = await fetch(`http://localhost:3001/api/mutations`, {
           method: `POST`,
           headers: {
@@ -65,15 +65,17 @@ export default function App() {
         }
 
         const result = await response.json()
-        collection.transactionManager.setMetadata(transaction.id, {
+        return {
           txid: result.txid,
-        })
+        }
       },
-      awaitSync: async ({ transaction }) => {
+      awaitSync: async ({
+        persistResult,
+      }: {
+        persistResult: { txid: number }
+      }) => {
         // Start waiting for the txid
-        await electricSync.current.awaitTxid(
-          transaction.metadata?.txid as number
-        )
+        await electricSync.current.awaitTxid(persistResult.txid)
       },
     },
   })
@@ -87,7 +89,7 @@ export default function App() {
     sync: configSync.current,
     schema: updateConfigSchema,
     mutationFn: {
-      persist: async ({ transaction, collection }) => {
+      persist: async ({ transaction }) => {
         const response = await fetch(`http://localhost:3001/api/mutations`, {
           method: `POST`,
           headers: {
@@ -100,13 +102,18 @@ export default function App() {
         }
 
         const result = await response.json()
-        collection.transactionManager.setMetadata(transaction.id, {
+        return {
           txid: result.txid,
-        })
+        }
       },
-      awaitSync: async ({ transaction }) => {
+      awaitSync: async ({
+        persistResult,
+      }: {
+        persistResult: { txid: number }
+      }) => {
+        console.log(`config awaitSync`, { persistResult })
         // Start waiting for the txid
-        await configSync.current.awaitTxid(transaction.metadata?.txid as number)
+        await configSync.current.awaitTxid(persistResult.txid)
       },
     },
   })

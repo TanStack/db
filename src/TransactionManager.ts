@@ -131,9 +131,8 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         },
         set() {
           // We don't allow direct setting of properties on the transaction
-          // Use setTransactionState or setMetadata instead
           console.warn(
-            `Direct modification of transaction properties is not allowed. Use setTransactionState or setMetadata instead.`
+            `Direct modification of transaction properties is not allowed. Use setTransactionState if updating the state`
           )
           return true
         },
@@ -211,79 +210,8 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         transaction.state = `queued`
         transaction.queuedBehind = conflictingTransaction.id
       } else {
-        transaction.state = `persisting`
         this.setTransaction(transaction)
-        this.collection.config.mutationFn
-          .persist({
-            transaction: this.createLiveTransactionReference(transaction.id),
-            attempt: 1,
-            collection: this.collection,
-          })
-          .then(() => {
-            const tx = this.getTransaction(transaction.id)
-            if (!tx) return
-
-            tx.isPersisted?.resolve(true)
-            if (this.collection.config.mutationFn.awaitSync) {
-              this.setTransactionState(
-                transaction.id,
-                `persisted_awaiting_sync`
-              )
-
-              this.collection.config.mutationFn
-                .awaitSync({
-                  transaction: this.createLiveTransactionReference(
-                    transaction.id
-                  ),
-                  collection: this.collection,
-                })
-                .then(() => {
-                  const updatedTx = this.getTransaction(transaction.id)
-                  if (!updatedTx) return
-
-                  updatedTx.isSynced?.resolve(true)
-                  this.setTransactionState(transaction.id, `completed`)
-                })
-                // Catch awaitSync errors
-                .catch((error) => {
-                  const updatedTx = this.getTransaction(transaction.id)
-                  if (!updatedTx) return
-
-                  // Update transaction with error information
-                  updatedTx.error = {
-                    message: error.message || `Error during sync`,
-                    error:
-                      error instanceof Error ? error : new Error(String(error)),
-                  }
-
-                  // Reject the isSynced promise
-                  updatedTx.isSynced?.reject(error)
-
-                  // Set transaction state to failed
-                  this.setTransaction(updatedTx)
-                  this.setTransactionState(transaction.id, `failed`)
-                })
-            } else {
-              this.setTransactionState(transaction.id, `completed`)
-            }
-          })
-          .catch((error) => {
-            const tx = this.getTransaction(transaction.id)
-            if (!tx) return
-
-            // Update transaction with error information
-            tx.error = {
-              message: error.message || `Error during persist`,
-              error: error instanceof Error ? error : new Error(String(error)),
-            }
-
-            // Reject both promises
-            tx.isPersisted?.reject(error)
-            tx.isSynced?.reject(error)
-
-            // Set transaction state to failed
-            this.setTransactionState(transaction.id, `failed`)
-          })
+        this.processTransaction(transaction.id, 1)
       }
     }
 
@@ -293,6 +221,101 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
 
     // Return a live reference to the transaction
     return this.createLiveTransactionReference(transaction.id)
+  }
+
+  /**
+   * Process a transaction through persist and awaitSync
+   *
+   * @param transactionId - The ID of the transaction to process
+   * @param attemptNumber - The attempt number for this transaction
+   * @private
+   */
+  private processTransaction(
+    transactionId: string,
+    attemptNumber: number
+  ): void {
+    const transaction = this.getTransaction(transactionId)
+    if (!transaction) return
+
+    this.setTransactionState(transactionId, `persisting`)
+
+    this.collection.config.mutationFn
+      .persist({
+        transaction: this.createLiveTransactionReference(transactionId),
+        attempt: attemptNumber,
+        collection: this.collection,
+      })
+      .then((persistResult) => {
+        const tx = this.getTransaction(transactionId)
+        if (!tx) return
+
+        tx.isPersisted?.resolve(true)
+        if (this.collection.config.mutationFn.awaitSync) {
+          this.setTransactionState(transactionId, `persisted_awaiting_sync`)
+
+          // Create a promise that rejects after 2 seconds
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`Sync operation timed out after 2 seconds`))
+            }, this.collection.config.mutationFn.awaitSyncTimeoutMs ?? 2000)
+          })
+
+          // Race the awaitSync promise against the timeout
+          Promise.race([
+            this.collection.config.mutationFn.awaitSync({
+              transaction: this.createLiveTransactionReference(transactionId),
+              collection: this.collection,
+              persistResult,
+            }),
+            timeoutPromise,
+          ])
+            .then(() => {
+              const updatedTx = this.getTransaction(transactionId)
+              if (!updatedTx) return
+
+              updatedTx.isSynced?.resolve(true)
+              this.setTransactionState(transactionId, `completed`)
+            })
+            // Catch awaitSync errors or timeout
+            .catch((error) => {
+              const updatedTx = this.getTransaction(transactionId)
+              if (!updatedTx) return
+
+              // Update transaction with error information
+              updatedTx.error = {
+                message: error.message || `Error during sync`,
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
+              }
+
+              // Reject the isSynced promise
+              updatedTx.isSynced?.reject(error)
+
+              // Set transaction state to failed
+              this.setTransaction(updatedTx)
+              this.setTransactionState(transactionId, `failed`)
+            })
+        } else {
+          this.setTransactionState(transactionId, `completed`)
+        }
+      })
+      .catch((error) => {
+        const tx = this.getTransaction(transactionId)
+        if (!tx) return
+
+        // Update transaction with error information
+        tx.error = {
+          message: error.message || `Error during persist`,
+          error: error instanceof Error ? error : new Error(String(error)),
+        }
+
+        // Reject both promises
+        tx.isPersisted?.reject(error)
+        tx.isSynced?.reject(error)
+
+        // Set transaction state to failed
+        this.setTransactionState(transactionId, `failed`)
+      })
   }
 
   /**
@@ -345,82 +368,9 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
       for (const queuedTransaction of queuedTransactions) {
         queuedTransaction.queuedBehind = undefined
         this.setTransaction(queuedTransaction)
-        this.setTransactionState(queuedTransaction.id, `persisting`)
-        this.collection.config.mutationFn
-          .persist({
-            transaction: this.createLiveTransactionReference(
-              queuedTransaction.id
-            ),
-            attempt: 1,
-            collection: this.collection,
-          })
-          .then(() => {
-            const tx = this.getTransaction(queuedTransaction.id)
-            if (!tx) return
-
-            tx.isPersisted?.resolve(true)
-            if (this.collection.config.mutationFn.awaitSync) {
-              this.setTransactionState(
-                queuedTransaction.id,
-                `persisted_awaiting_sync`
-              )
-
-              this.collection.config.mutationFn
-                .awaitSync({
-                  transaction: this.createLiveTransactionReference(
-                    queuedTransaction.id
-                  ),
-                  collection: this.collection,
-                })
-                .then(() => {
-                  const updatedTx = this.getTransaction(queuedTransaction.id)
-                  if (!updatedTx) return
-
-                  updatedTx.isSynced?.resolve(true)
-                  this.setTransactionState(queuedTransaction.id, `completed`)
-                })
-            } else {
-              this.setTransactionState(queuedTransaction.id, `completed`)
-            }
-          })
+        this.processTransaction(queuedTransaction.id, 1)
       }
     }
-  }
-
-  /**
-   * Sets metadata for a transaction
-   *
-   * @param id - The unique identifier of the transaction
-   * @param metadata - The metadata to set or merge with existing metadata
-   * @throws Error if the transaction is not found
-   */
-  setMetadata(id: string, metadata: Record<string, unknown>): Transaction {
-    const transaction = this.getTransaction(id)
-    if (!transaction) {
-      throw new Error(`Transaction ${id} not found`)
-    }
-
-    // Create a new metadata object by merging the existing metadata with the new one
-    const updatedMetadata = {
-      ...(transaction.metadata || {}),
-      ...metadata,
-    }
-
-    // Create updated transaction with new metadata
-    const updatedTransaction: Transaction = {
-      ...transaction,
-      metadata: updatedMetadata,
-      updatedAt: new Date(),
-    }
-
-    // Update in memory
-    this.setTransaction(updatedTransaction)
-
-    // Persist to storage
-    this.store.putTransaction(updatedTransaction)
-
-    // Return a live reference to the transaction
-    return this.createLiveTransactionReference(id)
   }
 
   /**
@@ -467,6 +417,11 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
 
     // Persist async
     this.store.putTransaction(updatedTransaction)
+
+    // Schedule the actual retry using setTimeout
+    setTimeout(() => {
+      this.processTransaction(id, attemptNumber + 1)
+    }, delay)
   }
 
   /**
