@@ -19,11 +19,6 @@
       "import": "./dist/lib/electric.mjs",
       "require": "./dist/cjs/lib/electric.cjs"
     },
-    "./write-to-pg": {
-      "types": "./dist/lib/write-to-pg.d.ts",
-      "import": "./dist/lib/write-to-pg.mjs",
-      "require": "./dist/cjs/lib/write-to-pg.cjs"
-    },
     "./package.json": "./package.json"
   },
   "files": [

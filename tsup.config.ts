@@ -7,7 +7,6 @@ export default defineConfig((options: Options) => {
       useCollection: `src/useCollection.ts`,
       collection: `src/collection.ts`,
       "lib/electric": `src/lib/electric.ts`,
-      "lib/write-to-pg": `src/lib/write-to-pg.ts`,
     },
     tsconfig: `./tsconfig.build.json`,
     sourcemap: true,

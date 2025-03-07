@@ -6,7 +6,7 @@ import {
   validateUpdateConfig,
 } from "../db/validation"
 import { PendingMutation } from "../../../src/types"
-import { processMutations } from "../../../src/lib/write-to-pg"
+import { processMutations } from "./write-to-pg"
 import express from "express"
 
 const router = express.Router()
