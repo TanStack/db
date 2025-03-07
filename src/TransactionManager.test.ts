@@ -450,6 +450,83 @@ describe(`TransactionManager`, () => {
     })
   })
 
+  describe(`Error Handling`, () => {
+    it(`should reject both isPersisted and isSynced promises when persist fails`, async () => {
+      // Create a collection with a persist function that throws an error
+      const errorCollection = new Collection({
+        id: `foo`,
+        sync: {
+          sync: () => {},
+        },
+        mutationFn: {
+          persist: async () => {
+            throw new Error(`Persist error affecting both promises`)
+          },
+          // Add awaitSync to ensure isSynced is initialized
+          awaitSync: async () => {},
+        },
+      })
+      const errorManager = new TransactionManager(store, errorCollection)
+
+      // Apply a transaction
+      const mutations = [createMockMutation(`error-test-5`)]
+      const transaction = errorManager.applyTransaction(
+        mutations,
+        orderedStrategy
+      )
+
+      await expect(transaction.isPersisted?.promise).rejects.toThrow(
+        `Persist error affecting both promises`
+      )
+      await expect(transaction.isSynced?.promise).rejects.toThrow(
+        `Persist error affecting both promises`
+      )
+
+      // Verify the transaction state
+      expect(transaction?.state).toBe(`failed`)
+      expect(transaction?.error?.message).toBe(
+        `Persist error affecting both promises`
+      )
+    })
+
+    it(`should reject the isSynced promise when awaitSync fails`, async () => {
+      // Create a collection with an awaitSync function that throws an error
+      const syncErrorCollection = new Collection({
+        id: `failing-sync`,
+        sync: {
+          sync: () => {},
+        },
+        mutationFn: {
+          persist: async () => {
+            return Promise.resolve()
+          },
+          awaitSync: async () => {
+            return Promise.reject(new Error(`Sync promise error`))
+          },
+        },
+      })
+      const syncErrorManager = new TransactionManager(
+        store,
+        syncErrorCollection
+      )
+
+      // Apply a transaction
+      const mutations = [createMockMutation(`error-test-4`)]
+      const transaction = syncErrorManager.applyTransaction(
+        mutations,
+        orderedStrategy
+      )
+
+      await expect(transaction.isSynced?.promise).rejects.toThrow(
+        `Sync promise error`
+      )
+
+      // Verify the transaction state
+      expect(transaction?.state).toBe(`failed`)
+      expect(transaction?.error?.message).toBe(`Sync promise error`)
+    })
+  })
+
   describe(`Terminal State Handling`, () => {
     it(`should delete transactions from IndexedDB when they reach a terminal state`, async () => {
       // Clear all existing transactions first

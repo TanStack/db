@@ -244,9 +244,45 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
                   updatedTx.isSynced?.resolve(true)
                   this.setTransactionState(transaction.id, `completed`)
                 })
+                // Catch awaitSync errors
+                .catch((error) => {
+                  const updatedTx = this.getTransaction(transaction.id)
+                  if (!updatedTx) return
+
+                  // Update transaction with error information
+                  updatedTx.error = {
+                    message: error.message || `Error during sync`,
+                    error:
+                      error instanceof Error ? error : new Error(String(error)),
+                  }
+
+                  // Reject the isSynced promise
+                  updatedTx.isSynced?.reject(error)
+
+                  // Set transaction state to failed
+                  this.setTransaction(updatedTx)
+                  this.setTransactionState(transaction.id, `failed`)
+                })
             } else {
               this.setTransactionState(transaction.id, `completed`)
             }
+          })
+          .catch((error) => {
+            const tx = this.getTransaction(transaction.id)
+            if (!tx) return
+
+            // Update transaction with error information
+            tx.error = {
+              message: error.message || `Error during persist`,
+              error: error instanceof Error ? error : new Error(String(error)),
+            }
+
+            // Reject both promises
+            tx.isPersisted?.reject(error)
+            tx.isSynced?.reject(error)
+
+            // Set transaction state to failed
+            this.setTransactionState(transaction.id, `failed`)
           })
       }
     }
