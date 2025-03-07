@@ -1,5 +1,6 @@
-import React, { useState, FormEvent, useRef } from "react"
+import React, { useState, FormEvent } from "react"
 import { useCollection } from "../../src/useCollection"
+import { Collection } from "../../src/collection"
 import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
 import { UpdateTodo, UpdateConfig } from "./db/validation"
@@ -8,8 +9,14 @@ import { updateConfigSchema, updateTodoSchema } from "./db/validation"
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
 
-  const electricSync = useRef(
-    createElectricSync(
+  const {
+    data: todos,
+    insert,
+    update,
+    delete: deleteTodo,
+  } = useCollection<UpdateTodo>({
+    id: `todos`,
+    sync: createElectricSync(
       {
         url: `http://localhost:3000/v1/shape`,
         params: {
@@ -21,35 +28,7 @@ export default function App() {
         },
       },
       { primaryKey: [`id`] }
-    )
-  )
-
-  const configSync = useRef(
-    createElectricSync(
-      {
-        url: `http://localhost:3000/v1/shape`,
-        params: {
-          table: `config`,
-        },
-        parser: {
-          // Parse timestamp columns into JavaScript Date objects
-          timestamptz: (date: string) => {
-            return new Date(date)
-          },
-        },
-      },
-      { primaryKey: [`id`] }
-    )
-  )
-
-  const {
-    data: todos,
-    insert,
-    update,
-    delete: deleteTodo,
-  } = useCollection<UpdateTodo>({
-    id: `todos`,
-    sync: electricSync.current,
+    ),
     schema: updateTodoSchema,
     mutationFn: {
       persist: async ({ transaction }) => {
@@ -71,11 +50,13 @@ export default function App() {
       },
       awaitSync: async ({
         persistResult,
+        collection,
       }: {
         persistResult: { txid: number }
+        collection: Collection
       }) => {
         // Start waiting for the txid
-        await electricSync.current.awaitTxid(persistResult.txid)
+        await collection.config.sync.awaitTxid(persistResult.txid)
       },
     },
   })
@@ -86,7 +67,21 @@ export default function App() {
     insert: insertConfig,
   } = useCollection<UpdateConfig>({
     id: `config`,
-    sync: configSync.current,
+    sync: createElectricSync(
+      {
+        url: `http://localhost:3000/v1/shape`,
+        params: {
+          table: `config`,
+        },
+        parser: {
+          // Parse timestamp columns into JavaScript Date objects
+          timestamptz: (date: string) => {
+            return new Date(date)
+          },
+        },
+      },
+      { primaryKey: [`id`] }
+    ),
     schema: updateConfigSchema,
     mutationFn: {
       persist: async ({ transaction }) => {
@@ -108,12 +103,13 @@ export default function App() {
       },
       awaitSync: async ({
         persistResult,
+        collection,
       }: {
         persistResult: { txid: number }
+        collection: Collection
       }) => {
-        console.log(`config awaitSync`, { persistResult })
         // Start waiting for the txid
-        await configSync.current.awaitTxid(persistResult.txid)
+        await collection.config.sync.awaitTxid(persistResult.txid)
       },
     },
   })
