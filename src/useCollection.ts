@@ -1,11 +1,6 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
-import type { Transaction } from "./types"
-import {
-  Collection,
-  CollectionConfig,
-  preloadCollection,
-  collectionsStore,
-} from "./collection"
+import type { Transaction, CollectionConfig } from "./types"
+import { Collection, preloadCollection, collectionsStore } from "./collection"
 import { SortedMap } from "./SortedMap"
 
 export { preloadCollection }
