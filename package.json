@@ -1,6 +1,6 @@
 {
   "name": "@kylemathews/optimistic",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Optimistic UI library for Sync Engines",
   "type": "module",
   "exports": {
