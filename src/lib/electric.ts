@@ -13,6 +13,7 @@ import { Store } from "@tanstack/store"
 // Re-exports
 export type * from "../types"
 export * from "../useCollection"
+export type { Collection } from "../collection"
 
 /**
  * Extended SyncConfig interface with ElectricSQL-specific functionality
