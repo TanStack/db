@@ -1,16 +1,16 @@
-# @kylemathews/optimistic
+# @tanstack/optimistic
 
 A library for creating fast optimistic updates with flexible backend support that pairs seamlessly with sync engines like ElectricSQL.
 
 ## Installation
 
 ```bash
-npm i @kylemathews/optimistic
+npm i @tanstack/optimistic
 ```
 
 ## Overview
 
-`@kylemathews/optimistic` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
+`@tanstack/optimistic` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
 
 - **Optimistic Updates**: Apply changes instantly in the UI while syncing in the background
 - **Flexible Backend Support**: Works with any backend or sync engine
@@ -21,7 +21,7 @@ npm i @kylemathews/optimistic
 
 ### Collections
 
-Collections are the central concept in `@kylemathews/optimistic`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
+Collections are the central concept in `@tanstack/optimistic`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
 
 - Has a unique identifier
 - Contains data items accessible via keys
@@ -30,7 +30,7 @@ Collections are the central concept in `@kylemathews/optimistic`. A collection r
 
 ### Transactions
 
-All mutations in `@kylemathews/optimistic` are handled through transactions. Transactions:
+All mutations in `@tanstack/optimistic` are handled through transactions. Transactions:
 
 - Group related changes together
 - Track the state of mutations (pending, persisting, completed, failed)
@@ -169,8 +169,8 @@ Transactions progress through several states:
 The `mutationFn` property is where you define how your application interacts with your backend. Here's a comprehensive example of integrating with ElectricSQL:
 
 ```typescript
-import { useCollection } from "@kylemathews/optimistic/useCollection"
-import { createElectricSync } from '@kylemathews/optimistic/electric';
+import { useCollection } from "@tanstack/optimistic/useCollection"
+import { createElectricSync } from '@tanstack/optimistic/electric';
 
 // Create a collection configuration for todos
 const todosConfig = {

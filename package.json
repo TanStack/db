@@ -1,7 +1,7 @@
 {
-  "name": "@kylemathews/optimistic",
+  "name": "@tanstack/optimistic",
   "version": "0.0.8",
-  "description": "Optimistic UI library for Sync Engines",
+  "description": "Optimistic UI library for sync engines",
   "type": "module",
   "exports": {
     "./react-electric": {
