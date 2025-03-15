@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import {
-  createChangeProxy,
   createArrayChangeProxy,
-  withChangeTracking,
+  createChangeProxy,
   withArrayChangeTracking,
+  withChangeTracking,
 } from "./proxy"
 
 describe(`Proxy Library`, () => {
@@ -414,7 +414,7 @@ describe(`Proxy Library`, () => {
         name: `Jane`,
         age: 30,
       })
-      // eslint-disable-next-line
+
       expect(obj.hasOwnProperty(`role`)).toBe(false)
     })
 
@@ -455,7 +455,7 @@ describe(`Proxy Library`, () => {
         name: `Jane`,
         age: 30,
       })
-      // eslint-disable-next-line
+
       expect(obj.hasOwnProperty(`role`)).toBe(false)
     })
   })

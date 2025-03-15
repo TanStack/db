@@ -1,13 +1,13 @@
+import express from "express"
 import { sql } from "../db/postgres"
 import {
-  validateInsertTodo,
-  validateUpdateTodo,
   validateInsertConfig,
+  validateInsertTodo,
   validateUpdateConfig,
+  validateUpdateTodo,
 } from "../db/validation"
-import { PendingMutation } from "../../../src/types"
 import { processMutations } from "./write-to-pg"
-import express from "express"
+import type { PendingMutation } from "../../../src/types"
 
 const router = express.Router()
 
@@ -16,7 +16,7 @@ const router = express.Router()
  */
 router.post(`/api/mutations`, async (req, res) => {
   try {
-    const pendingMutations: PendingMutation[] = req.body
+    const pendingMutations: Array<PendingMutation> = req.body
 
     if (!Array.isArray(pendingMutations)) {
       return res.status(400).json({ error: `Expected an array of mutations` })
@@ -24,7 +24,9 @@ router.post(`/api/mutations`, async (req, res) => {
 
     // Validate each mutation before processing
     const validatedMutations = pendingMutations.map((mutation) => {
-      const relation = mutation.syncMetadata.relation as string[] | undefined
+      const relation = mutation.syncMetadata.relation as
+        | Array<string>
+        | undefined
       const tableName = relation?.[1]
       if (!tableName) {
         throw new Error(`Could not find table name in relation metadata`)

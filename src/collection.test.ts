@@ -1,11 +1,10 @@
-import { describe, it, vi, expect } from "vitest"
-import { Collection } from "./collection"
-import type { ChangeMessage, PendingMutation } from "./types"
+import { describe, expect, it, vi } from "vitest"
 import "fake-indexeddb/auto"
 import mitt from "mitt"
 import { z } from "zod"
-import { SchemaValidationError } from "./collection"
-import { Row } from "@electric-sql/client"
+import { Collection, SchemaValidationError } from "./collection"
+import type { ChangeMessage, PendingMutation } from "./types"
+import type { Row } from "@electric-sql/client"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -22,11 +21,11 @@ describe(`Collection`, () => {
     ).toThrow(`Collection requires a mutationFn`)
   })
 
-  it(`It shouldn't expose any state until the initial sync is finished`, async () => {
+  it(`It shouldn't expose any state until the initial sync is finished`, () => {
     // Create a collection with a mock sync plugin
     new Collection<{ value: string }>({
+      id: `foo`,
       sync: {
-        id: `test`,
         sync: ({ collection, begin, write, commit }) => {
           // Initial state should be empty
           expect(collection.state).toEqual(new Map())
@@ -35,7 +34,7 @@ describe(`Collection`, () => {
           begin()
 
           // Write some test data
-          const operations: ChangeMessage[] = [
+          const operations: Array<ChangeMessage> = [
             { key: `user1`, value: { name: `Alice` }, type: `insert` },
             { key: `user2`, value: { name: `Bob` }, type: `insert` },
           ]
@@ -75,12 +74,12 @@ describe(`Collection`, () => {
         id: `mock`,
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust mitt's typing
-          emitter.on(`*`, (_, changes: PendingMutation[]) => {
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key!,
-                type: change.type!,
+                key: change.key,
+                type: change.type,
                 value: change.changes as Row,
               })
             })
@@ -122,7 +121,7 @@ describe(`Collection`, () => {
     // Test insert with auto-generated key
     const data = { value: `bar` }
     const transaction = collection.insert(data)
-    const insertedKey = transaction.mutations[0].key ?? ``
+    const insertedKey = transaction.mutations[0].key
 
     // The merged value should immediately contain the new insert
     expect(collection.state).toEqual(new Map([[insertedKey, { value: `bar` }]]))
@@ -212,8 +211,8 @@ describe(`Collection`, () => {
       collection.state.get(keys[2])!,
       collection.state.get(keys[3])!,
     ]
-    collection.update(items, { metadata: { bulkUpdate: true } }, (items) => {
-      items.forEach((item) => {
+    collection.update(items, { metadata: { bulkUpdate: true } }, (draft) => {
+      draft.forEach((item) => {
         item.value += `-updated`
       })
     })
@@ -252,12 +251,12 @@ describe(`Collection`, () => {
         id: `mock`,
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust Mitt's typing and this works.
-          emitter.on(`*`, (_, changes: PendingMutation[]) => {
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key!,
-                type: change.type!,
+                key: change.key,
+                type: change.type,
                 value: change.changes as Row,
               })
             })
@@ -329,7 +328,7 @@ describe(`Collection`, () => {
     // mutationFn fails w/ NonRetriableError and the check that optimistic state is rolledback.
   })
 
-  it(`should handle sparse key arrays for bulk inserts`, async () => {
+  it(`should handle sparse key arrays for bulk inserts`, () => {
     const collection = new Collection<{ value: string }>({
       sync: {
         id: `test`,
@@ -383,7 +382,7 @@ describe(`Collection`, () => {
 })
 
 describe(`Collection with schema validation`, () => {
-  it(`should validate data against schema on insert`, async () => {
+  it(`should validate data against schema on insert`, () => {
     // Create a Zod schema for a user
     const userSchema = z.object({
       name: z.string().min(1),
@@ -432,14 +431,14 @@ describe(`Collection with schema validation`, () => {
         expect(error.type).toBe(`insert`)
         expect(error.issues.length).toBeGreaterThan(0)
         // Check that we have validation errors for each invalid field
-        expect(
-          error.issues.some((issue) => issue?.path?.includes(`name`))
-        ).toBe(true)
-        expect(error.issues.some((issue) => issue?.path?.includes(`age`))).toBe(
+        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
+          true
+        )
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
           true
         )
         expect(
-          error.issues.some((issue) => issue?.path?.includes(`email`))
+          error.issues.some((issue) => issue.path?.includes(`email`))
         ).toBe(true)
       }
     }
@@ -461,7 +460,7 @@ describe(`Collection with schema validation`, () => {
       if (error instanceof SchemaValidationError) {
         expect(error.type).toBe(`update`)
         expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue?.path?.includes(`age`))).toBe(
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
           true
         )
       }

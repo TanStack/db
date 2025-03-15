@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest"
-import { createDeferred, type Deferred } from "./deferred"
+import { describe, expect, it } from "vitest"
+import { createDeferred } from "./deferred"
+import type { Deferred } from "./deferred"
 
 describe(`Deferred`, () => {
   it(`should create a deferred object with the correct shape`, () => {
@@ -61,7 +62,7 @@ describe(`Deferred`, () => {
     expect(await objectDeferred.promise).toEqual(testObj)
 
     // Array type
-    const arrayDeferred = createDeferred<number[]>()
+    const arrayDeferred = createDeferred<Array<number>>()
     arrayDeferred.resolve([1, 2, 3])
     expect(await arrayDeferred.promise).toEqual([1, 2, 3])
 

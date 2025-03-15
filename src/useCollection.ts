@@ -1,7 +1,7 @@
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector.js"
-import type { Transaction, CollectionConfig } from "./types"
-import { Collection, preloadCollection, collectionsStore } from "./collection"
-import { SortedMap } from "./SortedMap"
+import { Collection, collectionsStore, preloadCollection } from "./collection"
+import type { SortedMap } from "./SortedMap"
+import type { CollectionConfig, Transaction } from "./types"
 
 export { preloadCollection }
 
@@ -136,7 +136,7 @@ export function useCollection<T extends object>(
   /**
    * The collection data as an Array of data
    */
-  data: T[]
+  data: Array<T>
   /**
    * Updates an existing item in the collection
    *
@@ -212,7 +212,7 @@ export function useCollection<T extends object, R>(
   /**
    * The collection data as an Array of items
    */
-  data: T[]
+  data: Array<T>
   /**
    * Updates an existing item in the collection
    *
@@ -308,11 +308,11 @@ export function useCollection<T extends object, R = any>(
   // Use a single subscription to get all the data we need
   const result = useSyncExternalStoreWithSelector<
     Map<string, T>,
-    { state: Map<string, T>; data: T[] }
+    { state: Map<string, T>; data: Array<T> }
   >(
     collection.derivedState.subscribe,
-    () => collection.derivedState.state as Map<string, T>,
-    () => collection.derivedState.state as Map<string, T>,
+    () => collection.derivedState.state,
+    () => collection.derivedState.state,
     (stateMap) => {
       return {
         state: stateMap,
@@ -395,9 +395,9 @@ export function shallow<T>(objA: T, objB: T) {
     return false
   }
 
-  for (let i = 0; i < keysA.length; i++) {
+  for (const i of keysA) {
     if (
-      !Object.prototype.hasOwnProperty.call(objB, keysA[i] as string) ||
+      !Object.prototype.hasOwnProperty.call(objB, keysA[i]) ||
       !Object.is(objA[keysA[i] as keyof T], objB[keysA[i] as keyof T])
     ) {
       return false

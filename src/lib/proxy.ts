@@ -7,7 +7,7 @@
  * Simple debug utility that only logs when debug mode is enabled
  * Set DEBUG to true in localStorage to enable debug logging
  */
-function debugLog(...args: unknown[]): void {
+function debugLog(...args: Array<unknown>): void {
   // Check if we're in a browser environment
   const isBrowser =
     typeof window !== `undefined` && typeof localStorage !== `undefined`
@@ -49,7 +49,7 @@ interface ChangeTracker<T extends object> {
 /**
  * Deep clones an object while preserving special types like Date and RegExp
  */
-/* eslint-disable @typescript-eslint/no-unnecessary-type-constraint */
+
 function deepClone<T extends unknown>(
   obj: T,
   visited = new WeakMap<object, unknown>()
@@ -78,7 +78,7 @@ function deepClone<T extends unknown>(
   }
 
   if (Array.isArray(obj)) {
-    const arrayClone = [] as unknown[]
+    const arrayClone = [] as Array<unknown>
     visited.set(obj as object, arrayClone)
     obj.forEach((item, index) => {
       arrayClone[index] = deepClone(item, visited)
@@ -97,7 +97,7 @@ function deepClone<T extends unknown>(
 
     // Copy the values
     for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
-      ;(clone as TypedArray)[i] = (obj as unknown as TypedArray)[i]
+      clone[i] = (obj as unknown as TypedArray)[i]
     }
 
     return clone as unknown as T
@@ -107,16 +107,16 @@ function deepClone<T extends unknown>(
     const clone = new Map() as Map<unknown, unknown>
     visited.set(obj as object, clone)
     obj.forEach((value, key) => {
-      ;(clone as Map<unknown, unknown>).set(key, deepClone(value, visited))
+      clone.set(key, deepClone(value, visited))
     })
     return clone as unknown as T
   }
 
   if (obj instanceof Set) {
-    const clone = new Set() as Set<unknown>
+    const clone = new Set()
     visited.set(obj as object, clone)
     obj.forEach((value) => {
-      ;(clone as Set<unknown>).add(deepClone(value, visited))
+      clone.add(deepClone(value, visited))
     })
     return clone as unknown as T
   }
@@ -241,9 +241,7 @@ function deepEqual<T>(a: T, b: T): boolean {
   return keysA.every(
     (key) =>
       Object.prototype.hasOwnProperty.call(b, key) &&
-      /* eslint-disable @typescript-eslint/no-explicit-any */
       deepEqual((a as any)[key], (b as any)[key])
-    /* eslint-enable @typescript-eslint/no-explicit-any */
   )
 }
 
@@ -259,9 +257,8 @@ export function createChangeProxy<T extends object>(
   parent?: { tracker: ChangeTracker<object>; prop: string | symbol }
 ): {
   proxy: T
-  /* eslint-disable @typescript-eslint/no-explicit-any */
+
   getChanges: () => Record<string | symbol, any>
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 } {
   // Create a WeakMap to cache proxies for nested objects
   // This prevents creating multiple proxies for the same object
@@ -310,10 +307,8 @@ export function createChangeProxy<T extends object>(
     for (const prop in state.assigned_) {
       // If this property is marked as assigned
       if (state.assigned_[prop] === true) {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
         const currentValue = state.copy_ ? (state.copy_ as any)[prop] : null
         const originalValue = (state.originalObject as any)[prop]
-        /* eslint-enable @typescript-eslint/no-explicit-any */
 
         debugLog(
           `Checking property ${String(prop)}, current:`,
@@ -338,10 +333,8 @@ export function createChangeProxy<T extends object>(
     const symbolProps = Object.getOwnPropertySymbols(state.assigned_)
     for (const sym of symbolProps) {
       if (state.assigned_[sym.toString()] === true) {
-        /* eslint-disable @typescript-eslint/no-explicit-any */
         const currentValue = state.copy_ ? (state.copy_ as any)[sym] : null
         const originalValue = (state.originalObject as any)[sym]
-        /* eslint-enable @typescript-eslint/no-explicit-any */
 
         // If the value is not equal to original, something is still changed
         if (!deepEqual(currentValue, originalValue)) {
@@ -428,27 +421,27 @@ export function createChangeProxy<T extends object>(
   }
 
   // Create a proxy for the target object
-  function createObjectProxy<U extends object>(obj: U): U {
+  function createObjectProxy<TObj extends object>(obj: TObj): TObj {
     // If we've already created a proxy for this object, return it
     if (proxyCache.has(obj)) {
-      return proxyCache.get(obj) as U
+      return proxyCache.get(obj) as TObj
     }
 
     // Create a proxy for the object
     const proxy = new Proxy(obj, {
-      get(target, prop) {
-        const value = target[prop as keyof U]
+      get(ptarget, prop) {
+        const value = ptarget[prop as keyof TObj]
 
         // If it's a getter, return the value directly
-        const desc = Object.getOwnPropertyDescriptor(target, prop)
+        const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
         if (desc?.get) {
           return value
         }
 
-        // If the value is a function, bind it to the target
+        // If the value is a function, bind it to the ptarget
         if (typeof value === `function`) {
           // For Map and Set methods that modify the collection
-          if (target instanceof Map || target instanceof Set) {
+          if (ptarget instanceof Map || ptarget instanceof Set) {
             const methodName = prop.toString()
             const modifyingMethods = new Set([
               `set`,
@@ -465,8 +458,8 @@ export function createChangeProxy<T extends object>(
             ])
 
             if (modifyingMethods.has(methodName)) {
-              return function (...args: unknown[]) {
-                const result = value.apply(target, args)
+              return function (...args: Array<unknown>) {
+                const result = value.apply(ptarget, args)
                 markChanged(changeTracker)
                 return result
               }
@@ -482,8 +475,8 @@ export function createChangeProxy<T extends object>(
             ])
 
             if (iteratorMethods.has(methodName) || prop === Symbol.iterator) {
-              return function (this: unknown, ...args: unknown[]) {
-                const result = value.apply(target, args)
+              return function (this: unknown, ...args: Array<unknown>) {
+                const result = value.apply(ptarget, args)
 
                 // For forEach, we need to wrap the callback to track changes
                 if (methodName === `forEach`) {
@@ -491,19 +484,26 @@ export function createChangeProxy<T extends object>(
                   if (typeof callback === `function`) {
                     // Replace the original callback with our wrapped version
                     const wrappedCallback = function (
+                      // eslint-disable-next-line
                       this: unknown,
+                      // eslint-disable-next-line
                       value: unknown,
                       key: unknown,
                       collection: unknown
                     ) {
                       // Call the original callback
-                      const result = callback.call(this, value, key, collection)
+                      const cbresult = callback.call(
+                        this,
+                        value,
+                        key,
+                        collection
+                      )
                       // Mark as changed since the callback might have modified the value
                       markChanged(changeTracker)
-                      return result
+                      return cbresult
                     }
                     // Call forEach with our wrapped callback
-                    return value.apply(target, [
+                    return value.apply(ptarget, [
                       wrappedCallback,
                       ...args.slice(1),
                     ])
@@ -594,7 +594,7 @@ export function createChangeProxy<T extends object>(
               }
             }
           }
-          return value.bind(target)
+          return value.bind(ptarget)
         }
 
         // If the value is an object, create a proxy for it
@@ -622,8 +622,8 @@ export function createChangeProxy<T extends object>(
         return value
       },
 
-      set(obj, prop, value) {
-        const currentValue = obj[prop as keyof U]
+      set(sobj, prop, value) {
+        const currentValue = sobj[prop as keyof TObj]
         debugLog(
           `set called for property ${String(prop)}, current:`,
           currentValue,
@@ -632,13 +632,13 @@ export function createChangeProxy<T extends object>(
         )
 
         // Special handling for array length changes
-        if (Array.isArray(obj) && prop === `length`) {
+        if (Array.isArray(sobj) && prop === `length`) {
           const newLength = Number(value)
-          const oldLength = obj.length
+          const oldLength = sobj.length
 
           // Create a new array with the desired length
           const newArray = Array.from({ length: newLength }, (_, i) =>
-            i < oldLength ? obj[i] : undefined
+            i < oldLength ? sobj[i] : undefined
           )
 
           // Track the change in the parent object since 'arr' is the property name
@@ -649,7 +649,7 @@ export function createChangeProxy<T extends object>(
           }
 
           // Update the original array
-          obj.length = newLength
+          sobj.length = newLength
           return true
         }
 
@@ -711,7 +711,7 @@ export function createChangeProxy<T extends object>(
             }
 
             // Set the value on the original object
-            obj[prop as keyof U] = value
+            obj[prop as keyof TObj] = value
 
             // Track that this property was assigned - store using the actual property (symbol or string)
             changeTracker.assigned_[prop.toString()] = true
@@ -730,8 +730,8 @@ export function createChangeProxy<T extends object>(
         return true
       },
 
-      defineProperty(target, prop, descriptor) {
-        const result = Reflect.defineProperty(target, prop, descriptor)
+      defineProperty(ptarget, prop, descriptor) {
+        const result = Reflect.defineProperty(ptarget, prop, descriptor)
         if (result) {
           // Track the change if the property has a value
           if (`value` in descriptor) {
@@ -743,15 +743,15 @@ export function createChangeProxy<T extends object>(
         return result
       },
 
-      setPrototypeOf(target, proto) {
+      setPrototypeOf(ptarget, proto) {
         // Allow setting prototype but don't track it as a change
-        return Object.setPrototypeOf(target, proto)
+        return Object.setPrototypeOf(ptarget, proto)
       },
 
-      deleteProperty(obj, prop) {
+      deleteProperty(dobj, prop) {
         const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
-        if (stringProp in obj) {
+        if (stringProp in dobj) {
           // Check if the property exists in the original object
           const hadPropertyInOriginal =
             stringProp in changeTracker.originalObject
@@ -765,7 +765,7 @@ export function createChangeProxy<T extends object>(
           }
 
           // Delete the property from the original object
-          delete obj[prop as keyof U]
+          delete dobj[prop as keyof TObj]
 
           // If the property didn't exist in the original object, removing it
           // should revert to the original state
@@ -799,7 +799,7 @@ export function createChangeProxy<T extends object>(
     // Cache the proxy
     proxyCache.set(obj, proxy)
 
-    return proxy as U
+    return proxy
   }
 
   // Create a proxy for the target object
@@ -852,12 +852,14 @@ export function createChangeProxy<T extends object>(
       updateModifiedStatus(changeTracker)
 
       // If we're no longer modified after the check, return empty changes
+      // eslint-disable-next-line
       if (!changeTracker.modified) {
         debugLog(`No longer modified after check, returning empty object`)
         return {}
       }
 
       // Handle optimization case - if the object is marked modified but actually is equal to original
+      // eslint-disable-next-line
       if (changeTracker.modified) {
         const objToCheck = changeTracker.copy_ || target
         debugLog(
@@ -901,9 +903,9 @@ export function createChangeProxy<T extends object>(
           for (const sym of symbolProps) {
             if (changeTracker.assigned_[sym.toString()] === true) {
               // Use the symbol directly instead of its string representation
-              /* eslint-disable @typescript-eslint/no-explicit-any */
+
               const value = (changeTracker.copy_ as any)[sym]
-              /* eslint-enable @typescript-eslint/no-explicit-any */
+
               changes[sym.toString()] = deepClone(value)
             }
           }
@@ -917,11 +919,12 @@ export function createChangeProxy<T extends object>(
 
       // If the object is modified but has no direct changes (nested changes),
       // but we're the root object, recursively check if unknown changes exist
+      // eslint-disable-next-line
       if (changeTracker.modified && !parent) {
         debugLog(`Root object with nested changes, checking deep equality`)
-        /* eslint-disable @typescript-eslint/no-explicit-any */
+
         const currentState = changeTracker.copy_ || (target as any)
-        /* eslint-enable @typescript-eslint/no-explicit-any */
+
         debugLog(
           `Comparing current state with original:`,
           currentState,
@@ -952,6 +955,7 @@ export function createChangeProxy<T extends object>(
         // Special case for nested object reverts
         // If we're here, we need to check if the nested objects have been reverted
         // even if the parent object still shows as modified
+        // eslint-disable-next-line
         if (typeof target === `object` && target !== null) {
           let allNestedReverted = true
 
@@ -1004,10 +1008,10 @@ export function createChangeProxy<T extends object>(
  * @returns An object containing the array of proxies and a function to get all changes
  */
 export function createArrayChangeProxy<T extends object>(
-  targets: T[]
+  targets: Array<T>
 ): {
-  proxies: T[]
-  getChanges: () => Record<string | symbol, unknown>[]
+  proxies: Array<T>
+  getChanges: () => Array<Record<string | symbol, unknown>>
 } {
   const proxiesWithChanges = targets.map((target) => createChangeProxy(target))
 
@@ -1045,9 +1049,9 @@ export function withChangeTracking<T extends object>(
  * @returns Array of changes made to each object
  */
 export function withArrayChangeTracking<T extends object>(
-  targets: T[],
-  callback: (proxies: T[]) => void
-): Record<string | symbol, unknown>[] {
+  targets: Array<T>,
+  callback: (proxies: Array<T>) => void
+): Array<Record<string | symbol, unknown>> {
   const { proxies, getChanges } = createArrayChangeProxy(targets)
 
   callback(proxies)

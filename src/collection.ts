@@ -1,22 +1,21 @@
-import { Store, Derived, batch } from "@tanstack/store"
-import {
-  CollectionConfig,
-  ChangeMessage,
-  PendingMutation,
-  Transaction,
-  TransactionState,
-  StandardSchema,
-  InsertConfig,
-  OperationConfig,
-} from "./types"
-import { withChangeTracking, withArrayChangeTracking } from "./lib/proxy"
+import { Derived, Store, batch } from "@tanstack/store"
+import { withArrayChangeTracking, withChangeTracking } from "./lib/proxy"
 import { getTransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
+import type {
+  ChangeMessage,
+  CollectionConfig,
+  InsertConfig,
+  OperationConfig,
+  PendingMutation,
+  StandardSchema,
+  Transaction,
+  TransactionState,
+} from "./types"
 
 // Store collections in memory using Tanstack store
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 export const collectionsStore = new Store(new Map<string, Collection<any>>())
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Map to track loading collections
 
@@ -24,7 +23,7 @@ const loadingCollections = new Map<string, Promise<void>>()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
-  operations: ChangeMessage<T>[]
+  operations: Array<ChangeMessage<T>>
 }
 
 /**
@@ -142,21 +141,21 @@ export class Collection<T extends object = Record<string, unknown>> {
   public transactionManager!: ReturnType<typeof getTransactionManager<T>>
   private transactionStore: TransactionStore
 
-  public optimisticOperations: Derived<ChangeMessage<T>[]>
+  public optimisticOperations: Derived<Array<ChangeMessage<T>>>
   public derivedState: Derived<Map<string, T>>
-  public derivedArray: Derived<T[]>
+  public derivedArray: Derived<Array<T>>
 
   private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())
-  private pendingSyncedTransactions: PendingSyncedTransaction<T>[] = []
+  private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   public config: CollectionConfig<T>
-  private hasReceivedFirstCommit: boolean = false
+  private hasReceivedFirstCommit = false
 
   // WeakMap to associate objects with their keys
   public objectKeyMap = new WeakMap<object, string>()
 
   // Array to store one-time commit listeners
-  private onFirstCommitCallbacks: (() => void)[] = []
+  private onFirstCommitCallbacks: Array<() => void> = []
 
   /**
    * Register a callback to be executed on the next commit
@@ -179,7 +178,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     if (!config?.sync) {
       throw new Error(`Collection requires a sync config`)
     }
-    if (!config?.mutationFn && !config?.mutationFn?.persist) {
+    if (!config.mutationFn as unknown) {
       throw new Error(`Collection requires a mutationFn`)
     }
 
@@ -238,7 +237,7 @@ export class Collection<T extends object = Record<string, unknown>> {
               combined.set(operation.key, {
                 ...(existingValue || {}),
                 ...operation.value,
-              } as T)
+              })
               break
             case `delete`:
               combined.delete(operation.key)
@@ -290,6 +289,9 @@ export class Collection<T extends object = Record<string, unknown>> {
           this.pendingSyncedTransactions[
             this.pendingSyncedTransactions.length - 1
           ]
+        if (!pendingTransaction) {
+          throw new Error(`No pending sync transaction to write to`)
+        }
         if (pendingTransaction.committed) {
           throw new Error(
             `The pending sync transaction is already committed, you can't still write to it.`
@@ -302,6 +304,9 @@ export class Collection<T extends object = Record<string, unknown>> {
           this.pendingSyncedTransactions[
             this.pendingSyncedTransactions.length - 1
           ]
+        if (!pendingTransaction) {
+          throw new Error(`No pending sync transaction to commit`)
+        }
         if (pendingTransaction.committed) {
           throw new Error(
             `The pending sync transaction is already committed, you can't commit it again.`
@@ -340,7 +345,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     // Function to check if a state is NOT a terminal state
     function isNotTerminalState({ state }: Transaction): boolean {
-      return !terminalStates.has(state as TransactionState)
+      return !terminalStates.has(state)
     }
     if (
       this.transactions.size === 0 ||
@@ -515,12 +520,12 @@ export class Collection<T extends object = Record<string, unknown>> {
    * // Insert with custom key
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
-  insert = (data: T | T[], config?: InsertConfig) => {
+  insert = (data: T | Array<T>, config?: InsertConfig) => {
     const items = Array.isArray(data) ? data : [data]
-    const mutations: PendingMutation[] = []
+    const mutations: Array<PendingMutation> = []
 
     // Handle keys - convert to array if string, or generate if not provided
-    let keys: string[]
+    let keys: Array<string>
     if (config?.key) {
       const configKeys = Array.isArray(config.key) ? config.key : [config.key]
       // If keys are provided, ensure we have the right number or allow sparse array
@@ -545,7 +550,7 @@ export class Collection<T extends object = Record<string, unknown>> {
         modified: validatedData as Record<string, unknown>,
         changes: validatedData as Record<string, unknown>,
         key,
-        metadata: config?.metadata,
+        metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
         type: `insert`,
         createdAt: new Date(),
@@ -580,24 +585,22 @@ export class Collection<T extends object = Record<string, unknown>> {
    * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
 
-  update<T1 extends object = T>(
-    item: T1,
-    configOrCallback: ((draft: T1) => void) | OperationConfig,
-    maybeCallback?: (draft: T1) => void
+  update<TItem extends object = T>(
+    item: TItem,
+    configOrCallback: ((draft: TItem) => void) | OperationConfig,
+    maybeCallback?: (draft: TItem) => void
   ): Transaction
 
-  // eslint-disable-next-line no-dupe-class-members
-  update<T1 extends object = T>(
-    items: T1[],
-    configOrCallback: ((draft: T1[]) => void) | OperationConfig,
-    maybeCallback?: (draft: T1[]) => void
+  update<TItem extends object = T>(
+    items: Array<TItem>,
+    configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
+    maybeCallback?: (draft: Array<TItem>) => void
   ): Transaction
 
-  // eslint-disable-next-line no-dupe-class-members
-  update<T1 extends object = T>(
-    items: T1 | T1[],
-    configOrCallback: ((draft: T1 | T1[]) => void) | OperationConfig,
-    maybeCallback?: (draft: T1 | T1[]) => void
+  update<TItem extends object = T>(
+    items: TItem | Array<TItem>,
+    configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
+    maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
     const isArray = Array.isArray(items)
     const itemsArray = Array.isArray(items) ? items : [items]
@@ -607,9 +610,9 @@ export class Collection<T extends object = Record<string, unknown>> {
       typeof configOrCallback === `function` ? {} : configOrCallback
 
     const keys = itemsArray.map((item) => {
-      if (typeof item === `object` && item !== null) {
-        const key = this.objectKeyMap.get(item as object)
-        if (!key) {
+      if (typeof item === `object` && (item as unknown) !== null) {
+        const key = this.objectKeyMap.get(item)
+        if (key === undefined) {
           throw new Error(`Object not found in collection`)
         }
         return key
@@ -620,30 +623,30 @@ export class Collection<T extends object = Record<string, unknown>> {
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keys.map((key) => ({
       ...(this.state.get(key) || {}),
-    })) as T1[]
+    })) as Array<TItem>
 
     let changesArray
     if (isArray) {
       // Use the proxy to track changes for all objects
       changesArray = withArrayChangeTracking(
         currentObjects,
-        callback as (draft: T1[]) => void
+        callback as (draft: Array<TItem>) => void
       )
     } else {
       const result = withChangeTracking(
         currentObjects[0],
-        callback as (draft: T1) => void
+        callback as (draft: TItem) => void
       )
       changesArray = [result]
     }
 
     // Create mutations for each object that has changes
-    const mutations: PendingMutation[] = keys
+    const mutations: Array<PendingMutation> = keys
       .map((key, index) => {
         const changes = changesArray[index]
 
         // Skip items with no changes
-        if (Object.keys(changes).length === 0) {
+        if (!changes || Object.keys(changes).length === 0) {
           return null
         }
 
@@ -659,7 +662,7 @@ export class Collection<T extends object = Record<string, unknown>> {
           } as Record<string, unknown>,
           changes: validatedData as Record<string, unknown>,
           key,
-          metadata: config.metadata,
+          metadata: config.metadata as unknown,
           syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
             string,
             unknown
@@ -669,7 +672,7 @@ export class Collection<T extends object = Record<string, unknown>> {
           updatedAt: new Date(),
         }
       })
-      .filter(Boolean) as PendingMutation[]
+      .filter(Boolean) as Array<PendingMutation>
 
     // If no changes were made, return early
     if (mutations.length === 0) {
@@ -696,15 +699,18 @@ export class Collection<T extends object = Record<string, unknown>> {
    * // Delete with metadata
    * delete(todo, { metadata: { reason: "completed" } })
    */
-  delete = (items: (T | string)[] | T | string, config?: OperationConfig) => {
+  delete = (
+    items: Array<T | string> | T | string,
+    config?: OperationConfig
+  ) => {
     const itemsArray = Array.isArray(items) ? items : [items]
-    const mutations: PendingMutation[] = []
+    const mutations: Array<PendingMutation> = []
 
     for (const item of itemsArray) {
       let key: string
-      if (typeof item === `object` && item !== null) {
-        const objectKey = this.objectKeyMap.get(item as object)
-        if (!objectKey) {
+      if (typeof item === `object` && (item as unknown) !== null) {
+        const objectKey = this.objectKeyMap.get(item)
+        if (objectKey === undefined) {
           throw new Error(`Object not found in collection`)
         }
         key = objectKey
@@ -722,7 +728,7 @@ export class Collection<T extends object = Record<string, unknown>> {
         modified: { _deleted: true },
         changes: { _deleted: true },
         key,
-        metadata: config?.metadata,
+        metadata: config?.metadata as unknown,
         syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
           string,
           unknown
@@ -754,7 +760,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
   get state() {
-    return this.derivedState.state as Map<string, T>
+    return this.derivedState.state
   }
 
   /**
@@ -783,7 +789,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    return this.derivedArray.state as T[]
+    return this.derivedArray.state
   }
 
   /**
@@ -792,14 +798,14 @@ export class Collection<T extends object = Record<string, unknown>> {
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
-  toArrayWhenReady(): Promise<T[]> {
+  toArrayWhenReady(): Promise<Array<T>> {
     // If we already have data or there are no loading collections, resolve immediately
     if (this.toArray.length > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.toArray)
     }
 
     // Otherwise, wait for the first commit
-    return new Promise<T[]>((resolve) => {
+    return new Promise<Array<T>>((resolve) => {
       this.onFirstCommit(() => {
         resolve(this.toArray)
       })

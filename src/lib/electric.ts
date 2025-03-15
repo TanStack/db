@@ -1,14 +1,16 @@
 import {
   ShapeStream,
-  ShapeStreamOptions,
-  Message,
-  Row,
-  ControlMessage,
   isChangeMessage,
   isControlMessage,
 } from "@electric-sql/client"
-import { SyncConfig } from "../types"
 import { Store } from "@tanstack/store"
+import type { SyncConfig } from "../types"
+import type {
+  ControlMessage,
+  Message,
+  Row,
+  ShapeStreamOptions,
+} from "@electric-sql/client"
 
 // Re-exports
 export type * from "../types"
@@ -43,7 +45,7 @@ function isUpToDateMessage<T extends Row<unknown> = Row>(
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown> = Row>(
   message: Message<T>
-): message is Message<T> & { headers: { txids?: number[] } } {
+): message is Message<T> & { headers: { txids?: Array<number> } } {
   return (
     `headers` in message &&
     `txids` in message.headers &&
@@ -107,6 +109,7 @@ export function createElectricSync<T extends Row<unknown> = Row>(
    * @returns A string key formed from the primary key values
    */
   const generateKeyFromRow = (row: T): string => {
+    // eslint-disable-next-line
     if (!primaryKey || primaryKey.length === 0) {
       throw new Error(`Primary key is required for Electric sync`)
     }
@@ -144,13 +147,13 @@ export function createElectricSync<T extends Row<unknown> = Row>(
       let transactionStarted = false
       let newTxids = new Set<number>()
 
-      stream.subscribe((messages: Message<Row>[]) => {
+      stream.subscribe((messages: Array<Message<Row>>) => {
         let hasUpToDate = false
 
         for (const message of messages) {
           // Check for txids in the message and add them to our store
           if (hasTxids(message) && message.headers.txids) {
-            message.headers.txids?.forEach((txid) => newTxids.add(txid))
+            message.headers.txids.forEach((txid) => newTxids.add(txid))
           }
 
           // Check if the message contains schema information
@@ -216,5 +219,5 @@ export interface ElectricSyncOptions {
   /**
    * Array of column names that form the primary key of the shape
    */
-  primaryKey: string[]
+  primaryKey: Array<string>
 }

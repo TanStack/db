@@ -1,10 +1,10 @@
-import postgres from "postgres"
-import { PendingMutation } from "../types"
+import type postgres from "postgres"
+import type { PendingMutation } from "../types"
 
 /**
  * Get the table name from the relation metadata
  */
-function getTableName(relation?: string[]): string {
+function getTableName(relation?: Array<string>): string {
   if (!relation || relation.length < 2) {
     throw new Error(`could not find the table name`)
   }
@@ -19,22 +19,22 @@ function getTableName(relation?: string[]): string {
  */
 export async function processMutations(
   sql: postgres.Sql<Record<string, unknown>>,
-  pendingMutations: PendingMutation[]
+  pendingMutations: Array<PendingMutation>
 ): Promise<number> {
-  return await sql.begin(async (sql) => {
+  return await sql.begin(async (tx) => {
     // Get the transaction ID
-    const [{ txid }] = await sql`SELECT txid_current() as txid`
+    const [{ txid }] = await tx`SELECT txid_current() as txid`
 
     // Process each mutation in order
     for (const mutation of pendingMutations) {
       // Get the table name from the relation metadata
       const tableName = getTableName(
-        mutation.syncMetadata.relation as string[] | undefined
+        mutation.syncMetadata.relation as Array<string> | undefined
       )
 
       // Get the primary key columns from metadata
       const primaryKey = (mutation.syncMetadata.primaryKey as
-        | string[]
+        | Array<string>
         | undefined) || [`id`]
 
       // Process based on operation type
@@ -44,7 +44,7 @@ export async function processMutations(
           const values = Object.values(mutation.modified)
           const placeholders = values.map((_, i) => `$${i + 1}`).join(`, `)
 
-          await sql.unsafe(
+          await tx.unsafe(
             `INSERT INTO ${tableName} (${columns.join(`, `)}) VALUES (${placeholders})`,
             values
           )
@@ -70,7 +70,7 @@ export async function processMutations(
             ...primaryKey.map((k) => mutation.original[k]),
           ]
 
-          await sql.unsafe(
+          await tx.unsafe(
             `UPDATE ${tableName}
              SET ${setClause}
              WHERE ${whereClause}`,
@@ -88,7 +88,7 @@ export async function processMutations(
           // Extract primary key values in same order as columns
           const primaryKeyValues = primaryKey.map((k) => mutation.original[k])
 
-          await sql.unsafe(
+          await tx.unsafe(
             `DELETE FROM ${tableName}
              WHERE ${whereClause}`,
             primaryKeyValues

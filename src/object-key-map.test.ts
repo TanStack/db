@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest"
-import { Collection } from "./collection"
+import { beforeEach, describe, expect, it } from "vitest"
 import { z } from "zod"
+import { Collection } from "./collection"
 import "fake-indexeddb/auto"
 
 describe(`Object-Key Association`, () => {
@@ -26,7 +26,7 @@ describe(`Object-Key Association`, () => {
     })
   })
 
-  it(`should associate an object with its key after insert`, async () => {
+  it(`should associate an object with its key after insert`, () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
@@ -37,8 +37,8 @@ describe(`Object-Key Association`, () => {
     expect(item).toBeDefined()
 
     // Update using the object reference
-    collection.update(item!, (item) => {
-      item.age = 31
+    collection.update(item!, (draft) => {
+      draft.age = 31
     })
 
     // Verify the update worked
@@ -46,7 +46,7 @@ describe(`Object-Key Association`, () => {
     expect(updated).toEqual({ name: `John`, age: 31 })
   })
 
-  it(`should work with multiple objects`, async () => {
+  it(`should work with multiple objects`, () => {
     // Insert multiple objects
     const johnData = { name: `John`, age: 30 }
     const janeData = { name: `Jane`, age: 28 }
@@ -69,7 +69,7 @@ describe(`Object-Key Association`, () => {
     expect(collection.state.get(`user2`)).toEqual({ name: `Jane Doe`, age: 28 })
   })
 
-  it(`should handle delete with object reference`, async () => {
+  it(`should handle delete with object reference`, () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
@@ -83,7 +83,7 @@ describe(`Object-Key Association`, () => {
     expect(collection.state.get(`user1`)).toBeUndefined()
   })
 
-  it(`should maintain object-key association after updates`, async () => {
+  it(`should maintain object-key association after updates`, () => {
     // Insert an object
     const data = { name: `John`, age: 30 }
     collection.insert(data, { key: `user1` })
@@ -116,7 +116,7 @@ describe(`Object-Key Association`, () => {
     }).toThrow()
   })
 
-  it(`should support bulk insert with multiple keys`, async () => {
+  it(`should support bulk insert with multiple keys`, () => {
     // Insert multiple objects
     const johnData = { name: `John`, age: 30 }
     const janeData = { name: `Jane`, age: 28 }

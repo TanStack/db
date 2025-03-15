@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { TransactionStore } from "./TransactionStore"
 import type { Transaction, TransactionState } from "./types"
 import "fake-indexeddb/auto"

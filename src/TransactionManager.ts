@@ -1,17 +1,17 @@
 import { Store } from "@tanstack/store"
+import { SortedMap } from "./SortedMap"
+import { createDeferred } from "./deferred"
+import type { TransactionStore } from "./TransactionStore"
+import type { Collection } from "./collection"
 import type {
+  MutationStrategy,
+  PendingMutation,
   Transaction,
   TransactionState,
-  PendingMutation,
-  MutationStrategy,
 } from "./types"
-import { TransactionStore } from "./TransactionStore"
-import { SortedMap } from "./SortedMap"
-import { Collection } from "./collection"
-import { createDeferred } from "./deferred"
 
 // Singleton instance of TransactionManager with type map
-// eslint-disable-next-line
+
 const transactionManagerInstances = new Map<string, TransactionManager<any>>()
 
 /**
@@ -97,7 +97,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
    * @returns A proxy that always gets the latest transaction values
    */
   createLiveTransactionReference(id: string): Transaction {
-    // eslint-disable-next-line
     const self: TransactionManager<T> = this
     return new Proxy(
       {
@@ -109,7 +108,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
           }
 
           // Create a shallow copy of the transaction without the toObject method
-          // eslint-disable-next-line
+
           const { toObject, ...transactionData } = transaction
           return { ...transactionData }
         },
@@ -147,12 +146,12 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
    * @returns A live reference to the created or updated transaction
    */
   applyTransaction(
-    mutations: PendingMutation[],
+    mutations: Array<PendingMutation>,
     strategy: MutationStrategy
   ): Transaction {
     // See if there's an existing overlapping queued mutation.
     const mutationKeys = mutations.map((m) => m.key)
-    let transaction: Transaction = Array.from(
+    let transaction: Transaction | undefined = Array.from(
       this.transactions.state.values()
     ).filter(
       (t) =>
@@ -160,7 +159,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         t.mutations.some((m) => mutationKeys.includes(m.key))
     )[0]
 
-    // If there's a map, overwrite matching mutations.
+    // If there's a transaction, overwrite matching mutations.
     if (transaction) {
       for (const newMutation of mutations) {
         const existingIndex = transaction.mutations.findIndex(
@@ -176,8 +175,8 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
           transaction.mutations.push(newMutation)
         }
       }
-      // Else create a new transaction.
     } else {
+      // Create a new transaction if none exists
       transaction = {
         id: crypto.randomUUID(),
         state: `pending`,
@@ -370,7 +369,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
    *
    * @returns Array of active transactions
    */
-  getActiveTransactions(): Transaction[] {
+  getActiveTransactions(): Array<Transaction> {
     return Array.from(this.transactions.state.values()).filter(
       (tx) => tx.state !== `completed` && tx.state !== `failed`
     )
@@ -384,8 +383,8 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
    * @returns True if there are overlapping mutations, false otherwise
    */
   hasOverlappingMutations(
-    mutations1: PendingMutation[],
-    mutations2: PendingMutation[]
+    mutations1: Array<PendingMutation>,
+    mutations2: Array<PendingMutation>
   ): boolean {
     const ids1 = new Set(mutations1.map((m) => m.original.id))
     const ids2 = new Set(mutations2.map((m) => m.original.id))

@@ -16,8 +16,8 @@
     "src"
   ],
   "scripts": {
-    "build": "shx rm -rf dist && tsup && tsc -p tsconfig.build.json",
-    "prepack": "pnpm build",
+    "build": "vite build && publint --strict",
+    "prepack": "vite build",
     "test": "vitest --run",
     "lint": "eslint . --fix",
     "prepare": "husky"
@@ -34,6 +34,7 @@
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@stylistic/eslint-plugin": "^4.0.1",
+    "@tanstack/config": "^0.17.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/node": "^22.13.4",
@@ -53,11 +54,13 @@
     "lint-staged": "^15.4.3",
     "mitt": "^3.0.1",
     "prettier": "^3.5.1",
+    "publint": "^0.3.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "shx": "^0.3.4",
     "tsup": "^8.0.2",
     "typescript": "^5.7.3",
+    "vite": "^6.2.2",
     "vitest": "^3.0.6",
     "zod": "^3.24.2"
   },

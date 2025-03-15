@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { TransactionManager } from "./TransactionManager"
 import { TransactionStore } from "./TransactionStore"
-import type { PendingMutation, MutationStrategy } from "./types"
 import "fake-indexeddb/auto"
 import { Collection } from "./collection"
+import type { MutationStrategy, PendingMutation } from "./types"
 
 describe(`TransactionManager`, () => {
   let store: TransactionStore
@@ -182,7 +182,7 @@ describe(`TransactionManager`, () => {
 
       // Create transactions in reverse chronological order
       await Promise.all(
-        timestamps.map(async (timestamp, i) => {
+        timestamps.map((timestamp, i) => {
           const tx = manager.applyTransaction(
             [createMockMutation(`test-${i + 1}`)],
             parallelStrategy
@@ -394,6 +394,7 @@ describe(`TransactionManager`, () => {
           sync: () => {},
         },
         mutationFn: {
+          // eslint-disable-next-line
           persist: async () => {
             throw new Error(`Persist error affecting both promises`)
           },
@@ -418,8 +419,8 @@ describe(`TransactionManager`, () => {
       )
 
       // Verify the transaction state
-      expect(transaction?.state).toBe(`failed`)
-      expect(transaction?.error?.message).toBe(
+      expect(transaction.state).toBe(`failed`)
+      expect(transaction.error?.message).toBe(
         `Persist error affecting both promises`
       )
     })
@@ -436,9 +437,9 @@ describe(`TransactionManager`, () => {
         },
         // Explicitly specify the MutationFn with proper generic types
         mutationFn: {
-          persist: async () => {
+          persist: () => {
             // Return some test data that should be passed to awaitSync
-            return { testData: `persist-data` }
+            return Promise.resolve({ testData: `persist-data` })
           },
           awaitSync: async ({
             persistResult,
@@ -469,8 +470,8 @@ describe(`TransactionManager`, () => {
       )
 
       // Verify the transaction state
-      expect(transaction?.state).toBe(`failed`)
-      expect(transaction?.error?.message).toBe(
+      expect(transaction.state).toBe(`failed`)
+      expect(transaction.error?.message).toBe(
         `Sync promise error - persist-data`
       )
     })
@@ -483,8 +484,8 @@ describe(`TransactionManager`, () => {
           sync: () => {},
         },
         mutationFn: {
-          persist: async () => {
-            return { testData: `persist-data` }
+          persist: () => {
+            return Promise.resolve({ testData: `persist-data` })
           },
           awaitSyncTimeoutMs: 10,
           awaitSync: async () => {
@@ -512,8 +513,8 @@ describe(`TransactionManager`, () => {
       )
 
       // Verify the transaction state
-      expect(transaction?.state).toBe(`failed`)
-      expect(transaction?.error?.message).toBe(
+      expect(transaction.state).toBe(`failed`)
+      expect(transaction.error?.message).toBe(
         `Sync operation timed out after 2 seconds`
       )
     })
@@ -531,9 +532,9 @@ describe(`TransactionManager`, () => {
         },
         // Explicitly specify the MutationFn with proper generic types
         mutationFn: {
-          persist: async () => {
+          persist: () => {
             // Return some test data that should be passed to awaitSync
-            return { testData: `persist-data` }
+            return Promise.resolve({ testData: `persist-data` })
           },
           awaitSync: async ({
             persistResult,
@@ -576,8 +577,8 @@ describe(`TransactionManager`, () => {
       )
 
       // Verify the transaction state
-      expect(tx2?.state).toBe(`failed`)
-      expect(tx2?.error?.message).toBe(`Sync promise error - persist-data`)
+      expect(tx2.state).toBe(`failed`)
+      expect(tx2.error?.message).toBe(`Sync promise error - persist-data`)
     })
   })
 

@@ -1,4 +1,5 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb"
+import { openDB } from "idb"
+import type { DBSchema, IDBPDatabase } from "idb"
 import type { Transaction } from "./types"
 
 /**
@@ -43,7 +44,7 @@ export class TransactionStore {
    *
    * @returns Promise resolving to an array of all transactions
    */
-  async getTransactions(): Promise<Transaction[]> {
+  async getTransactions(): Promise<Array<Transaction>> {
     const db = await this.getDB()
     return db.getAll(`transactions`)
   }
@@ -56,7 +57,7 @@ export class TransactionStore {
    */
   async putTransaction(tx: Transaction): Promise<void> {
     const db = await this.getDB()
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     const { isSynced, isPersisted, toObject, ...restOfTx } = tx
     await db.put(`transactions`, restOfTx)
   }

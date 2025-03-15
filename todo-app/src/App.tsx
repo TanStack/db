@@ -1,10 +1,11 @@
-import React, { useState, FormEvent } from "react"
+import React, { useState } from "react"
 import { useCollection } from "../../src/useCollection"
-import { Collection } from "../../src/collection"
 import { createElectricSync } from "../../src/lib/electric"
 import { DevTools } from "./DevTools"
-import { UpdateTodo, UpdateConfig } from "./db/validation"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
+import type { UpdateConfig, UpdateTodo } from "./db/validation"
+import type { Collection } from "../../src/collection"
+import type { FormEvent } from "react"
 
 export default function App() {
   const [newTodo, setNewTodo] = useState(``)
@@ -191,12 +192,12 @@ export default function App() {
 
   const titleColor = getComplementaryColor(backgroundColor)
 
-  const handleColorChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newColor = e.target.value
     setConfigValue(`backgroundColor`, newColor)
   }
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (!newTodo.trim()) return
 
@@ -255,7 +256,7 @@ export default function App() {
                 <button
                   type="button"
                   className="absolute left-0 w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
-                  onClick={async () => {
+                  onClick={() => {
                     const allCompleted = completedTodos.length === todos.length
                     update(
                       allCompleted ? completedTodos : activeTodos,
@@ -323,7 +324,7 @@ export default function App() {
                   </span>
                   {completedTodos.length > 0 && (
                     <button
-                      onClick={async () => {
+                      onClick={() => {
                         deleteTodo(completedTodos)
                       }}
                       className="text-inherit hover:underline"

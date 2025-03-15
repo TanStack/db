@@ -1,5 +1,5 @@
-import { Collection } from "./collection"
-import { Deferred } from "./deferred"
+import type { Collection } from "./collection"
+import type { Deferred } from "./deferred"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 export type TransactionState =
@@ -28,7 +28,7 @@ export interface Transaction {
   state: TransactionState
   createdAt: Date
   updatedAt: Date
-  mutations: PendingMutation[]
+  mutations: Array<PendingMutation>
   strategy: MutationStrategy
   metadata: Record<string, unknown>
   queuedBehind?: string
@@ -46,17 +46,17 @@ export interface Transaction {
   toObject?: () => Omit<Transaction, `toObject`>
 }
 
-type Value<Extensions = never> =
+type Value<TExtensions = never> =
   | string
   | number
   | boolean
   | bigint
   | null
-  | Extensions
-  | Value<Extensions>[]
-  | { [key: string]: Value<Extensions> }
+  | TExtensions
+  | Array<Value<TExtensions>>
+  | { [key: string]: Value<TExtensions> }
 
-export type Row<Extensions = never> = Record<string, Value<Extensions>>
+export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 type OperationType = `insert` | `update` | `delete`
 
@@ -86,7 +86,6 @@ export interface MutationFn<T extends object = Record<string, unknown>> {
   persist: (params: {
     transaction: Transaction
     collection: Collection<T>
-    // eslint-disable-next-line
   }) => Promise<any>
 
   // Set timeout for awaiting sync (default is 2 seconds)
@@ -94,7 +93,7 @@ export interface MutationFn<T extends object = Record<string, unknown>> {
   awaitSync?: (params: {
     transaction: Transaction
     collection: Collection<T>
-    // eslint-disable-next-line
+
     persistResult: any
   }) => Promise<void>
 }
@@ -103,7 +102,7 @@ export interface MutationStrategy {
   type: `ordered` | `parallel`
   merge?: (
     syncedData: Record<string, unknown>,
-    pendingMutations: PendingMutation[]
+    pendingMutations: Array<PendingMutation>
   ) => Record<string, unknown>
 }
 
@@ -130,7 +129,7 @@ export interface OperationConfig {
 }
 
 export interface InsertConfig {
-  key?: string | (string | undefined)[]
+  key?: string | Array<string | undefined>
   metadata?: Record<string, unknown>
 }
 

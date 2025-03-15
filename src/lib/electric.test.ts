@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Collection } from "../collection"
-import { createElectricSync, ElectricSync } from "./electric"
-import { Message, Row } from "@electric-sql/client"
+import { createElectricSync } from "./electric"
+import type { Message, Row } from "@electric-sql/client"
+import type { ElectricSync } from "./electric"
 import "fake-indexeddb/auto"
-import { PendingMutation, Transaction } from "../types"
+import type { PendingMutation, Transaction } from "../types"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -21,7 +22,7 @@ vi.mock(`@electric-sql/client`, async () => {
 
 describe(`Electric Integration`, () => {
   let collection: Collection
-  let subscriber: (messages: Message<Row>[]) => void
+  let subscriber: (messages: Array<Message<Row>>) => void
   let electricSync: ElectricSync
 
   beforeEach(() => {
@@ -292,7 +293,7 @@ describe(`Electric Integration`, () => {
       const fakeBackend = {
         data: new Map<string, unknown>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: async (mutations: PendingMutation[]): Promise<number> => {
+        persist: (mutations: Array<PendingMutation>): Promise<number> => {
           const txid = Date.now()
 
           // Store the changes with the txid
@@ -303,12 +304,12 @@ describe(`Electric Integration`, () => {
             })
           })
 
-          return txid
+          return Promise.resolve(txid)
         },
         // Simulates the server sending sync messages with txids
         simulateSyncMessage: (txid: number) => {
           // Create messages for each item in the store that has this txid
-          const messages: Message<Row>[] = []
+          const messages: Array<Message<Row>> = []
 
           fakeBackend.data.forEach((data, key) => {
             if (data.txid === txid) {
@@ -350,7 +351,7 @@ describe(`Electric Integration`, () => {
         awaitSync: vi.fn(
           async ({ persistResult }: { persistResult: { txid: number } }) => {
             // Get the txid from the transaction metadata
-            const txid = persistResult?.txid
+            const txid = persistResult.txid
 
             if (!txid) {
               throw new Error(`No txid found`)

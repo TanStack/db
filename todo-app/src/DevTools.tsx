@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { useCollections } from "../../src/useCollection"
-import { Transaction } from "../../src/types"
 import { DiffView } from "./DiffView"
+import type { Transaction } from "../../src/types"
 
 export function DevTools() {
   const collections = useCollections()
@@ -102,18 +102,16 @@ export function DevTools() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {Array.from(selectedData.state || []).map(
-                      ([key, value]) => (
-                        <tr key={key}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {key}
-                          </td>
-                          <td className="px-6 py-4 whitespace-pre text-sm text-gray-500 font-mono">
-                            {JSON.stringify(value, null, 2)}
-                          </td>
-                        </tr>
-                      )
-                    )}
+                    {Array.from(selectedData.state).map(([key, value]) => (
+                      <tr key={key}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {key}
+                        </td>
+                        <td className="px-6 py-4 whitespace-pre text-sm text-gray-500 font-mono">
+                          {JSON.stringify(value, null, 2)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               ) : activeTab === `transactions` && selectedData ? (
@@ -209,8 +207,8 @@ export function DevTools() {
                                           </span>
                                         </div>
                                         <DiffView
-                                          oldValue={mutation.original || {}}
-                                          newValue={mutation.modified || {}}
+                                          oldValue={mutation.original}
+                                          newValue={mutation.modified}
                                         />
                                       </div>
                                     )

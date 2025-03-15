@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import { SortedMap } from "./SortedMap"
 
 describe(`SortedMap`, () => {
@@ -66,7 +66,7 @@ describe(`SortedMap`, () => {
     expect(values).toEqual([1, 2, 3])
 
     // Test forEach
-    const forEachResults: number[] = []
+    const forEachResults: Array<number> = []
     map.forEach((value) => forEachResults.push(value))
     expect(forEachResults).toEqual([1, 2, 3])
   })

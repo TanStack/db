@@ -1,20 +1,20 @@
 /**
  * A Map implementation that keeps its entries sorted based on a comparator function
- * @template K - The type of keys in the map
- * @template V - The type of values in the map
+ * @template TKey - The type of keys in the map
+ * @template TValue - The type of values in the map
  */
-export class SortedMap<K, V> {
-  private map: Map<K, V>
-  private sortedKeys: K[]
-  private comparator: (a: V, b: V) => number
+export class SortedMap<TKey, TValue> {
+  private map: Map<TKey, TValue>
+  private sortedKeys: Array<TKey>
+  private comparator: (a: TValue, b: TValue) => number
 
   /**
    * Creates a new SortedMap instance
    *
    * @param comparator - Optional function to compare values for sorting
    */
-  constructor(comparator?: (a: V, b: V) => number) {
-    this.map = new Map<K, V>()
+  constructor(comparator?: (a: TValue, b: TValue) => number) {
+    this.map = new Map<TKey, TValue>()
     this.sortedKeys = []
     this.comparator = comparator || this.defaultComparator
   }
@@ -26,7 +26,7 @@ export class SortedMap<K, V> {
    * @param b - Second value to compare
    * @returns -1 if a < b, 1 if a > b, 0 if equal
    */
-  private defaultComparator(a: V, b: V): number {
+  private defaultComparator(a: TValue, b: TValue): number {
     if (a < b) return -1
     if (a > b) return 1
     return 0
@@ -39,7 +39,7 @@ export class SortedMap<K, V> {
    * @param value - The value to associate with the key
    * @returns This SortedMap instance for chaining
    */
-  set(key: K, value: V): this {
+  set(key: TKey, value: TValue): this {
     this.map.set(key, value)
 
     if (!this.sortedKeys.includes(key)) {
@@ -62,7 +62,7 @@ export class SortedMap<K, V> {
    * @param key - The key to look up
    * @returns The value associated with the key, or undefined if not found
    */
-  get(key: K): V | undefined {
+  get(key: TKey): TValue | undefined {
     return this.map.get(key)
   }
 
@@ -72,7 +72,7 @@ export class SortedMap<K, V> {
    * @param key - The key to remove
    * @returns True if the key was found and removed, false otherwise
    */
-  delete(key: K): boolean {
+  delete(key: TKey): boolean {
     if (this.map.delete(key)) {
       const index = this.sortedKeys.indexOf(key)
       this.sortedKeys.splice(index, 1)
@@ -87,7 +87,7 @@ export class SortedMap<K, V> {
    * @param key - The key to check
    * @returns True if the key exists, false otherwise
    */
-  has(key: K): boolean {
+  has(key: TKey): boolean {
     return this.map.has(key)
   }
 
@@ -111,9 +111,9 @@ export class SortedMap<K, V> {
    *
    * @returns An iterator for the map's entries
    */
-  *[Symbol.iterator](): IterableIterator<[K, V]> {
+  *[Symbol.iterator](): IterableIterator<[TKey, TValue]> {
     for (const key of this.sortedKeys) {
-      yield [key, this.map.get(key)!] as [K, V]
+      yield [key, this.map.get(key)!] as [TKey, TValue]
     }
   }
 
@@ -122,7 +122,7 @@ export class SortedMap<K, V> {
    *
    * @returns An iterator for the map's entries
    */
-  entries(): IterableIterator<[K, V]> {
+  entries(): IterableIterator<[TKey, TValue]> {
     return this[Symbol.iterator]()
   }
 
@@ -131,7 +131,7 @@ export class SortedMap<K, V> {
    *
    * @returns An iterator for the map's keys
    */
-  keys(): IterableIterator<K> {
+  keys(): IterableIterator<TKey> {
     return this.sortedKeys[Symbol.iterator]()
   }
 
@@ -140,8 +140,8 @@ export class SortedMap<K, V> {
    *
    * @returns An iterator for the map's values
    */
-  values(): IterableIterator<V> {
-    return function* (this: SortedMap<K, V>) {
+  values(): IterableIterator<TValue> {
+    return function* (this: SortedMap<TKey, TValue>) {
       for (const key of this.sortedKeys) {
         yield this.map.get(key)!
       }
@@ -153,7 +153,9 @@ export class SortedMap<K, V> {
    *
    * @param callbackfn - Function to execute for each entry
    */
-  forEach(callbackfn: (value: V, key: K, map: Map<K, V>) => void): void {
+  forEach(
+    callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void
+  ): void {
     for (const key of this.sortedKeys) {
       callbackfn(this.map.get(key)!, key, this.map)
     }
