@@ -2,6 +2,7 @@
   "name": "@tanstack/optimistic",
   "version": "0.0.8",
   "description": "Optimistic UI library for sync engines",
+  "packageManager": "pnpm@10.6.3",
   "type": "module",
   "exports": {
     "./react-electric": {
@@ -20,7 +21,10 @@
     "prepack": "vite build",
     "test": "vitest --run",
     "lint": "eslint . --fix",
-    "prepare": "husky"
+    "prepare": "husky",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "changeset:publish": "changeset publish"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -32,8 +36,10 @@
   "author": "Kyle Mathews <mathews.kyle@gmail.com>",
   "license": "MIT",
   "devDependencies": {
+    "@changesets/cli": "^2.28.1",
     "@eslint/js": "^9.20.0",
     "@stylistic/eslint-plugin": "^4.0.1",
+    "@svitejs/changesets-changelog-github-compact": "^1.2.0",
     "@tanstack/config": "^0.17.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
