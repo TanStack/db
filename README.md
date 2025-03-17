@@ -19,7 +19,7 @@ npm i @TanStack/optimistic
 - **Optimistic Updates**: Apply changes instantly in the UI while syncing in the background
 - **Flexible Backend Support**: Works with any backend or sync engine
 - **Immutable Snapshots**: Create immutable snapshots of updates that can be persisted and rolled back
-- **React Integration**: Seamless integration with React applications
+- **Framework Integration**: Seamless integration with frontend frameworks
 
 ## Core Concepts
 
@@ -28,7 +28,7 @@ npm i @TanStack/optimistic
 Collections are the central concept in `@TanStack/optimistic`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
 
 - Has a unique identifier
-- Contains data items accessible via keys
+- Contains data items
 - Provides CRUD operations (insert, update, delete)
 - Manages its own sync and persistence logic
 
@@ -68,7 +68,7 @@ const { data, insert, update, delete: deleteFn } = useCollection({
 
 Returns:
 - `data`: An array of all items in the collection
-- `state`: A Map containing all items in the collection with their keys
+- `state`: A Map containing all items in the collection with their internal keys
 - `insert`: Function to add new items to the collection
 - `update`: Function to modify existing items
 - `delete`: Function to remove items from the collection
@@ -144,7 +144,7 @@ delete(todo, { metadata: { reason: "completed" } });
 
 ### Schema Validation
 
-Collections can optionally include a schema for data validation:
+Collections can optionally include a [standard schema](https://github.com/standard-schema/standard-schema) for data validation:
 
 ```typescript
 const todoCollection = useCollection({
