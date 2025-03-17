@@ -1,6 +1,6 @@
 # @TanStack/optimistic
 
-A library for creating fast optimistic updates with flexible backend support that pairs seamlessly with sync engines (like [ElectricSQL](https://electric-sql.com/).
+A library for creating fast optimistic updates with flexible backend support that pairs seamlessly with sync engines (like [ElectricSQL](https://electric-sql.com/)).
 
 This library is still under design! Please let us know what you think.
 
