@@ -71,7 +71,7 @@
     "zod": "^3.24.2"
   },
   "dependencies": {
-    "@electric-sql/client": "1.0.0-beta.3",
+    "@electric-sql/client": "1.0.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/store": "^0.7.0",
     "diff": "^7.0.0",
