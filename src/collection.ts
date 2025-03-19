@@ -19,7 +19,10 @@ export const collectionsStore = new Store(new Map<string, Collection<any>>())
 
 // Map to track loading collections
 
-const loadingCollections = new Map<string, Promise<void>>()
+const loadingCollections = new Map<
+  string,
+  Promise<Collection<Record<string, unknown>>>
+>()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -55,18 +58,20 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  */
 export function preloadCollection<T extends object = Record<string, unknown>>(
   config: CollectionConfig<T>
-): Promise<void> {
+): Promise<Collection<T>> {
   // If the collection is already fully loaded, return a resolved promise
   if (
     collectionsStore.state.has(config.id) &&
     !loadingCollections.has(config.id)
   ) {
-    return Promise.resolve()
+    return Promise.resolve(
+      collectionsStore.state.get(config.id)! as Collection<T>
+    )
   }
 
   // If the collection is in the process of loading, return its promise
   if (loadingCollections.has(config.id)) {
-    return loadingCollections.get(config.id)!
+    return loadingCollections.get(config.id)! as Promise<Collection<T>>
   }
 
   // Create a new collection instance if it doesn't exist
@@ -90,8 +95,10 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
 
   // Create a promise that will resolve after the first commit
   let resolveFirstCommit: () => void
-  const firstCommitPromise = new Promise<void>((resolve) => {
-    resolveFirstCommit = resolve
+  const firstCommitPromise = new Promise<Collection<T>>((resolve) => {
+    resolveFirstCommit = () => {
+      resolve(collection)
+    }
   })
 
   // Register a one-time listener for the first commit
@@ -103,7 +110,10 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   })
 
   // Store the loading promise
-  loadingCollections.set(config.id, firstCommitPromise)
+  loadingCollections.set(
+    config.id,
+    firstCommitPromise as Promise<Collection<Record<string, unknown>>>
+  )
 
   return firstCommitPromise
 }
