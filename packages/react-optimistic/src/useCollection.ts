@@ -152,6 +152,7 @@ export function useCollection<T extends object>(
    * @param maybeCallback - Callback function if config was provided
    * @returns {Transaction} A Transaction object representing the update operation
    * @throws {SchemaValidationError} If the updated data fails schema validation
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Update a single item
    * update(todo, (draft) => { draft.completed = true })
@@ -173,6 +174,7 @@ export function useCollection<T extends object>(
    * @returns {Transaction} A Transaction object representing the insert operation
    * @throws {SchemaValidationError} If the data fails schema validation
    * @throws {Error} If more keys provided than items to insert
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Insert a single item
    * insert({ text: "Buy groceries", completed: false })
@@ -193,6 +195,7 @@ export function useCollection<T extends object>(
    * @param items - Item(s) to delete (must exist in collection) or their key(s)
    * @param config - Optional configuration including metadata
    * @returns {Transaction} A Transaction object representing the delete operation
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Delete a single item
    * delete(todo)
@@ -228,6 +231,7 @@ export function useCollection<T extends object, R>(
    * @param maybeCallback - Callback function if config was provided
    * @returns {Transaction} A Transaction object representing the update operation
    * @throws {SchemaValidationError} If the updated data fails schema validation
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Update a single item
    * update(todo, (draft) => { draft.completed = true })
@@ -249,6 +253,7 @@ export function useCollection<T extends object, R>(
    * @returns {Transaction} A Transaction object representing the insert operation
    * @throws {SchemaValidationError} If the data fails schema validation
    * @throws {Error} If more keys provided than items to insert
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Insert a single item
    * insert({ text: "Buy groceries", completed: false })
@@ -269,6 +274,7 @@ export function useCollection<T extends object, R>(
    * @param items - Item(s) to delete (must exist in collection) or their key(s)
    * @param config - Optional configuration including metadata
    * @returns {Transaction} A Transaction object representing the delete operation
+   * @throws {Error} If mutationFn is not provided in the collection config
    * @example
    * // Delete a single item
    * delete(todo)

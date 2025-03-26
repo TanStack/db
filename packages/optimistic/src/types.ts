@@ -138,6 +138,6 @@ export interface InsertConfig {
 export interface CollectionConfig<T extends object = Record<string, unknown>> {
   id: string
   sync: SyncConfig<T>
-  mutationFn: MutationFn<T>
+  mutationFn?: MutationFn<T>
   schema?: StandardSchema<T>
 }

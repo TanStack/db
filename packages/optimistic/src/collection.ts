@@ -45,6 +45,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  *   await preloadCollection({
  *     id: `users-${params.userId}`,
  *     sync: { ... },
+ *     // mutationFn is optional - provide it if you need mutation capabilities
  *     mutationFn: { ... }
  *   });
  *
@@ -53,7 +54,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * ```
  *
  * @template T - The type of items in the collection
- * @param config - Configuration for the collection, including id, sync, and mutationFn
+ * @param config - Configuration for the collection, including id, sync, and optional mutationFn
  * @returns Promise that resolves when the initial sync is finished
  */
 export function preloadCollection<T extends object = Record<string, unknown>>(
@@ -182,14 +183,11 @@ export class Collection<T extends object = Record<string, unknown>> {
    * Creates a new Collection instance
    *
    * @param config - Configuration object for the collection
-   * @throws Error if sync config or mutationFn is missing
+   * @throws Error if sync config is missing
    */
   constructor(config?: CollectionConfig<T>) {
     if (!config?.sync) {
       throw new Error(`Collection requires a sync config`)
-    }
-    if (!config.mutationFn as unknown) {
-      throw new Error(`Collection requires a mutationFn`)
     }
 
     this.transactionStore = new TransactionStore()
@@ -517,6 +515,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @param config - Optional configuration including metadata and custom keys
    * @returns A Transaction object representing the insert operation(s)
    * @throws {SchemaValidationError} If the data fails schema validation
+   * @throws {Error} If mutationFn is not provided
    * @example
    * // Insert a single item
    * insert({ text: "Buy groceries", completed: false })
@@ -531,6 +530,13 @@ export class Collection<T extends object = Record<string, unknown>> {
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
   insert = (data: T | Array<T>, config?: InsertConfig) => {
+    // Throw error if mutationFn is not provided
+    if (!this.config.mutationFn) {
+      throw new Error(
+        `Cannot use mutation operators without providing a mutationFn in the collection config`
+      )
+    }
+
     const items = Array.isArray(data) ? data : [data]
     const mutations: Array<PendingMutation> = []
 
@@ -582,6 +588,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @param maybeCallback - Update callback if config was provided
    * @returns A Transaction object representing the update operation(s)
    * @throws {SchemaValidationError} If the updated data fails schema validation
+   * @throws {Error} If mutationFn is not provided
    * @example
    * // Update a single item
    * update(todo, (draft) => { draft.completed = true })
@@ -612,6 +619,13 @@ export class Collection<T extends object = Record<string, unknown>> {
     configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
+    // Throw error if mutationFn is not provided
+    if (!this.config.mutationFn) {
+      throw new Error(
+        `Cannot use mutation operators without providing a mutationFn in the collection config`
+      )
+    }
+
     if (typeof items === `undefined`) {
       throw new Error(`The first argument to update is missing`)
     }
@@ -702,6 +716,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @param items - Single item/key or array of items/keys to delete
    * @param config - Optional configuration including metadata
    * @returns A Transaction object representing the delete operation(s)
+   * @throws {Error} If mutationFn is not provided
    * @example
    * // Delete a single item
    * delete(todo)
@@ -716,6 +731,13 @@ export class Collection<T extends object = Record<string, unknown>> {
     items: Array<T | string> | T | string,
     config?: OperationConfig
   ) => {
+    // Throw error if mutationFn is not provided
+    if (!this.config.mutationFn) {
+      throw new Error(
+        `Cannot use mutation operators without providing a mutationFn in the collection config`
+      )
+    }
+
     const itemsArray = Array.isArray(items) ? items : [items]
     const mutations: Array<PendingMutation> = []
 

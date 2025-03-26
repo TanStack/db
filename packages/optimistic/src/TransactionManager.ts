@@ -231,6 +231,13 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     const transaction = this.getTransaction(transactionId)
     if (!transaction) return
 
+    // If no mutationFn is provided, throw an error
+    if (!this.collection.config.mutationFn) {
+      throw new Error(
+        `Cannot process transaction without a mutationFn in the collection config`
+      )
+    }
+
     this.setTransactionState(transactionId, `persisting`)
 
     this.collection.config.mutationFn
@@ -243,14 +250,14 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         if (!tx) return
 
         tx.isPersisted?.resolve(true)
-        if (this.collection.config.mutationFn.awaitSync) {
+        if (this.collection.config.mutationFn?.awaitSync) {
           this.setTransactionState(transactionId, `persisted_awaiting_sync`)
 
           // Create a promise that rejects after 2 seconds
           const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => {
               reject(new Error(`Sync operation timed out after 2 seconds`))
-            }, this.collection.config.mutationFn.awaitSyncTimeoutMs ?? 2000)
+            }, this.collection.config.mutationFn?.awaitSyncTimeoutMs ?? 2000)
           })
 
           // Race the awaitSync promise against the timeout

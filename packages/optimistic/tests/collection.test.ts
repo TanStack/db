@@ -10,15 +10,63 @@ describe(`Collection`, () => {
     expect(() => new Collection()).toThrow(`Collection requires a sync config`)
   })
 
-  it(`should throw if there's no mutationFn`, () => {
-    expect(
-      () =>
-        // @ts-expect-error mutationFn is supposed to be missing.
-        new Collection({
-          id: `foo`,
-          sync: { sync: async () => {} },
-        })
-    ).toThrow(`Collection requires a mutationFn`)
+  it(`should allow creating a collection without a mutationFn`, () => {
+    // This should not throw an error
+    const collection = new Collection({
+      id: `foo`,
+      sync: { sync: async () => {} },
+    })
+
+    // Verify that the collection was created successfully
+    expect(collection).toBeInstanceOf(Collection)
+  })
+
+  it(`should throw an error when trying to use mutation operations without a mutationFn`, async () => {
+    // Create a collection with sync but no mutationFn
+    const collection = new Collection<{ value: string }>({
+      id: `no-mutation-fn`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Immediately execute the sync cycle
+          begin()
+          write({
+            type: `insert`,
+            key: `initial`,
+            value: { value: `initial value` },
+          })
+          commit()
+        },
+      },
+    })
+
+    // Wait for the collection to be ready
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.get(`initial`)).toEqual({ value: `initial value` })
+
+    // Verify that insert throws an error
+    expect(() => {
+      collection.insert({ value: `new value` }, { key: `new-key` })
+    }).toThrow(
+      `Cannot use mutation operators without providing a mutationFn in the collection config`
+    )
+
+    // Verify that update throws an error
+    expect(() => {
+      collection.update(collection.state.get(`initial`)!, (draft) => {
+        draft.value = `updated value`
+      })
+    }).toThrow(
+      `Cannot use mutation operators without providing a mutationFn in the collection config`
+    )
+
+    // Verify that delete throws an error
+    expect(() => {
+      collection.delete(`initial`)
+    }).toThrow(
+      `Cannot use mutation operators without providing a mutationFn in the collection config`
+    )
   })
 
   it(`It shouldn't expose any state until the initial sync is finished`, () => {
@@ -331,20 +379,6 @@ describe(`Collection`, () => {
     await transaction.isSynced?.promise
 
     expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
-  })
-
-  // Skip until e2e working
-  it(`If the mutationFn throws error, it get retried`, () => {
-    // new collection w/ mock sync/mutation
-    // insert
-    // mutationFn fails the first time and then succeeds
-  })
-
-  // Skip until e2e working
-  it(`If the mutationFn throws NonRetriableError, it doesn't get retried and optimistic state is rolled back`, () => {
-    // new collection w/ mock sync/mutation
-    // insert
-    // mutationFn fails w/ NonRetriableError and the check that optimistic state is rolledback.
   })
 
   it(`should handle sparse key arrays for bulk inserts`, () => {
