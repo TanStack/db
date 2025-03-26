@@ -1,5 +1,14 @@
 # @tanstack/react-optimistic
 
+## 0.0.2
+
+### Patch Changes
+
+- make mutationFn optional for read-only collections ([#12](https://github.com/TanStack/optimistic/pull/12))
+
+- Updated dependencies [[`9bb6e89`](https://github.com/TanStack/optimistic/commit/9bb6e8909cebdcd7c03091bfc12dd37f5ab2e1ea), [`8eb7e9b`](https://github.com/TanStack/optimistic/commit/8eb7e9b1d1f569c5c064e0f440257589486b73cf)]:
+  - @tanstack/optimistic@0.0.2
+
 ## 0.0.1
 
 ### Patch Changes
