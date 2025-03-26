@@ -120,18 +120,18 @@ The `mutationFn` property is where you define how your application interacts wit
 
 ```typescript
 import { useCollection } from "@TanStack/react-optimistic"
-import { createElectricSync } from '@TanStack/optimistic/electric';
+import { createElectricSync } from "@TanStack/optimistic/electric"
 
 // Create a collection configuration for todos
 const todosConfig = {
-  id: 'todos',
+  id: "todos",
   // Create an ElectricSQL sync configuration
   sync: createElectricSync(
     {
       // ShapeStream options
       url: `http://localhost:3000/v1/shape`,
       params: {
-        table: 'todos',
+        table: "todos",
       },
     },
     {
@@ -143,39 +143,39 @@ const todosConfig = {
   mutationFn: {
     insert: async (items) => {
       // Insert items into Electric database
-      const db = electric.db;
+      const db = electric.db
       await db.todos.createMany({
         data: items,
-      });
+      })
     },
     update: async (items) => {
       // Update items in Electric database
-      const db = electric.db;
+      const db = electric.db
       for (const item of items) {
         await db.todos.update({
           where: { id: item.id },
           data: item,
-        });
+        })
       }
     },
     delete: async (items) => {
       // Delete items from Electric database
-      const db = electric.db;
+      const db = electric.db
       await db.todos.deleteMany({
         where: {
           id: {
             in: items.map((item) => item.id),
           },
         },
-      });
+      })
     },
   },
-};
+}
 
 // Use the collection in a component
 function TodoList() {
-  const { data, insert, update, delete: deleteFn } = useCollection(todosConfig);
-  
+  const { data, insert, update, delete: deleteFn } = useCollection(todosConfig)
+
   // Now you can use these functions to interact with your data
   // with automatic optimistic updates and backend persistence
 }
