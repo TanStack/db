@@ -402,6 +402,43 @@ describe(`Collection`, () => {
       })
     }).toThrow(`More keys provided than items to insert`)
   })
+
+  it(`should throw errors when deleting items not in the collection`, () => {
+    const collection = new Collection<{ name: string }>({
+      id: `delete-errors`,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      mutationFn: {
+        persist: () => Promise.resolve(),
+      },
+    })
+
+    // Add an item to the collection
+    const item = { name: `Test Item` }
+    collection.insert(item)
+
+    // Should throw when trying to delete an object not in the collection
+    const notInCollection = { name: `Not In Collection` }
+    expect(() => collection.delete(notInCollection)).toThrow(
+      `Object not found in collection`
+    )
+
+    // Should throw when trying to delete an invalid type
+    // @ts-expect-error testing error handling with invalid type
+    expect(() => collection.delete(123)).toThrow(
+      `Invalid item type for delete - must be an object or string key`
+    )
+
+    // Should not throw when deleting by string key (even if key doesn't exist)
+    expect(() => collection.delete(`non-existent-key`)).not.toThrow()
+
+    // Should not throw when deleting an object that exists in the collection
+    expect(() => collection.delete(item)).not.toThrow()
+  })
 })
 
 describe(`Collection with schema validation`, () => {

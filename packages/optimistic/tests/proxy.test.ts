@@ -1361,4 +1361,63 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({})
     })
   })
+
+  describe(`Shallow Copy Handling`, () => {
+    it(`should properly handle Array shallow copies`, () => {
+      const obj = { items: [1, 2, 3] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace the array instead of modifying it to ensure changes are tracked
+      proxy.items = [1, 2, 3, 4]
+
+      expect(getChanges()).toEqual({
+        items: [1, 2, 3, 4],
+      })
+      expect(obj.items).toEqual([1, 2, 3, 4])
+    })
+
+    it(`should properly handle RegExp shallow copies`, () => {
+      const obj = { pattern: /test/i }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace with a new RegExp to trigger shallow copy
+      proxy.pattern = /modified/g
+
+      expect(getChanges()).toEqual({
+        pattern: /modified/g,
+      })
+      expect(obj.pattern).toEqual(/modified/g)
+      expect(obj.pattern.flags).toBe(`g`)
+      expect(obj.pattern.source).toBe(`modified`)
+    })
+
+    it(`should handle primitive values directly`, () => {
+      // Test with a primitive value
+      const primitiveObj = { value: 42 }
+      const { proxy: primitiveProxy, getChanges: getPrimitiveChanges } =
+        createChangeProxy(primitiveObj)
+
+      primitiveProxy.value = 100
+
+      expect(getPrimitiveChanges()).toEqual({
+        value: 100,
+      })
+      expect(primitiveObj.value).toBe(100)
+    })
+
+    it(`should handle Date objects correctly`, () => {
+      const originalDate = new Date(`2023-01-01T00:00:00Z`)
+      const obj = { date: originalDate }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      const newDate = new Date(`2024-01-01T00:00:00Z`)
+      proxy.date = newDate
+
+      expect(getChanges()).toEqual({
+        date: newDate,
+      })
+      expect(obj.date).toEqual(newDate)
+      expect(obj.date.getTime()).toBe(newDate.getTime())
+    })
+  })
 })

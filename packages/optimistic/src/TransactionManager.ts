@@ -298,13 +298,13 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
 
         // Update transaction with error information
         tx.error = {
-          message: error.message || `Error during persist`,
+          message: error instanceof Error ? error.message : String(error),
           error: error instanceof Error ? error : new Error(String(error)),
         }
 
         // Reject both promises
-        tx.isPersisted?.reject(error)
-        tx.isSynced?.reject(error)
+        tx.isPersisted?.reject(tx.error.error)
+        tx.isSynced?.reject(tx.error.error)
 
         // Set transaction state to failed
         this.setTransactionState(transactionId, `failed`)

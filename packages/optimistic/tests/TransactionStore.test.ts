@@ -81,4 +81,30 @@ describe(`TransactionStore`, () => {
   it(`should handle non-existent transaction deletion gracefully`, async () => {
     await expect(store.deleteTransaction(`non-existent`)).resolves.not.toThrow()
   })
+
+  // Test to cover database initialization with a new object store
+  it(`should initialize the database and create object store if needed`, async () => {
+    // Create a new instance with a different name to force initialization
+    const uniqueDbName = `test-db-${Date.now()}`
+    const customStore = new TransactionStore()
+
+    // Access private properties for testing
+    // @ts-expect-error accessing private property for testing
+    customStore.dbName = uniqueDbName
+
+    // Force a new connection to be created
+    // @ts-expect-error accessing private property for testing
+    customStore.db = null
+
+    // This should trigger the upgrade function to create a new object store
+    const tx = createMockTransaction(`test-init`)
+    await customStore.putTransaction(tx)
+
+    // Verify the transaction was stored successfully
+    const transactions = await customStore.getTransactions()
+    expect(transactions.some((t) => t.id === `test-init`)).toBe(true)
+
+    // Clean up
+    await customStore.clearAll()
+  })
 })

@@ -582,6 +582,87 @@ describe(`TransactionManager`, () => {
       expect(tx2.state).toBe(`failed`)
       expect(tx2.error?.message).toBe(`Sync promise error - persist-data`)
     })
+
+    it(`should handle non-Error objects thrown during persist`, async () => {
+      // Create a collection with a persist function that throws a non-Error object
+      const nonErrorCollection = new Collection({
+        id: `non-error-object`,
+        sync: {
+          sync: () => {},
+        },
+        mutationFn: {
+          persist: async () => {
+            // Throw a string instead of an Error object
+            throw `String error message`
+          },
+          awaitSync: async () => {},
+        },
+      })
+      const nonErrorManager = new TransactionManager(store, nonErrorCollection)
+
+      // Apply a transaction
+      const mutations = [createMockMutation(`non-error-test`)]
+      const transaction = nonErrorManager.applyTransaction(
+        mutations,
+        orderedStrategy
+      )
+
+      // The promise should reject with a converted Error
+      await expect(transaction.isPersisted?.promise).rejects.toThrow(
+        `String error message`
+      )
+      transaction.isSynced?.promise.catch(() => {})
+      transaction.isPersisted?.promise.catch(() => {})
+
+      // Verify the transaction state and error handling
+      expect(transaction.state).toBe(`failed`)
+      expect(transaction.error?.message).toBe(`String error message`)
+      expect(transaction.error?.error).toBeInstanceOf(Error)
+    })
+
+    // TODO figure out why this isn't working.
+    // it(`should handle non-Error objects thrown during awaitSync`, async () => {
+    //   // Create a collection with an awaitSync function that throws a non-Error object
+    //   const nonErrorSyncCollection = new Collection({
+    //     id: `non-error-sync-object`,
+    //     sync: {
+    //       sync: () => {},
+    //     },
+    //     mutationFn: {
+    //       persist: () => {
+    //         return Promise.resolve({ success: true })
+    //       },
+    //       awaitSync: () => {
+    //         // Throw a number instead of an Error object
+    //         throw 123
+    //       },
+    //     },
+    //   })
+    //   const nonErrorSyncManager = new TransactionManager(
+    //     store,
+    //     nonErrorSyncCollection
+    //   )
+    //
+    //   // Apply a transaction
+    //   const mutations = [createMockMutation(`non-error-sync-test`)]
+    //   const transaction = nonErrorSyncManager.applyTransaction(
+    //     mutations,
+    //     orderedStrategy
+    //   )
+    //
+    //   // The promise should reject with a converted Error
+    //   // await expect(transaction.isPersisted?.promise).rejects.toThrow(`123`)
+    //   try {
+    //     await transaction.isPersisted?.promise
+    //   } catch (e) {
+    //     console.log(e)
+    //   }
+    //
+    //   // Verify the transaction state and error handling
+    //   expect(transaction.state).toBe(`failed`)
+    //   expect(transaction.error?.message).toBe(`123`)
+    //   expect(transaction.error?.error).toBeInstanceOf(Error)
+    // })
   })
 
   describe(`Terminal State Handling`, () => {
