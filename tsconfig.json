@@ -24,13 +24,16 @@
     "jsx": "react-jsx"
   },
   "include": [
-    "src/**/*.ts", 
-    "src/**/*.tsx", 
-    "test/**/*.ts", 
-    "vite.config.ts", 
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "vite.config.ts",
     "vitest.config.ts",
     "todo-app/**/*.ts",
-    "todo-app/**/*.tsx"
+    "todo-app/**/*.tsx",
+    "examples/**/*.ts",
+    "examples/**/*.tsx",
+    "eslint.config.mjs"
   ],
   "exclude": ["node_modules"]
 }

@@ -67,6 +67,7 @@ const { data, insert, update, delete: deleteFn } = useCollection({
 ```
 
 Returns:
+
 - `data`: An array of all items in the collection
 - `state`: A Map containing all items in the collection with their internal keys
 - `insert`: Function to add new items to the collection
@@ -87,6 +88,7 @@ await preloadCollection({
 ```
 
 Features:
+
 1. Returns a promise that resolves when the first sync commit is complete
 2. Shares the same collection instance with `useCollection`
 3. Handles already-loaded collections by returning immediately
@@ -98,16 +100,16 @@ Features:
 
 ```typescript
 // Insert a single item
-insert({ text: "Buy groceries", completed: false });
+insert({ text: "Buy groceries", completed: false })
 
 // Insert multiple items
 insert([
   { text: "Buy groceries", completed: false },
-  { text: "Walk dog", completed: false }
-]);
+  { text: "Walk dog", completed: false },
+])
 
 // Insert with custom key
-insert({ text: "Buy groceries" }, { key: "grocery-task" });
+insert({ text: "Buy groceries" }, { key: "grocery-task" })
 ```
 
 #### Update
@@ -116,30 +118,34 @@ We use a proxy to capture updates as immutable draft optimistic updates.
 
 ```typescript
 // Update a single item
-update(todo, (draft) => { draft.completed = true });
+update(todo, (draft) => {
+  draft.completed = true
+})
 
 // Update multiple items
 update([todo1, todo2], (drafts) => {
-  drafts.forEach(draft => { draft.completed = true });
-});
+  drafts.forEach((draft) => {
+    draft.completed = true
+  })
+})
 
 // Update with metadata
-update(todo, { metadata: { reason: "user update" } }, (draft) => { 
-  draft.text = "Updated text";
-});
+update(todo, { metadata: { reason: "user update" } }, (draft) => {
+  draft.text = "Updated text"
+})
 ```
 
 #### Delete
 
 ```typescript
 // Delete a single item
-delete(todo);
+delete todo
 
 // Delete multiple items
-delete([todo1, todo2]);
+delete [todo1, todo2]
 
 // Delete with metadata
-delete(todo, { metadata: { reason: "completed" } });
+delete (todo, { metadata: { reason: "completed" } })
 ```
 
 ### Schema Validation
@@ -148,11 +154,15 @@ Collections can optionally include a [standard schema](https://github.com/standa
 
 ```typescript
 const todoCollection = useCollection({
-  id: 'todos',
-  sync: { /* sync config */ },
-  mutationFn: { /* mutation functions */ },
-  schema: todoSchema // Standard schema interface
-});
+  id: "todos",
+  sync: {
+    /* sync config */
+  },
+  mutationFn: {
+    /* mutation functions */
+  },
+  schema: todoSchema, // Standard schema interface
+})
 ```
 
 ## Transaction Management
@@ -163,6 +173,7 @@ The library includes a robust transaction management system:
 - `TransactionStore`: Provides persistent storage for transactions using IndexedDB
 
 Transactions progress through several states:
+
 1. `pending`: Initial state when a transaction is created
 2. `persisting`: Transaction is being persisted to the backend
 3. `completed`: Transaction has been successfully persisted
@@ -241,31 +252,31 @@ export async function loader() {
 // Example usage in a component
 function TodoList() {
   const { data, insert, update, delete: remove } = useCollection(todosConfig);
-  
+
   const addTodo = () => {
     insert({ title: 'New todo', completed: false });
   };
-  
+
   const toggleTodo = (todo) => {
     update(todo, (draft) => {
       draft.completed = !draft.completed;
     });
   };
-  
+
   const removeTodo = (todo) => {
     remove(todo);
   };
-  
+
   return (
     <div>
       <button onClick={addTodo}>Add Todo</button>
       <ul>
         {data.map(todo => (
           <li key={todo.id}>
-            <input 
-              type="checkbox" 
-              checked={todo.completed} 
-              onChange={() => toggleTodo(todo)} 
+            <input
+              type="checkbox"
+              checked={todo.completed}
+              onChange={() => toggleTodo(todo)}
             />
             {todo.title}
             <button onClick={() => removeTodo(todo)}>Delete</button>

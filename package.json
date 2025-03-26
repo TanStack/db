@@ -1,9 +1,43 @@
 {
-  "name": "@tanstack/optimistic",
-  "version": "0.0.8",
+  "name": "@tanstack/optimistic-monorepo",
   "description": "Optimistic UI library for sync engines",
-  "packageManager": "pnpm@10.6.3",
-  "type": "module",
+  "version": "0.0.0",
+  "author": "Kyle Mathews <mathews.kyle@gmail.com>",
+  "dependencies": {
+    "diff": "^7.0.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.28.1",
+    "@eslint/js": "^9.22.0",
+    "@stylistic/eslint-plugin": "^4.2.0",
+    "@svitejs/changesets-changelog-github-compact": "^1.2.0",
+    "@tanstack/config": "^0.17.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "@types/use-sync-external-store": "^0.0.6",
+    "@typescript-eslint/eslint-plugin": "^8.26.1",
+    "@typescript-eslint/parser": "^8.26.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.22.0",
+    "eslint-config-prettier": "^10.1.1",
+    "eslint-plugin-prettier": "^5.2.3",
+    "eslint-plugin-react": "^7.37.4",
+    "fake-indexeddb": "^6.0.0",
+    "husky": "^9.1.7",
+    "jsdom": "^26.0.0",
+    "lint-staged": "^15.5.0",
+    "mitt": "^3.0.1",
+    "prettier": "^3.5.3",
+    "publint": "^0.3.9",
+    "shx": "^0.4.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2",
+    "vitest": "^3.0.9",
+    "zod": "^3.24.2"
+  },
   "exports": {
     "./react-electric": {
       "types": "./dist/lib/electric.d.ts",
@@ -16,67 +50,29 @@
     "dist",
     "src"
   ],
-  "scripts": {
-    "build": "vite build && publint --strict",
-    "prepack": "vite build",
-    "test": "vitest --run",
-    "lint": "eslint . --fix",
-    "prepare": "husky",
-    "changeset": "changeset",
-    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
-    "changeset:publish": "changeset publish"
-  },
+  "keywords": [],
+  "license": "MIT",
   "lint-staged": {
     "*.{ts,tsx}": [
-      "eslint --fix",
-      "vitest related --run"
+      "eslint --fix"
     ]
   },
-  "keywords": [],
-  "author": "Kyle Mathews <mathews.kyle@gmail.com>",
-  "license": "MIT",
-  "devDependencies": {
-    "@changesets/cli": "^2.28.1",
-    "@eslint/js": "^9.20.0",
-    "@stylistic/eslint-plugin": "^4.0.1",
-    "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.17.1",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.2.0",
-    "@types/node": "^22.13.4",
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
-    "@types/use-sync-external-store": "^0.0.6",
-    "@typescript-eslint/eslint-plugin": "^8.24.1",
-    "@typescript-eslint/parser": "^8.24.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.0.0",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-prettier": "^5.2.3",
-    "eslint-plugin-react": "^7.37.4",
-    "fake-indexeddb": "^6.0.0",
-    "husky": "^9.1.7",
-    "jsdom": "^26.0.0",
-    "lint-staged": "^15.4.3",
-    "mitt": "^3.0.1",
-    "prettier": "^3.5.1",
-    "publint": "^0.3.9",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "shx": "^0.3.4",
-    "tsup": "^8.0.2",
-    "typescript": "^5.7.3",
-    "vite": "^6.2.2",
-    "vitest": "^3.0.6",
-    "zod": "^3.24.2"
+  "packageManager": "pnpm@10.6.3",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter \"./packages/**\" build",
+    "changeset": "changeset",
+    "changeset:publish": "changeset publish",
+    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "lint": "eslint . --fix",
+    "prepack": "vite build",
+    "prepare": "husky",
+    "test": "pnpm --filter \"./packages/**\" test"
   },
-  "dependencies": {
-    "@electric-sql/client": "1.0.0",
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/store": "^0.7.0",
-    "diff": "^7.0.0",
-    "idb": "^8.0.2",
-    "postgres": "^3.4.5",
-    "use-sync-external-store": "^1.4.0"
-  }
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/*",
+    "examples/react/*"
+  ]
 }

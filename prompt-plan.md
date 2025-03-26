@@ -1,7 +1,7 @@
 Below you'll find a structured approach to building out the Sync Library in a methodical, test-driven manner. We'll start with a high-level blueprint, then refine it into progressively smaller steps, and finally provide a series of prompts (in code blocks) that you could feed into a code-generation LLM to implement those steps. Each prompt includes test scaffolding/best practices to ensure minimal breakage between steps.
 
 1. High-Level Blueprint
-Core Data Structures & Storage
+   Core Data Structures & Storage
 
 Set up basic interfaces: Transaction, Mutation, SyncConfig, etc.
 Implement persistent storage using IndexedDB (or fallback) to store transactions and states.
@@ -33,8 +33,7 @@ Final integration tests ensuring that useCollection ties together:
 Persistent transaction state.
 Retry flows.
 Sync merges.
-Confirm that no orphan code remains untested or unexposed.
-2. First Iteration of Chunks (Broad Steps)
+Confirm that no orphan code remains untested or unexposed. 2. First Iteration of Chunks (Broad Steps)
 Below is an initial breakdown of the blueprint into several implementable chunks. Each chunk is big enough to introduce a complete feature, but small enough to be tested thoroughly before moving on.
 
 Initialize Repo & Basic Types
@@ -84,8 +83,7 @@ Cleanup, Diagnostics, & Final Testing
 
 Add advanced error handling with NonRetriableError.
 Provide event hooks or logs for transaction lifecycle.
-Review for orphan code or untested flows, fill coverage gaps.
-3. Second Iteration of Chunks (More Detailed)
+Review for orphan code or untested flows, fill coverage gaps. 3. Second Iteration of Chunks (More Detailed)
 We’ll now break the above steps into even smaller, iterative sub-steps. Each sub-step is just enough to add one new piece of functionality with minimal changes in code or tests.
 
 Project Setup 1.1. Initialize a TypeScript/Node project.
@@ -142,7 +140,7 @@ Advanced Error Handling & Final Polish 11.1. Introduce NonRetriableError logic.
 11.4. Ship final library with complete usage examples.
 
 4. Third Iteration of Chunks (Right-Sized Steps)
-Let’s refine again. Each step below should be small enough to implement in a single coding session (ideally < 1–2 hours) with clear acceptance criteria. The prompts we generate in the next section will map to these steps.
+   Let’s refine again. Each step below should be small enough to implement in a single coding session (ideally < 1–2 hours) with clear acceptance criteria. The prompts we generate in the next section will map to these steps.
 
 Project Initialization
 
@@ -200,8 +198,7 @@ Advanced Errors, Logging, & Final Check
 Step 11A: Add NonRetriableError usage to skip retries.
 Step 11B: Integrate optional logging or event callbacks.
 Step 11C: Final coverage check: remove or unify any code that is orphaned.
-Step 11D: Conclude with a final release.
-5. Prompts for a Code Generation LLM (Step-by-Step)
+Step 11D: Conclude with a final release. 5. Prompts for a Code Generation LLM (Step-by-Step)
 Below is a series of prompts to feed into a code-generation LLM. Each prompt corresponds to one or more of the steps listed above, in the order you’d implement them. Remember: these prompts assume a fresh environment each time you run them, so each code snippet should be self-contained or reference files from previous steps.
 
 Each prompt is enclosed in triple backticks with the language set to text. You can copy these directly into your code-gen environment, or adapt them as needed.
@@ -232,45 +229,45 @@ Continue in the “sync-lib” project. Implement the basic types and helpers:
 4. Create a `getLockedObjects` stub in `src/utils.ts` that returns an empty Set for now.
 5. Provide tests in `tests/types.test.ts` or similar. Just verify correct import and instantiation of these structures.
 
-Output all relevant files and tests. 
+Output all relevant files and tests.
 Prompt 3: IndexedDB Storage
 text
 Copy
 Now create a file `src/TransactionStore.ts` that handles storing and retrieving transactions in IndexedDB:
 
-1. Use an existing IndexedDB wrapper or a minimal approach. 
-2. Implement methods: 
+1. Use an existing IndexedDB wrapper or a minimal approach.
+2. Implement methods:
    - `getTransactions(): Promise<Transaction[]>`
    - `putTransaction(tx: Transaction): Promise<void>`
    - `deleteTransaction(id: string): Promise<void>`
 3. In `tests/TransactionStore.test.ts`, write tests to confirm that transactions can be created, fetched, updated, and deleted.
 4. Provide the code for these files and show the passing test results.
-Prompt 4: TransactionManager & Lifecycle
-text
-Copy
-Add a class `TransactionManager` in `src/TransactionManager.ts`:
+   Prompt 4: TransactionManager & Lifecycle
+   text
+   Copy
+   Add a class `TransactionManager` in `src/TransactionManager.ts`:
 
-1. It should have:
+5. It should have:
    - A constructor that takes a reference to `TransactionStore`.
    - `createTransaction(mutations: PendingMutation[], strategy: MutationStrategy): Promise<Transaction>`.
    - `updateTransactionState(id: string, newState: TransactionState): Promise<void>`.
    - Exponential backoff scheduling in a function `scheduleRetry(id: string, attemptNumber: number): Promise<void>`.
-2. Test it in `tests/TransactionManager.test.ts`, covering:
+6. Test it in `tests/TransactionManager.test.ts`, covering:
    - Creating a transaction in `pending` state.
    - Updating states to `persisting`, `completed`, `failed`.
    - Scheduling retries (just store the time we’d retry, no actual timer yet).
-3. Output the new files and tests with passing results.
-Prompt 5: Ordered vs. Parallel Logic
-text
-Copy
-Enhance `TransactionManager` with separate flows for ordered and parallel modes:
+7. Output the new files and tests with passing results.
+   Prompt 5: Ordered vs. Parallel Logic
+   text
+   Copy
+   Enhance `TransactionManager` with separate flows for ordered and parallel modes:
 
-1. Extend `createTransaction` to accept a `type` field from `MutationStrategy` which is either 'ordered' or 'parallel'.
-2. If 'ordered', new transactions should have a `queued_behind` if the previous transaction isn't done.
-3. If 'parallel', run immediately without queueing.
-4. In `tests/TransactionManager.test.ts`, add concurrency tests:
-   - Create multiple transactions in ordered mode, ensure only one runs at a time.
-   - Create multiple transactions in parallel mode, ensure none queue behind each other.
+8. Extend `createTransaction` to accept a `type` field from `MutationStrategy` which is either 'ordered' or 'parallel'.
+9. If 'ordered', new transactions should have a `queued_behind` if the previous transaction isn't done.
+10. If 'parallel', run immediately without queueing.
+11. In `tests/TransactionManager.test.ts`, add concurrency tests:
+    - Create multiple transactions in ordered mode, ensure only one runs at a time.
+    - Create multiple transactions in parallel mode, ensure none queue behind each other.
 
 Provide updated code and test results.
 Prompt 6: Basic useCollection Hook
@@ -284,7 +281,7 @@ Create a new file `src/useCollection.ts`:
    - Maintain some local `data` state (can be an empty object for now).
    - On `update` (etc.), create a transaction via `TransactionManager`.
    - Currently, do nothing else (no real network calls).
-4. Write a new test file `tests/useCollection.test.ts` using React Testing Library or similar. 
+4. Write a new test file `tests/useCollection.test.ts` using React Testing Library or similar.
    - Render a component that calls `useCollection`.
    - Ensure that `update` or `insert` triggers transaction creation.
    - Verify that `data` is unchanged for now since we haven't implemented optimism.
@@ -308,8 +305,8 @@ text
 Copy
 Update `mutationFn` to include a mock `persist` method:
 
-1. `persist`: Wait a short random time (like 100-500ms), succeed half the time, fail half the time. 
-2. On failure, ensure `TransactionManager` triggers a retry (up to 4 retries). 
+1. `persist`: Wait a short random time (like 100-500ms), succeed half the time, fail half the time.
+2. On failure, ensure `TransactionManager` triggers a retry (up to 4 retries).
 3. Add tests to confirm that:
    - If it fails, the transaction eventually either succeeds (within 4 retries) or ends up in `failed`.
    - The local state reverts if it fails after all retries, remains if it eventually succeeds.
@@ -320,7 +317,7 @@ text
 Copy
 Add final details for parallel merges and lock management:
 
-1. For ordered mode, if a transaction is `persisting`, the next transaction should wait. 
+1. For ordered mode, if a transaction is `persisting`, the next transaction should wait.
 2. After `persisting` finishes, remove the lock, let the next proceed.
 3. For parallel mode, if a custom merge function is provided, call it on each sync update to combine pending changes.
 4. Write concurrency tests in `tests/TransactionManager.test.ts` or a new file:
@@ -341,16 +338,16 @@ Integrate a real `setup` call and demonstrate an end-to-end flow:
    - Calls `update`, triggers a successful persist, verifies updated data.
    - Calls `update`, triggers a fail, verifies revert or retry.
 4. Show all relevant code and passing test results.
-Prompt 11: Advanced Errors, Logging, & Cleanup
-text
-Copy
-Complete the library with advanced features and a final pass:
+   Prompt 11: Advanced Errors, Logging, & Cleanup
+   text
+   Copy
+   Complete the library with advanced features and a final pass:
 
-1. Use `NonRetriableError` if a certain API status indicates a permanent failure (e.g., 400). 
-2. Add optional logging or event hooks in `TransactionManager` to track state transitions.
-3. Confirm no orphan code is left, unify any duplicated logic, finalize all type exports in `src/index.ts`.
-4. Provide the final code layout with a short README explaining usage. 
-5. Show the final test coverage or evidence of complete testing.
+5. Use `NonRetriableError` if a certain API status indicates a permanent failure (e.g., 400).
+6. Add optional logging or event hooks in `TransactionManager` to track state transitions.
+7. Confirm no orphan code is left, unify any duplicated logic, finalize all type exports in `src/index.ts`.
+8. Provide the final code layout with a short README explaining usage.
+9. Show the final test coverage or evidence of complete testing.
 
 Summarize final library structure and usage.
 Final Notes

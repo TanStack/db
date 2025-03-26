@@ -1,23 +1,26 @@
 # Sync Library Technical Specification
 
 ## Overview
+
 A general mutation library for sync engines that can write to any API. The library provides automatic optimistic updates, retry handling, and flexible mutation strategies for different types of updates.
 
 ## Core Concepts
 
 ### Collections
+
 - Collections represent synchronized datasets that can be mutated locally and persisted to a backend
 - Each collection is identified by its sync configuration
 - Multiple components can share the same collection instance
 - Collections maintain both synced state and optimistic updates
 
 ### Mutations
+
 Two primary mutation strategies:
+
 1. **Ordered** (default)
    - Mutations queue behind active transactions
    - Strict ordering of changes
    - Automatic rollback of dependent transactions
-   
 2. **Parallel**
    - All mutations can fire API calls immediately
    - Custom merge function to handle sync updates
@@ -25,6 +28,7 @@ Two primary mutation strategies:
    - No queueing or dependency management
 
 ### Transactions
+
 - Track the state and history of mutations
 - Include retry attempts and error information
 - Support both ordered and parallel mutation patterns
@@ -35,6 +39,7 @@ Two primary mutation strategies:
 ## API Design
 
 ### Collection Hook
+
 ```typescript
 const useCollection = (config: {
   sync: SyncConfig
@@ -51,18 +56,18 @@ const useCollection = (config: {
 ```
 
 ### Sync Configuration
+
 ```typescript
 type SyncConfig = {
   id: string
-  setup: (params: { 
-    onUpdate: (data: any) => void 
-  }) => Promise<{
+  setup: (params: { onUpdate: (data: any) => void }) => Promise<{
     data: any
   }>
 }
 ```
 
 ### Mutation Function
+
 ```typescript
 type MutationFn = {
   // Persist changes to backend
@@ -82,14 +87,15 @@ type MutationFn = {
 ```
 
 ### Transaction State
+
 ```typescript
-type TransactionState = 
-  | 'queued'          // Waiting for another transaction to complete
-  | 'pending'         // Created but not yet persisting
-  | 'persisting'      // Currently running mutationFn.persist()
-  | 'persisted_awaiting_sync'  // Persist succeeded, waiting for sync
-  | 'completed'       // Fully completed
-  | 'failed'          // Failed (includes dependency cancellations)
+type TransactionState =
+  | "queued" // Waiting for another transaction to complete
+  | "pending" // Created but not yet persisting
+  | "persisting" // Currently running mutationFn.persist()
+  | "persisted_awaiting_sync" // Persist succeeded, waiting for sync
+  | "completed" // Fully completed
+  | "failed" // Failed (includes dependency cancellations)
 
 type Transaction = {
   id: string
@@ -101,7 +107,7 @@ type Transaction = {
   current_attempt: number
   queued_behind?: string
   error?: {
-    transaction_id?: string  // For dependency failures
+    transaction_id?: string // For dependency failures
     message: string
     error: Error
   }
@@ -123,40 +129,42 @@ type PendingMutation = {
   metadata: unknown
   created_at: Date
   updated_at: Date
-  state: 'created' | 'persisting' | 'synced'
+  state: "created" | "persisting" | "synced"
 }
 ```
 
 ### Mutation Strategy
+
 ```typescript
 type MutationStrategy = {
-  type: 'ordered' | 'parallel'
+  type: "ordered" | "parallel"
   merge?: (syncedData: any, pendingMutations: PendingMutation[]) => any
 }
 ```
 
 ### Error Handling
+
 ```typescript
 class NonRetriableError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'NonRetriableError'
+    this.name = "NonRetriableError"
   }
 }
 ```
 
 ### Lock Management
+
 ```typescript
 // Helper function to determine locked objects from transaction state
 function getLockedObjects(transactions: Transaction[]): Set<string> {
   return new Set(
     transactions
-      .filter(t => 
-        t.state === 'persisting' || 
-        t.state === 'persisted_awaiting_sync'
+      .filter(
+        (t) => t.state === "persisting" || t.state === "persisted_awaiting_sync"
       )
-      .flatMap(t => t.mutations)
-      .map(m => m.modified.id)
+      .flatMap((t) => t.mutations)
+      .map((m) => m.modified.id)
   )
 }
 ```
@@ -164,6 +172,7 @@ function getLockedObjects(transactions: Transaction[]): Set<string> {
 ## Implementation Details
 
 ### Transaction Persistence
+
 - All transactions automatically persist to survive page reloads
 - Uses IndexedDB by default
 - Logs error if persistence setup fails
@@ -171,12 +180,14 @@ function getLockedObjects(transactions: Transaction[]): Set<string> {
 - Assumes successful sync if page closed after persist succeeds
 
 ### Retry Handling
+
 - Retry by default for all errors
 - NonRetriableError to opt out of retries
 - Default 4 retries (5 total attempts) per transaction
 - Exponential backoff with configurable options
 
 ### Optimistic Updates
+
 - Applied immediately upon mutation
 - Maintained until backend sync completes
 - For parallel mutations, reapplied after syncs via merge function
@@ -184,13 +195,16 @@ function getLockedObjects(transactions: Transaction[]): Set<string> {
 - Dropped after successful persist if page reloads before sync completes
 
 ### Sync Integration
+
 - Sync mechanism provided by developer
 - Updates to locked objects queue until transaction completes
 - Parallel mutations use merge function to handle concurrent updates
 - Sync instance passed to mutationFn for coordination
 
 ### Transaction Management
+
 1. Ordered Transactions:
+
    - Lock detection via transaction state
    - Queue dependent mutations
    - Roll back on failure
@@ -203,6 +217,7 @@ function getLockedObjects(transactions: Transaction[]): Set<string> {
    - No rollback on failure
 
 ### State Management
+
 - Track all transactions with full history
 - Maintain optimistic updates separately
 - Queue updates to locked objects
@@ -214,16 +229,19 @@ function getLockedObjects(transactions: Transaction[]): Set<string> {
 The library provides several key extension points for advanced functionality:
 
 ### Error Handling
+
 - Custom retry strategies
 - Extended error classification beyond NonRetriableError
 - Error transformation and aggregation
 
 ### Merge Strategies
+
 - Custom merge functions for parallel mutations
 - Advanced conflict resolution
 - Domain-specific merge logic
 
 ### Monitoring
+
 - Transaction event subscribers
 - Custom logging and metrics
 - Debug tooling and visualization
@@ -232,6 +250,7 @@ The library provides several key extension points for advanced functionality:
 ## Testing Utilities
 
 ### Basic Test Harness
+
 ```typescript
 const { collection, syncControl } = createTestCollection({
   initialData: any
@@ -245,6 +264,7 @@ syncControl.failNextPersist()
 ```
 
 ### Future Testing Enhancements
+
 - Network condition simulation
 - Persistence recovery testing
 - Parallel/ordered mutation interaction testing
@@ -252,11 +272,13 @@ syncControl.failNextPersist()
 - Time-travel debugging
 
 ## State Exposure
+
 - All transaction state available via useTransactions hook
 - Support for building debugging tools
 - Event subscription for state changes
 
 ## Future Considerations
+
 - SSR support via Provider pattern
 - RSC support via HydrationBoundary
 - Advanced debugging tools
