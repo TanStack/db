@@ -3,4 +3,4 @@
 "@tanstack/optimistic": patch
 ---
 
-Initial release
+feat: Initial release
