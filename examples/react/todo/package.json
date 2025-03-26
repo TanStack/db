@@ -1,7 +1,7 @@
 {
-  "name": "todo-app",
+  "name": "examples/react/todo",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "dependencies": {
     "@tanstack/react-optimistic": "workspace:*",
     "cors": "^2.8.5",
@@ -36,7 +36,6 @@
     "typescript": "^5.8.2",
     "vite": "^6.2.2"
   },
-  "private": true,
   "scripts": {
     "api:dev": "tsx watch src/api/server.ts",
     "build": "tsc -b && vite build",
