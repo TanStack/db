@@ -16,7 +16,6 @@
     "typescript"
   ],
   "packageManager": "pnpm@10.5.2",
-  "version": "0.0.0",
   "dependencies": {
     "@tanstack/optimistic": "workspace:*",
     "@tanstack/store": "^0.7.0",
