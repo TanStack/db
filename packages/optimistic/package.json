@@ -29,9 +29,11 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.5.2",
   "peerDependencies": {
     "typescript": ">=4.7"
   },
+  "repository": "https://github.com/tanstack/optimistic.git",
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",

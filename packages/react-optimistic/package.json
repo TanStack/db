@@ -2,6 +2,9 @@
   "name": "@tanstack/react-optimistic",
   "description": "React hooks for optimistic updates",
   "version": "0.0.1",
+  "repository": "https://github.com/tanstack/optimistic.git",
+  "packageManager": "pnpm@10.5.2",
+  "version": "0.0.0",
   "dependencies": {
     "@tanstack/optimistic": "workspace:*",
     "@tanstack/store": "^0.7.0",
