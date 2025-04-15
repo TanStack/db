@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "54321:5432"
+      - "54322:5432"
     volumes:
       - ./postgres.conf:/etc/postgresql/postgresql.conf:ro
     tmpfs:
@@ -29,7 +29,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/todo_app?sslmode=disable
       ELECTRIC_INSECURE: true
     ports:
-      - 3000:3000
+      - 3003:3000
     depends_on:
       postgres:
         condition: service_healthy

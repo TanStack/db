@@ -2,6 +2,11 @@
 
 ## How to run
 
+- Go to the root of the repository and run:
+
+  - `pnpm install`
+  - `pnpm build`
+
 - Install packages
   `pnpm install`
 

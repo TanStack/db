@@ -591,6 +591,7 @@ describe(`TransactionManager`, () => {
           sync: () => {},
         },
         mutationFn: {
+          // eslint-disable-next-line @typescript-eslint/require-await
           persist: async () => {
             // Throw a string instead of an Error object
             throw `String error message`

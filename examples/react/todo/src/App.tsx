@@ -18,7 +18,7 @@ export default function App() {
     id: `todos`,
     sync: createElectricSync(
       {
-        url: `http://localhost:3000/v1/shape`,
+        url: `http://localhost:3003/v1/shape`,
         params: {
           table: `todos`,
         },
@@ -69,7 +69,7 @@ export default function App() {
     id: `config`,
     sync: createElectricSync(
       {
-        url: `http://localhost:3000/v1/shape`,
+        url: `http://localhost:3003/v1/shape`,
         params: {
           table: `config`,
         },
