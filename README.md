@@ -4,7 +4,7 @@ A library for creating fast optimistic updates with flexible backend support tha
 
 This library is still under design! Please let us know what you think.
 
-Checkout the [example todo app](todo-app/).
+Checkout the [example todo app](examples/react/todo).
 
 ## Installation
 
