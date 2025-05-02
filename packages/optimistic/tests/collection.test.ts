@@ -3,7 +3,11 @@ import "fake-indexeddb/auto"
 import mitt from "mitt"
 import { z } from "zod"
 import { Collection, SchemaValidationError } from "../src/collection"
-import type { ChangeMessage, PendingMutation } from "../src/types"
+import type {
+  ChangeMessage,
+  OptimisticChangeMessage,
+  PendingMutation,
+} from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -185,10 +189,11 @@ describe(`Collection`, () => {
     })
 
     // Check the optimistic operation is there
-    const insertOperation: ChangeMessage = {
+    const insertOperation: OptimisticChangeMessage = {
       key: insertedKey,
       value: { value: `bar` },
       type: `insert`,
+      isActive: true,
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
@@ -222,7 +227,9 @@ describe(`Collection`, () => {
       // @ts-expect-error possibly undefined is ok in test
       Array.from(collection.transactions.values())[0].state
     ).toMatchInlineSnapshot(`"completed"`)
-    expect(collection.optimisticOperations.state).toEqual([])
+    expect(
+      collection.optimisticOperations.state.filter((o) => o.isActive)
+    ).toEqual([])
     expect(collection.state).toEqual(new Map([[insertedKey, { value: `bar` }]]))
 
     // Test insert with provided key
@@ -307,7 +314,7 @@ describe(`Collection`, () => {
     expect(collection.state.has(keys[3])).toBe(false)
   })
 
-  it(`synced updates shouldn't be applied while there's an ongoing transaction`, async () => {
+  it(`synced updates should be applied while there's an ongoing transaction`, async () => {
     const emitter = mitt()
 
     // new collection w/ mock sync/mutation
@@ -336,8 +343,15 @@ describe(`Collection`, () => {
           // we're still in the middle of persisting a transaction.
           emitter.emit(`update`, [
             { key: `the-key`, type: `insert`, changes: { bar: `value` } },
+            // This update is ignored because the optimistic update overrides it.
+            { key: `foo`, type: `update`, changes: { bar: `value2` } },
           ])
-          expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
+          expect(collection.state).toEqual(
+            new Map([
+              [`foo`, { value: `bar` }],
+              [`the-key`, { bar: `value` }],
+            ])
+          )
           // Remove it so we don't have to assert against it below
           emitter.emit(`update`, [{ key: `the-key`, type: `delete` }])
           return Promise.resolve()
@@ -369,10 +383,11 @@ describe(`Collection`, () => {
     })
 
     // Check the optimistic operation is there
-    const insertOperation: ChangeMessage = {
+    const insertOperation: OptimisticChangeMessage = {
       key: `foo`,
       value: { value: `bar` },
       type: `insert`,
+      isActive: true,
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 

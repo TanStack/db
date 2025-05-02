@@ -84,6 +84,13 @@ export interface ChangeMessage<T extends object = Record<string, unknown>> {
   metadata?: Record<string, unknown>
 }
 
+export interface OptimisticChangeMessage<
+  T extends object = Record<string, unknown>,
+> extends ChangeMessage<T> {
+  // Is this change message part of an active transaction. Only applies to optimistic changes.
+  isActive?: boolean
+}
+
 export interface MutationFn<T extends object = Record<string, unknown>> {
   persist: (params: {
     transaction: Transaction
