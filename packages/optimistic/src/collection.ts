@@ -548,9 +548,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       mutations.push(mutation)
     })
 
-    return this.transactionManager.applyTransaction(mutations, {
-      type: `ordered`,
-    })
+    return this.transactionManager.applyTransaction(mutations)
   }
 
   /**
@@ -678,9 +676,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw new Error(`No changes were made to any of the objects`)
     }
 
-    return this.transactionManager.applyTransaction(mutations, {
-      type: `ordered`,
-    })
+    return this.transactionManager.applyTransaction(mutations)
   }
 
   /**
@@ -758,9 +754,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       }
     })
 
-    return this.transactionManager.applyTransaction(mutations, {
-      type: `ordered`,
-    })
+    return this.transactionManager.applyTransaction(mutations)
   }
 
   /**

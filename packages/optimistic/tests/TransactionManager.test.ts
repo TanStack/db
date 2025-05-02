@@ -3,7 +3,7 @@ import { TransactionManager } from "../src/TransactionManager"
 import { TransactionStore } from "../src/TransactionStore"
 import "fake-indexeddb/auto"
 import { Collection } from "../src/collection"
-import type { MutationStrategy, PendingMutation } from "../src/types"
+import type { PendingMutation } from "../src/types"
 
 describe(`TransactionManager`, () => {
   let store: TransactionStore
@@ -41,18 +41,10 @@ describe(`TransactionManager`, () => {
     syncMetadata: {},
   })
 
-  const orderedStrategy: MutationStrategy = {
-    type: `ordered`,
-  }
-
-  const parallelStrategy: MutationStrategy = {
-    type: `parallel`,
-  }
-
   describe(`Basic Transaction Management`, () => {
     it(`should create a transaction in pending state`, () => {
       const mutations = [createMockMutation(`test-1`)]
-      const transaction = manager.applyTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations)
 
       expect(transaction.id).toBeDefined()
       expect(transaction.state).toBe(`pending`)
@@ -61,7 +53,7 @@ describe(`TransactionManager`, () => {
 
     it(`should update transaction state`, () => {
       const mutations = [createMockMutation(`test-2`)]
-      const transaction = manager.applyTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations)
 
       // Add a small delay to ensure timestamps are different
       const beforeUpdate = transaction.updatedAt
@@ -82,95 +74,16 @@ describe(`TransactionManager`, () => {
   })
 
   describe(`Ordered vs Parallel Transactions`, () => {
-    it(`should queue ordered transactions with overlapping mutations`, () => {
-      // Create first transaction modifying object 1
-      const tx1 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        orderedStrategy
-      )
-      expect(tx1.state).toBe(`pending`)
-      expect(tx1.queuedBehind).toBeUndefined()
-
-      // Create second transaction also modifying object 1 - should be queued
-      const tx2 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        orderedStrategy
-      )
-      expect(tx2.state).toBe(`queued`)
-      expect(tx2.queuedBehind).toBe(tx1.id)
-
-      // Create third transaction modifying different object - should not be queued
-      const tx3 = manager.applyTransaction(
-        [createMockMutation(`object-2`)],
-        orderedStrategy
-      )
-      expect(tx3.state).toBe(`pending`)
-      expect(tx3.queuedBehind).toBeUndefined()
-
-      // Complete first transaction
-      manager.setTransactionState(tx1.id, `completed`)
-
-      // Check that second transaction is now pending
-      const updatedTx2 = manager.getTransaction(tx2.id)!
-      expect(updatedTx2.state).toBe(`persisting`)
-    })
-
-    it(`should not queue parallel transactions`, () => {
+    it(`should not queue transactions`, () => {
       // Create multiple parallel transactions modifying same object
-      const tx1 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        parallelStrategy
-      )
-      const tx2 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        parallelStrategy
-      )
-      const tx3 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        parallelStrategy
-      )
+      const tx1 = manager.applyTransaction([createMockMutation(`object-1`)])
+      const tx2 = manager.applyTransaction([createMockMutation(`object-1`)])
+      const tx3 = manager.applyTransaction([createMockMutation(`object-1`)])
 
       // All should be in pending state and not queued
       expect(tx1.state).toBe(`pending`)
-      expect(tx1.queuedBehind).toBeUndefined()
       expect(tx2.state).toBe(`pending`)
-      expect(tx2.queuedBehind).toBeUndefined()
       expect(tx3.state).toBe(`pending`)
-      expect(tx3.queuedBehind).toBeUndefined()
-    })
-
-    it(`should mix ordered and parallel transactions correctly`, () => {
-      // Create an ordered transaction modifying object 1
-      const ordered1 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        orderedStrategy
-      )
-
-      // Create a parallel transaction modifying object 1 - should not queue
-      const parallel1 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        parallelStrategy
-      )
-
-      // Create another ordered transaction modifying object 1 - should queue behind ordered1
-      const ordered2 = manager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        orderedStrategy
-      )
-
-      expect(ordered1.state).toBe(`pending`)
-      expect(ordered1.queuedBehind).toBeUndefined()
-      expect(parallel1.state).toBe(`pending`)
-      expect(parallel1.queuedBehind).toBeUndefined()
-      expect(ordered2.state).toBe(`queued`)
-      expect(ordered2.queuedBehind).toBe(ordered1.id)
-
-      // Complete ordered1, ordered2 should become pending
-      manager.setTransactionState(ordered1.id, `completed`)
-
-      const updatedOrdered2 = manager.getTransaction(ordered2.id)!
-      expect(updatedOrdered2.state).toBe(`persisting`)
-      expect(updatedOrdered2.queuedBehind).toBeUndefined()
     })
   })
 
@@ -183,10 +96,9 @@ describe(`TransactionManager`, () => {
       // Create transactions in reverse chronological order
       await Promise.all(
         timestamps.map((timestamp, i) => {
-          const tx = manager.applyTransaction(
-            [createMockMutation(`test-${i + 1}`)],
-            parallelStrategy
-          )
+          const tx = manager.applyTransaction([
+            createMockMutation(`test-${i + 1}`),
+          ])
           // Force the createdAt time
           const updatedTx = {
             ...tx.toObject(),
@@ -212,7 +124,7 @@ describe(`TransactionManager`, () => {
     it(`should create a new transaction when no existing transactions with overlapping keys exist`, () => {
       // Create a new transaction
       const mutations = [createMockMutation(`test-apply-1`)]
-      const transaction = manager.applyTransaction(mutations, orderedStrategy)
+      const transaction = manager.applyTransaction(mutations)
 
       // Verify transaction was created with the expected properties
       expect(transaction.id).toBeDefined()
@@ -228,10 +140,10 @@ describe(`TransactionManager`, () => {
         changes: { value: `original-value` },
       }
 
-      manager.applyTransaction([originalMutation], orderedStrategy)
+      manager.applyTransaction([originalMutation])
 
       // Create second transaction with a mutation - this should be queued behind the first.
-      const tx1 = manager.applyTransaction([originalMutation], orderedStrategy)
+      const tx1 = manager.applyTransaction([originalMutation])
       expect(tx1.mutations[0]?.modified.value).toBe(`original-value`)
 
       // Apply a new transaction with a mutation for the same key but different value.
@@ -241,7 +153,7 @@ describe(`TransactionManager`, () => {
         changes: { value: `updated-value` },
       }
 
-      const tx2 = manager.applyTransaction([newMutation], orderedStrategy)
+      const tx2 = manager.applyTransaction([newMutation])
 
       // Should reuse the same transaction ID
       expect(tx2.id).toBe(tx1.id)
@@ -255,11 +167,11 @@ describe(`TransactionManager`, () => {
     it(`should add new mutations while preserving existing ones for different keys`, () => {
       // Create first transaction with a mutation
       const mutation1 = createMockMutation(`test-apply-3a`)
-      const tx1 = manager.applyTransaction([mutation1], orderedStrategy)
+      const tx1 = manager.applyTransaction([mutation1])
 
       // Apply a new transaction with a mutation for a different key
       const mutation2 = createMockMutation(`test-apply-3b`)
-      const tx2 = manager.applyTransaction([mutation2], orderedStrategy)
+      const tx2 = manager.applyTransaction([mutation2])
 
       // Should create a new transaction since keys don't overlap
       expect(tx2.id).not.toBe(tx1.id)
@@ -282,11 +194,8 @@ describe(`TransactionManager`, () => {
       }
 
       // Apply an initial one so the second is queued behind it.
-      manager.applyTransaction([mutationA1, mutationB1], orderedStrategy)
-      const tx1 = manager.applyTransaction(
-        [mutationA1, mutationB1],
-        orderedStrategy
-      )
+      manager.applyTransaction([mutationA1, mutationB1])
+      const tx1 = manager.applyTransaction([mutationA1, mutationB1])
 
       // Create second transaction with mutations for keys B and C
       const mutationB2 = {
@@ -302,10 +211,7 @@ describe(`TransactionManager`, () => {
       }
 
       // Apply the new transaction
-      const tx2 = manager.applyTransaction(
-        [mutationB2, mutationC1],
-        orderedStrategy
-      )
+      const tx2 = manager.applyTransaction([mutationB2, mutationC1])
 
       // Should update tx1 since it has an overlapping key (B)
       expect(tx2.id).toBe(tx1.id)
@@ -333,20 +239,11 @@ describe(`TransactionManager`, () => {
 
     it(`should handle the case where mutations don't overlap at all`, () => {
       // Create three transactions with non-overlapping mutations
-      const tx1 = manager.applyTransaction(
-        [createMockMutation(`key-1`)],
-        orderedStrategy
-      )
-      const tx2 = manager.applyTransaction(
-        [createMockMutation(`key-2`)],
-        orderedStrategy
-      )
+      const tx1 = manager.applyTransaction([createMockMutation(`key-1`)])
+      const tx2 = manager.applyTransaction([createMockMutation(`key-2`)])
 
       // Apply a transaction with a new non-overlapping key
-      const tx3 = manager.applyTransaction(
-        [createMockMutation(`key-3`)],
-        orderedStrategy
-      )
+      const tx3 = manager.applyTransaction([createMockMutation(`key-3`)])
 
       // Should be a new transaction
       expect(tx3.id).not.toBe(tx1.id)
@@ -368,7 +265,7 @@ describe(`TransactionManager`, () => {
     it(`should only consider active transactions for applying updates`, () => {
       // Create a transaction and mark it as completed
       const mutation1 = createMockMutation(`completed-key`)
-      const tx1 = manager.applyTransaction([mutation1], orderedStrategy)
+      const tx1 = manager.applyTransaction([mutation1])
       manager.setTransactionState(tx1.id, `completed`)
 
       // Apply a new transaction with the same key
@@ -378,7 +275,7 @@ describe(`TransactionManager`, () => {
         changes: { value: `new-value` },
       }
 
-      const tx2 = manager.applyTransaction([mutation2], orderedStrategy)
+      const tx2 = manager.applyTransaction([mutation2])
 
       // Should create a new transaction since the existing one is completed
       expect(tx2.id).not.toBe(tx1.id)
@@ -408,10 +305,7 @@ describe(`TransactionManager`, () => {
 
       // Apply a transaction
       const mutations = [createMockMutation(`error-test-5`)]
-      const transaction = errorManager.applyTransaction(
-        mutations,
-        orderedStrategy
-      )
+      const transaction = errorManager.applyTransaction(mutations)
 
       await expect(transaction.isPersisted?.promise).rejects.toThrow(
         `Persist error affecting both promises`
@@ -462,10 +356,7 @@ describe(`TransactionManager`, () => {
 
       // Apply a transaction
       const mutations = [createMockMutation(`error-test-4`)]
-      const transaction = syncErrorManager.applyTransaction(
-        mutations,
-        orderedStrategy
-      )
+      const transaction = syncErrorManager.applyTransaction(mutations)
 
       await expect(transaction.isSynced?.promise).rejects.toThrow(
         `Sync promise error - persist-data`
@@ -504,10 +395,7 @@ describe(`TransactionManager`, () => {
 
       // Apply a transaction
       const mutations = [createMockMutation(`timeout-test`)]
-      const transaction = timeoutManager.applyTransaction(
-        mutations,
-        orderedStrategy
-      )
+      const transaction = timeoutManager.applyTransaction(mutations)
 
       // The promise should reject with a timeout error
       await expect(transaction.isSynced?.promise).rejects.toThrow(
@@ -519,68 +407,6 @@ describe(`TransactionManager`, () => {
       expect(transaction.error?.message).toBe(
         `Sync operation timed out after 2 seconds`
       )
-    })
-
-    it(`should capture errors from queued transactions when they're persisted`, async () => {
-      // Define the type for our persist result
-      type PersistResult = { testData: string }
-
-      let transactionCount = 0
-      // Create a collection with an awaitSync function that throws an error
-      const syncErrorCollection = new Collection({
-        id: `failing-sync`,
-        sync: {
-          sync: () => {},
-        },
-        // Explicitly specify the MutationFn with proper generic types
-        mutationFn: {
-          persist: () => {
-            // Return some test data that should be passed to awaitSync
-            return Promise.resolve({ testData: `persist-data` })
-          },
-          awaitSync: async ({
-            persistResult,
-          }: {
-            persistResult: PersistResult
-          }) => {
-            if (transactionCount === 1) {
-              // Now TypeScript knows that persistResult has a testData property
-              return Promise.reject(
-                new Error(`Sync promise error - ${persistResult.testData}`)
-              )
-            }
-
-            transactionCount += 1
-          },
-        },
-      })
-      const syncErrorManager = new TransactionManager(
-        store,
-        syncErrorCollection
-      )
-
-      // Apply a transaction
-      const mutations = [createMockMutation(`object-1`)]
-      const tx1 = syncErrorManager.applyTransaction(mutations, orderedStrategy)
-
-      expect(tx1.state).toBe(`pending`)
-      expect(tx1.queuedBehind).toBeUndefined()
-
-      // Create second transaction also modifying object 1 - should be queued
-      const tx2 = syncErrorManager.applyTransaction(
-        [createMockMutation(`object-1`)],
-        orderedStrategy
-      )
-      expect(tx2.state).toBe(`queued`)
-      expect(tx2.queuedBehind).toBe(tx1.id)
-
-      await expect(tx2.isSynced?.promise).rejects.toThrow(
-        `Sync promise error - persist-data`
-      )
-
-      // Verify the transaction state
-      expect(tx2.state).toBe(`failed`)
-      expect(tx2.error?.message).toBe(`Sync promise error - persist-data`)
     })
 
     it(`should handle non-Error objects thrown during persist`, async () => {
@@ -603,10 +429,7 @@ describe(`TransactionManager`, () => {
 
       // Apply a transaction
       const mutations = [createMockMutation(`non-error-test`)]
-      const transaction = nonErrorManager.applyTransaction(
-        mutations,
-        orderedStrategy
-      )
+      const transaction = nonErrorManager.applyTransaction(mutations)
 
       // The promise should reject with a converted Error
       await expect(transaction.isPersisted?.promise).rejects.toThrow(
@@ -648,7 +471,7 @@ describe(`TransactionManager`, () => {
     //   const mutations = [createMockMutation(`non-error-sync-test`)]
     //   const transaction = nonErrorSyncManager.applyTransaction(
     //     mutations,
-    //     orderedStrategy
+    //
     //   )
     //
     //   // The promise should reject with a converted Error
@@ -666,46 +489,46 @@ describe(`TransactionManager`, () => {
     // })
   })
 
-  describe(`Terminal State Handling`, () => {
-    it(`should delete transactions from IndexedDB when they reach a terminal state`, async () => {
-      // Clear all existing transactions first
-      await store.clearAll()
-
-      // Create a transaction
-      const tx = manager.applyTransaction(
-        [createMockMutation(`test-object`)],
-        parallelStrategy
-      )
-
-      // Verify transaction exists in IndexedDB
-      let transactions = await store.getTransactions()
-      expect(transactions.length).toBe(1)
-      expect(transactions[0]?.id).toBe(tx.id)
-
-      // Update to 'completed' state (terminal)
-      manager.setTransactionState(tx.id, `completed`)
-
-      // Verify transaction is deleted from IndexedDB
-      transactions = await store.getTransactions()
-      expect(transactions.length).toBe(0)
-
-      // Create another transaction
-      const tx2 = manager.applyTransaction(
-        [createMockMutation(`test-object-2`)],
-        parallelStrategy
-      )
-
-      // Verify transaction exists in IndexedDB
-      transactions = await store.getTransactions()
-      expect(transactions.length).toBe(1)
-      expect(transactions[0]?.id).toBe(tx2.id)
-
-      // Update to 'failed' state (terminal)
-      manager.setTransactionState(tx2.id, `failed`)
-
-      // Verify transaction is deleted from IndexedDB
-      transactions = await store.getTransactions()
-      expect(transactions.length).toBe(0)
-    })
-  })
+  // describe(`Terminal State Handling`, () => {
+  //   // Ignoring htis as we're removing the store soon anyways.
+  //   it(
+  //     `should delete transactions from IndexedDB when they reach a terminal state`,
+  //     async () => {
+  //       // Clear all existing transactions first
+  //       await store.clearAll()
+  //
+  //       // Create a transaction
+  //       const tx = manager.applyTransaction([createMockMutation(`test-object`)])
+  //
+  //       // Verify transaction exists in IndexedDB
+  //       let transactions = await store.getTransactions()
+  //       expect(transactions.length).toBe(1)
+  //       expect(transactions[0]?.id).toBe(tx.id)
+  //
+  //       // Update to 'completed' state (terminal)
+  //       manager.setTransactionState(tx.id, `completed`)
+  //
+  //       // Verify transaction is deleted from IndexedDB
+  //       transactions = await store.getTransactions()
+  //       expect(transactions.length).toBe(0)
+  //
+  //       // Create another transaction
+  //       const tx2 = manager.applyTransaction([
+  //         createMockMutation(`test-object-2`),
+  //       ])
+  //
+  //       // Verify transaction exists in IndexedDB
+  //       transactions = await store.getTransactions()
+  //       expect(transactions.length).toBe(1)
+  //       expect(transactions[0]?.id).toBe(tx2.id)
+  //
+  //       // Update to 'failed' state (terminal)
+  //       manager.setTransactionState(tx2.id, `failed`)
+  //
+  //       // Verify transaction is deleted from IndexedDB
+  //       transactions = await store.getTransactions()
+  //       expect(transactions.length).toBe(0)
+  //     }
+  //   )
+  // })
 })

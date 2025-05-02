@@ -197,6 +197,8 @@ describe(`Collection`, () => {
     }
     expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
 
+    await transaction.isPersisted?.promise
+
     // Check persist data (moved outside the persist callback)
     // @ts-expect-error possibly undefined is ok in test
     const persistData = persistMock.mock.calls[0][0]

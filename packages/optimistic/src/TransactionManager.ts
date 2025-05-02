@@ -3,12 +3,7 @@ import { SortedMap } from "./SortedMap"
 import { createDeferred } from "./deferred"
 import type { TransactionStore } from "./TransactionStore"
 import type { Collection } from "./collection"
-import type {
-  MutationStrategy,
-  PendingMutation,
-  Transaction,
-  TransactionState,
-} from "./types"
+import type { PendingMutation, Transaction, TransactionState } from "./types"
 
 // Singleton instance of TransactionManager with type map
 
@@ -141,23 +136,20 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
   }
 
   /**
-   * Applies a transaction with the given mutations using the specified strategy
+   * Applies mutations to the current transaction. A given transaction accumulates mutations
+   * within a single event loop.
    *
    * @param mutations - Array of pending mutations to apply
-   * @param strategy - Strategy to use when applying the transaction
    * @returns A live reference to the created or updated transaction
    */
-  applyTransaction(
-    mutations: Array<PendingMutation>,
-    strategy: MutationStrategy
-  ): Transaction {
-    // See if there's an existing overlapping queued mutation.
+  applyTransaction(mutations: Array<PendingMutation>): Transaction {
+    // See if there's an existing transaction with overlapping queued mutation.
     const mutationKeys = mutations.map((m) => m.key)
     let transaction: Transaction | undefined = Array.from(
       this.transactions.state.values()
     ).filter(
       (t) =>
-        t.state === `queued` &&
+        t.state === `pending` &&
         t.mutations.some((m) => mutationKeys.includes(m.key))
     )[0]
 
@@ -186,36 +178,20 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         updatedAt: new Date(),
         mutations,
         metadata: {},
-        strategy,
         isSynced: createDeferred(),
         isPersisted: createDeferred(),
       } as Transaction
     }
 
-    // For ordered transactions, check if we need to queue behind another transaction
-    if (strategy.type === `ordered`) {
-      const activeTransactions = this.getActiveTransactions()
-      const orderedTransactions = activeTransactions.filter(
-        (tx) => tx.strategy.type === `ordered` && tx.state !== `queued`
-      )
-
-      // Find any active transaction that has overlapping mutations
-      const conflictingTransaction = orderedTransactions.find((tx) =>
-        this.hasOverlappingMutations(tx.mutations, mutations)
-      )
-
-      if (conflictingTransaction) {
-        transaction.state = `queued`
-        transaction.queuedBehind = conflictingTransaction.id
-      } else {
-        this.setTransaction(transaction)
-        this.processTransaction(transaction.id)
-      }
-    }
-
     this.setTransaction(transaction)
+
     // Persist async
     this.store.putTransaction(transaction)
+
+    // Start processing in the next event loop tick.
+    setTimeout(() => {
+      this.processTransaction(transaction.id)
+    }, 0)
 
     // Return a live reference to the transaction
     return this.createLiveTransactionReference(transaction.id)
@@ -347,29 +323,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     } else {
       // Persist async only if not in terminal state
       this.store.putTransaction(updatedTransaction)
-    }
-
-    // If this transaction is completing, check if any are queued behind it
-    if (
-      (newState === `completed` || newState === `failed`) &&
-      transaction.strategy.type === `ordered`
-    ) {
-      // Get all ordered transactions that are queued behind this one
-      const queuedTransactions = Array.from(
-        this.transactions.state.values()
-      ).filter(
-        (tx) =>
-          tx.state === `queued` &&
-          tx.strategy.type === `ordered` &&
-          tx.queuedBehind === transaction.id
-      )
-
-      // Process each queued transaction
-      for (const queuedTransaction of queuedTransactions) {
-        queuedTransaction.queuedBehind = undefined
-        this.setTransaction(queuedTransaction)
-        this.processTransaction(queuedTransaction.id)
-      }
     }
   }
 

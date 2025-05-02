@@ -3,7 +3,6 @@ import type { Deferred } from "../src/deferred"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 export type TransactionState =
-  | `queued`
   | `pending`
   | `persisting`
   | `persisted_awaiting_sync`
@@ -29,9 +28,7 @@ export interface Transaction {
   createdAt: Date
   updatedAt: Date
   mutations: Array<PendingMutation>
-  strategy: MutationStrategy
   metadata: Record<string, unknown>
-  queuedBehind?: string
   isSynced?: Deferred<boolean>
   isPersisted?: Deferred<boolean>
   error?: {
@@ -105,14 +102,6 @@ export interface MutationFn<T extends object = Record<string, unknown>> {
 
     persistResult: any
   }) => Promise<void>
-}
-
-export interface MutationStrategy {
-  type: `ordered` | `parallel`
-  merge?: (
-    syncedData: Record<string, unknown>,
-    pendingMutations: Array<PendingMutation>
-  ) => Record<string, unknown>
 }
 
 /**
