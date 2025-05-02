@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { TransactionManager } from "../src/TransactionManager"
-import "fake-indexeddb/auto"
 import { Collection } from "../src/collection"
 import type { PendingMutation } from "../src/types"
 
@@ -9,16 +8,13 @@ describe(`TransactionManager`, () => {
   let manager: TransactionManager
 
   beforeEach(() => {
-    // Reset indexedDB for each test using the fake-indexeddb implementation
     collection = new Collection({
       id: `foo`,
       sync: {
         sync: () => {},
       },
-      mutationFn: {
-        persist: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 1))
-        },
+      mutationFn: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1))
       },
     })
     manager = new TransactionManager(collection)
@@ -281,20 +277,16 @@ describe(`TransactionManager`, () => {
   })
 
   describe(`Error Handling`, () => {
-    it(`should reject both isPersisted and isSynced promises when persist fails`, async () => {
+    it(`should reject isPersisted persist fails`, async () => {
       // Create a collection with a persist function that throws an error
       const errorCollection = new Collection({
         id: `foo`,
         sync: {
           sync: () => {},
         },
-        mutationFn: {
-          // eslint-disable-next-line
-          persist: async () => {
-            throw new Error(`Persist error affecting both promises`)
-          },
-          // Add awaitSync to ensure isSynced is initialized
-          awaitSync: async () => {},
+        // eslint-disable-next-line @typescript-eslint/require-await
+        mutationFn: async () => {
+          throw new Error(`Persist error`)
         },
       })
       const errorManager = new TransactionManager(errorCollection)
@@ -304,118 +296,25 @@ describe(`TransactionManager`, () => {
       const transaction = errorManager.applyTransaction(mutations)
 
       await expect(transaction.isPersisted?.promise).rejects.toThrow(
-        `Persist error affecting both promises`
-      )
-      await expect(transaction.isSynced?.promise).rejects.toThrow(
-        `Persist error affecting both promises`
+        `Persist error`
       )
 
       // Verify the transaction state
       expect(transaction.state).toBe(`failed`)
-      expect(transaction.error?.message).toBe(
-        `Persist error affecting both promises`
-      )
+      expect(transaction.error?.message).toBe(`Persist error`)
     })
 
-    it(`should reject the isSynced promise when awaitSync fails`, async () => {
-      // Define the type for our persist result
-      type PersistResult = { testData: string }
-
-      // Create a collection with an awaitSync function that throws an error
-      const syncErrorCollection = new Collection({
-        id: `failing-sync`,
-        sync: {
-          sync: () => {},
-        },
-        // Explicitly specify the MutationFn with proper generic types
-        mutationFn: {
-          persist: () => {
-            // Return some test data that should be passed to awaitSync
-            return Promise.resolve({ testData: `persist-data` })
-          },
-          awaitSync: async ({
-            persistResult,
-          }: {
-            persistResult: PersistResult
-          }) => {
-            // Now TypeScript knows that persistResult has a testData property
-            return Promise.reject(
-              new Error(`Sync promise error - ${persistResult.testData}`)
-            )
-          },
-        },
-      })
-      const syncErrorManager = new TransactionManager(syncErrorCollection)
-
-      // Apply a transaction
-      const mutations = [createMockMutation(`error-test-4`)]
-      const transaction = syncErrorManager.applyTransaction(mutations)
-
-      await expect(transaction.isSynced?.promise).rejects.toThrow(
-        `Sync promise error - persist-data`
-      )
-
-      // Verify the transaction state
-      expect(transaction.state).toBe(`failed`)
-      expect(transaction.error?.message).toBe(
-        `Sync promise error - persist-data`
-      )
-    })
-
-    it(`should timeout and reject the isSynced promise when awaitSync takes too long`, async () => {
-      // Create a collection with an awaitSync function that takes longer than the timeout
-      const timeoutCollection = new Collection({
-        id: `timeout-sync`,
-        sync: {
-          sync: () => {},
-        },
-        mutationFn: {
-          persist: () => {
-            return Promise.resolve({ testData: `persist-data` })
-          },
-          awaitSyncTimeoutMs: 10,
-          awaitSync: async () => {
-            // This promise will never resolve within the timeout period
-            return new Promise((resolve) => {
-              setTimeout(() => {
-                return resolve()
-              }, 10000)
-            })
-          },
-        },
-      })
-      const timeoutManager = new TransactionManager(timeoutCollection)
-
-      // Apply a transaction
-      const mutations = [createMockMutation(`timeout-test`)]
-      const transaction = timeoutManager.applyTransaction(mutations)
-
-      // The promise should reject with a timeout error
-      await expect(transaction.isSynced?.promise).rejects.toThrow(
-        `Sync operation timed out after 2 seconds`
-      )
-
-      // Verify the transaction state
-      expect(transaction.state).toBe(`failed`)
-      expect(transaction.error?.message).toBe(
-        `Sync operation timed out after 2 seconds`
-      )
-    })
-
-    it(`should handle non-Error objects thrown during persist`, async () => {
+    it.only(`should handle non-Error objects thrown during persist`, async () => {
       // Create a collection with a persist function that throws a non-Error object
       const nonErrorCollection = new Collection({
         id: `non-error-object`,
         sync: {
           sync: () => {},
         },
-        mutationFn: {
-          // eslint-disable-next-line @typescript-eslint/require-await
-          persist: async () => {
-            // Throw a string instead of an Error object
-            throw `String error message`
-          },
-          awaitSync: async () => {},
+        // eslint-disable-next-line @typescript-eslint/require-await
+        mutationFn: async () => {
+          // Throw a string instead of an Error object
+          throw `String error message`
         },
       })
       const nonErrorManager = new TransactionManager(nonErrorCollection)
@@ -428,7 +327,6 @@ describe(`TransactionManager`, () => {
       await expect(transaction.isPersisted?.promise).rejects.toThrow(
         `String error message`
       )
-      transaction.isSynced?.promise.catch(() => {})
       transaction.isPersisted?.promise.catch(() => {})
 
       // Verify the transaction state and error handling

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { preloadCollection } from "../src/useCollection"
 import type { CollectionConfig } from "@tanstack/optimistic"
-import "fake-indexeddb/auto"
 
 describe(`preloadCollection`, () => {
   beforeEach(() => {

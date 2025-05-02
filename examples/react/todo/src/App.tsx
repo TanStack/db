@@ -30,34 +30,22 @@ export default function App() {
       { primaryKey: [`id`] }
     ),
     schema: updateTodoSchema,
-    mutationFn: {
-      persist: async ({ transaction }) => {
-        const response = await fetch(`http://localhost:3001/api/mutations`, {
-          method: `POST`,
-          headers: {
-            "Content-Type": `application/json`,
-          },
-          body: JSON.stringify(transaction.mutations),
-        })
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`)
-        }
+    mutationFn: async ({ transaction, collection }) => {
+      const response = await fetch(`http://localhost:3001/api/mutations`, {
+        method: `POST`,
+        headers: {
+          "Content-Type": `application/json`,
+        },
+        body: JSON.stringify(transaction.mutations),
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
 
-        const result = await response.json()
-        return {
-          txid: result.txid,
-        }
-      },
-      awaitSync: async ({
-        persistResult,
-        collection,
-      }: {
-        persistResult: { txid: number }
-        collection: Collection
-      }) => {
-        // Start waiting for the txid
-        await collection.config.sync.awaitTxid(persistResult.txid)
-      },
+      const result = await response.json()
+
+      // Start waiting for the txid
+      await collection.config.sync.awaitTxid(result.txid)
     },
   })
 
@@ -83,34 +71,22 @@ export default function App() {
       { primaryKey: [`id`] }
     ),
     schema: updateConfigSchema,
-    mutationFn: {
-      persist: async ({ transaction }) => {
-        const response = await fetch(`http://localhost:3001/api/mutations`, {
-          method: `POST`,
-          headers: {
-            "Content-Type": `application/json`,
-          },
-          body: JSON.stringify(transaction.mutations),
-        })
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`)
-        }
+    mutationFn: async ({ transaction, collection }) => {
+      const response = await fetch(`http://localhost:3001/api/mutations`, {
+        method: `POST`,
+        headers: {
+          "Content-Type": `application/json`,
+        },
+        body: JSON.stringify(transaction.mutations),
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
 
-        const result = await response.json()
-        return {
-          txid: result.txid,
-        }
-      },
-      awaitSync: async ({
-        persistResult,
-        collection,
-      }: {
-        persistResult: { txid: number }
-        collection: Collection
-      }) => {
-        // Start waiting for the txid
-        await collection.config.sync.awaitTxid(persistResult.txid)
-      },
+      const result = await response.json()
+
+      // Start waiting for the txid
+      await collection.config.sync.awaitTxid(result.txid)
     },
   })
 

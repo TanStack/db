@@ -4,7 +4,6 @@ import { createElectricSync } from "../src/electric"
 import type { PendingMutation, Transaction } from "@tanstack/optimistic"
 import type { Message, Row } from "@electric-sql/client"
 import type { ElectricSync } from "../src/electric"
-import "fake-indexeddb/auto"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -49,10 +48,7 @@ describe(`Electric Integration`, () => {
     collection = new Collection({
       id: `test`,
       sync: electricSync,
-      mutationFn: {
-        persist: vi.fn().mockResolvedValue(undefined),
-        awaitSync: async () => {},
-      },
+      mutationFn: vi.fn().mockResolvedValue(undefined),
     })
   })
 
@@ -288,8 +284,8 @@ describe(`Electric Integration`, () => {
       await expect(promise).resolves.toBe(true)
     })
 
-    // Test the complete flow from persist to awaitSync
-    it(`should simulate the complete flow from persist to awaitSync`, async () => {
+    // Test the complete flow
+    it(`should simulate the complete flow`, async () => {
       // Create a fake backend store to simulate server-side storage
       const fakeBackend = {
         data: new Map<string, { txid: number; value: unknown }>(),
@@ -338,41 +334,29 @@ describe(`Electric Integration`, () => {
       }
 
       // Create a test mutation function that uses our fake backend
-      const testMutationFn = {
-        persist: vi.fn(
-          async ({ transaction }: { transaction: Transaction }) => {
-            // Persist to fake backend and get txid
-            const txid = await fakeBackend.persist(transaction.mutations)
+      const testMutationFn = vi.fn(
+        async ({ transaction }: { transaction: Transaction }) => {
+          // Persist to fake backend and get txid
+          const txid = await fakeBackend.persist(transaction.mutations)
 
-            // Return the txid (which will be passed to awaitSync)
-            return Promise.resolve({ txid })
+          if (!txid) {
+            throw new Error(`No txid found`)
           }
-        ),
 
-        awaitSync: vi.fn(
-          async ({ persistResult }: { persistResult: { txid: number } }) => {
-            // Get the txid from the transaction metadata
-            const txid = persistResult.txid
+          // Start waiting for the txid
+          const awaitPromise = electricSync.awaitTxid(txid, 1000)
 
-            if (!txid) {
-              throw new Error(`No txid found`)
-            }
+          // Simulate the server sending sync messages after a delay
+          setTimeout(() => {
+            fakeBackend.simulateSyncMessage(txid)
+          }, 50)
 
-            // Start waiting for the txid
-            const awaitPromise = electricSync.awaitTxid(txid, 1000)
+          // Wait for the txid to be seen
+          await awaitPromise
 
-            // Simulate the server sending sync messages after a delay
-            setTimeout(() => {
-              fakeBackend.simulateSyncMessage(txid)
-            }, 50)
-
-            // Wait for the txid to be seen
-            await awaitPromise
-
-            return Promise.resolve()
-          }
-        ),
-      }
+          return Promise.resolve()
+        }
+      )
 
       // Create a new collection with our test mutation function
       const testCollection = new Collection({
@@ -390,11 +374,8 @@ describe(`Electric Integration`, () => {
 
       transaction = testCollection.transactions.get(transaction.id)!
 
-      await transaction.isSynced?.promise
-
       // Verify the mutation function was called correctly
-      expect(testMutationFn.persist).toHaveBeenCalledTimes(1)
-      expect(testMutationFn.awaitSync).toHaveBeenCalledTimes(1)
+      expect(testMutationFn).toHaveBeenCalledTimes(1)
 
       // Check that the data was added to the collection
       // Note: In a real implementation, the collection would be updated by the sync process
@@ -436,10 +417,7 @@ describe(`Electric Integration`, () => {
     const testCollection = new Collection({
       id: `foo`,
       sync: createElectricSync({ url: `foo` }, { primaryKey: [`id`] }), // Add primary key
-      mutationFn: {
-        persist: async () => {},
-        awaitSync: async () => {},
-      },
+      mutationFn: async () => {},
     })
 
     // Create a transaction

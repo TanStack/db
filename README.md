@@ -204,41 +204,33 @@ const todosConfig = {
       primaryKey: ['id'],
     }
   ),
-  mutationFn: {
-    // Persist mutations to ElectricSQL
-    persist: async (mutations, transaction) => {
-      const response = await fetch(`http://localhost:3001/api/mutations`, {
-        method: `POST`,
-        headers: {
-          "Content-Type": `application/json`,
-        },
-        body: JSON.stringify(transaction.mutations),
-      })
-      if (!response.ok) {
-        // Throwing an error will rollback the optimistic state.
-        throw new Error(`HTTP error! Status: ${response.status}`)
-      }
+  // Persist mutations to ElectricSQL
+  mutationFn: async (mutations, transaction, config) => {
+    const response = await fetch(`http://localhost:3001/api/mutations`, {
+      method: `POST`,
+      headers: {
+        "Content-Type": `application/json`,
+      },
+      body: JSON.stringify(transaction.mutations),
+    })
+    if (!response.ok) {
+      // Throwing an error will rollback the optimistic state.
+      throw new Error(`HTTP error! Status: ${response.status}`)
+    }
 
-      const result = await response.json()
+    const result = await response.json()
 
-      return {
-        txid: result.txid,
-      }
-    },
-    // Wait for a transaction to be synced
-    awaitSync: async ({ config, persistResult: { txid: number } }) => {
-      try {
-        // Use the awaitTxid function from the ElectricSync configuration
-        // This waits for the specific transaction to be synced to the server
-        // The second parameter is an optional timeout in milliseconds
-        await config.sync.awaitTxid(persistResult.txid, 10000)
-        return true;
-      } catch (error) {
-        console.error('Error waiting for transaction to sync:', error);
-        // Throwing an error will rollback the optimistic state.
-        throw error;
-      }
-    },
+    try {
+      // Use the awaitTxid function from the ElectricSync configuration
+      // This waits for the specific transaction to be synced to the server
+      // The second parameter is an optional timeout in milliseconds
+      await config.sync.awaitTxid(persistResult.txid, 10000)
+      return true;
+    } catch (error) {
+      console.error('Error waiting for transaction to sync:', error);
+      // Throwing an error will rollback the optimistic state.
+      throw error;
+    }
   },
 };
 

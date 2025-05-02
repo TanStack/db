@@ -44,7 +44,14 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  *     id: `users-${params.userId}`,
  *     sync: { ... },
  *     // mutationFn is optional - provide it if you need mutation capabilities
- *     mutationFn: { ... }
+ *     mutationFn: async (params: {
+ *       transaction: Transaction
+ *       collection: Collection<Record<string, unknown>>
+ *     }) => {
+ *       // Implement your mutation (and syncing) logic here
+ *       // Return a promise that resolves when the mutation and syncing is complete.
+ *       // When this function returns, the optimistic mutations are dropped.
+ *     }
  *   });
  *
  *   return null;

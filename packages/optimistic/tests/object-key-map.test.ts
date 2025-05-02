@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { z } from "zod"
 import { Collection } from "../src/collection"
-import "fake-indexeddb/auto"
 
 describe(`Object-Key Association`, () => {
   let collection: Collection<{ name: string; age: number }>
@@ -18,10 +17,7 @@ describe(`Object-Key Association`, () => {
       sync: {
         sync: async () => {},
       },
-      mutationFn: {
-        persist: async () => {},
-        awaitSync: async () => {},
-      },
+      mutationFn: async () => {},
     })
   })
 

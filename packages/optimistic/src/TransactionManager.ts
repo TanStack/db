@@ -163,7 +163,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         updatedAt: new Date(),
         mutations,
         metadata: {},
-        isSynced: createDeferred(),
         isPersisted: createDeferred(),
       } as Transaction
     }
@@ -180,7 +179,7 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
   }
 
   /**
-   * Process a transaction through persist and awaitSync
+   * Process a transaction through the mutation function
    *
    * @param transactionId - The ID of the transaction to process
    * @private
@@ -189,73 +188,32 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     const transaction = this.getTransaction(transactionId)
     if (!transaction) return
 
-    // If no mutationFn is provided, throw an error
+    // Throw an error if no mutation function is provided
     if (!this.collection.config.mutationFn) {
       throw new Error(
-        `Cannot process transaction without a mutationFn in the collection config`
+        `No mutation function provided for transaction ${transactionId}`
       )
     }
 
+    // Set transaction state to persisting
     this.setTransactionState(transactionId, `persisting`)
 
-    this.collection.config.mutationFn
-      .persist({
-        transaction: this.createLiveTransactionReference(transactionId),
+    // Create a live reference to the transaction that always returns the latest state
+    const transactionRef = this.createLiveTransactionReference(transactionId)
+
+    // Call the mutation function
+    this.collection.config
+      .mutationFn({
+        transaction: transactionRef,
         collection: this.collection,
       })
-      .then((persistResult) => {
+      .then(() => {
         const tx = this.getTransaction(transactionId)
         if (!tx) return
 
+        // Mark as persisted
         tx.isPersisted?.resolve(true)
-        if (this.collection.config.mutationFn?.awaitSync) {
-          this.setTransactionState(transactionId, `persisted_awaiting_sync`)
-
-          // Create a promise that rejects after 2 seconds
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => {
-              reject(new Error(`Sync operation timed out after 2 seconds`))
-            }, this.collection.config.mutationFn?.awaitSyncTimeoutMs ?? 2000)
-          })
-
-          // Race the awaitSync promise against the timeout
-          Promise.race([
-            this.collection.config.mutationFn.awaitSync({
-              transaction: this.createLiveTransactionReference(transactionId),
-              collection: this.collection,
-              persistResult,
-            }),
-            timeoutPromise,
-          ])
-            .then(() => {
-              const updatedTx = this.getTransaction(transactionId)
-              if (!updatedTx) return
-
-              updatedTx.isSynced?.resolve(true)
-              this.setTransactionState(transactionId, `completed`)
-            })
-            // Catch awaitSync errors or timeout
-            .catch((error) => {
-              const updatedTx = this.getTransaction(transactionId)
-              if (!updatedTx) return
-
-              // Update transaction with error information
-              updatedTx.error = {
-                message: error.message || `Error during sync`,
-                error:
-                  error instanceof Error ? error : new Error(String(error)),
-              }
-
-              // Reject the isSynced promise
-              updatedTx.isSynced?.reject(error)
-
-              // Set transaction state to failed
-              this.setTransaction(updatedTx)
-              this.setTransactionState(transactionId, `failed`)
-            })
-        } else {
-          this.setTransactionState(transactionId, `completed`)
-        }
+        this.setTransactionState(transactionId, `completed`)
       })
       .catch((error) => {
         const tx = this.getTransaction(transactionId)
@@ -267,9 +225,8 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
           error: error instanceof Error ? error : new Error(String(error)),
         }
 
-        // Reject both promises
+        // Reject the promise
         tx.isPersisted?.reject(tx.error.error)
-        tx.isSynced?.reject(tx.error.error)
 
         // Set transaction state to failed
         this.setTransactionState(transactionId, `failed`)
