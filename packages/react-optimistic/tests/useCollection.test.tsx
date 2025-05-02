@@ -144,6 +144,7 @@ describe(`useCollection`, () => {
     expect(result.current.state.size).toBe(0)
     expect(result.current.data.length).toBe(0)
 
+    await new Promise((resolve) => setTimeout(() => resolve(null), 0))
     // Verify persist was called for each operation
     expect(persistMock).toHaveBeenCalledTimes(6) // 2 inserts + 2 updates + 2 deletes
   })

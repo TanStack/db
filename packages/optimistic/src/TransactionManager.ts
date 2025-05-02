@@ -1,7 +1,6 @@
 import { Store } from "@tanstack/store"
 import { SortedMap } from "./SortedMap"
 import { createDeferred } from "./deferred"
-import type { TransactionStore } from "./TransactionStore"
 import type { Collection } from "./collection"
 import type { PendingMutation, Transaction, TransactionState } from "./types"
 
@@ -13,41 +12,37 @@ const transactionManagerInstances = new Map<string, TransactionManager<any>>()
  * Get the global TransactionManager instance for a specific type
  * Creates a new instance if one doesn't exist for that type
  *
- * @param store - The transaction store for persistence
  * @param collection - The collection this manager is associated with
  * @returns The TransactionManager instance
  */
 export function getTransactionManager<
   T extends object = Record<string, unknown>,
->(store?: TransactionStore, collection?: Collection<T>): TransactionManager<T> {
-  if (!store || !collection) {
+>(collection?: Collection<T>): TransactionManager<T> {
+  if (!collection) {
     throw new Error(
-      `TransactionManager not initialized. You must provide store and collection parameters on first call.`
+      `TransactionManager not initialized. You must provide its collection on the first call.`
     )
   }
 
   if (!transactionManagerInstances.has(collection.id)) {
     transactionManagerInstances.set(
       collection.id,
-      new TransactionManager(store, collection)
+      new TransactionManager(collection)
     )
   }
   return transactionManagerInstances.get(collection.id) as TransactionManager<T>
 }
 
 export class TransactionManager<T extends object = Record<string, unknown>> {
-  private store: TransactionStore
   private collection: Collection<T>
   public transactions: Store<SortedMap<string, Transaction>>
 
   /**
    * Creates a new TransactionManager instance
    *
-   * @param store - The transaction store for persistence
    * @param collection - The collection this manager is associated with
    */
-  constructor(store: TransactionStore, collection: Collection<T>) {
-    this.store = store
+  constructor(collection: Collection<T>) {
     this.collection = collection
     // Initialize store with SortedMap that sorts by createdAt
     this.transactions = new Store(
@@ -55,16 +50,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
       )
     )
-
-    // Load transactions from store on init
-    this.store.getTransactions().then((transactions) => {
-      transactions.forEach((tx) => {
-        this.transactions.setState((sortedMap) => {
-          sortedMap.set(tx.id, tx as Transaction)
-          return sortedMap
-        })
-      })
-    })
   }
 
   /**
@@ -184,9 +169,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     }
 
     this.setTransaction(transaction)
-
-    // Persist async
-    this.store.putTransaction(transaction)
 
     // Start processing in the next event loop tick.
     setTimeout(() => {
@@ -315,15 +297,6 @@ export class TransactionManager<T extends object = Record<string, unknown>> {
     }
 
     this.setTransaction(updatedTransaction)
-
-    // Check if the transaction is in a terminal state
-    if (newState === `completed` || newState === `failed`) {
-      // Delete from IndexedDB if in terminal state
-      this.store.deleteTransaction(id)
-    } else {
-      // Persist async only if not in terminal state
-      this.store.putTransaction(updatedTransaction)
-    }
   }
 
   /**

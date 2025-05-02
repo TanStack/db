@@ -1,18 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { TransactionManager } from "../src/TransactionManager"
-import { TransactionStore } from "../src/TransactionStore"
 import "fake-indexeddb/auto"
 import { Collection } from "../src/collection"
 import type { PendingMutation } from "../src/types"
 
 describe(`TransactionManager`, () => {
-  let store: TransactionStore
   let collection: Collection
   let manager: TransactionManager
 
   beforeEach(() => {
     // Reset indexedDB for each test using the fake-indexeddb implementation
-    store = new TransactionStore()
     collection = new Collection({
       id: `foo`,
       sync: {
@@ -24,8 +21,7 @@ describe(`TransactionManager`, () => {
         },
       },
     })
-    manager = new TransactionManager(store, collection)
-    store.clearAll()
+    manager = new TransactionManager(collection)
   })
 
   const createMockMutation = (id: string): PendingMutation => ({
@@ -301,7 +297,7 @@ describe(`TransactionManager`, () => {
           awaitSync: async () => {},
         },
       })
-      const errorManager = new TransactionManager(store, errorCollection)
+      const errorManager = new TransactionManager(errorCollection)
 
       // Apply a transaction
       const mutations = [createMockMutation(`error-test-5`)]
@@ -349,10 +345,7 @@ describe(`TransactionManager`, () => {
           },
         },
       })
-      const syncErrorManager = new TransactionManager(
-        store,
-        syncErrorCollection
-      )
+      const syncErrorManager = new TransactionManager(syncErrorCollection)
 
       // Apply a transaction
       const mutations = [createMockMutation(`error-test-4`)]
@@ -391,7 +384,7 @@ describe(`TransactionManager`, () => {
           },
         },
       })
-      const timeoutManager = new TransactionManager(store, timeoutCollection)
+      const timeoutManager = new TransactionManager(timeoutCollection)
 
       // Apply a transaction
       const mutations = [createMockMutation(`timeout-test`)]
@@ -425,7 +418,7 @@ describe(`TransactionManager`, () => {
           awaitSync: async () => {},
         },
       })
-      const nonErrorManager = new TransactionManager(store, nonErrorCollection)
+      const nonErrorManager = new TransactionManager(nonErrorCollection)
 
       // Apply a transaction
       const mutations = [createMockMutation(`non-error-test`)]
@@ -463,7 +456,6 @@ describe(`TransactionManager`, () => {
     //     },
     //   })
     //   const nonErrorSyncManager = new TransactionManager(
-    //     store,
     //     nonErrorSyncCollection
     //   )
     //
@@ -488,47 +480,4 @@ describe(`TransactionManager`, () => {
     //   expect(transaction.error?.error).toBeInstanceOf(Error)
     // })
   })
-
-  // describe(`Terminal State Handling`, () => {
-  //   // Ignoring htis as we're removing the store soon anyways.
-  //   it(
-  //     `should delete transactions from IndexedDB when they reach a terminal state`,
-  //     async () => {
-  //       // Clear all existing transactions first
-  //       await store.clearAll()
-  //
-  //       // Create a transaction
-  //       const tx = manager.applyTransaction([createMockMutation(`test-object`)])
-  //
-  //       // Verify transaction exists in IndexedDB
-  //       let transactions = await store.getTransactions()
-  //       expect(transactions.length).toBe(1)
-  //       expect(transactions[0]?.id).toBe(tx.id)
-  //
-  //       // Update to 'completed' state (terminal)
-  //       manager.setTransactionState(tx.id, `completed`)
-  //
-  //       // Verify transaction is deleted from IndexedDB
-  //       transactions = await store.getTransactions()
-  //       expect(transactions.length).toBe(0)
-  //
-  //       // Create another transaction
-  //       const tx2 = manager.applyTransaction([
-  //         createMockMutation(`test-object-2`),
-  //       ])
-  //
-  //       // Verify transaction exists in IndexedDB
-  //       transactions = await store.getTransactions()
-  //       expect(transactions.length).toBe(1)
-  //       expect(transactions[0]?.id).toBe(tx2.id)
-  //
-  //       // Update to 'failed' state (terminal)
-  //       manager.setTransactionState(tx2.id, `failed`)
-  //
-  //       // Verify transaction is deleted from IndexedDB
-  //       transactions = await store.getTransactions()
-  //       expect(transactions.length).toBe(0)
-  //     }
-  //   )
-  // })
 })

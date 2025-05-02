@@ -1,7 +1,6 @@
 import { Derived, Store, batch } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { getTransactionManager } from "./TransactionManager"
-import { TransactionStore } from "./TransactionStore"
 import type {
   ChangeMessage,
   CollectionConfig,
@@ -14,7 +13,6 @@ import type {
 } from "./types"
 
 // Store collections in memory using Tanstack store
-
 export const collectionsStore = new Store(new Map<string, Collection<any>>())
 
 // Map to track loading collections
@@ -150,7 +148,6 @@ export class SchemaValidationError extends Error {
 
 export class Collection<T extends object = Record<string, unknown>> {
   public transactionManager!: ReturnType<typeof getTransactionManager<T>>
-  private transactionStore: TransactionStore
 
   public optimisticOperations: Derived<Array<OptimisticChangeMessage<T>>>
   public derivedState: Derived<Map<string, T>>
@@ -190,11 +187,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactionStore = new TransactionStore()
-    this.transactionManager = getTransactionManager<T>(
-      this.transactionStore,
-      this
-    )
+    this.transactionManager = getTransactionManager<T>(this)
 
     // Copies of live mutations are stored here and removed once the transaction completes.
     this.optimisticOperations = new Derived({
