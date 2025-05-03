@@ -304,7 +304,7 @@ describe(`TransactionManager`, () => {
       expect(transaction.error?.message).toBe(`Persist error`)
     })
 
-    it.only(`should handle non-Error objects thrown during persist`, async () => {
+    it(`should handle non-Error objects thrown during persist`, async () => {
       // Create a collection with a persist function that throws a non-Error object
       const nonErrorCollection = new Collection({
         id: `non-error-object`,
