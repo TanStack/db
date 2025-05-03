@@ -76,6 +76,7 @@ export interface SyncConfig<T extends object = Record<string, unknown>> {
 export interface ChangeMessage<T extends object = Record<string, unknown>> {
   key: string
   value: T
+  previousValue?: T
   type: OperationType
   metadata?: Record<string, unknown>
 }
@@ -125,3 +126,7 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
   mutationFn?: MutationFn<T>
   schema?: StandardSchema<T>
 }
+
+export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
+  ChangeMessage<T>
+>

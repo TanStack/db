@@ -159,10 +159,11 @@ export class Collection<T extends object = Record<string, unknown>> {
   public optimisticOperations: Derived<Array<OptimisticChangeMessage<T>>>
   public derivedState: Derived<Map<string, T>>
   public derivedArray: Derived<Array<T>>
-
+  public derivedChanges: Derived<Array<ChangeMessage<T>>>
   private syncedData = new Store<Map<string, T>>(new Map())
   public syncedMetadata = new Store(new Map<string, unknown>())
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
+  private syncedKeys = new Set<string>()
   public config: CollectionConfig<T>
   private hasReceivedFirstCommit = false
 
@@ -273,6 +274,50 @@ export class Collection<T extends object = Record<string, unknown>> {
     })
     this.derivedArray.mount()
 
+    this.derivedChanges = new Derived({
+      fn: ({
+        currDepVals: [derivedState, optimisticOperations],
+        prevDepVals,
+      }) => {
+        const prevDerivedState = prevDepVals?.[0] ?? new Map<string, T>()
+        const changedKeys = new Set(this.syncedKeys)
+        optimisticOperations
+          .flat()
+          .filter((op) => op.isActive)
+          .forEach((op) => changedKeys.add(op.key))
+
+        if (changedKeys.size === 0) {
+          return []
+        }
+
+        const changes: Array<ChangeMessage<T>> = []
+        for (const key of changedKeys) {
+          if (prevDerivedState.has(key) && !derivedState.has(key)) {
+            changes.push({
+              type: `delete`,
+              key,
+              value: prevDerivedState.get(key)!,
+            })
+          } else if (!prevDerivedState.has(key) && derivedState.has(key)) {
+            changes.push({ type: `insert`, key, value: derivedState.get(key)! })
+          } else if (prevDerivedState.has(key) && derivedState.has(key)) {
+            changes.push({
+              type: `update`,
+              key,
+              value: derivedState.get(key)!,
+              previousValue: prevDerivedState.get(key),
+            })
+          }
+        }
+
+        this.syncedKeys.clear()
+
+        return changes
+      },
+      deps: [this.derivedState, this.optimisticOperations],
+    })
+    this.derivedChanges.mount()
+
     this.config = config
 
     this.derivedState.mount()
@@ -337,6 +382,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
           keys.add(operation.key)
+          this.syncedKeys.add(operation.key)
           this.syncedMetadata.setState((prevData) => {
             switch (operation.type) {
               case `insert`:
@@ -822,5 +868,36 @@ export class Collection<T extends object = Record<string, unknown>> {
    */
   get transactions() {
     return this.transactionManager.transactions.state
+  }
+
+  /**
+   * Returns the current state of the collection as an array of changes
+   * @returns An array of changes
+   */
+  public currentStateAsChanges(): Array<ChangeMessage<T>> {
+    return [...this.state.entries()].map(([key, value]) => ({
+      type: `insert`,
+      key,
+      value,
+    }))
+  }
+
+  /**
+   * Subscribe to changes in the collection
+   * @param callback - A function that will be called with the changes in the collection
+   * @returns A function that can be called to unsubscribe from the changes
+   */
+  public subscribeChanges(
+    callback: (changes: Array<ChangeMessage<T>>) => void
+  ): () => void {
+    // First send the current state as changes
+    callback(this.currentStateAsChanges())
+
+    // Then subscribe to changes, this returns an unsubscribe function
+    return this.derivedChanges.subscribe((changes) => {
+      if (changes.currentVal.length > 0) {
+        callback(changes.currentVal)
+      }
+    })
   }
 }
