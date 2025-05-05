@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { D2, MessageType, MultiSet, output, v } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/compiler.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/schema.js"
 
 // Define types for our test records
@@ -91,7 +91,9 @@ describe(`Query Wildcard Select`, () => {
   // Helper function to run a query with only users data
   const runUserQuery = (query: Query) => {
     // Compile the query
-    const pipeline = compileQuery<any>(query, { users: usersInput as any })
+    const pipeline = compileQueryPipeline<any>(query, {
+      users: usersInput as any,
+    })
 
     // Create an output to collect the results
     const outputOp = output<any>((message) => {
@@ -120,7 +122,7 @@ describe(`Query Wildcard Select`, () => {
   // Helper function to run a query with both users and orders data
   const runJoinQuery = (query: Query) => {
     // Compile the query
-    const pipeline = compileQuery<any>(query, {
+    const pipeline = compileQueryPipeline<any>(query, {
       users: usersInput as any,
       orders: ordersInput as any,
     })

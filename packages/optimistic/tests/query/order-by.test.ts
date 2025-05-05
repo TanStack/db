@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/index.js"
 
 type User = {
@@ -43,7 +43,7 @@ describe(`Query`, () => {
           name: string
           age: number
         }>()
-        compileQuery(query, { users: input })
+        compileQueryPipeline(query, { users: input })
       }).toThrow(
         `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
       )
@@ -64,7 +64,7 @@ describe(`Query`, () => {
           name: string
           age: number
         }>()
-        compileQuery(query, { users: input })
+        compileQueryPipeline(query, { users: input })
       }).toThrow(
         `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
       )
@@ -85,7 +85,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -140,7 +140,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -194,7 +194,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -245,7 +245,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -316,7 +316,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -382,7 +382,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -438,7 +438,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -493,7 +493,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -545,7 +545,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -616,7 +616,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -680,7 +680,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -735,7 +735,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -789,7 +789,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -840,7 +840,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -917,7 +917,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -989,7 +989,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1045,7 +1045,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1100,7 +1100,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1152,7 +1152,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1229,7 +1229,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1299,7 +1299,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1354,7 +1354,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1408,7 +1408,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1460,7 +1460,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1530,7 +1530,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1593,7 +1593,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1649,7 +1649,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1704,7 +1704,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {
@@ -1762,7 +1762,7 @@ describe(`Query`, () => {
         }>()
         let latestMessage: any = null
 
-        const pipeline = compileQuery(query, { input })
+        const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
             if (message.type === MessageType.DATA) {

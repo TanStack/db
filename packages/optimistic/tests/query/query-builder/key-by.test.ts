@@ -30,7 +30,7 @@ describe(`QueryBuilder.keyBy`, () => {
       .select(`@id`, `@name`)
       .keyBy(`@id`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.keyBy).toBe(`@id`)
   })
 
@@ -40,7 +40,7 @@ describe(`QueryBuilder.keyBy`, () => {
       .select(`@id`, `@name`, `@department_id`)
       .keyBy([`@id`, `@department_id`])
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.keyBy).toEqual([`@id`, `@department_id`])
   })
 
@@ -51,7 +51,7 @@ describe(`QueryBuilder.keyBy`, () => {
       .keyBy(`@id`)
       .keyBy(`@department_id`) // This should override
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.keyBy).toBe(`@department_id`)
   })
 
@@ -67,7 +67,7 @@ describe(`QueryBuilder.keyBy`, () => {
       .select(`@e.id`, `@e.name`, `@d.name`)
       .keyBy(`@d.id`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.keyBy).toBe(`@d.id`)
   })
 
@@ -87,7 +87,7 @@ describe(`QueryBuilder.keyBy`, () => {
       .offset(5)
       .keyBy(`@e.id`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     // Check keyBy
     expect(builtQuery.keyBy).toBe(`@e.id`)

@@ -7,7 +7,7 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Message } from "@electric-sql/d2ts"
 import type { Query } from "../../src/query/index.js"
 
@@ -78,7 +78,7 @@ describe(`Query Function Integration`, () => {
   function runQuery(query: Query): Array<any> {
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(

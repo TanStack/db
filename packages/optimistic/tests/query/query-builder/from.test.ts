@@ -24,7 +24,7 @@ interface TestSchema extends Schema {
 describe(`QueryBuilder.from`, () => {
   it(`sets the from clause correctly`, () => {
     const query = queryBuilder<TestSchema>().from(`employees`)
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.from).toBe(`employees`)
     expect(builtQuery.as).toBeUndefined()
@@ -32,7 +32,7 @@ describe(`QueryBuilder.from`, () => {
 
   it(`sets the from clause with an alias`, () => {
     const query = queryBuilder<TestSchema>().from(`employees`, `e`)
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.from).toBe(`employees`)
     expect(builtQuery.as).toBe(`e`)
@@ -44,7 +44,7 @@ describe(`QueryBuilder.from`, () => {
       .where(`@id`, `=`, 1)
       .select(`@id`, `@name`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.from).toBe(`employees`)
     expect(builtQuery.where).toBeDefined()

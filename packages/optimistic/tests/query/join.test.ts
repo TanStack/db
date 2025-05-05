@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { RootStreamBuilder } from "@electric-sql/d2ts"
-import type { Query } from "../../src/query/index.js"
+import type { Query } from "../../src/query/schema.js"
 
 describe(`Query - JOIN Clauses`, () => {
   // Sample data for users
@@ -170,7 +170,7 @@ describe(`Query - JOIN Clauses`, () => {
     }
 
     // Compile the query with the unified inputs map
-    const pipeline = compileQuery(query, inputs)
+    const pipeline = compileQueryPipeline(query, inputs)
 
     // Create a sink to collect the results
     const results: Array<any> = []

@@ -14,7 +14,7 @@ import type { IStreamBuilder } from "@electric-sql/d2ts"
  * @param inputs Mapping of table names to input streams
  * @returns A stream builder representing the compiled query
  */
-export function compileQuery<T extends IStreamBuilder<unknown>>(
+export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   query: Query,
   inputs: Record<string, IStreamBuilder<Record<string, unknown>>>
 ): T {
@@ -45,7 +45,10 @@ export function compileQuery<T extends IStreamBuilder<unknown>>(
 
       // Compile the WITH query using the current set of inputs
       // (which includes previously compiled WITH queries)
-      const compiledWithQuery = compileQuery(withQueryWithoutWith, allInputs)
+      const compiledWithQuery = compileQueryPipeline(
+        withQueryWithoutWith,
+        allInputs
+      )
 
       // Add the compiled query to the inputs map using its alias
       allInputs[withQuery.as] = compiledWithQuery as IStreamBuilder<

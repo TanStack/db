@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { D2, MessageType, MultiSet, output, v } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
-import type { Query } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
+import type { Query } from "../../src/query/schema.js"
 
 // Define a type for our test records
 type OrderRecord = {
@@ -85,7 +85,9 @@ describe(`D2QL GROUP BY`, () => {
   // Helper function to run a query and get results
   const runQuery = (query: Query) => {
     // Compile the query
-    const pipeline = compileQuery<any>(query, { orders: ordersInput as any })
+    const pipeline = compileQueryPipeline<any>(query, {
+      orders: ordersInput as any,
+    })
 
     // Create an output to collect the results
     const outputOp = output<any>((message) => {

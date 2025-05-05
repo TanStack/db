@@ -29,7 +29,7 @@ describe(`QueryBuilder.where`, () => {
       .from(`employees`)
       .where(`@id`, `=`, 1)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([`@id`, `=`, 1])
   })
 
@@ -52,7 +52,7 @@ describe(`QueryBuilder.where`, () => {
         .from(`employees`)
         .where(`@id`, op as any, 1)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.where).toBeDefined()
       // Type assertion since we know where is defined based on our query
       const where = builtQuery.where!
@@ -65,7 +65,7 @@ describe(`QueryBuilder.where`, () => {
       .from(`employees`, `e`)
       .where(`@e.department_id`, `=`, `@department.id`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([
       `@e.department_id`,
       `=`,
@@ -78,7 +78,7 @@ describe(`QueryBuilder.where`, () => {
       .from(`employees`)
       .where(10000, `<`, `@salary`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([10000, `<`, `@salary`])
   })
 
@@ -87,7 +87,7 @@ describe(`QueryBuilder.where`, () => {
       .from(`employees`)
       .where(`@active`, `=`, true)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([`@active`, `=`, true])
   })
 
@@ -97,7 +97,7 @@ describe(`QueryBuilder.where`, () => {
       .where(`@id`, `>`, 10)
       .where(`@salary`, `>=`, 50000)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([
       [`@id`, `>`, 10],
       `and`,
@@ -112,7 +112,7 @@ describe(`QueryBuilder.where`, () => {
       .where(`@salary`, `>=`, 50000)
       .where(`@active`, `=`, true)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([
       [[`@id`, `>`, 10], `and`, [`@salary`, `>=`, 50000]],
       `and`,
@@ -125,7 +125,7 @@ describe(`QueryBuilder.where`, () => {
 
     const query = queryBuilder<TestSchema>().from(`employees`).where(condition)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual(condition)
   })
 
@@ -135,7 +135,7 @@ describe(`QueryBuilder.where`, () => {
       .where(`@salary`, `>`, 50000)
       .select(`@id`, `@name`, `@salary`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([`@salary`, `>`, 50000])
     expect(builtQuery.select).toEqual([`@id`, `@name`, `@salary`])
   })

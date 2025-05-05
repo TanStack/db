@@ -30,7 +30,7 @@ describe(`QueryBuilder.having`, () => {
       .from(`employees`)
       .having(`@salary`, `>`, 50000)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.having).toEqual([`@salary`, `>`, 50000])
   })
 
@@ -53,7 +53,7 @@ describe(`QueryBuilder.having`, () => {
         .from(`employees`)
         .having(`@salary`, op as any, 50000)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.having).toBeDefined()
       const having = builtQuery.having!
       expect(having[1]).toBe(op)
@@ -71,7 +71,7 @@ describe(`QueryBuilder.having`, () => {
       })
       .having(`@e.salary`, `>`, `@d.budget`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.having).toEqual([`@e.salary`, `>`, `@d.budget`])
   })
 
@@ -80,7 +80,7 @@ describe(`QueryBuilder.having`, () => {
       .from(`employees`)
       .having(50000, `<`, `@salary`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.having).toEqual([50000, `<`, `@salary`])
   })
 
@@ -90,7 +90,7 @@ describe(`QueryBuilder.having`, () => {
       .having(`@salary`, `>`, 50000)
       .having(`@active`, `=`, true)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.having).toEqual([
       [`@salary`, `>`, 50000],
       `and`,
@@ -103,7 +103,7 @@ describe(`QueryBuilder.having`, () => {
 
     const query = queryBuilder<TestSchema>().from(`employees`).having(condition)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.having).toEqual(condition)
   })
 
@@ -120,7 +120,7 @@ describe(`QueryBuilder.having`, () => {
       .groupBy(`@d.name`)
       .having({ SUM: `@e.salary` } as any, `>`, 100000)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@d.name`)
     expect(builtQuery.having).toEqual([{ SUM: `@e.salary` }, `>`, 100000])
   })
@@ -141,7 +141,7 @@ describe(`QueryBuilder.having`, () => {
       .orderBy(`@d.name`)
       .limit(10)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toBeDefined()
     expect(builtQuery.groupBy).toBeDefined()
     expect(builtQuery.having).toBeDefined()

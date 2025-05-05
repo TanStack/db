@@ -28,7 +28,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
     it(`sets a simple string order`, () => {
       const query = queryBuilder<TestSchema>().from(`employees`).orderBy(`@id`)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.orderBy).toBe(`@id`)
     })
 
@@ -37,7 +37,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .from(`employees`)
         .orderBy({ "@id": `desc` })
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.orderBy).toEqual({ "@id": `desc` })
     })
 
@@ -46,7 +46,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .from(`employees`)
         .orderBy([`@id`, { "@name": `asc` }])
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.orderBy).toEqual([`@id`, { "@name": `asc` }])
     })
 
@@ -56,7 +56,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .orderBy(`@id`)
         .orderBy(`@name`) // This should override
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.orderBy).toBe(`@name`)
     })
   })
@@ -65,7 +65,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
     it(`sets a limit on the query`, () => {
       const query = queryBuilder<TestSchema>().from(`employees`).limit(10)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.limit).toBe(10)
     })
 
@@ -75,7 +75,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .limit(10)
         .limit(20) // This should override
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.limit).toBe(20)
     })
   })
@@ -84,7 +84,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
     it(`sets an offset on the query`, () => {
       const query = queryBuilder<TestSchema>().from(`employees`).offset(5)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.offset).toBe(5)
     })
 
@@ -94,7 +94,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .offset(5)
         .offset(15) // This should override
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.offset).toBe(15)
     })
   })
@@ -115,7 +115,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         .limit(10)
         .offset(5)
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.orderBy).toEqual([`@e.salary`, { "@d.name": `asc` }])
       expect(builtQuery.limit).toBe(10)
       expect(builtQuery.offset).toBe(5)

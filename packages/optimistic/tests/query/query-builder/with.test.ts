@@ -48,7 +48,7 @@ describe(`QueryBuilder.with`, () => {
       .from(`emp_cte`)
       .select(`@id`, `@name`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.with).toBeDefined()
     expect(builtQuery.with).toHaveLength(1)
@@ -74,7 +74,7 @@ describe(`QueryBuilder.with`, () => {
       })
       .select(`@emp_cte.id`, `@emp_cte.name`, `@dept_cte.name`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.with).toBeDefined()
     expect(builtQuery.with).toHaveLength(2)
@@ -105,7 +105,7 @@ describe(`QueryBuilder.with`, () => {
       .where(`@id`, `>`, 100)
       .select(`@id`, { employee_name: `@name` })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     expect(builtQuery.with).toBeDefined()
     expect(builtQuery.with?.[0]!.where).toBeDefined()

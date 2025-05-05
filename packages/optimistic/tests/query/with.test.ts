@@ -7,9 +7,9 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/compiler.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Message } from "@electric-sql/d2ts"
-import type { Query } from "../../src/query/index.js"
+import type { Query } from "../../src/query/schema.js"
 
 // Sample user type for tests
 type User = {
@@ -68,7 +68,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { users: input })
+      const pipeline = compileQueryPipeline(query, { users: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(
@@ -133,7 +133,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { users: input })
+      const pipeline = compileQueryPipeline(query, { users: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(
@@ -186,7 +186,7 @@ describe(`Query`, () => {
 
       // Should throw an error because the CTE is missing the 'as' property
       expect(() => {
-        compileQuery(invalidQuery as any, { users: input })
+        compileQueryPipeline(invalidQuery as any, { users: input })
       }).toThrow(`WITH query must have an "as" property`)
     })
 
@@ -210,7 +210,7 @@ describe(`Query`, () => {
 
       // Should throw an error because the CTE has a keyBy property
       expect(() => {
-        compileQuery(invalidQuery as any, { users: input })
+        compileQueryPipeline(invalidQuery as any, { users: input })
       }).toThrow(`WITH query cannot have a "keyBy" property`)
     })
 
@@ -240,7 +240,7 @@ describe(`Query`, () => {
 
       // Should throw an error because of duplicate CTE names
       expect(() => {
-        compileQuery(invalidQuery as any, { users: input })
+        compileQueryPipeline(invalidQuery as any, { users: input })
       }).toThrow(`CTE with name "filtered_users" already exists`)
     })
 
@@ -264,7 +264,7 @@ describe(`Query`, () => {
 
       // Should throw an error because the referenced CTE doesn't exist
       expect(() => {
-        compileQuery(invalidQuery as any, { users: input })
+        compileQueryPipeline(invalidQuery as any, { users: input })
       }).toThrow(`Input for table "non_existent_cte" not found in inputs map`)
     })
   })

@@ -390,16 +390,6 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   }
 
   /**
-   * Build and return the final query object.
-   *
-   * @returns The built query
-   */
-  buildQuery(): Query<TContext> {
-    // Create a copy of the query to avoid exposing the internal state directly
-    return { ...this.query } as Query<TContext>
-  }
-
-  /**
    * Add a join clause to the query using a CollectionRef.
    */
   join<TCollectionRef extends CollectionRef>(joinClause: {
@@ -828,7 +818,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     )
 
     // Get the query from the builder
-    const cteQuery = cteQueryBuilder.buildQuery()
+    const cteQuery = cteQueryBuilder._query
 
     // Add an 'as' property to the CTE
     const withQuery: WithQuery<any> = {
@@ -849,14 +839,18 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       schema: TContext[`schema`]
     }>
   }
+
+  get _query(): Query<TContext> {
+    return this.query as Query<TContext>
+  }
 }
 
-type InitialQueryBuilder<TContext extends Context<Schema>> = Pick<
+export type InitialQueryBuilder<TContext extends Context<Schema>> = Pick<
   BaseQueryBuilder<TContext>,
   `from` | `with`
 >
 
-type QueryBuilder<TContext extends Context<Schema>> = Omit<
+export type QueryBuilder<TContext extends Context<Schema>> = Omit<
   BaseQueryBuilder<TContext>,
   `from`
 >
@@ -873,6 +867,13 @@ export function queryBuilder<TBaseSchema extends Schema = {}>() {
     schema: {}
   }>
 }
+
+export type ResultsFromContext<TContext extends Context<Schema>> =
+  TContext[`result`] extends object
+    ? TContext[`result`]
+    : TContext[`result`] extends undefined
+      ? TContext[`schema`]
+      : object
 
 export type ResultFromQueryBuilder<TQueryBuilder> = Flatten<
   TQueryBuilder extends QueryBuilder<infer C>

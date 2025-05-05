@@ -7,9 +7,9 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/compiler.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Message } from "@electric-sql/d2ts"
-import type { Query } from "../../src/query/index.js"
+import type { Query } from "../../src/query/schema.js"
 
 // Sample user type for tests
 type User = {
@@ -53,7 +53,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { [query.from]: input })
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(
@@ -100,7 +100,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { [query.from]: input })
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(
@@ -150,7 +150,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { [query.from]: input })
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(
@@ -197,7 +197,7 @@ describe(`Query`, () => {
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
       const input = graph.newInput<User>()
-      const pipeline = compileQuery(query, { [query.from]: input })
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
       pipeline.pipe(

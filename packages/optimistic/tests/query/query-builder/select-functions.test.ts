@@ -35,7 +35,7 @@ describe(`QueryBuilder.select with function calls`, () => {
         max_salary: { MAX: `@salary` },
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toMatchObject([
       `@id`,
       {
@@ -58,7 +58,7 @@ describe(`QueryBuilder.select with function calls`, () => {
         concat_text: { CONCAT: [`Employee: `, `@name`] },
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toMatchObject([
       `@id`,
       {
@@ -78,7 +78,7 @@ describe(`QueryBuilder.select with function calls`, () => {
         json_value: { JSON_EXTRACT: [`@name`, `$.property`] },
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(2)
     expect(builtQuery.select[1]).toHaveProperty(`json_value`)
   })
@@ -121,7 +121,7 @@ describe(`QueryBuilder.select with function calls`, () => {
         upper_name: { UPPER: `@e.name` },
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(4)
     expect(builtQuery.select[0]).toBe(`@e.id`)
     expect(builtQuery.select[1]).toBe(`@e.name`)

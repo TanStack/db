@@ -34,7 +34,7 @@ describe(`QueryBuilder.join`, () => {
         on: [`@e.department_id`, `=`, `@d.id`],
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.join).toBeDefined()
     const join = builtQuery.join!
     expect(join).toHaveLength(1)
@@ -59,7 +59,7 @@ describe(`QueryBuilder.join`, () => {
           on: [`@e.department_id`, `=`, `@d.id`],
         })
 
-      const builtQuery = query.buildQuery()
+      const builtQuery = query._query
       expect(builtQuery.join).toBeDefined()
       expect(builtQuery.join![0]!.type).toBe(type)
     }
@@ -81,7 +81,7 @@ describe(`QueryBuilder.join`, () => {
         on: [`@e.department_id`, `=`, `@d2.id`],
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.join).toBeDefined()
     const join = builtQuery.join!
     expect(join).toHaveLength(2)
@@ -102,7 +102,7 @@ describe(`QueryBuilder.join`, () => {
         where: [`@d.budget`, `>`, 1000000],
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join![0]!.where).toEqual([`@d.budget`, `>`, 1000000])
   })
@@ -118,7 +118,7 @@ describe(`QueryBuilder.join`, () => {
       })
       .select(`@e.id`, `@e.name`, `@d.name`, `@d.budget`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toEqual([
       `@e.id`,
       `@e.name`,
@@ -138,7 +138,7 @@ describe(`QueryBuilder.join`, () => {
       })
       .where(`@d.budget`, `>`, 1000000)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.where).toEqual([`@d.budget`, `>`, 1000000])
   })
 
@@ -157,7 +157,7 @@ describe(`QueryBuilder.join`, () => {
         dept_location: `@d.location`,
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.from).toBe(`employees`)
     expect(builtQuery.as).toBe(`e`)
     expect(builtQuery.join).toBeDefined()

@@ -7,8 +7,8 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
-import type { Condition, Query } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
+import type { Condition, Query } from "../../src/query/schema.js"
 import type { Message } from "@electric-sql/d2ts"
 
 describe(`Query - LIKE Operator`, () => {
@@ -72,7 +72,7 @@ describe(`Query - LIKE Operator`, () => {
   function runQuery(query: Query): Array<any> {
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -149,7 +149,7 @@ describe(`Query - LIKE Operator`, () => {
     // Create a separate graph for this test with our specific SKU test items
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(

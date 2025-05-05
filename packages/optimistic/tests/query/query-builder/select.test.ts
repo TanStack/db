@@ -28,7 +28,7 @@ describe(`QueryBuilder.select`, () => {
       .from(`employees`)
       .select(`@id`, `@name`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toEqual([`@id`, `@name`])
   })
 
@@ -37,7 +37,7 @@ describe(`QueryBuilder.select`, () => {
       .from(`employees`)
       .select(`@id`, { employee_name: `@name` })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(2)
     expect(builtQuery.select[0]).toBe(`@id`)
     expect(builtQuery.select[1]).toHaveProperty(`employee_name`, `@name`)
@@ -50,7 +50,7 @@ describe(`QueryBuilder.select`, () => {
         upper_name: { UPPER: `@name` },
       })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(2)
     expect(builtQuery.select[1]).toHaveProperty(`upper_name`)
   })
@@ -61,7 +61,7 @@ describe(`QueryBuilder.select`, () => {
       .select(`@id`, `@name`)
       .select(`@id`, `@salary`) // This should override the previous select
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toEqual([`@id`, `@salary`])
   })
 
@@ -70,7 +70,7 @@ describe(`QueryBuilder.select`, () => {
       .from(`employees`, `e`)
       .select(`@e.id`, `@e.name`)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toEqual([`@e.id`, `@e.name`])
   })
 
@@ -82,7 +82,7 @@ describe(`QueryBuilder.select`, () => {
 
     // We can't directly assert on types in a test, but we can check
     // that the query is constructed correctly, which implies the types work
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.select).toEqual([`@id`, `@name`])
   })
 })

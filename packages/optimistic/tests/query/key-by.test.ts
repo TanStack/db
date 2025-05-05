@@ -7,8 +7,8 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
-import type { Query } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
+import type { Query } from "../../src/query/schema.js"
 import type { Keyed, Message } from "@electric-sql/d2ts"
 
 // Sample user type for tests
@@ -91,7 +91,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -145,7 +145,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -189,7 +189,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -238,7 +238,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -288,7 +288,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -340,7 +340,7 @@ describe(`Query keyBy`, () => {
 
     // This should throw an error
     expect(() => {
-      const pipeline = compileQuery(query, { [query.from]: input })
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       pipeline.pipe(output(() => {}))
 
@@ -366,7 +366,7 @@ describe(`Query keyBy`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<User>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(

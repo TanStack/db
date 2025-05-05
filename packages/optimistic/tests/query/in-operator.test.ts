@@ -7,9 +7,9 @@ import {
   output,
   v,
 } from "@electric-sql/d2ts"
-import { compileQuery } from "../../src/query/index.js"
+import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Message } from "@electric-sql/d2ts"
-import type { Condition, Query } from "../../src/query/index.js"
+import type { Condition, Query } from "../../src/query/schema.js"
 
 describe(`Query - IN Operator`, () => {
   // Sample test data
@@ -87,7 +87,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -121,7 +121,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -155,7 +155,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -190,7 +190,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -232,7 +232,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -264,7 +264,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -311,7 +311,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -343,7 +343,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(
@@ -380,7 +380,7 @@ describe(`Query - IN Operator`, () => {
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
     const input = graph.newInput<TestItem>()
-    const pipeline = compileQuery(query, { [query.from]: input })
+    const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
     pipeline.pipe(

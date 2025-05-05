@@ -27,31 +27,31 @@ describe(`QueryBuilder.groupBy`, () => {
   it(`sets a single property reference as groupBy`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`)
-      .select(`@department_id`, { count: { COUNT: `@id` } as any })
       .groupBy(`@department_id`)
+      .select(`@department_id`, { count: { COUNT: `@id` } as any })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@department_id`)
   })
 
   it(`sets an array of property references as groupBy`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`)
-      .select(`@department_id`, `@salary`, { count: { COUNT: `@id` } as any })
       .groupBy([`@department_id`, `@salary`])
+      .select(`@department_id`, `@salary`, { count: { COUNT: `@id` } as any })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toEqual([`@department_id`, `@salary`])
   })
 
   it(`overrides previous groupBy values`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`)
-      .select(`@department_id`, `@salary`, { count: { COUNT: `@id` } as any })
       .groupBy(`@department_id`)
       .groupBy(`@salary`) // This should override
+      .select(`@department_id`, `@salary`, { count: { COUNT: `@id` } as any })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@salary`)
   })
 
@@ -64,10 +64,10 @@ describe(`QueryBuilder.groupBy`, () => {
         as: `d`,
         on: [`@e.department_id`, `=`, `@d.id`],
       })
-      .select(`@d.name`, { avg_salary: { AVG: `@e.salary` } as any })
       .groupBy(`@d.name`)
+      .select(`@d.name`, { avg_salary: { AVG: `@e.salary` } as any })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@d.name`)
   })
 
@@ -80,11 +80,11 @@ describe(`QueryBuilder.groupBy`, () => {
         as: `d`,
         on: [`@e.department_id`, `=`, `@d.id`],
       })
-      .select(`@d.name`, { total_salary: { SUM: `@e.salary` } as any })
       .groupBy(`@d.name`)
       .having({ SUM: `@e.salary` } as any, `>`, 100000)
+      .select(`@d.name`, { total_salary: { SUM: `@e.salary` } as any })
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@d.name`)
     expect(builtQuery.having).toEqual([{ SUM: `@e.salary` }, `>`, 100000])
   })
@@ -99,13 +99,13 @@ describe(`QueryBuilder.groupBy`, () => {
         on: [`@e.department_id`, `=`, `@d.id`],
       })
       .where(`@e.salary`, `>`, 50000)
-      .select(`@d.name`, { count: { COUNT: `@e.id` } as any })
       .groupBy(`@d.name`)
       .having({ COUNT: `@e.id` } as any, `>`, 5)
+      .select(`@d.name`, { count: { COUNT: `@e.id` } as any })
       .orderBy(`@d.name`)
       .limit(10)
 
-    const builtQuery = query.buildQuery()
+    const builtQuery = query._query
 
     // Check groupBy
     expect(builtQuery.groupBy).toBe(`@d.name`)
