@@ -1,8 +1,8 @@
 import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
 import { Effect, batch } from "@tanstack/store"
+import { Collection } from "../collection.js"
 import { compileQueryPipeline } from "./pipeline-compiler.js"
-import { ResultCollection } from "./result-collection.js"
-import type { ChangeMessage } from "../types.js"
+import type { ChangeMessage, SyncConfig } from "../types.js"
 import type {
   IStreamBuilder,
   MultiSetArray,
@@ -10,7 +10,6 @@ import type {
 } from "@electric-sql/d2ts"
 import type { QueryBuilder, ResultsFromContext } from "./query-builder.js"
 import type { Context, Schema } from "./types.js"
-import type { Collection } from "../collection.js"
 
 export function compileQuery<TContext extends Context<Schema>>(
   queryBuilder: QueryBuilder<TContext>
@@ -22,7 +21,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   private graph: D2
   private inputs: Record<string, RootStreamBuilder<any>>
   private inputCollections: Record<string, Collection<any>>
-  private resultCollection: ResultCollection<TResults>
+  private resultCollection: Collection<TResults>
   private state: `compiled` | `running` | `stopped` = `compiled`
   private version = 0
   private unsubscribeEffect?: () => void
@@ -35,27 +34,76 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       throw new Error(`No collections provided`)
     }
 
-    this.resultCollection = new ResultCollection<TResults>()
     this.inputCollections = collections
-    this.graph = new D2({ initialFrontier: this.version })
-    this.inputs = Object.fromEntries(
-      Object.entries(collections).map(([key]) => [
-        key,
-        this.graph.newInput<any>(),
-      ])
+
+    const graph = new D2({ initialFrontier: this.version })
+    const inputs = Object.fromEntries(
+      Object.entries(collections).map(([key]) => [key, graph.newInput<any>()])
     )
 
-    compileQueryPipeline<IStreamBuilder<[string, unknown]>>(
-      query,
-      this.inputs
-    ).pipe(
-      output((msg) => {
-        if (msg.type === MessageType.DATA) {
-          this.resultCollection.applyChanges(msg.data.collection)
-        }
-      })
-    )
-    this.graph.finalize()
+    const sync: SyncConfig<TResults>[`sync`] = ({ begin, write, commit }) => {
+      compileQueryPipeline<IStreamBuilder<[unknown, TResults]>>(
+        query,
+        inputs
+      ).pipe(
+        output(({ type, data }) => {
+          if (type === MessageType.DATA) {
+            begin()
+            data.collection
+              .getInner()
+              .reduce((acc, [[key, value], multiplicity]) => {
+                const changes = acc.get(key) || {
+                  deletes: 0,
+                  inserts: 0,
+                  value,
+                }
+                if (multiplicity < 0) {
+                  changes.deletes += Math.abs(multiplicity)
+                } else if (multiplicity > 0) {
+                  changes.inserts += multiplicity
+                  changes.value = value
+                }
+                acc.set(key, changes)
+                return acc
+              }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
+              .forEach((changes, rawKey) => {
+                const key = (rawKey as any).toString()
+                const { deletes, inserts, value } = changes
+                if (inserts && !deletes) {
+                  write({
+                    key,
+                    value: value,
+                    type: `insert`,
+                  })
+                } else if (inserts >= deletes) {
+                  write({
+                    key,
+                    value: value,
+                    type: `update`,
+                  })
+                } else if (deletes > 0) {
+                  write({
+                    key,
+                    value: value,
+                    type: `delete`,
+                  })
+                }
+              })
+            commit()
+          }
+        })
+      )
+      graph.finalize()
+    }
+
+    this.graph = graph
+    this.inputs = inputs
+    this.resultCollection = new Collection<TResults>({
+      id: crypto.randomUUID(), // TODO: remove when we don't require any more
+      sync: {
+        sync,
+      },
+    })
   }
 
   get results() {
