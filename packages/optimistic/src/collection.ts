@@ -365,11 +365,6 @@ export class Collection<T extends object = Record<string, unknown>> {
         this.commitPendingTransactions()
       },
     })
-
-    // Listen to transactions and re-run commitPendingTransactions on changes
-    // this.transactionManager.transactions.subscribe(
-    //   this.commitPendingTransactions
-    // )
   }
 
   /**
@@ -377,65 +372,71 @@ export class Collection<T extends object = Record<string, unknown>> {
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    const keys = new Set<string>()
-    batch(() => {
-      for (const transaction of this.pendingSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          keys.add(operation.key)
-          this.syncedKeys.add(operation.key)
-          this.syncedMetadata.setState((prevData) => {
-            switch (operation.type) {
-              case `insert`:
-                prevData.set(operation.key, operation.metadata)
-                break
-              case `update`:
-                prevData.set(operation.key, {
-                  ...prevData.get(operation.key)!,
-                  ...operation.metadata,
-                })
-                break
-              case `delete`:
-                prevData.delete(operation.key)
-                break
-            }
-            return prevData
-          })
-          this.syncedData.setState((prevData) => {
-            switch (operation.type) {
-              case `insert`:
-                prevData.set(operation.key, operation.value)
-                break
-              case `update`:
-                prevData.set(operation.key, {
-                  ...prevData.get(operation.key)!,
-                  ...operation.value,
-                })
-                break
-              case `delete`:
-                prevData.delete(operation.key)
-                break
-            }
-            return prevData
-          })
+    if (
+      !Array.from(this.transactions.values()).some(
+        ({ state }) => state === `persisting`
+      )
+    ) {
+      const keys = new Set<string>()
+      batch(() => {
+        for (const transaction of this.pendingSyncedTransactions) {
+          for (const operation of transaction.operations) {
+            keys.add(operation.key)
+            this.syncedKeys.add(operation.key)
+            this.syncedMetadata.setState((prevData) => {
+              switch (operation.type) {
+                case `insert`:
+                  prevData.set(operation.key, operation.metadata)
+                  break
+                case `update`:
+                  prevData.set(operation.key, {
+                    ...prevData.get(operation.key)!,
+                    ...operation.metadata,
+                  })
+                  break
+                case `delete`:
+                  prevData.delete(operation.key)
+                  break
+              }
+              return prevData
+            })
+            this.syncedData.setState((prevData) => {
+              switch (operation.type) {
+                case `insert`:
+                  prevData.set(operation.key, operation.value)
+                  break
+                case `update`:
+                  prevData.set(operation.key, {
+                    ...prevData.get(operation.key)!,
+                    ...operation.value,
+                  })
+                  break
+                case `delete`:
+                  prevData.delete(operation.key)
+                  break
+              }
+              return prevData
+            })
+          }
         }
+      })
+
+      keys.forEach((key) => {
+        const curValue = this.state.get(key)
+        if (curValue) {
+          this.objectKeyMap.set(curValue, key)
+        }
+      })
+
+      this.pendingSyncedTransactions = []
+
+      // Call any registered one-time commit listeners
+      if (!this.hasReceivedFirstCommit) {
+        this.hasReceivedFirstCommit = true
+        const callbacks = [...this.onFirstCommitCallbacks]
+        this.onFirstCommitCallbacks = []
+        callbacks.forEach((callback) => callback())
       }
-    })
-
-    keys.forEach((key) => {
-      const curValue = this.state.get(key)
-      if (curValue) {
-        this.objectKeyMap.set(curValue, key)
-      }
-    })
-
-    this.pendingSyncedTransactions = []
-
-    // Call any registered one-time commit listeners
-    if (!this.hasReceivedFirstCommit) {
-      this.hasReceivedFirstCommit = true
-      const callbacks = [...this.onFirstCommitCallbacks]
-      this.onFirstCommitCallbacks = []
-      callbacks.forEach((callback) => callback())
     }
   }
 

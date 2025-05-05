@@ -363,7 +363,10 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Now add an optimistic item
-    collection.insert({ value: `optimistic value` }, { key: `optimisticItem` })
+    const tx = collection.insert(
+      { value: `optimistic value` },
+      { key: `optimisticItem` }
+    )
 
     // Verify optimistic insert was emitted - this is the synchronous optimistic update
     // and so we don't await here
@@ -377,8 +380,7 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    // Wait for update to sync back
-    await waitForChanges()
+    await tx.isPersisted?.promise
 
     // Verify synced update was emitted
     expect(callback).toHaveBeenCalledTimes(2)
@@ -390,8 +392,9 @@ describe(`Collection.subscribeChanges`, () => {
     // Update both items in optimistic and synced ways
     // First update the optimistic item optimistically
     const optItem = collection.state.get(`optimisticItem`)
+    let updateTx
     if (optItem) {
-      collection.update(optItem, (draft) => {
+      updateTx = collection.update(optItem, (draft) => {
         draft.value = `updated optimistic value`
       })
     }
@@ -414,11 +417,11 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    // Wait for changes to propagate
-    await waitForChanges()
+    await updateTx?.isPersisted?.promise
 
     // Verify synced update was emitted
     expect(callback).toHaveBeenCalledTimes(2)
+
     // This is called 3 times:
     // 1. Set transaction state to persisting
     // 2. The sync operation arrives and is applied to the state

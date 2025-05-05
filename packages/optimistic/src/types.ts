@@ -2,12 +2,7 @@ import type { Collection } from "../src/collection"
 import type { Deferred } from "../src/deferred"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
-export type TransactionState =
-  | `pending`
-  | `persisting`
-  | `persisted_awaiting_sync`
-  | `completed`
-  | `failed`
+export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 export interface PendingMutation {
   mutationId: string

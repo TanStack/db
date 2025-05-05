@@ -339,12 +339,7 @@ describe(`Collection`, () => {
           // This update is ignored because the optimistic update overrides it.
           { key: `foo`, type: `update`, changes: { bar: `value2` } },
         ])
-        expect(collection.state).toEqual(
-          new Map([
-            [`foo`, { value: `bar` }],
-            [`the-key`, { bar: `value` }],
-          ])
-        )
+        expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
         // Remove it so we don't have to assert against it below
         emitter.emit(`update`, [{ key: `the-key`, type: `delete` }])
 
