@@ -73,8 +73,10 @@ describe(`Query Wildcard Select`, () => {
   })
 
   // Helper function to extract results from messages
-  const extractResults = (messages: Array<any>): Array<any> => {
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+  const extractResults = (messagesToExtract: Array<any>): Array<any> => {
+    const dataMessages = messagesToExtract.filter(
+      (m) => m.type === MessageType.DATA
+    )
     if (dataMessages.length === 0) return []
 
     // For single table queries, we need to extract all items from the MultiSet

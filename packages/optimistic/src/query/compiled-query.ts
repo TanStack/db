@@ -186,10 +186,8 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   }
 
   stop() {
-    if (this.state === `stopped`) {
-      throw new Error(`Query is already stopped`)
-    }
     this.unsubscribeEffect?.()
+    this.unsubscribeEffect = undefined
     this.state = `stopped`
   }
 }

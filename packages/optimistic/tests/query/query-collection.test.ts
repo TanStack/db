@@ -65,10 +65,9 @@ const initialIssues: Array<Issue> = [
   },
 ]
 
-describe(`Query Collections`, async () => {
+describe(`Query Collections`, () => {
   it(`should be able to query a collection`, async () => {
     const emitter = mitt()
-    const callback = vi.fn()
 
     // Create collection with mutation capability
     const collection = new Collection<Person>({

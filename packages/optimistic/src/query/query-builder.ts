@@ -534,10 +534,10 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
                     Input
                 >
               }
-            : TFrom extends InputReference<infer TFrom>
+            : TFrom extends InputReference<infer TRef>
               ? {
-                  [K in keyof TFrom & string]: RemoveIndexSignature<
-                    TFrom[keyof TFrom]
+                  [K in keyof TRef & string]: RemoveIndexSignature<
+                    TRef[keyof TRef]
                   >
                 }
               : never)
@@ -554,10 +554,10 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
                     Input
                 >
               }
-            : TFrom extends InputReference<infer TFrom>
+            : TFrom extends InputReference<infer TRef>
               ? {
-                  [K in keyof TFrom & string]: RemoveIndexSignature<
-                    TFrom[keyof TFrom]
+                  [K in keyof TRef & string]: RemoveIndexSignature<
+                    TRef[keyof TRef]
                   >
                 }
               : never)
@@ -868,12 +868,13 @@ export function queryBuilder<TBaseSchema extends Schema = {}>() {
   }>
 }
 
-export type ResultsFromContext<TContext extends Context<Schema>> =
+export type ResultsFromContext<TContext extends Context<Schema>> = Flatten<
   TContext[`result`] extends object
     ? TContext[`result`]
     : TContext[`result`] extends undefined
       ? TContext[`schema`]
       : object
+>
 
 export type ResultFromQueryBuilder<TQueryBuilder> = Flatten<
   TQueryBuilder extends QueryBuilder<infer C>

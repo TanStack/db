@@ -11,7 +11,7 @@ import type {
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
 
 describe(`Collection.subscribeChanges`, () => {
-  it(`should emit initial collection state as insert changes`, async () => {
+  it(`should emit initial collection state as insert changes`, () => {
     const callback = vi.fn()
 
     // Create collection with pre-populated data
@@ -61,7 +61,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should emit changes from synced operations using mitt emitter`, async () => {
+  it(`should emit changes from synced operations using mitt emitter`, () => {
     const emitter = mitt()
     const callback = vi.fn()
 
@@ -182,7 +182,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should emit changes from optimistic operations`, async () => {
+  it(`should emit changes from optimistic operations`, () => {
     const emitter = mitt()
     const callback = vi.fn()
 
@@ -570,7 +570,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should correctly unsubscribe when returned function is called`, async () => {
+  it(`should correctly unsubscribe when returned function is called`, () => {
     const callback = vi.fn()
 
     // Create collection

@@ -124,14 +124,14 @@ describe(`D2QL GROUP BY`, () => {
       groupBy: [`@customer_id`],
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBe(1)
 
     // Verify we got a frontier message
-    const frontierMessages = messages.filter(
+    const frontierMessages = messagesRet.filter(
       (m) => m.type === MessageType.FRONTIER
     )
     expect(frontierMessages.length).toBeGreaterThan(0)
@@ -180,10 +180,10 @@ describe(`D2QL GROUP BY`, () => {
       groupBy: [`@customer_id`, `@status`],
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBeGreaterThan(0)
 
     const result = dataMessages[0].data.collection.getInner() as Array<Result>
@@ -256,10 +256,10 @@ describe(`D2QL GROUP BY`, () => {
       having: [{ col: `total_amount` }, `>`, 200],
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBeGreaterThan(0)
 
     const result = dataMessages[0].data.collection.getInner() as Array<Result>
@@ -315,10 +315,10 @@ describe(`D2QL GROUP BY`, () => {
       groupBy: [`@customer_id`],
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBeGreaterThan(0)
 
     const result = dataMessages[0].data.collection.getInner() as Array<Result>
@@ -377,10 +377,10 @@ describe(`D2QL GROUP BY`, () => {
       groupBy: [`@customer_id`],
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBeGreaterThan(0)
 
     const result = dataMessages[0].data.collection.getInner() as Array<Result>
@@ -421,10 +421,10 @@ describe(`D2QL GROUP BY`, () => {
       groupBy: `@status`, // Single string instead of array
     }
 
-    const messages = runQuery(query)
+    const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
     expect(dataMessages.length).toBeGreaterThan(0)
 
     const result = dataMessages[0].data.collection.getInner() as Array<Result>
