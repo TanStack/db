@@ -44,8 +44,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "dev": "docker-compose up -d && concurrently \"pnpm api:dev\" \"vite\"",
-    "lint": "eslint .",
+    "dev": "docker compose up -d && concurrently \"pnpm api:dev\" \"vite\"",
+    "lint": "eslint . --fix",
     "preview": "vite preview"
   },
   "type": "module"

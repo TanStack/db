@@ -40,15 +40,8 @@ export function useCollections() {
           snapshotCache = null // Invalidate cache when state changes
           callback()
         })
-        const transactionsUnsub =
-          collection.transactionManager.transactions.subscribe(() => {
-            snapshotCache = null // Invalidate cache when transactions change
-            callback()
-          })
-        return () => {
-          derivedStateUnsub()
-          transactionsUnsub()
-        }
+
+        return derivedStateUnsub
       })
 
       return () => {
@@ -72,7 +65,7 @@ export function useCollections() {
       for (const [id, collection] of collectionsStore.state) {
         snapshot.set(id, {
           state: collection.derivedState.state,
-          transactions: collection.transactionManager.transactions.state,
+          transactions: collection.transactions.state,
         })
       }
       snapshotCache = snapshot
@@ -94,7 +87,7 @@ export function useCollections() {
       for (const [id, collection] of collectionsStore.state) {
         snapshot.set(id, {
           state: collection.derivedState.state,
-          transactions: collection.transactionManager.transactions.state,
+          transactions: collection.transactions.state,
         })
       }
       snapshotCache = snapshot
@@ -308,7 +301,6 @@ export function useCollection<T extends object, R = any>(
         new Collection<T>({
           id: config.id,
           sync: config.sync,
-          mutationFn: config.mutationFn,
           schema: config.schema,
         })
       )

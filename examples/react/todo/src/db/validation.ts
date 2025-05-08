@@ -25,6 +25,9 @@ export type UpdateConfig = z.infer<typeof updateConfigSchema>
 
 // Validation functions
 export const validateInsertTodo = (data: unknown): InsertTodo => {
+  if (data.text === `really hard todo`) {
+    throw new Error(`we don't want to do really hard todos`)
+  }
   return insertTodoSchema.parse(data)
 }
 

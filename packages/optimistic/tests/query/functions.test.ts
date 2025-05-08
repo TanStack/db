@@ -200,7 +200,7 @@ describe(`Query > Functions`, () => {
         expect(result).toBeInstanceOf(Date)
         expect((result as Date).getFullYear()).toBe(2023)
         expect((result as Date).getMonth()).toBe(0) // January = 0
-        expect((result as Date).getDate()).toBe(15)
+        expect((result as Date).getUTCDate()).toBe(15)
 
         // Test other date formats
         const isoResult = evaluateFunction(`DATE`, `2023-02-20T12:30:45Z`)

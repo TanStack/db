@@ -22,7 +22,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   private inputs: Record<string, RootStreamBuilder<any>>
   private inputCollections: Record<string, Collection<any>>
   private resultCollection: Collection<TResults>
-  private state: `compiled` | `running` | `stopped` = `compiled`
+  public state: `compiled` | `running` | `stopped` = `compiled`
   private version = 0
   private unsubscribeEffect?: () => void
 

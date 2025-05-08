@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { Collection } from "../src/collection"
+import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
   ChangesPayload,
   PendingMutation,
+  Transaction,
+  TransactionConfig,
 } from "../src/types"
 
 // Helper function to wait for changes to be processed
@@ -34,7 +37,6 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      mutationFn: async () => {},
     })
 
     // Wait for initial sync to complete
@@ -90,7 +92,6 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      mutationFn: async () => {},
     })
 
     // Subscribe to changes
@@ -207,11 +208,12 @@ describe(`Collection.subscribeChanges`, () => {
           })
         },
       },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
-      },
     })
+
+    const mutationFn = async ({ transaction }) => {
+      emitter.emit(`sync`, transaction.mutations)
+      return Promise.resolve()
+    }
 
     // Subscribe to changes
     const unsubscribe = collection.subscribeChanges(callback)
@@ -220,7 +222,13 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Perform optimistic insert
-    collection.insert({ value: `optimistic value` }, { key: `optimisticItem` })
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.insert(
+        { value: `optimistic value` },
+        { key: `optimisticItem` }
+      )
+    )
 
     // Verify that insert was emitted immediately (optimistically)
     expect(callback).toHaveBeenCalledTimes(1)
@@ -249,10 +257,13 @@ describe(`Collection.subscribeChanges`, () => {
     if (!item) {
       throw new Error(`Item not found`)
     }
-    collection.update(item, (draft) => {
-      draft.value = `updated optimistic value`
-      draft.updated = true
-    })
+    const updateTx = createTransaction({ mutationFn })
+    updateTx.mutate(() =>
+      collection.update(item, (draft) => {
+        draft.value = `updated optimistic value`
+        draft.updated = true
+      })
+    )
 
     // Verify that update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -278,7 +289,8 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Perform optimistic delete
-    collection.delete(`optimisticItem`)
+    const deleteTx = createTransaction({ mutationFn })
+    deleteTx.mutate(() => collection.delete(`optimisticItem`))
 
     // Verify that delete was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -327,11 +339,12 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
-      },
     })
+
+    const mutationFn = async ({ transaction }) => {
+      emitter.emit(`sync`, transaction.mutations)
+      return Promise.resolve()
+    }
 
     // Subscribe to changes
     const unsubscribe = collection.subscribeChanges(callback)
@@ -363,9 +376,12 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Now add an optimistic item
-    const tx = collection.insert(
-      { value: `optimistic value` },
-      { key: `optimisticItem` }
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.insert(
+        { value: `optimistic value` },
+        { key: `optimisticItem` }
+      )
     )
 
     // Verify optimistic insert was emitted - this is the synchronous optimistic update
@@ -380,13 +396,12 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    await tx.isPersisted?.promise
+    await tx.isPersisted.promise
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2)
-    // This is called 3 times:
-    // 1. Set transaction state to persisting
-    // 2. The sync operation arrives and is applied to the state
+    expect(callback).toHaveBeenCalledTimes(1)
+    // This is called 1 time when the mutationFn call returns
+    // and the optimistic state is dropped and the synced state applied.
     callback.mockReset()
 
     // Update both items in optimistic and synced ways
@@ -394,9 +409,12 @@ describe(`Collection.subscribeChanges`, () => {
     const optItem = collection.state.get(`optimisticItem`)
     let updateTx
     if (optItem) {
-      updateTx = collection.update(optItem, (draft) => {
-        draft.value = `updated optimistic value`
-      })
+      updateTx = createTransaction({ mutationFn })
+      updateTx.mutate(() =>
+        collection.update(optItem, (draft) => {
+          draft.value = `updated optimistic value`
+        })
+      )
     }
 
     // We don't await here as the optimistic update is sync
@@ -417,14 +435,12 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    await updateTx?.isPersisted?.promise
+    await updateTx?.isPersisted.promise
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2)
-
-    // This is called 3 times:
-    // 1. Set transaction state to persisting
-    // 2. The sync operation arrives and is applied to the state
+    expect(callback).toHaveBeenCalledTimes(1)
+    // This is called 1 time when the mutationFn call returns
+    // and the optimistic state is dropped and the synced state applied.
     callback.mockReset()
 
     // Then update the synced item with a synced update
@@ -496,11 +512,11 @@ describe(`Collection.subscribeChanges`, () => {
           })
         },
       },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
-      },
     })
+    const mutationFn = async ({ transaction }) => {
+      emitter.emit(`sync`, transaction.mutations)
+      return Promise.resolve()
+    }
 
     // Subscribe to changes
     const unsubscribe = collection.subscribeChanges(callback)
@@ -516,11 +532,14 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Insert multiple items at once
-    collection.insert([
-      { value: `batch1` },
-      { value: `batch2` },
-      { value: `batch3` },
-    ])
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() =>
+      collection.insert([
+        { value: `batch1` },
+        { value: `batch2` },
+        { value: `batch3` },
+      ])
+    )
 
     // Verify only the 3 new items were emitted, not the existing ones
     expect(callback).toHaveBeenCalledTimes(1)
@@ -537,10 +556,10 @@ describe(`Collection.subscribeChanges`, () => {
     await waitForChanges()
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2)
-    // This is called 3 times:
-    // 1. Set transaction state to persisting
-    // 2. The sync operation arrives and is applied to the state
+    expect(callback).toHaveBeenCalledTimes(1)
+    // This is called when the mutationFn returns and
+    // the optimistic state is dropped and synced state is
+    // applied.
     callback.mockReset()
 
     // Update one item only
@@ -548,9 +567,12 @@ describe(`Collection.subscribeChanges`, () => {
     if (!itemToUpdate) {
       throw new Error(`Item not found`)
     }
-    collection.update(itemToUpdate, (draft) => {
-      draft.value = `updated value`
-    })
+    const tx2 = createTransaction({ mutationFn })
+    tx2.mutate(() =>
+      collection.update(itemToUpdate, (draft) => {
+        draft.value = `updated value`
+      })
+    )
 
     // Verify only the updated item was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -582,8 +604,8 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      mutationFn: async () => {},
     })
+    const mutationFn = async () => {}
 
     // Subscribe to changes
     const unsubscribe = collection.subscribeChanges(callback)
@@ -598,7 +620,8 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
 
     // Insert an item
-    collection.insert({ value: `test value` })
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.insert({ value: `test value` }))
 
     // Callback shouldn't be called after unsubscribe
     expect(callback).not.toHaveBeenCalled()

@@ -135,48 +135,89 @@ const todosConfig = {
       },
     },
     {
-      // Electric client instance
-      client: electric,
+      // Primary key for the todos table
+      primaryKey: ['id'],
     }
   ),
-  // Define mutation functions for backend persistence
-  mutationFn: {
-    insert: async (items) => {
-      // Insert items into Electric database
-      const db = electric.db
-      await db.todos.createMany({
-        data: items,
-      })
-    },
-    update: async (items) => {
-      // Update items in Electric database
-      const db = electric.db
-      for (const item of items) {
-        await db.todos.update({
-          where: { id: item.id },
-          data: item,
-        })
-      }
-    },
-    delete: async (items) => {
-      // Delete items from Electric database
-      const db = electric.db
-      await db.todos.deleteMany({
-        where: {
-          id: {
-            in: items.map((item) => item.id),
-          },
-        },
-      })
-    },
-  },
 }
 
 // Use the collection in a component
 function TodoList() {
   const { data, insert, update, delete: deleteFn } = useCollection(todosConfig)
 
-  // Now you can use these functions to interact with your data
-  // with automatic optimistic updates and backend persistence
+  // Create a mutation for handling all todo operations
+  const todoMutation = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const payload = transaction.mutations.map(m => {
+        const { collection, ...payload } = m
+        return payload
+      })
+
+      const response = await fetch(`http://localhost:3001/api/mutations`, {
+        method: `POST`,
+        headers: {
+          "Content-Type": `application/json`,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      await transaction.mutations[0].collection.config.sync.awaitTxid(result.txid)
+    }
+  })
+
+  const addTodo = () => {
+    todoMutation.mutate(() => {
+      insert({ title: 'New todo', completed: false })
+    })
+  }
+
+  const toggleTodo = (todo) => {
+    todoMutation.mutate(() => {
+      update(todo, (draft) => {
+        draft.completed = !draft.completed
+      })
+    })
+  }
+
+  const removeTodo = (todo) => {
+    todoMutation.mutate(() => {
+      deleteFn(todo)
+    })
+  }
+
+  return (
+    <div>
+      <button
+        onClick={addTodo}
+        disabled={todoMutation.isPending}
+      >
+        {todoMutation.isPending ? 'Saving...' : 'Add Todo'}
+      </button>
+      <ul>
+        {data.map(todo => (
+          <li key={todo.id}>
+            <input
+              type="checkbox"
+              checked={todo.completed}
+              onChange={() => toggleTodo(todo)}
+              disabled={todoMutation.isPending}
+            />
+            {todo.title}
+            <button
+              onClick={() => removeTodo(todo)}
+              disabled={todoMutation.isPending}
+            >
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 ```

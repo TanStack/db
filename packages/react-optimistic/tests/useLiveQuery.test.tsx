@@ -95,10 +95,6 @@ describe(`Query Collections`, () => {
           })
         },
       },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
-      },
     })
 
     // Sync from initial state
@@ -248,10 +244,6 @@ describe(`Query Collections`, () => {
             }
           )
         },
-      },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync-person`, transaction.mutations)
-        return Promise.resolve()
       },
     })
 
@@ -427,10 +419,6 @@ describe(`Query Collections`, () => {
           })
         },
       },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
-      },
     })
 
     // Sync from initial state
@@ -525,10 +513,6 @@ describe(`Query Collections`, () => {
             commit()
           })
         },
-      },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync`, transaction.mutations)
-        return Promise.resolve()
       },
     })
 

@@ -128,10 +128,22 @@ const todoCollection = createCollection({
 
 ## Transaction Management
 
-The library includes a robust transaction management system:
+The library includes a simple yet powerful transaction management system. Transactions are created using the `createTransaction` function:
 
-- `TransactionManager`: Handles transaction lifecycle, persistence, and retry logic
-- `TransactionStore`: Provides persistent storage for transactions using IndexedDB
+```typescript
+const tx = createTransaction({
+  mutationFn: async ({ transaction }) => {
+    // Implement your mutation logic here
+    // This function is called when the transaction is committed
+  },
+})
+
+// Apply mutations within the transaction
+tx.mutate(() => {
+  // All collection operations (insert/update/delete) within this callback
+  // will be part of this transaction
+})
+```
 
 Transactions progress through several states:
 

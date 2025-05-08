@@ -58,11 +58,24 @@ The library uses proxies to create immutable snapshots and track changes:
 The primary hook for interacting with collections in React components.
 
 ```typescript
+// Create a collection
 const { data, insert, update, delete: deleteFn } = useCollection({
   id: 'todos',
   sync: { /* sync configuration */ },
-  mutationFn: { /* mutation functions */ },
   schema: /* optional schema */
+});
+
+// Create a mutation
+const mutation = useOptimisticMutation({
+  mutationFn: async ({ mutations }) => {
+    // Implement your mutation logic here
+    // This function is called when mutations are committed
+  }
+});
+
+// Use the mutation with collection operations
+mutation.mutate(() => {
+  insert({ text: 'New todo' });
 });
 ```
 
@@ -167,10 +180,22 @@ const todoCollection = useCollection({
 
 ## Transaction Management
 
-The library includes a robust transaction management system:
+The library includes a simple yet powerful transaction management system. Transactions are created using the `createTransaction` function:
 
-- `TransactionManager`: Handles transaction lifecycle, persistence, and retry logic
-- `TransactionStore`: Provides persistent storage for transactions using IndexedDB
+```typescript
+const tx = createTransaction({
+  mutationFn: async ({ transaction }) => {
+    // Implement your mutation logic here
+    // This function is called when the transaction is committed
+  },
+})
+
+// Apply mutations within the transaction
+tx.mutate(() => {
+  // All collection operations (insert/update/delete) within this callback
+  // will be part of this transaction
+})
+```
 
 Transactions progress through several states:
 
@@ -204,35 +229,56 @@ const todosConfig = {
       primaryKey: ['id'],
     }
   ),
-  // Persist mutations to ElectricSQL
-  mutationFn: async (mutations, transaction, config) => {
-    const response = await fetch(`http://localhost:3001/api/mutations`, {
-      method: `POST`,
-      headers: {
-        "Content-Type": `application/json`,
-      },
-      body: JSON.stringify(transaction.mutations),
-    })
-    if (!response.ok) {
-      // Throwing an error will rollback the optimistic state.
-      throw new Error(`HTTP error! Status: ${response.status}`)
-    }
-
-    const result = await response.json()
-
-    try {
-      // Use the awaitTxid function from the ElectricSync configuration
-      // This waits for the specific transaction to be synced to the server
-      // The second parameter is an optional timeout in milliseconds
-      await config.sync.awaitTxid(persistResult.txid, 10000)
-      return true;
-    } catch (error) {
-      console.error('Error waiting for transaction to sync:', error);
-      // Throwing an error will rollback the optimistic state.
-      throw error;
-    }
-  },
 };
+
+// In your component
+function TodoList() {
+  const { data, insert, update, delete: deleteFn } = useCollection(todosConfig)
+
+  // Create a mutation for handling all todo operations
+  const todoMutation = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      // Filter out collection from mutations before sending to server
+      const payload = transaction.mutations.map(m => {
+        const { collection, ...payload } = m
+        return payload
+      })
+
+      const response = await fetch(`http://localhost:3001/api/mutations`, {
+        method: `POST`,
+        headers: {
+          "Content-Type": `application/json`,
+        },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        // Throwing an error will rollback the optimistic state.
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      try {
+        // Use the awaitTxid function from the ElectricSync configuration
+        // This waits for the specific transaction to be synced to the server
+        await transaction.mutations[0].collection.config.sync.awaitTxid(result.txid)
+      } catch (error) {
+        console.error('Error waiting for transaction to sync:', error);
+        // Throwing an error will rollback the optimistic state.
+        throw error;
+      }
+    },
+  })
+
+  // Use the mutation for any todo operations
+  const addTodo = () => {
+    todoMutation.mutate(() => {
+      insert({ title: 'New todo', completed: false })
+    })
+  }
+
+  // ... rest of your component
+}
 
 // In a route loader
 export async function loader() {

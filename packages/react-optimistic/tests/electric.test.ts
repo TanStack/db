@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Collection } from "@tanstack/optimistic"
+import { Collection, createTransaction } from "@tanstack/optimistic"
 import { createElectricSync } from "../src/electric"
 import type { PendingMutation, Transaction } from "@tanstack/optimistic"
 import type { Message, Row } from "@electric-sql/client"
@@ -48,7 +48,6 @@ describe(`Electric Integration`, () => {
     collection = new Collection({
       id: `test`,
       sync: electricSync,
-      mutationFn: vi.fn().mockResolvedValue(undefined),
     })
   })
 
@@ -362,17 +361,17 @@ describe(`Electric Integration`, () => {
       const testCollection = new Collection({
         id: `ofo`,
         sync: electricSync,
-        mutationFn: testMutationFn,
       })
 
-      let transaction = testCollection.insert(
-        { id: 1, name: `Test item 1` },
-        { key: `item1` }
+      const tx1 = createTransaction({ mutationFn: testMutationFn })
+
+      let transaction = tx1.mutate(() =>
+        testCollection.insert({ id: 1, name: `Test item 1` }, { key: `item1` })
       )
 
-      await transaction.isPersisted?.promise
+      await transaction.isPersisted.promise
 
-      transaction = testCollection.transactions.get(transaction.id)!
+      transaction = testCollection.transactions.state.get(transaction.id)!
 
       // Verify the mutation function was called correctly
       expect(testMutationFn).toHaveBeenCalledTimes(1)
@@ -414,32 +413,27 @@ describe(`Electric Integration`, () => {
 
   it(`Transaction proxy with toObject method works correctly`, () => {
     // Create a collection with a simple mutation function
-    const testCollection = new Collection({
+    new Collection({
       id: `foo`,
       sync: createElectricSync({ url: `foo` }, { primaryKey: [`id`] }), // Add primary key
-      mutationFn: async () => {},
     })
 
     // Create a transaction
-    const transaction = testCollection.transactionManager.applyTransaction(
-      [] // No mutations
-    )
+    const transaction = createTransaction({
+      mutationFn: () => {
+        return Promise.resolve()
+      },
+    })
 
     // Test that we can access properties
     expect(transaction.id).toBeDefined()
     expect(transaction.state).toBe(`pending`)
 
-    // Test the toObject method
-    const transactionObj = transaction.toObject()
-    expect(transactionObj).toBeDefined()
-    expect(transactionObj.id).toBe(transaction.id)
-    expect(transactionObj.state).toBe(transaction.state)
-
     // Test that we can create a modified clone
     const modifiedTransaction = {
-      ...transaction.toObject(),
+      ...transaction,
       metadata: {
-        ...transaction.toObject().metadata,
+        ...transaction.metadata,
         testKey: `testValue`,
       },
     }

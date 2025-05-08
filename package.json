@@ -63,7 +63,8 @@
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
-    "lint": "eslint . --fix",
+    "lint": "pnpm --filter \"./packages/**\" lint",
+    "lint-all": "eslint . --fix",
     "prepack": "vite build",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test"

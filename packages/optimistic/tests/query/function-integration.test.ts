@@ -230,7 +230,7 @@ describe(`Query Function Integration`, () => {
       expect(results[0].id).toBe(1) // Alice
       expect(results[0].joined.getFullYear()).toBe(2023)
       expect(results[0].joined.getMonth()).toBe(0) // January (0-indexed)
-      expect(results[0].joined.getDate()).toBe(15)
+      expect(results[0].joined.getUTCDate()).toBe(15)
     })
   })
 
