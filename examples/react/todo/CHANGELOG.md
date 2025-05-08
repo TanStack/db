@@ -1,5 +1,12 @@
 # examples/react/todo
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`b42479c`](https://github.com/TanStack/optimistic/commit/b42479cf95f9a820b36e01684b13a9179973f3d8)]:
+  - @tanstack/react-optimistic@0.0.3
+
 ## 0.0.2
 
 ### Patch Changes

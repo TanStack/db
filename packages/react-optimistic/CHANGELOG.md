@@ -1,5 +1,14 @@
 # @tanstack/react-optimistic
 
+## 0.0.3
+
+### Patch Changes
+
+- Make transactions first class & move ownership of mutationFn from collections to transactions ([#53](https://github.com/TanStack/optimistic/pull/53))
+
+- Updated dependencies [[`b42479c`](https://github.com/TanStack/optimistic/commit/b42479cf95f9a820b36e01684b13a9179973f3d8)]:
+  - @tanstack/optimistic@0.0.3
+
 ## 0.0.2
 
 ### Patch Changes
