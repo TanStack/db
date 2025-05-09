@@ -19,7 +19,6 @@
   "dependencies": {
     "@tanstack/optimistic": "workspace:*",
     "@tanstack/react-store": "^0.7.0",
-    "@tanstack/store": "^0.7.0",
     "use-sync-external-store": "^1.2.0"
   },
   "devDependencies": {
@@ -52,7 +51,6 @@
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
   "peerDependencies": {
-    "@electric-sql/client": "1.0.0",
     "react": ">=16.8.0"
   },
   "scripts": {

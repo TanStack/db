@@ -7,3 +7,6 @@ export * from "./errors"
 export * from "./utils"
 export * from "./proxy"
 export * from "./query/index.js"
+
+// Re-export some stuff explicitly to ensure the type & value is exported
+export { Collection } from "./collection"

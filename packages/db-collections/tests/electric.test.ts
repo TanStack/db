@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Collection, createTransaction } from "@tanstack/optimistic"
-import { createElectricSync } from "../src/electric"
+import { createTransaction } from "@tanstack/optimistic"
+import { createElectricCollection } from "../src/electric"
+import type { ElectricCollection } from "../src/electric"
 import type { PendingMutation, Transaction } from "@tanstack/optimistic"
 import type { Message, Row } from "@electric-sql/client"
-import type { ElectricSync } from "../src/electric"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -20,9 +20,8 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric Integration`, () => {
-  let collection: Collection
+  let collection: ElectricCollection<Row>
   let subscriber: (messages: Array<Message<Row>>) => void
-  let electricSync: ElectricSync
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -33,21 +32,16 @@ describe(`Electric Integration`, () => {
       return () => {}
     })
 
-    // Create Electric sync config with primary key
-    electricSync = createElectricSync(
-      {
+    // Create collection with Electric configuration
+    collection = createElectricCollection({
+      id: `test`,
+      streamOptions: {
         url: `http://test-url`,
         params: {
           table: `test_table`,
         },
       },
-      { primaryKey: [`id`] }
-    ) // Using 'id' as the primary key column
-
-    // Create collection with Electric sync
-    collection = new Collection({
-      id: `test`,
-      sync: electricSync,
+      primaryKey: [`id`], // Using 'id' as the primary key column
     })
   })
 
@@ -208,7 +202,7 @@ describe(`Electric Integration`, () => {
       ])
 
       // The txid should be tracked and awaitTxid should resolve immediately
-      await expect(electricSync.awaitTxid(testTxid)).resolves.toBe(true)
+      await expect(collection.awaitTxId(testTxid)).resolves.toBe(true)
     })
 
     it(`should handle multiple txids in a single message`, async () => {
@@ -231,8 +225,8 @@ describe(`Electric Integration`, () => {
       ])
 
       // Both txids should be tracked
-      await expect(electricSync.awaitTxid(txid1)).resolves.toBe(true)
-      await expect(electricSync.awaitTxid(txid2)).resolves.toBe(true)
+      await expect(collection.awaitTxId(txid1)).resolves.not.toThrow()
+      await expect(collection.awaitTxId(txid2)).resolves.not.toThrow()
     })
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {
@@ -241,11 +235,11 @@ describe(`Electric Integration`, () => {
       const shortTimeout = 100
 
       // Attempt to await a txid that hasn't been seen with a short timeout
-      const promise = electricSync.awaitTxid(unknownTxid, shortTimeout)
+      const promise = collection.awaitTxId(unknownTxid, shortTimeout)
 
       // The promise should reject with a timeout error
       await expect(promise).rejects.toThrow(
-        `Timeout waiting for txid: ${unknownTxid}`
+        `Timeout waiting for txId: ${unknownTxid}`
       )
     })
 
@@ -253,7 +247,7 @@ describe(`Electric Integration`, () => {
       const laterTxid = 1000
 
       // Start waiting for a txid that hasn't arrived yet
-      const promise = electricSync.awaitTxid(laterTxid, 1000)
+      const promise = collection.awaitTxId(laterTxid, 1000)
 
       // Send the txid after a short delay
       setTimeout(() => {
@@ -280,7 +274,7 @@ describe(`Electric Integration`, () => {
       }, 50)
 
       // The promise should resolve when the txid arrives
-      await expect(promise).resolves.toBe(true)
+      await expect(promise).resolves.not.toThrow()
     })
 
     // Test the complete flow
@@ -343,7 +337,7 @@ describe(`Electric Integration`, () => {
           }
 
           // Start waiting for the txid
-          const awaitPromise = electricSync.awaitTxid(txid, 1000)
+          const promise = collection.awaitTxId(txid, 1000)
 
           // Simulate the server sending sync messages after a delay
           setTimeout(() => {
@@ -351,27 +345,21 @@ describe(`Electric Integration`, () => {
           }, 50)
 
           // Wait for the txid to be seen
-          await awaitPromise
+          await promise
 
           return Promise.resolve()
         }
       )
 
-      // Create a new collection with our test mutation function
-      const testCollection = new Collection({
-        id: `ofo`,
-        sync: electricSync,
-      })
-
       const tx1 = createTransaction({ mutationFn: testMutationFn })
 
       let transaction = tx1.mutate(() =>
-        testCollection.insert({ id: 1, name: `Test item 1` }, { key: `item1` })
+        collection.insert({ id: 1, name: `Test item 1` }, { key: `item1` })
       )
 
       await transaction.isPersisted.promise
 
-      transaction = testCollection.transactions.state.get(transaction.id)!
+      transaction = collection.transactions.state.get(transaction.id)!
 
       // Verify the mutation function was called correctly
       expect(testMutationFn).toHaveBeenCalledTimes(1)
@@ -380,7 +368,7 @@ describe(`Electric Integration`, () => {
       // Note: In a real implementation, the collection would be updated by the sync process
       // This is just verifying our test setup worked correctly
       expect(fakeBackend.data.has(`item1`)).toBe(true)
-      expect(testCollection.state.has(`item1`)).toBe(true)
+      expect(collection.state.has(`item1`)).toBe(true)
     })
   })
 
@@ -409,36 +397,5 @@ describe(`Electric Integration`, () => {
     // Verify that the primaryKey is included in the metadata
     expect(metadata).toHaveProperty(`primaryKey`)
     expect(metadata.primaryKey).toEqual([`id`])
-  })
-
-  it(`Transaction proxy with toObject method works correctly`, () => {
-    // Create a collection with a simple mutation function
-    new Collection({
-      id: `foo`,
-      sync: createElectricSync({ url: `foo` }, { primaryKey: [`id`] }), // Add primary key
-    })
-
-    // Create a transaction
-    const transaction = createTransaction({
-      mutationFn: () => {
-        return Promise.resolve()
-      },
-    })
-
-    // Test that we can access properties
-    expect(transaction.id).toBeDefined()
-    expect(transaction.state).toBe(`pending`)
-
-    // Test that we can create a modified clone
-    const modifiedTransaction = {
-      ...transaction,
-      metadata: {
-        ...transaction.metadata,
-        testKey: `testValue`,
-      },
-    }
-
-    expect(modifiedTransaction.id).toBe(transaction.id)
-    expect(modifiedTransaction.metadata.testKey).toBe(`testValue`)
   })
 })

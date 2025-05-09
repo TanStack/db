@@ -1,12 +1,9 @@
 import React, { useState } from "react"
-import {
-  Collection,
-  createElectricSync,
-  createTransaction,
-  useLiveQuery,
-} from "@tanstack/react-optimistic"
-import { DevTools } from "./DevTools"
+import { createTransaction, useLiveQuery } from "@tanstack/react-optimistic"
+import { createElectricCollection } from "@tanstack/db-collections"
+// import { DevTools } from "./DevTools"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
+import type { ElectricCollection } from "@tanstack/db-collections"
 import type { MutationFn, PendingMutation } from "@tanstack/react-optimistic"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
@@ -32,7 +29,9 @@ const todoMutationFn: MutationFn = async ({ transaction }) => {
   const result = await response.json()
 
   // Start waiting for the txid
-  await transaction.mutations[0]!.collection.config.sync.awaitTxid(result.txid)
+  await (transaction.mutations[0]!.collection as ElectricCollection).awaitTxId(
+    result.txid
+  )
 }
 
 const configMutationFn: MutationFn = async ({ transaction }) => {
@@ -56,44 +55,42 @@ const configMutationFn: MutationFn = async ({ transaction }) => {
   const result = await response.json()
 
   // Start waiting for the txid
-  await transaction.mutations[0]!.collection.config.sync.awaitTxid(result.txid)
+  await (transaction.mutations[0]!.collection as ElectricCollection).awaitTxId(
+    result.txid
+  )
 }
 
-const todoCollection = new Collection<UpdateTodo>({
+const todoCollection = createElectricCollection<UpdateTodo>({
   id: `todos`,
-  sync: createElectricSync(
-    {
-      url: `http://localhost:3003/v1/shape`,
-      params: {
-        table: `todos`,
-      },
-      parser: {
-        // Parse timestamp columns into JavaScript Date objects
-        timestamptz: (date: string) => new Date(date),
-      },
+  streamOptions: {
+    url: `http://localhost:3003/v1/shape`,
+    params: {
+      table: `todos`,
     },
-    { primaryKey: [`id`] }
-  ),
+    parser: {
+      // Parse timestamp columns into JavaScript Date objects
+      timestamptz: (date: string) => new Date(date),
+    },
+  },
+  primaryKey: [`id`],
   schema: updateTodoSchema,
 })
 
-const configCollection = new Collection<UpdateConfig>({
+const configCollection = createElectricCollection<UpdateConfig>({
   id: `config`,
-  sync: createElectricSync(
-    {
-      url: `http://localhost:3003/v1/shape`,
-      params: {
-        table: `config`,
-      },
-      parser: {
-        // Parse timestamp columns into JavaScript Date objects
-        timestamptz: (date: string) => {
-          return new Date(date)
-        },
+  streamOptions: {
+    url: `http://localhost:3003/v1/shape`,
+    params: {
+      table: `config`,
+    },
+    parser: {
+      // Parse timestamp columns into JavaScript Date objects
+      timestamptz: (date: string) => {
+        return new Date(date)
       },
     },
-    { primaryKey: [`id`] }
-  ),
+  },
+  primaryKey: [`id`],
   schema: updateConfigSchema,
 })
 
@@ -380,7 +377,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      <DevTools />
+      {/* <DevTools /> */}
     </>
   )
 }
