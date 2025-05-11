@@ -385,7 +385,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify ascending order
-    const ascendingArray = Array.from(ascendingResult.state.values())
+    const ascendingArray = Array.from(ascendingResult.toArray)
     expect(ascendingArray).toEqual([
       { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
       { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
@@ -407,7 +407,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify descending order
-    const descendingArray = Array.from(descendingResult.state.values())
+    const descendingArray = Array.from(descendingResult.toArray)
     expect(descendingArray).toEqual([
       { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
       { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
@@ -429,7 +429,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify multiple field ordering
-    const multiOrderArray = Array.from(multiOrderResult.state.values())
+    const multiOrderArray = Array.from(multiOrderResult.toArray)
     expect(multiOrderArray).toEqual([
       {
         id: `3`,
@@ -442,8 +442,128 @@ describe(`Query Collections`, () => {
       { id: `1`, name: `John Doe`, age: 30, isActive: true, _orderByIndex: 2 },
     ])
   })
+
+  it(`should maintain correct ordering when items are added, updated, or deleted`, async () => {
+    const emitter = mitt()
+
+    // Create collection with mutation capability
+    const collection = new Collection<Person>({
+      id: `order-update-test`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          emitter.on(`sync`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync from initial state
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    // Create a query that orders by age in ascending order
+    const query = queryBuilder()
+      .from({ collection })
+      .keyBy(`@id`)
+      .orderBy(`@age`)
+      .select(`@id`, `@name`, `@age`)
+
+    const compiledQuery = compileQuery(query)
+    compiledQuery.start()
+
+    await waitForChanges()
+
+    // Verify initial ordering
+    let currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
+      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+    ])
+
+    // Add a new person with the youngest age
+    emitter.emit(`sync`, [
+      {
+        key: `4`,
+        type: `insert`,
+        changes: {
+          id: `4`,
+          name: `Alice Young`,
+          age: 22,
+          email: `alice.young@example.com`,
+          isActive: true,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify order is updated with the new person at the beginning
+    currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 2 },
+      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 3 },
+    ])
+
+    // Update a person's age to move them in the ordering
+    emitter.emit(`sync`, [
+      {
+        key: `1`,
+        type: `update`,
+        changes: {
+          age: 40, // Update John Doe to be the oldest
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify order is updated with John Doe now at the end
+    currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+      { id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
+    ])
+
+    // Delete a person in the middle of the ordering
+    emitter.emit(`sync`, [
+      {
+        key: `3`,
+        type: `delete`,
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify order is updated with John Smith removed
+    currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
+    ])
+  })
 })
 
-async function waitForChanges(ms = 100) {
+async function waitForChanges(ms = 0) {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
