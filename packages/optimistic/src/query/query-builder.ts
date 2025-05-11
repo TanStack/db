@@ -262,6 +262,12 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       return select
     })
 
+    // Ensure we have an orderByIndex in the select if we have an orderBy
+    // This is required if select is called after orderBy
+    if (this._query.orderBy) {
+      validatedSelects.push({ _orderByIndex: { ORDER_INDEX: `numeric` } })
+    }
+
     const newBuilder = new BaseQueryBuilder<TContext>(
       (this as BaseQueryBuilder<TContext>).query
     )
@@ -704,7 +710,8 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     // Set the orderBy clause
     newBuilder.query.orderBy = orderBy
 
-    // And the order index to the select
+    // Ensure we have an orderByIndex in the select if we have an orderBy
+    // This is required if select is called before orderBy
     newBuilder.query.select = [
       ...(newBuilder.query.select ?? []),
       { _orderByIndex: { ORDER_INDEX: `numeric` } },
