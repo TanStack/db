@@ -74,7 +74,7 @@ export const myPendingTodos = createElectricCollection<Todo>({
 })
 ```
 
-> [!Tip] Shapes vs Queries
+> [!TIP]
 > TanStack DB de-couples the data you sync into a collection from the data you bind to a component. Shape where clauses are used to filter the data you sync into collections. [Live queries](#live-queries) are used to bind data to components.
 >
 > Live queries are much more expressive than shapes, allowing you to query across collections, join, aggregate, etc. This allows you to de-normalise the data you bind to a component.
