@@ -262,7 +262,11 @@ export class Collection<T extends object = Record<string, unknown>> {
     // Create a derived array from the map to avoid recalculating it
     this.derivedArray = new Derived({
       fn: ({ currDepVals: [stateMap] }) => {
-        return Array.from(stateMap.values())
+        const array = Array.from(stateMap.values())
+        if (this.config.sortFn) {
+          array.sort(this.config.sortFn)
+        }
+        return array
       },
       deps: [this.derivedState],
     })

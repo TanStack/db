@@ -29,6 +29,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   constructor(queryBuilder: QueryBuilder<Context<Schema>>) {
     const query = queryBuilder._query
     const collections = query.collections
+    const hasOrderBy = !!query.orderBy
 
     if (!collections) {
       throw new Error(`No collections provided`)
@@ -103,6 +104,13 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       sync: {
         sync,
       },
+      sortFn: hasOrderBy
+        ? (a, b) => {
+            const aIndex = (a as { _orderByIndex: number })[`_orderByIndex`]
+            const bIndex = (b as { _orderByIndex: number })[`_orderByIndex`]
+            return aIndex - bIndex
+          }
+        : undefined,
     })
   }
 

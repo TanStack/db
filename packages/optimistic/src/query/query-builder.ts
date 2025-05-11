@@ -704,6 +704,12 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     // Set the orderBy clause
     newBuilder.query.orderBy = orderBy
 
+    // And the order index to the select
+    newBuilder.query.select = [
+      ...(newBuilder.query.select ?? []),
+      { _orderByIndex: { ORDER_INDEX: `numeric` } },
+    ]
+
     return newBuilder as QueryBuilder<TContext>
   }
 

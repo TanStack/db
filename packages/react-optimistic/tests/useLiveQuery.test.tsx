@@ -81,14 +81,13 @@ describe(`Query Collections`, () => {
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
-          // @ts-expect-error don't trust Mitt's typing and this works.
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`*`, (_, changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()
@@ -116,6 +115,7 @@ describe(`Query Collections`, () => {
           .where(`@age`, `>`, 30)
           .keyBy(`@id`)
           .select(`@id`, `@name`)
+          .orderBy({ "@id": `asc` })
       )
     })
 
@@ -227,22 +227,17 @@ describe(`Query Collections`, () => {
       id: `person-collection-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(
-            `sync-person`,
-            // @ts-expect-error Mitt typing doesn't match our usage
-            (changes: Array<PendingMutation<Person>>) => {
-              begin()
-              changes.forEach((change) => {
-                write({
-                  key: change.key,
-                  type: change.type,
-                  value: change.changes,
-                })
+          emitter.on(`sync-person`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
               })
-              commit()
-            }
-          )
+            })
+            commit()
+          })
         },
       },
     })
@@ -252,23 +247,18 @@ describe(`Query Collections`, () => {
       id: `issue-collection-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(`sync-issue`, (changes: Array<PendingMutation<Issue>>) => {
+          emitter.on(`sync-issue`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Issue,
               })
             })
             commit()
           })
         },
-      },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync-issue`, transaction.mutations)
-        return Promise.resolve()
       },
     })
 
@@ -405,14 +395,13 @@ describe(`Query Collections`, () => {
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
-          // @ts-expect-error don't trust Mitt's typing and this works.
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`sync`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()
@@ -500,14 +489,13 @@ describe(`Query Collections`, () => {
       id: `stop-query-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`sync`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()
