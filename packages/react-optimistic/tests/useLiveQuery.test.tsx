@@ -121,12 +121,14 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`3`)).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
 
     expect(result.current.data.length).toBe(1)
     expect(result.current.data[0]).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
@@ -152,20 +154,24 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`3`)).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
     expect(result.current.state.get(`4`)).toEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
 
     expect(result.current.data.length).toBe(2)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
@@ -187,12 +193,14 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`4`)).toEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
 
     expect(result.current.data.length).toBe(2)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
@@ -214,6 +222,7 @@ describe(`Query Collections`, () => {
 
     expect(result.current.data.length).toBe(1)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
