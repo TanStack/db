@@ -263,8 +263,8 @@ export class Collection<T extends object = Record<string, unknown>> {
     this.derivedArray = new Derived({
       fn: ({ currDepVals: [stateMap] }) => {
         const array = Array.from(stateMap.values())
-        if (config.sortFn) {
-          array.sort(config.sortFn)
+        if (config.sortBy) {
+          array.sort(config.sortBy)
         }
         return array
       },

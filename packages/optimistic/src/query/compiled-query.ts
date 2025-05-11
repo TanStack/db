@@ -104,7 +104,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       sync: {
         sync,
       },
-      sortFn: hasOrderBy
+      sortBy: hasOrderBy
         ? (a, b) => {
             const aIndex = (a as { _orderByIndex: number })[`_orderByIndex`]
             const bIndex = (b as { _orderByIndex: number })[`_orderByIndex`]

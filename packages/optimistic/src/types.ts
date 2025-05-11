@@ -118,7 +118,7 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
   id: string
   sync: SyncConfig<T>
   schema?: StandardSchema<T>
-  sortFn?: (a: T, b: T) => number
+  sortBy?: (a: T, b: T) => number
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
