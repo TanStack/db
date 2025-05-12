@@ -262,7 +262,21 @@ export class Collection<T extends object = Record<string, unknown>> {
     // Create a derived array from the map to avoid recalculating it
     this.derivedArray = new Derived({
       fn: ({ currDepVals: [stateMap] }) => {
-        return Array.from(stateMap.values())
+        // Collections returned by a query that has an orderBy are annotated
+        // with the _orderByIndex field.
+        // This is used to sort the array when it's derived.
+        const array: Array<T & { _orderByIndex?: number }> = Array.from(
+          stateMap.values()
+        )
+        if (array[0] && `_orderByIndex` in array[0]) {
+          ;(array as Array<T & { _orderByIndex: number }>).sort((a, b) => {
+            if (a._orderByIndex === b._orderByIndex) {
+              return 0
+            }
+            return a._orderByIndex < b._orderByIndex ? -1 : 1
+          })
+        }
+        return array
       },
       deps: [this.derivedState],
     })

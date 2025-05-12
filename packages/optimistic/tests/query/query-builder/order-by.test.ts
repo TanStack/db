@@ -125,7 +125,12 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
       expect(builtQuery.as).toBe(`e`)
       expect(builtQuery.join).toBeDefined()
       expect(builtQuery.where).toBeDefined()
-      expect(builtQuery.select).toHaveLength(3)
+      expect(builtQuery.select).toEqual([
+        `@e.id`,
+        `@e.name`,
+        `@d.name`,
+        { _orderByIndex: { ORDER_INDEX: `numeric` } }, // Added by the orderBy method
+      ])
     })
   })
 })

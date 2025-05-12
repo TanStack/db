@@ -81,14 +81,13 @@ describe(`Query Collections`, () => {
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
-          // @ts-expect-error don't trust Mitt's typing and this works.
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`*`, (_, changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()
@@ -116,17 +115,20 @@ describe(`Query Collections`, () => {
           .where(`@age`, `>`, 30)
           .keyBy(`@id`)
           .select(`@id`, `@name`)
+          .orderBy({ "@id": `asc` })
       )
     })
 
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`3`)).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
 
     expect(result.current.data.length).toBe(1)
     expect(result.current.data[0]).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
@@ -152,20 +154,24 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`3`)).toEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
     expect(result.current.state.get(`4`)).toEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
 
     expect(result.current.data.length).toBe(2)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
@@ -187,12 +193,14 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`4`)).toEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
 
     expect(result.current.data.length).toBe(2)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
@@ -214,6 +222,7 @@ describe(`Query Collections`, () => {
 
     expect(result.current.data.length).toBe(1)
     expect(result.current.data).toContainEqual({
+      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
@@ -227,22 +236,17 @@ describe(`Query Collections`, () => {
       id: `person-collection-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(
-            `sync-person`,
-            // @ts-expect-error Mitt typing doesn't match our usage
-            (changes: Array<PendingMutation<Person>>) => {
-              begin()
-              changes.forEach((change) => {
-                write({
-                  key: change.key,
-                  type: change.type,
-                  value: change.changes,
-                })
+          emitter.on(`sync-person`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
               })
-              commit()
-            }
-          )
+            })
+            commit()
+          })
         },
       },
     })
@@ -252,23 +256,18 @@ describe(`Query Collections`, () => {
       id: `issue-collection-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(`sync-issue`, (changes: Array<PendingMutation<Issue>>) => {
+          emitter.on(`sync-issue`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Issue,
               })
             })
             commit()
           })
         },
-      },
-      mutationFn: async ({ transaction }) => {
-        emitter.emit(`sync-issue`, transaction.mutations)
-        return Promise.resolve()
       },
     })
 
@@ -405,14 +404,13 @@ describe(`Query Collections`, () => {
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
-          // @ts-expect-error don't trust Mitt's typing and this works.
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`sync`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()
@@ -500,14 +498,13 @@ describe(`Query Collections`, () => {
       id: `stop-query-test`,
       sync: {
         sync: ({ begin, write, commit }) => {
-          // @ts-expect-error Mitt typing doesn't match our usage
-          emitter.on(`sync`, (changes: Array<PendingMutation<Person>>) => {
+          emitter.on(`sync`, (changes) => {
             begin()
-            changes.forEach((change) => {
+            ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
                 key: change.key,
                 type: change.type,
-                value: change.changes,
+                value: change.changes as Person,
               })
             })
             commit()

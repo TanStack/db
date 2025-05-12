@@ -97,7 +97,13 @@ describe(`QueryBuilder.keyBy`, () => {
     expect(builtQuery.as).toBe(`e`)
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.where).toBeDefined()
-    expect(builtQuery.select).toHaveLength(3)
+    expect(builtQuery.select).toHaveLength(4)
+    expect(builtQuery.select).toEqual([
+      `@e.id`,
+      `@e.name`,
+      `@d.name`,
+      { _orderByIndex: { ORDER_INDEX: `numeric` } }, // Added by the orderBy method
+    ])
     expect(builtQuery.orderBy).toBe(`@e.salary`)
     expect(builtQuery.limit).toBe(10)
     expect(builtQuery.offset).toBe(5)
