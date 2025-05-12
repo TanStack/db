@@ -13,6 +13,8 @@ TanStack DB extends TanStack Query with collections, live queries and transactio
     <img alt="" src="https://img.shields.io/badge/Discord-TanStack-%235865F2" /></a>
   <a href="https://npmjs.com/package/@tanstack/db">
     <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" /></a>
+  <a href="#status">
+    <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status - Alpha"></a>
   <a href="https://github.com/tanstack/db/discussions">
     <img alt="Join the discussion on Github" src="https://img.shields.io/badge/Discussions-Chat%20now!-green" /></a>
   <a href="https://x.com/tan_stack">
@@ -198,6 +200,10 @@ No. TanStack DB is not an ORM. Queries run entirely in the client against local 
       src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png"
   />
 </a>
+
+## Status
+
+Tanstack DB is currently an early preview release in alpha. It's still under active development. There will be bugs and the APIs are still liable to change.
 
 ## Contributing
 
