@@ -1,109 +1,319 @@
 import React, { useState } from "react"
-import { createTransaction, useLiveQuery } from "@tanstack/react-optimistic"
-import { createElectricCollection } from "@tanstack/db-collections"
+import { useLiveQuery, useOptimisticMutation, Collection } from "@tanstack/react-optimistic"
+import {
+  createElectricCollection,
+  createQueryCollection,
+} from "@tanstack/db-collections"
 // import { DevTools } from "./DevTools"
+import { QueryClient } from "@tanstack/query-core"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
-import type { ElectricCollection } from "@tanstack/db-collections"
-import type { MutationFn, PendingMutation } from "@tanstack/react-optimistic"
+import type {
+  ElectricCollection,
+  QueryCollection,
+} from "@tanstack/db-collections"
+import type { PendingMutation } from "@tanstack/react-optimistic"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
-const todoMutationFn: MutationFn = async ({ transaction }) => {
-  const payload = transaction.mutations.map(
-    (m: PendingMutation<UpdateTodo>) => {
-      const { collection, ...rest } = m
-      return rest
-    }
-  )
-  const response = await fetch(`http://localhost:3001/api/mutations`, {
-    method: `POST`,
-    headers: {
-      "Content-Type": `application/json`,
+// API helper for todos and config
+const API_BASE_URL = `http://localhost:3001/api`
+
+const api = {
+  // Todo API methods
+  todos: {
+    getAll: async (): Promise<Array<UpdateTodo>> => {
+      const response = await fetch(`${API_BASE_URL}/todos`)
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(`HTTP error! Status: ${response.status}`)
-  }
-
-  const result = await response.json()
-
-  // Start waiting for the txid
-  await (transaction.mutations[0]!.collection as ElectricCollection).awaitTxId(
-    result.txid
-  )
-}
-
-const configMutationFn: MutationFn = async ({ transaction }) => {
-  const payload = transaction.mutations.map(
-    (m: PendingMutation<UpdateConfig>) => {
-      const { collection, ...rest } = m
-      return rest
-    }
-  )
-  const response = await fetch(`http://localhost:3001/api/mutations`, {
-    method: `POST`,
-    headers: {
-      "Content-Type": `application/json`,
+    getById: async (id: number): Promise<UpdateTodo> => {
+      const response = await fetch(`${API_BASE_URL}/todos/${id}`)
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(`HTTP error! Status: ${response.status}`)
-  }
-
-  const result = await response.json()
-
-  // Start waiting for the txid
-  await (transaction.mutations[0]!.collection as ElectricCollection).awaitTxId(
-    result.txid
-  )
-}
-
-const todoCollection = createElectricCollection<UpdateTodo>({
-  id: `todos`,
-  streamOptions: {
-    url: `http://localhost:3003/v1/shape`,
-    params: {
-      table: `todos`,
+    create: async (
+      todo: Partial<UpdateTodo>
+    ): Promise<{ todo: UpdateTodo; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/todos`, {
+        method: `POST`,
+        headers: { "Content-Type": `application/json` },
+        body: JSON.stringify(todo),
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
-    parser: {
-      // Parse timestamp columns into JavaScript Date objects
-      timestamptz: (date: string) => new Date(date),
+    update: async (
+      id: unknown,
+      changes: Partial<UpdateTodo>
+    ): Promise<{ todo: UpdateTodo; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
+        method: `PUT`,
+        headers: { "Content-Type": `application/json` },
+        body: JSON.stringify(changes),
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
+    },
+    delete: async (
+      id: unknown
+    ): Promise<{ success: boolean; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
+        method: `DELETE`,
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
   },
-  primaryKey: [`id`],
-  schema: updateTodoSchema,
-})
 
-const configCollection = createElectricCollection<UpdateConfig>({
-  id: `config`,
-  streamOptions: {
-    url: `http://localhost:3003/v1/shape`,
-    params: {
-      table: `config`,
+  // Config API methods
+  config: {
+    getAll: async (): Promise<Array<UpdateConfig>> => {
+      const response = await fetch(`${API_BASE_URL}/config`)
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
-    parser: {
-      // Parse timestamp columns into JavaScript Date objects
-      timestamptz: (date: string) => {
-        return new Date(date)
-      },
+    getById: async (id: number): Promise<UpdateConfig> => {
+      const response = await fetch(`${API_BASE_URL}/config/${id}`)
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
+    },
+    create: async (
+      config: Partial<UpdateConfig>
+    ): Promise<{ config: UpdateConfig; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/config`, {
+        method: `POST`,
+        headers: { "Content-Type": `application/json` },
+        body: JSON.stringify(config),
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
+    },
+    update: async (
+      id: number,
+      changes: Partial<UpdateConfig>
+    ): Promise<{ config: UpdateConfig; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/config/${id}`, {
+        method: `PUT`,
+        headers: { "Content-Type": `application/json` },
+        body: JSON.stringify(changes),
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
+    },
+    delete: async (id: number): Promise<{ success: boolean; txid: number }> => {
+      const response = await fetch(`${API_BASE_URL}/config/${id}`, {
+        method: `DELETE`,
+      })
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`)
+      return response.json()
     },
   },
-  primaryKey: [`id`],
-  schema: updateConfigSchema,
-})
+}
+
+// Collection type enum
+enum CollectionType {
+  Electric = `electric`,
+  Query = `query`,
+}
+
+// Create a query client for query collections
+const queryClient = new QueryClient()
+
+const collectionsCache = new Map()
+// Function to create the appropriate todo collection based on type
+const createTodoCollection = (type: CollectionType) => {
+  if (collectionsCache.has(`todo`)) {
+    return collectionsCache.get(`todo`)
+  } else {
+    let newCollection: Collection
+    if (type === CollectionType.Electric) {
+      newCollection = createElectricCollection<UpdateTodo>({
+        id: `todos`,
+        streamOptions: {
+          url: `http://localhost:3003/v1/shape`,
+          params: {
+            table: `todos`,
+          },
+          parser: {
+            // Parse timestamp columns into JavaScript Date objects
+            timestamptz: (date: string) => new Date(date),
+          },
+        },
+        primaryKey: [`id`],
+        schema: updateTodoSchema,
+      })
+    } else {
+      // Query collection using our API helper
+      newCollection = createQueryCollection<UpdateTodo>({
+        id: `todos`,
+        queryKey: [`todos`],
+        queryFn: async () => {
+          const todos = await api.todos.getAll()
+          // Turn date strings into Dates if needed
+          return todos.map((todo) => ({
+            ...todo,
+            created_at: todo.created_at ? new Date(todo.created_at) : undefined,
+            updated_at: todo.updated_at ? new Date(todo.updated_at) : undefined,
+          }))
+        },
+        getPrimaryKey: (item) => String(item.id),
+        schema: updateTodoSchema,
+        queryClient,
+      })
+    }
+    collectionsCache.set(`todo`, newCollection)
+    return newCollection
+  }
+}
+
+// Function to create the appropriate config collection based on type
+const createConfigCollection = (type: CollectionType) => {
+  if (collectionsCache.has(`config`)) {
+    return collectionsCache.get(`config`)
+  } else {
+    let newCollection: Collection
+    if (type === CollectionType.Electric) {
+      newCollection = createElectricCollection<UpdateConfig>({
+        id: `config`,
+        streamOptions: {
+          url: `http://localhost:3003/v1/shape`,
+          params: {
+            table: `config`,
+          },
+          parser: {
+            // Parse timestamp columns into JavaScript Date objects
+            timestamptz: (date: string) => {
+              return new Date(date)
+            },
+          },
+        },
+        primaryKey: [`id`],
+        schema: updateConfigSchema,
+      })
+    } else {
+      // Query collection using our API helper
+      newCollection = createQueryCollection<UpdateConfig>({
+        id: `config`,
+        queryKey: [`config`],
+        queryFn: async () => {
+          return api.config.getAll()
+        },
+        getPrimaryKey: (item) => String(item.id),
+        schema: updateConfigSchema,
+        queryClient,
+      })
+    }
+    collectionsCache.set(`config`, newCollection)
+    return newCollection
+  }
+}
+
+// A bit of indirection to handle awaiting each collection type syncing in new changes.
+async function collectionSync(
+  type: CollectionType,
+  mutation: PendingMutation,
+  txid: number
+) {
+  if (type === CollectionType.Query) {
+    await (mutation.collection as QueryCollection<UpdateTodo>).invalidate()
+  } else {
+    await (mutation.collection as ElectricCollection<UpdateTodo>).awaitTxId(
+      txid
+    )
+  }
+}
 
 export default function App() {
+  // Read collection type from URL param directly
+  const getInitialCollectionType = (): CollectionType => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get(`type`) === `query`
+      ? CollectionType.Query
+      : CollectionType.Electric
+  }
+
+  const collectionType = getInitialCollectionType()
   const [newTodo, setNewTodo] = useState(``)
 
+  // Create collections
+  const todoCollection = createTodoCollection(collectionType)
+  const configCollection = createConfigCollection(collectionType)
+
+  // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
-    q.from({ todoCollection }).keyBy(`@id`).select(`@id`, `@text`, `@completed`)
+    q.from({ todoCollection }).keyBy(`@id`).select(`@id`, `@text`, `@completed`).orderBy(`@created_at`)
   )
 
   const { data: configData } = useLiveQuery((q) =>
     q.from({ configCollection }).keyBy(`@id`).select(`@id`, `@key`, `@value`)
   )
+
+  // Define mutations
+  const addTodo = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
+
+      const { modified } = mutation
+      const response = await api.todos.create(modified)
+      await collectionSync(collectionType, mutation, response.txid)
+    },
+  })
+
+  const updateTodo = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
+      const { original, changes } = mutation
+      const response = await api.todos.update(original.id, changes)
+      await collectionSync(collectionType, mutation, response.txid)
+    },
+  })
+
+  const deleteTodo = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
+      const { original } = mutation
+      const response = await api.todos.delete(original.id)
+      await collectionSync(collectionType, mutation, response.txid)
+    },
+  })
+
+  const createConfig = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const mutation = transaction.mutations[0] as PendingMutation<UpdateConfig>
+      const { modified } = mutation
+      const response = await api.config.create(modified)
+      await collectionSync(collectionType, mutation, response.txid)
+    },
+  })
+
+  const updateConfig = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const mutation = transaction.mutations[0] as PendingMutation<UpdateConfig>
+      const { original, changes } = mutation
+      const response = await api.config.update(original.id as number, changes)
+      await collectionSync(collectionType, mutation, response.txid)
+    },
+  })
+
+  // Handle collection type change directly
+  const handleCollectionTypeChange = (type: CollectionType) => {
+    if (type !== collectionType) {
+      // Update URL and reload page
+      const url = new URL(window.location.href)
+      url.searchParams.set(`type`, type)
+      window.location.href = url.toString()
+    }
+  }
 
   // Define a more robust type-safe helper function to get config values
   const getConfigValue = (key: string): string => {
@@ -119,9 +329,9 @@ export default function App() {
   const setConfigValue = (key: string, value: string): void => {
     for (const config of configData) {
       if (config.key === key) {
-        createTransaction({ mutationFn: configMutationFn }).mutate(() =>
+        updateConfig.mutate(() =>
           configCollection.update(
-            Array.from(configCollection.state.values())[0]!,
+            Array.from(configCollection.state.values())[0]! as UpdateConfig,
             (draft) => {
               draft.value = value
             }
@@ -133,7 +343,7 @@ export default function App() {
     }
 
     // If the config doesn't exist yet, create it
-    createTransaction({ mutationFn: configMutationFn }).mutate(() =>
+    createConfig.mutate(() =>
       configCollection.insert({
         key,
         value,
@@ -198,8 +408,7 @@ export default function App() {
     e.preventDefault()
     if (!newTodo.trim()) return
 
-    const tx = createTransaction({ mutationFn: todoMutationFn })
-    tx.mutate(() =>
+    addTodo.mutate(() =>
       todoCollection.insert({
         text: newTodo,
         completed: false,
@@ -210,8 +419,7 @@ export default function App() {
   }
 
   const toggleTodo = (todo: UpdateTodo) => {
-    const tx = createTransaction({ mutationFn: todoMutationFn })
-    tx.mutate(() =>
+    updateTodo.mutate(() =>
       todoCollection.update(
         Array.from(todoCollection.state.values()).find(
           (t) => t.id === todo.id
@@ -240,6 +448,39 @@ export default function App() {
             todos
           </h1>
 
+          {/* Collection Type Selector */}
+          <div className="mb-4 flex justify-center">
+            <div className="flex items-center bg-white rounded-lg shadow-md p-2">
+              <span className="mr-2 text-sm font-medium text-gray-700">
+                Collection Type:
+              </span>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() =>
+                    handleCollectionTypeChange(CollectionType.Electric)
+                  }
+                  className={`px-3 py-1 text-sm rounded-md ${collectionType === CollectionType.Electric
+                    ? `bg-blue-500 text-white`
+                    : `bg-gray-200 text-gray-700 hover:bg-gray-300`
+                    }`}
+                >
+                  Electric
+                </button>
+                <button
+                  onClick={() =>
+                    handleCollectionTypeChange(CollectionType.Query)
+                  }
+                  className={`px-3 py-1 text-sm rounded-md ${collectionType === CollectionType.Query
+                    ? `bg-blue-500 text-white`
+                    : `bg-gray-200 text-gray-700 hover:bg-gray-300`
+                    }`}
+                >
+                  Query
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="mb-4 flex justify-end">
             <div className="flex items-center">
               <label
@@ -267,13 +508,12 @@ export default function App() {
                   className="absolute left-0 w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
                   onClick={() => {
                     const allCompleted = completedTodos.length === todos.length
-                    const tx = createTransaction({ mutationFn: todoMutationFn })
                     const todosToToggle = allCompleted
                       ? completedTodos
                       : activeTodos
                     const togglingIds = new Set()
                     todosToToggle.forEach((t) => togglingIds.add(t.id))
-                    tx.mutate(() =>
+                    updateTodo.mutate(() =>
                       todoCollection.update(
                         Array.from(todoCollection.state.values()).filter((t) =>
                           togglingIds.has(t.id)
@@ -318,18 +558,14 @@ export default function App() {
                           className="absolute left-[12px] top-0 bottom-0 my-auto h-[40px] w-[40px] cursor-pointer"
                         />
                         <label
-                          className={`block leading-[1.2] py-[15px] px-[15px] text-2xl transition-colors ${
-                            todo.completed ? `text-[#d9d9d9] line-through` : ``
-                          }`}
+                          className={`block leading-[1.2] py-[15px] px-[15px] text-2xl transition-colors ${todo.completed ? `text-[#d9d9d9] line-through` : ``
+                            }`}
                         >
                           {todo.text}
                         </label>
                         <button
                           onClick={() => {
-                            const tx = createTransaction({
-                              mutationFn: todoMutationFn,
-                            })
-                            tx.mutate(() =>
+                            deleteTodo.mutate(() =>
                               todoCollection.delete(
                                 Array.from(todoCollection.state.values()).find(
                                   (t) => t.id === todo.id
@@ -355,10 +591,7 @@ export default function App() {
                   {completedTodos.length > 0 && (
                     <button
                       onClick={() => {
-                        const tx = createTransaction({
-                          mutationFn: todoMutationFn,
-                        })
-                        tx.mutate(() =>
+                        deleteTodo.mutate(() =>
                           todoCollection.delete(
                             Array.from(todoCollection.state.values()).filter(
                               (t) => completedTodos.some((ct) => ct.id === t.id)
