@@ -289,10 +289,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       }) => {
         const prevDerivedState = prevDepVals?.[0] ?? new Map<string, T>()
         const changedKeys = new Set(this.syncedKeys)
-        optimisticOperations
-          .flat()
-          .filter((op) => op.isActive)
-          .forEach((op) => changedKeys.add(op.key))
+        optimisticOperations.flat().forEach((op) => changedKeys.add(op.key))
 
         if (changedKeys.size === 0) {
           return []
