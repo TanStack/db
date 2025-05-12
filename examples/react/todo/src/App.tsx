@@ -249,9 +249,9 @@ export default function App() {
   // Read collection type from URL param directly
   const getInitialCollectionType = (): CollectionType => {
     const params = new URLSearchParams(window.location.search)
-    return params.get(`type`) === `query`
-      ? CollectionType.Query
-      : CollectionType.Electric
+    return params.get(`type`) === `electric`
+      ? CollectionType.Electric
+      : CollectionType.Query
   }
 
   const collectionType = getInitialCollectionType()
@@ -478,21 +478,6 @@ export default function App() {
               <div className="flex">
                 <button
                   onClick={() =>
-                    handleCollectionTypeChange(CollectionType.Electric)
-                  }
-                  className={`relative px-6 py-3 text-sm font-medium transition-all duration-200 ${
-                    collectionType === CollectionType.Electric
-                      ? `text-blue-600 bg-blue-50`
-                      : `text-gray-600 hover:bg-gray-50`
-                  }`}
-                >
-                  <span>Electric</span>
-                  {collectionType === CollectionType.Electric && (
-                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-600"></span>
-                  )}
-                </button>
-                <button
-                  onClick={() =>
                     handleCollectionTypeChange(CollectionType.Query)
                   }
                   className={`relative px-6 py-3 text-sm font-medium transition-all duration-200 ${
@@ -503,6 +488,21 @@ export default function App() {
                 >
                   <span>Query</span>
                   {collectionType === CollectionType.Query && (
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-600"></span>
+                  )}
+                </button>
+                <button
+                  onClick={() =>
+                    handleCollectionTypeChange(CollectionType.Electric)
+                  }
+                  className={`relative px-6 py-3 text-sm font-medium transition-all duration-200 ${
+                    collectionType === CollectionType.Electric
+                      ? `text-blue-600 bg-blue-50`
+                      : `text-gray-600 hover:bg-gray-50`
+                  }`}
+                >
+                  <span>Electric</span>
+                  {collectionType === CollectionType.Electric && (
                     <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-600"></span>
                   )}
                 </button>
