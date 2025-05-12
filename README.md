@@ -61,7 +61,7 @@ const todoCollection = createQueryCollection<TodoList>({
 Bind live queries to your components:
 
 ```tsx
-import { useLiveQuery } from "@tanstack/react-optimistic"
+import { useLiveQuery } from "@tanstack/react-db"
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
@@ -75,7 +75,7 @@ const Todos = () => {
 Apply transactional writes with local optimistic state:
 
 ```tsx
-import { useOptimisticMutation } from "@tanstack/react-optimistic"
+import { useOptimisticMutation } from "@tanstack/react-db"
 
 const AddTodo = () => {
   const addTodo = useOptimisticMutation({

@@ -1,4 +1,4 @@
-# @tanstack/react-optimistic
+# @tanstack/react-db
 
 ## 0.0.3
 

@@ -1,5 +1,5 @@
 {
-  "name": "@tanstack/react-optimistic",
+  "name": "@tanstack/react-db",
   "description": "React hooks for optimistic updates",
   "version": "0.0.3",
   "author": "Kyle Mathews",
@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TanStack/optimistic.git",
-    "directory": "packages/react-optimistic"
+    "directory": "packages/react-db"
   },
   "homepage": "https://tanstack.com/optimistic",
   "keywords": [

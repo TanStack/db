@@ -119,7 +119,7 @@ TanStack DB live queries are implemented using [d2ts](https://github.com/electri
 Use the `useLiveQuery` hook to bind data to React components:
 
 ```ts
-import { useLiveQuery } from '@tanstack/react-optimistic'
+import { useLiveQuery } from '@tanstack/react-db'
 
 const Todos = () => {
   const { data: todos } = useLiveQuery(query =>
@@ -138,7 +138,7 @@ const Todos = () => {
 You can also query across collections with joins:
 
 ```ts
-import { useLiveQuery } from '@tanstack/react-optimistic'
+import { useLiveQuery } from '@tanstack/react-db'
 
 const Todos = () => {
   const { data: todos } = useLiveQuery(query =>
@@ -178,7 +178,7 @@ For example, this is a generic function that POSTs mutations to the server:
 
 ```tsx
 import type { Collection } from '@tanstack/optimistic'
-import type { MutationFn, PendingMutation } from '@tanstack/react-optimistic'
+import type { MutationFn, PendingMutation } from '@tanstack/react-db'
 
 const filterOutCollection = (mutation: PendingMutation) => {
   const { collection: _, ...rest } = mutation
@@ -220,7 +220,7 @@ The key requirments for the server, in this case are:
 Use the `useOptimisticMutation` hook to create transactions in your components:
 
 ```tsx
-import { useOptimisticMutation } from '@tanstack/react-optimistic'
+import { useOptimisticMutation } from '@tanstack/react-db'
 
 const AddTodo = () => {
   const tx = useOptimisticMutation({ mutationFn })

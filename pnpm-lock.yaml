@@ -108,9 +108,9 @@ importers:
       '@tanstack/query-core':
         specifier: ^5.75.7
         version: 5.75.7
-      '@tanstack/react-optimistic':
+      '@tanstack/react-db':
         specifier: workspace:*
-        version: link:../../../packages/react-optimistic
+        version: link:../../../packages/react-db
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -244,7 +244,7 @@ importers:
         specifier: ^3.0.9
         version: 3.0.9(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
 
-  packages/react-optimistic:
+  packages/react-db:
     dependencies:
       '@tanstack/optimistic':
         specifier: workspace:*
