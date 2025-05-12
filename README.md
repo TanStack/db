@@ -80,9 +80,9 @@ import { useOptimisticMutation } from "@tanstack/react-optimistic"
 const AddTodo = () => {
   const addTodo = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
-      const { collection, ...newTodo } = transaction.mutations[0]!
+      const { collection, modified: newTodo } = transaction.mutations[0]!
 
-      await axios.post("/api/todos", newTodo)
+      await api.todos.create(newTodo)
       await collection.invalidate()
     },
   })
