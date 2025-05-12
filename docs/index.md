@@ -118,12 +118,10 @@ const updateTodo = useOptimisticMutation({
 This combines to support a model of uni-directional data flow, extending the redux/flux style state management pattern beyond the client, to take in the server as well:
 
 <figure>
-  <a href="./unidirectional-data-flow.png" target="_blank">
+  <a href="./unidirectional-data-flow.lg.png" target="_blank">
     <img src="./unidirectional-data-flow.png" />
   </a>
 </figure>
-
-There is an inner loop of optimistic state, that becomes superseded by the outer loop when the persisted mutation syncs back to the client.
 
 ## API reference
 
