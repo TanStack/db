@@ -93,7 +93,7 @@ See the [Electric docs](https://electric-sql.com/docs/intro) for more informatio
 const todoCollection = createQueryCollection({
   queryKey: ['todoItems'],
   queryFn: async () => fetch('/api/todos'),
-  getPrimaryKey: (item) => item.id
+  getId: (item) => item.id
 })
 ```
 

@@ -53,7 +53,7 @@ import { createQueryCollection } from "@tanstack/db-collections"
 const todoCollection = createQueryCollection<TodoList>({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
-  getPrimaryKey: (item) => item.id,
+  getId: (item) => item.id,
   schema: todoSchema, // any standard schema
 })
 ```
