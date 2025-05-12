@@ -48,26 +48,24 @@ TanStack DB is **backend agnostic** and **incrementally adoptable**:
 Sync data into collections:
 
 ```ts
-import { createQueryCollection } from '@tanstack/db-collections'
+import { createQueryCollection } from "@tanstack/db-collections"
 
 const todoCollection = createQueryCollection<TodoList>({
-  queryKey: ['todos'],
-  queryFn: async () => fetch('/api/todos'),
-  getPrimaryKey: item => item.id,
-  schema: todoSchema // any standard schema
+  queryKey: ["todos"],
+  queryFn: async () => fetch("/api/todos"),
+  getPrimaryKey: (item) => item.id,
+  schema: todoSchema, // any standard schema
 })
 ```
 
 Bind live queries to your components:
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-optimistic'
+import { useLiveQuery } from "@tanstack/react-optimistic"
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ todoCollection })
-      .where('@completed', '=', false)
+    query.from({ todoCollection }).where("@completed", "=", false)
   )
 
   return <List items={todos} />
@@ -77,27 +75,31 @@ const Todos = () => {
 Apply transactional writes with local optimistic state:
 
 ```tsx
-import { useOptimisticMutation } from '@tanstack/react-optimistic'
+import { useOptimisticMutation } from "@tanstack/react-optimistic"
 
 const AddTodo = () => {
   const addTodo = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
       const { collection, ...newTodo } = transaction.mutations[0]!
 
-      await axios.post('/api/todos', newTodo)
+      await axios.post("/api/todos", newTodo)
       await collection.invalidate()
-    }
+    },
   })
 
-  return <Button onClick={() =>
-    addTodo.mutate(() =>
-      todoCollection.insert({
-        id: uuid(),
-        text: '🔥 Make app faster',
-        completed: false
-      })
-    )
-  } />
+  return (
+    <Button
+      onClick={() =>
+        addTodo.mutate(() =>
+          todoCollection.insert({
+            id: uuid(),
+            text: "🔥 Make app faster",
+            completed: false,
+          })
+        )
+      }
+    />
+  )
 }
 ```
 
