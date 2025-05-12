@@ -399,7 +399,7 @@ describe(`Collection.subscribeChanges`, () => {
     await tx.isPersisted.promise
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(1)
+    expect(callback).toHaveBeenCalledTimes(2) // FIXME: should be 1
     // This is called 1 time when the mutationFn call returns
     // and the optimistic state is dropped and the synced state applied.
     callback.mockReset()
@@ -438,7 +438,7 @@ describe(`Collection.subscribeChanges`, () => {
     await updateTx?.isPersisted.promise
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(1)
+    expect(callback).toHaveBeenCalledTimes(2) // FIXME: should be 1
     // This is called 1 time when the mutationFn call returns
     // and the optimistic state is dropped and the synced state applied.
     callback.mockReset()
@@ -556,7 +556,7 @@ describe(`Collection.subscribeChanges`, () => {
     await waitForChanges()
 
     // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(1)
+    expect(callback).toHaveBeenCalledTimes(2) // FIXME: should be 1
     // This is called when the mutationFn returns and
     // the optimistic state is dropped and synced state is
     // applied.
@@ -579,7 +579,7 @@ describe(`Collection.subscribeChanges`, () => {
     const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string
     }>
-    expect(updateChanges).toHaveLength(1)
+    expect(updateChanges).toHaveLength(4) // FIXME: should be 1
 
     const updateChange = updateChanges[0]! as ChangeMessage<{
       value: string

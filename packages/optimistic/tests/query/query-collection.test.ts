@@ -668,7 +668,6 @@ describe(`Query Collections`, () => {
         return Promise.resolve()
       },
     })
-    console.log(`initial state`, Object.fromEntries(result.state))
 
     // Perform optimistic insert of a new issue
     tx.mutate(() =>
@@ -683,8 +682,6 @@ describe(`Query Collections`, () => {
       )
     )
 
-    console.log(`after optimistic insert`, Object.fromEntries(result.state))
-
     // Verify optimistic state is immediately reflected
     expect(result.state.size).toBe(4)
     expect(result.state.get(`temp-key`)).toEqual({
@@ -695,8 +692,6 @@ describe(`Query Collections`, () => {
 
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
-
-    console.log(`after commit`, Object.fromEntries(result.state))
 
     expect(result.state.size).toBe(4)
     expect(result.state.get(`4`)).toBeDefined()
