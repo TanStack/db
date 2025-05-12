@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { useLiveQuery, useOptimisticMutation, Collection } from "@tanstack/react-optimistic"
+import { useLiveQuery, useOptimisticMutation } from "@tanstack/react-optimistic"
 import {
   createElectricCollection,
   createQueryCollection,
@@ -11,7 +11,7 @@ import type {
   ElectricCollection,
   QueryCollection,
 } from "@tanstack/db-collections"
-import type { PendingMutation } from "@tanstack/react-optimistic"
+import type { Collection, PendingMutation } from "@tanstack/react-optimistic"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
@@ -157,6 +157,7 @@ const createTodoCollection = (type: CollectionType) => {
       newCollection = createQueryCollection<UpdateTodo>({
         id: `todos`,
         queryKey: [`todos`],
+        refetchInterval: 3000,
         queryFn: async () => {
           const todos = await api.todos.getAll()
           // Turn date strings into Dates if needed
@@ -205,8 +206,19 @@ const createConfigCollection = (type: CollectionType) => {
       newCollection = createQueryCollection<UpdateConfig>({
         id: `config`,
         queryKey: [`config`],
+        refetchInterval: 3000,
         queryFn: async () => {
-          return api.config.getAll()
+          const configs = await api.config.getAll()
+          // Turn date strings into Dates if needed
+          return configs.map((config) => ({
+            ...config,
+            created_at: config.created_at
+              ? new Date(config.created_at)
+              : undefined,
+            updated_at: config.updated_at
+              ? new Date(config.updated_at)
+              : undefined,
+          }))
         },
         getPrimaryKey: (item) => String(item.id),
         schema: updateConfigSchema,
@@ -251,11 +263,18 @@ export default function App() {
 
   // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
-    q.from({ todoCollection }).keyBy(`@id`).select(`@id`, `@text`, `@completed`).orderBy(`@created_at`)
+    q
+      .from({ todoCollection: todoCollection as Collection<UpdateTodo> })
+      .keyBy(`@id`)
+      .orderBy(`@created_at`)
+      .select(`@id`, `@created_at`, `@text`, `@completed`)
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q.from({ configCollection }).keyBy(`@id`).select(`@id`, `@key`, `@value`)
+    q
+      .from({ configCollection: configCollection as Collection<UpdateConfig> })
+      .keyBy(`@id`)
+      .select(`@id`, `@key`, `@value`)
   )
 
   // Define mutations
@@ -449,33 +468,43 @@ export default function App() {
           </h1>
 
           {/* Collection Type Selector */}
-          <div className="mb-4 flex justify-center">
-            <div className="flex items-center bg-white rounded-lg shadow-md p-2">
-              <span className="mr-2 text-sm font-medium text-gray-700">
-                Collection Type:
-              </span>
-              <div className="flex space-x-2">
+          <div className="mb-6 flex justify-center">
+            <div className="flex flex-col bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+              <div className="px-4 py-2 bg-gray-100 border-b border-gray-200 text-center">
+                <span className="text-sm font-semibold text-gray-700">
+                  Collection Type
+                </span>
+              </div>
+              <div className="flex">
                 <button
                   onClick={() =>
                     handleCollectionTypeChange(CollectionType.Electric)
                   }
-                  className={`px-3 py-1 text-sm rounded-md ${collectionType === CollectionType.Electric
-                    ? `bg-blue-500 text-white`
-                    : `bg-gray-200 text-gray-700 hover:bg-gray-300`
-                    }`}
+                  className={`relative px-6 py-3 text-sm font-medium transition-all duration-200 ${
+                    collectionType === CollectionType.Electric
+                      ? `text-blue-600 bg-blue-50`
+                      : `text-gray-600 hover:bg-gray-50`
+                  }`}
                 >
-                  Electric
+                  <span>Electric</span>
+                  {collectionType === CollectionType.Electric && (
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-600"></span>
+                  )}
                 </button>
                 <button
                   onClick={() =>
                     handleCollectionTypeChange(CollectionType.Query)
                   }
-                  className={`px-3 py-1 text-sm rounded-md ${collectionType === CollectionType.Query
-                    ? `bg-blue-500 text-white`
-                    : `bg-gray-200 text-gray-700 hover:bg-gray-300`
-                    }`}
+                  className={`relative px-6 py-3 text-sm font-medium transition-all duration-200 ${
+                    collectionType === CollectionType.Query
+                      ? `text-blue-600 bg-blue-50`
+                      : `text-gray-600 hover:bg-gray-50`
+                  }`}
                 >
-                  Query
+                  <span>Query</span>
+                  {collectionType === CollectionType.Query && (
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-600"></span>
+                  )}
                 </button>
               </div>
             </div>
@@ -558,8 +587,9 @@ export default function App() {
                           className="absolute left-[12px] top-0 bottom-0 my-auto h-[40px] w-[40px] cursor-pointer"
                         />
                         <label
-                          className={`block leading-[1.2] py-[15px] px-[15px] text-2xl transition-colors ${todo.completed ? `text-[#d9d9d9] line-through` : ``
-                            }`}
+                          className={`block leading-[1.2] py-[15px] px-[15px] text-2xl transition-colors ${
+                            todo.completed ? `text-[#d9d9d9] line-through` : ``
+                          }`}
                         >
                           {todo.text}
                         </label>

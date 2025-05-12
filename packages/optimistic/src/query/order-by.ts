@@ -137,26 +137,50 @@ export function processOrderBy(
     }
     // if a and b are both booleans, compare them
     if (typeof a === `boolean` && typeof b === `boolean`) {
-      return a ? 1 : -1
+      return a === b ? 0 : a ? 1 : -1
     }
     // if a and b are both dates, compare them
     if (a instanceof Date && b instanceof Date) {
       return a.getTime() - b.getTime()
     }
     // if a and b are both null, return 0
-    if (a === null && b === null) {
+    if (a === null || b === null) {
       return 0
     }
+
     // if a and b are both arrays, compare them element by element
     if (Array.isArray(a) && Array.isArray(b)) {
-      for (let i = 0; i < a.length; i++) {
-        const result = comparator(a[i], b[i])
-        if (result !== 0) return result
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        // Get the values from the array
+        const aVal = a[i]
+        const bVal = b[i]
+
+        // Compare the values
+        let result: number
+
+        if (typeof aVal === `boolean` && typeof bVal === `boolean`) {
+          // Special handling for booleans - false comes before true
+          result = aVal === bVal ? 0 : aVal ? 1 : -1
+        } else if (typeof aVal === `number` && typeof bVal === `number`) {
+          // Numeric comparison
+          result = aVal - bVal
+        } else if (typeof aVal === `string` && typeof bVal === `string`) {
+          // String comparison
+          result = aVal.localeCompare(bVal)
+        } else {
+          // Default comparison using the general comparator
+          result = comparator(aVal, bVal)
+        }
+
+        if (result !== 0) {
+          return result
+        }
       }
-      return 0
+      // All elements are equal up to the minimum length
+      return a.length - b.length
     }
     // if a and b are both null/undefined, return 0
-    if ((a === null || a === undefined) && (b === null || b === undefined)) {
+    if (a == null && b == null) {
       return 0
     }
     // Fallback to string comparison for all other cases

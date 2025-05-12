@@ -32,7 +32,7 @@ export function useLiveQuery<
   }, [...deps, restart])
 
   const state = useStore(compiledQuery.results.derivedState)
-  let data: Array<ResultsFromContext<TResultContext>> | undefined
+  const data = useStore(compiledQuery.results.derivedArray)
 
   // Clean up on unmount
   useEffect(() => {
@@ -49,11 +49,6 @@ export function useLiveQuery<
 
   return {
     state,
-    get data() {
-      if (!data) {
-        data = Array.from(state.values())
-      }
-      return data
-    },
+    data,
   }
 }

@@ -1,4 +1,3 @@
-
 # TanStack DB
 
 <!-- ![TanStack DB Header](https://github.com/tanstack/db/raw/main/media/repo-header.png) -->
@@ -12,10 +11,10 @@ TanStack DB extends TanStack Query with collections, live queries and transactio
     <img alt="#TanStack" src="https://img.shields.io/twitter/url?color=%2308a0e9&label=%23TanStack&style=social&url=https%3A%2F%2Ftwitter.com%2Fintent%2Ftweet%3Fbutton_hashtag%3DTanStack" /></a>
   <a href="https://discord.gg/yjUNbvbraC">
     <img alt="" src="https://img.shields.io/badge/Discord-TanStack-%235865F2" /></a>
-  <a href="https://discord.electric-sql.com">
-    <img alt="" src="https://img.shields.io/badge/Discord-Electric-%235865F2" /></a>
   <a href="https://npmjs.com/package/@tanstack/db">
     <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" /></a>
+  <a href="#status">
+    <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status - Alpha"></a>
   <a href="https://github.com/tanstack/db/discussions">
     <img alt="Join the discussion on Github" src="https://img.shields.io/badge/Discussions-Chat%20now!-green" /></a>
   <a href="https://x.com/tan_stack">
@@ -49,49 +48,49 @@ TanStack DB is **backend agnostic** and **incrementally adoptable**:
 Sync data into collections:
 
 ```ts
-import { createElectricCollection } from '@tanstack/db-collections'
+import { createElectricCollection } from "@tanstack/db-collections"
 
 // You can configure any strategy you like to load data into
 // collections. Here we're using the Electric sync engine.
 export const todoCollection = createElectricCollection<Todo>({
-  id: 'todos',
+  id: "todos",
   streamOptions: {
-    url: 'https://example.com/v1/shape',
+    url: "https://example.com/v1/shape",
     params: {
-      table: 'todos'
-    }
+      table: "todos",
+    },
   },
-  primaryKey: ['id'],
-  schema: todoSchema // standard schema interface
+  primaryKey: ["id"],
+  schema: todoSchema, // standard schema interface
 })
 ```
 
 Bind live queries to your components:
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-optimistic'
+import { useLiveQuery } from "@tanstack/react-optimistic"
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery(query =>
+  const { data: todos } = useLiveQuery((query) =>
     // You can query across collections with where clauses,
     // joins, aggregates, etc. Here we're doing a simple query
     // for all the todos that aren't completed.
     query
       .from({ todoCollection })
-      .where('@completed', '=', false)
-      .select('@id', '@text')
-      .keyBy('@id')
+      .where("@completed", "=", false)
+      .select("@id", "@text")
+      .keyBy("@id")
   )
 
-  return <List items={ todos } />
+  return <List items={todos} />
 }
 ```
 
 Define a `mutationFn` to handle persistence of local writes:
 
 ```tsx
-import type { Collection } from '@tanstack/optimistic'
-import type { MutationFn, PendingMutation } from '@tanstack/react-optimistic'
+import type { Collection } from "@tanstack/optimistic"
+import type { MutationFn, PendingMutation } from "@tanstack/react-optimistic"
 
 const filterOutCollection = (mutation: PendingMutation) => {
   const { collection: _, ...rest } = mutation
@@ -103,12 +102,12 @@ const filterOutCollection = (mutation: PendingMutation) => {
 // generic function that POSTs them to the server.
 const mutationFn: MutationFn = async ({ transaction }) => {
   const payload = transaction.mutations.map(filterOutCollection)
-  const response = await fetch('https://api.example.com', {
-    method: 'POST',
+  const response = await fetch("https://api.example.com", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   })
 
   if (!response.ok) {
@@ -128,7 +127,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 Use it in your components:
 
 ```tsx
-import { useOptimisticMutation } from '@tanstack/react-optimistic'
+import { useOptimisticMutation } from "@tanstack/react-optimistic"
 
 const AddTodo = () => {
   const tx = useOptimisticMutation({ mutationFn })
@@ -139,13 +138,13 @@ const AddTodo = () => {
       // Instantly applies the local optimistic state.
       todoCollection.insert({
         id: uuid(),
-        text: '🔥 Make app faster',
-        completed: false
+        text: "🔥 Make app faster",
+        completed: false,
       })
     )
   }
 
-  return <Button onClick={ addTodo } />
+  return <Button onClick={addTodo} />
 }
 ```
 
@@ -183,10 +182,10 @@ There's also an example [React todo app](./examples/react/todo).
 ## ❓ FAQ
 
 **How is this different from TanStack Query?**<br />
-TanStack DB builds *on top of* TanStack Query. Use Query to fetch data; use DB to manage reactive local collections and mutations. They complement each other.
+TanStack DB builds _on top of_ TanStack Query. Use Query to fetch data; use DB to manage reactive local collections and mutations. They complement each other.
 
 **Do I need a sync engine like ElectricSQL?**<br />
-No. TanStack DB *is* designed to work with sync engines like [Electric](https://electric-sql.com) but *also* works with any backend: polling APIs, GraphQL, REST, or custom sync logic.
+No. TanStack DB _is_ designed to work with sync engines like [Electric](https://electric-sql.com) but _also_ works with any backend: polling APIs, GraphQL, REST, or custom sync logic.
 
 **What is a Collection? Is it like a DB table?**<br />
 Kind of. Collections are typed sets of objects, but they can also be filtered views or custom groupings. They're just JavaScript structures that you define and manage.
@@ -201,6 +200,10 @@ No. TanStack DB is not an ORM. Queries run entirely in the client against local 
       src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png"
   />
 </a>
+
+## Status
+
+Tanstack DB is currently an early preview release in alpha. It's still under active development. There will be bugs and the APIs are still liable to change.
 
 ## Contributing
 
