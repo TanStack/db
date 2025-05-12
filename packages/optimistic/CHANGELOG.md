@@ -1,5 +1,11 @@
 # @tanstack/optimistic
 
+## 0.0.4
+
+### Patch Changes
+
+- Add @tanstack/db-collections w/ initial ElectricCollection class ([#59](https://github.com/TanStack/db/pull/59))
+
 ## 0.0.3
 
 ### Patch Changes

@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/optimistic",
   "description": "Core optimistic updates library",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "dependencies": {
     "@electric-sql/d2ts": "^0.1.5",
     "@standard-schema/spec": "^1.0.0",

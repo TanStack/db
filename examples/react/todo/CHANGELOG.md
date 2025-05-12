@@ -1,5 +1,15 @@
 # examples/react/todo
 
+## 0.0.4
+
+### Patch Changes
+
+- Add @tanstack/db-collections w/ initial ElectricCollection class ([#59](https://github.com/TanStack/db/pull/59))
+
+- Updated dependencies [[`382783e`](https://github.com/TanStack/db/commit/382783e6d59e53a73a3374ad22424df896774170), [`efec9d7`](https://github.com/TanStack/db/commit/efec9d7eba4f348467192fb15996acaf89f8e880)]:
+  - @tanstack/db-collections@0.0.2
+  - @tanstack/react-optimistic@0.0.4
+
 ## 0.0.3
 
 ### Patch Changes
