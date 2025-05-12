@@ -1,5 +1,5 @@
 {
-  "name": "@tanstack/optimistic-monorepo",
+  "name": "@tanstack/db-monorepo",
   "description": "Optimistic UI library for sync engines",
   "version": "0.0.0",
   "author": "Kyle Mathews <mathews.kyle@gmail.com>",

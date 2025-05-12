@@ -13,7 +13,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@tanstack/store": ["../store/src"],
-      "@tanstack/optimistic": ["../optimistic/src"]
+      "@tanstack/db": ["../db/src"]
     }
   },
   "include": ["src/**/*", "tests", "vite.config.ts"],

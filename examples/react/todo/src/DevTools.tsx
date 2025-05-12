@@ -1,7 +1,7 @@
 import React, { useState } from "react"
-import { useCollections } from "@tanstack/react-optimistic"
+import { useCollections } from "@tanstack/react-db"
 import { DiffView } from "./DiffView"
-import type { Transaction } from "@tanstack/react-optimistic"
+import type { Transaction } from "@tanstack/react-db"
 
 export function DevTools() {
   const collections = useCollections()

@@ -5,7 +5,7 @@
   "dependencies": {
     "@tanstack/db-collections": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
-    "@tanstack/react-optimistic": "workspace:*",
+    "@tanstack/react-db": "workspace:*",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",

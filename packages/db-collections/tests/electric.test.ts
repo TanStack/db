@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createTransaction } from "@tanstack/optimistic"
+import { createTransaction } from "@tanstack/db"
 import { createElectricCollection } from "../src/electric"
 import type { ElectricCollection } from "../src/electric"
-import type { PendingMutation, Transaction } from "@tanstack/optimistic"
+import type { PendingMutation, Transaction } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
 
 // Mock the ShapeStream module

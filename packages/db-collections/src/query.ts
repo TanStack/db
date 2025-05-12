@@ -1,4 +1,4 @@
-import { Collection } from "@tanstack/optimistic"
+import { Collection } from "@tanstack/db"
 import { QueryObserver } from "@tanstack/query-core"
 import type {
   QueryClient,
@@ -6,7 +6,7 @@ import type {
   QueryKey,
   QueryObserverOptions,
 } from "@tanstack/query-core"
-import type { CollectionConfig, SyncConfig } from "@tanstack/optimistic"
+import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 
 export interface QueryCollectionConfig<
   TItem extends object,

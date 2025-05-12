@@ -4,8 +4,8 @@ import {
   isControlMessage,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
-import { Collection } from "@tanstack/optimistic"
-import type { CollectionConfig, SyncConfig } from "@tanstack/optimistic"
+import { Collection } from "@tanstack/db"
+import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 import type {
   ControlMessage,
   Message,
