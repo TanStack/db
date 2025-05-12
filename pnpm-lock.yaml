@@ -105,6 +105,9 @@ importers:
       '@tanstack/db-collections':
         specifier: workspace:*
         version: link:../../../packages/db-collections
+      '@tanstack/query-core':
+        specifier: ^5.75.7
+        version: 5.75.7
       '@tanstack/react-optimistic':
         specifier: workspace:*
         version: link:../../../packages/react-optimistic
@@ -205,6 +208,9 @@ importers:
       '@tanstack/optimistic':
         specifier: workspace:*
         version: link:../optimistic
+      '@tanstack/query-core':
+        specifier: ^5.75.7
+        version: 5.75.7
       '@tanstack/store':
         specifier: ^0.7.0
         version: 0.7.0
@@ -1587,6 +1593,9 @@ packages:
   '@tanstack/publish-config@0.1.0':
     resolution: {integrity: sha512-nI4F7/SpT6BMoigq1VmrrNe3A6Hsua9XcZNql+qzK2zJUOcKBRqMvC22n3eKcjsbZuWIFvkIC0ThsuBVYCKXfA==}
     engines: {node: '>=18'}
+
+  '@tanstack/query-core@5.75.7':
+    resolution: {integrity: sha512-4BHu0qnxUHOSnTn3ow9fIoBKTelh0GY08yn1IO9cxjBTsGvnxz1ut42CHZqUE3Vl/8FAjcHsj8RNJMoXvjgHEA==}
 
   '@tanstack/react-store@0.7.0':
     resolution: {integrity: sha512-S/Rq17HaGOk+tQHV/yrePMnG1xbsKZIl/VsNWnNXt4XW+tTY8dTlvpJH2ZQ3GRALsusG5K6Q3unAGJ2pd9W/Ng==}
@@ -5971,6 +5980,8 @@ snapshots:
       simple-git: 3.27.0
     transitivePeerDependencies:
       - supports-color
+
+  '@tanstack/query-core@5.75.7': {}
 
   '@tanstack/react-store@0.7.0(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
     dependencies:

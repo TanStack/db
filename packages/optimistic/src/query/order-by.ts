@@ -144,9 +144,10 @@ export function processOrderBy(
       return a.getTime() - b.getTime()
     }
     // if a and b are both null, return 0
-    if (a === null && b === null) {
+    if (a === null || b === null) {
       return 0
     }
+
     // if a and b are both arrays, compare them element by element
     if (Array.isArray(a) && Array.isArray(b)) {
       for (let i = 0; i < Math.min(a.length, b.length); i++) {
@@ -179,7 +180,7 @@ export function processOrderBy(
       return a.length - b.length
     }
     // if a and b are both null/undefined, return 0
-    if ((a === null || a === undefined) && (b === null || b === undefined)) {
+    if (a == null && b == null) {
       return 0
     }
     // Fallback to string comparison for all other cases
