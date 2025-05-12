@@ -72,7 +72,7 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
-  it(`should be able to query a collection`, async () => {
+  it.only(`should be able to query a collection`, async () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
@@ -118,6 +118,20 @@ describe(`Query Collections`, () => {
           .orderBy({ "@id": `asc` })
       )
     })
+    console.log(1)
+    console.log(result.current.collection)
+    console.log(2)
+    const { groupedResult } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ queryResult: result.current.collection })
+          .groupBy(`@name`)
+          .select(`@*`)
+      )
+    })
+    console.log(3)
+
+    console.log({ group: groupedResult.current })
 
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`3`)).toEqual({
