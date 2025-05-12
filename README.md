@@ -40,7 +40,7 @@ Built on a TypeScript implementation of differential dataflow ([#](https://githu
 
 TanStack DB is **backend agnostic** and **incrementally adoptable**:
 
-- plug in any backend: sync engines, polling APIs, GraphQL, custom sources
+- plug in any backend: sync engines, REST APIs, GraphQL, polling, custom sources
 - builds on [TanStack Store](https://tanstack.com/store), works with and alongside [TanStack Query](https://tanstack.com/query)
 
 ## 💥 Usage example
@@ -48,107 +48,69 @@ TanStack DB is **backend agnostic** and **incrementally adoptable**:
 Sync data into collections:
 
 ```ts
-import { createElectricCollection } from "@tanstack/db-collections"
+import { createQueryCollection } from '@tanstack/db-collections'
 
-// You can configure any strategy you like to load data into
-// collections. Here we're using the Electric sync engine.
-export const todoCollection = createElectricCollection<Todo>({
-  id: "todos",
-  streamOptions: {
-    url: "https://example.com/v1/shape",
-    params: {
-      table: "todos",
-    },
-  },
-  primaryKey: ["id"],
-  schema: todoSchema, // standard schema interface
+const todoCollection = createQueryCollection<TodoList>({
+  queryKey: ['todos'],
+  queryFn: async () => fetch('/api/todos'),
+  getPrimaryKey: item => item.id,
+  schema: todoSchema // any standard schema
 })
 ```
 
 Bind live queries to your components:
 
 ```tsx
-import { useLiveQuery } from "@tanstack/react-optimistic"
+import { useLiveQuery } from '@tanstack/react-optimistic'
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
-    // You can query across collections with where clauses,
-    // joins, aggregates, etc. Here we're doing a simple query
-    // for all the todos that aren't completed.
     query
       .from({ todoCollection })
-      .where("@completed", "=", false)
-      .select("@id", "@text")
-      .keyBy("@id")
+      .where('@completed', '=', false)
   )
 
   return <List items={todos} />
 }
 ```
 
-Define a `mutationFn` to handle persistence of local writes:
+Apply transactional writes with local optimistic state:
 
 ```tsx
-import type { Collection } from "@tanstack/optimistic"
-import type { MutationFn, PendingMutation } from "@tanstack/react-optimistic"
-
-const filterOutCollection = (mutation: PendingMutation) => {
-  const { collection: _, ...rest } = mutation
-
-  return rest
-}
-
-// You can handle mutations any way you like. Here, we define a
-// generic function that POSTs them to the server.
-const mutationFn: MutationFn = async ({ transaction }) => {
-  const payload = transaction.mutations.map(filterOutCollection)
-  const response = await fetch("https://api.example.com", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) {
-    // Throwing an error will rollback the optimistic state.
-    throw new Error(`HTTP Error: ${response.status}`)
-  }
-
-  const result = await response.json()
-
-  // Wait for the transaction to be synced back from the server
-  // before discarding the optimistic state.
-  const collection: Collection = transaction.mutations[0]!.collection
-  await collection.config.sync.awaitTxid(result.txid)
-}
-```
-
-Use it in your components:
-
-```tsx
-import { useOptimisticMutation } from "@tanstack/react-optimistic"
+import { useOptimisticMutation } from '@tanstack/react-optimistic'
 
 const AddTodo = () => {
-  const tx = useOptimisticMutation({ mutationFn })
+  const addTodo = useOptimisticMutation({
+    mutationFn: async ({ transaction }) => {
+      const { collection, ...newTodo } = transaction.mutations[0]!
 
-  const addTodo = () => {
-    // Triggers the mutationFn to sync data in the background.
-    tx.mutate(() =>
-      // Instantly applies the local optimistic state.
+      await axios.post('/api/todos', newTodo)
+      await collection.invalidate()
+    }
+  })
+
+  return <Button onClick={() =>
+    addTodo.mutate(() =>
       todoCollection.insert({
         id: uuid(),
-        text: "🔥 Make app faster",
-        completed: false,
+        text: '🔥 Make app faster',
+        completed: false
       })
     )
-  }
-
-  return <Button onClick={addTodo} />
+  } />
 }
 ```
 
-For transactional writes with local optimistic state and managed background sync.
+## 📚 Docs
+
+See the [Usage guide](./docs/index.md) for more details, including how to do:
+
+- real-time sync
+- cross-collection queries
+- fine-grained reactivity
+- different strategies for data loading and handling mutations
+
+There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/optimistic/tests).
 
 ## 🧱 Core concepts
 
@@ -172,12 +134,6 @@ For transactional writes with local optimistic state and managed background sync
 ```bash
 npm install @tanstack/db
 ```
-
-## 📚 Docs
-
-See the [Documentation](./docs/index.md) for usage guides and the API reference.
-
-There's also an example [React todo app](./examples/react/todo).
 
 ## ❓ FAQ
 
