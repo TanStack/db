@@ -3,6 +3,7 @@ import mitt from "mitt"
 import { Collection } from "../../src/collection.js"
 import { queryBuilder } from "../../src/query/query-builder.js"
 import { compileQuery } from "../../src/query/compiled-query.js"
+import { createTransaction } from "../../src/transactions.js"
 import type { PendingMutation } from "../../src/types.js"
 
 type Person = {
@@ -561,6 +562,144 @@ describe(`Query Collections`, () => {
       { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
       { id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
     ])
+  })
+
+  it(`optimistic state is dropped after commit`, async () => {
+    const emitter = mitt()
+
+    // Create person collection
+    const personCollection = new Collection<Person>({
+      id: `person-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-person`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Create issue collection
+    const issueCollection = new Collection<Issue>({
+      id: `issue-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-issue`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Issue,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync initial person data
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    // Sync initial issue data
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        key: issue.id,
+        type: `insert`,
+        changes: issue,
+      }))
+    )
+
+    // Create a query with a join between persons and issues
+    const query = queryBuilder()
+      .from({ issues: issueCollection })
+      .join({
+        type: `inner`,
+        from: { persons: personCollection },
+        on: [`@persons.id`, `=`, `@issues.userId`],
+      })
+      .select(`@issues.id`, `@issues.title`, `@persons.name`)
+      .keyBy(`@id`)
+
+    const compiledQuery = compileQuery(query)
+    compiledQuery.start()
+
+    const result = compiledQuery.results
+
+    await waitForChanges()
+
+    // Verify initial state
+    expect(result.state.size).toBe(3)
+
+    // Create a transaction to perform an optimistic mutation
+    const tx = createTransaction({
+      mutationFn: async () => {
+        emitter.emit(`sync-issue`, [
+          {
+            key: `4`,
+            type: `insert`,
+            changes: {
+              id: `4`,
+              title: `New Issue`,
+              description: `New Issue Description`,
+              userId: `1`,
+            },
+          },
+        ])
+        return Promise.resolve()
+      },
+    })
+    console.log(`initial state`, Object.fromEntries(result.state))
+
+    // Perform optimistic insert of a new issue
+    tx.mutate(() =>
+      issueCollection.insert(
+        {
+          id: `temp-key`,
+          title: `New Issue`,
+          description: `New Issue Description`,
+          userId: `1`,
+        },
+        { key: `temp-key` }
+      )
+    )
+
+    console.log(`after optimistic insert`, Object.fromEntries(result.state))
+
+    // Verify optimistic state is immediately reflected
+    expect(result.state.size).toBe(4)
+    expect(result.state.get(`temp-key`)).toEqual({
+      id: `temp-key`,
+      name: `John Doe`,
+      title: `New Issue`,
+    })
+
+    // Wait for the transaction to be committed
+    await tx.isPersisted.promise
+
+    console.log(`after commit`, Object.fromEntries(result.state))
+
+    expect(result.state.size).toBe(4)
+    expect(result.state.get(`4`)).toBeDefined()
   })
 })
 
