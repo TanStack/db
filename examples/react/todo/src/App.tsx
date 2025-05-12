@@ -167,7 +167,7 @@ const createTodoCollection = (type: CollectionType) => {
             updated_at: todo.updated_at ? new Date(todo.updated_at) : undefined,
           }))
         },
-        getPrimaryKey: (item) => String(item.id),
+        getId: (item) => String(item.id),
         schema: updateTodoSchema,
         queryClient,
       })
@@ -220,7 +220,7 @@ const createConfigCollection = (type: CollectionType) => {
               : undefined,
           }))
         },
-        getPrimaryKey: (item) => String(item.id),
+        getId: (item) => String(item.id),
         schema: updateConfigSchema,
         queryClient,
       })
