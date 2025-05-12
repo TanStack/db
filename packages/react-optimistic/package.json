@@ -17,7 +17,7 @@
   ],
   "packageManager": "pnpm@10.5.2",
   "dependencies": {
-    "@tanstack/optimistic": "workspace:*",
+    "@tanstack/db": "workspace:*",
     "@tanstack/react-store": "^0.7.0",
     "use-sync-external-store": "^1.2.0"
   },

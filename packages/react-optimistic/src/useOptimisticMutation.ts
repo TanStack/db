@@ -1,5 +1,5 @@
-import { createTransaction } from "@tanstack/optimistic"
-import type { Transaction, TransactionConfig } from "@tanstack/optimistic"
+import { createTransaction } from "@tanstack/db"
+import type { Transaction, TransactionConfig } from "@tanstack/db"
 
 export function useOptimisticMutation(config: TransactionConfig) {
   return {

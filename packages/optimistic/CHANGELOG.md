@@ -1,4 +1,4 @@
-# @tanstack/optimistic
+# @tanstack/db
 
 ## 0.0.3
 

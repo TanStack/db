@@ -177,7 +177,7 @@ The `mutationFn` is responsible for handling the local changes and processing th
 For example, this is a generic function that POSTs mutations to the server:
 
 ```tsx
-import type { Collection } from '@tanstack/optimistic'
+import type { Collection } from '@tanstack/db'
 import type { MutationFn, PendingMutation } from '@tanstack/react-db'
 
 const filterOutCollection = (mutation: PendingMutation) => {

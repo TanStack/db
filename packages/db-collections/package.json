@@ -3,7 +3,7 @@
   "description": "A collection for (aspirationally) every way of loading your data",
   "version": "0.0.1",
   "dependencies": {
-    "@tanstack/optimistic": "workspace:*",
+    "@tanstack/db": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
     "@tanstack/store": "^0.7.0"
   },

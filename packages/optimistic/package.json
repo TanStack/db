@@ -1,5 +1,5 @@
 {
-  "name": "@tanstack/optimistic",
+  "name": "@tanstack/db",
   "description": "Core optimistic updates library",
   "version": "0.0.3",
   "dependencies": {

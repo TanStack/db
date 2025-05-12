@@ -2,9 +2,9 @@
 export * from "./useOptimisticMutation"
 export * from "./useLiveQuery"
 
-// Re-export everything from @tanstack/optimistic
-export * from "@tanstack/optimistic"
+// Re-export everything from @tanstack/db
+export * from "@tanstack/db"
 
 // Re-export some stuff explicitly to ensure the type & value is exported
-export { Collection } from "@tanstack/optimistic"
-export { createTransaction } from "@tanstack/optimistic"
+export { Collection } from "@tanstack/db"
+export { createTransaction } from "@tanstack/db"
