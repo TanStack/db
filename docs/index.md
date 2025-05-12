@@ -1,23 +1,164 @@
 
-# TanStack DB - Usage
+# TanStack DB - Documentation
+
+Welcome to the TanStack DB documentation.
+
+TanStack DB is a reactive client store for building super fast apps on sync. It extends TanStack Query with collections, live queries and transactional mutators.
+
+## Contents
+
+- [Usage guide](#usage-guide) &mdash; understand the TanStack DB development model and how the pieces fit together
+- [API reference](#api-reference) &mdash; for the primitives and function interfaces
+- [Examples](#examples) &mdash; concrete, end-to-end examples for common usage patterns
+- [More info](#more-info) &mdash; where to find support and more information
+
+## Usage guide
+
+The key primitives of TanStack DB are:
+
+- [collections](#defining-collections) &mdash; typed sets of objects that can be populated with data
+- [live queries](#using-live-queries) &mdash; to query data from/across collections and bind it to your components
+- [transactional mutators](#making-local-writes) &mdash; to apply local writes with background sync and managed optimistic state
+
+```tsx
+// Define collections to load data into
+const todoCollection = createCollection({
+  // your config
+})
+
+const Todos = () => {
+  // Bind data using live queries
+  const { data: todos } = useLiveQuery((query) =>
+    query
+      .from({ todoCollection })
+      .where('@completed', '=', false)
+  )
+
+  // Update data using transactional mutators
+  const updateTodo = useOptimisticMutation({ mutationFn })
+  const complete = (todo) =>
+    // Invokes the mutationFn to handle the write
+    updateTodo.mutate(() =>
+      // Instantly applies optimistic state
+      todoCollection.update(todo, (draft) => {
+        draft.completed = true
+      })
+    )
+
+  return (
+    <ul>
+      {todos.map(todo =>
+        <li key={ todo.id } onClick={() => complete(todo) }>
+          { todo.text }
+        </li>
+      )}
+    </ul>
+  )
+}
+```
+
+### Defining collections
+
+Collections are typed sets of objects that can be populated with data.
+
+They're designed to de-couple:
+
+- loading data into your app; from
+- binding data to your components
+
+Collections can be populated in many ways, including:
+
+- fetching data, for example [from API endpoints using TanStack Query](#)
+- syncing data, for example [using a sync engine like ElectricSQL](#)
+- storing local data, for example [in-memory client data or UI state](#)
+- from live queries, creating [derived collections as materialised views](#)
+
+Once you have your data in collections, you can query across them to bind results to your components. This allows you to:
+
+1. load normalised data into collections and then de-normalise it through queries; simplifying your backend by avoiding the need for bespoke API endpoints that match your client
+2. join data from multiple sources; for example, syncing some data out of a database, fetching some other data from an external API and then joining these into a unified data model for your front-end code
+
+Your components don't need to know where the data in the collections they're working with came from.
+
+### Using live queries
+
+Live queries are used to query data out of collections and bind the results to state variables in your components. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the new result is automatically assigned to the state variable, triggering a re-render.
+
+TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update *incrementally* (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
+
+Live queries support joins across collections. In fact, live queries return new collections. It's collections all the way down.
+
+### Making local writes
+
+Collections support `insert`, `update` and `delete` operations. These operations must be made within the context of a transactional mutator. Rather than mutating the collection data directly, the collection internally treats its synced/loaded data as immutable and maintains a seperate set of local mutations as optimistic state.
+
+When live queries read from the collection, they see a local view that overlays the local optimistic mutations on-top-of the immutable synced data.
+
+In addition, the local mutations are passed to the async `mutationFn` that's passed in when creating the mutator.
+
+```ts
+const addTodo = useOptimisticMutation({ mutationFn })
+```
+
+This mutationFn is responsible for handling the writes, usually by sending them to a server or a database. TanStack DB waits for the function to resolve before then removing the optimistic state that was applied when the local writes was made.
+
+For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.create(newTodo)` and then calls `await collection.invalidate()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
+
+```ts
+const addTodo = useOptimisticMutation({
+  mutationFn: async ({ transaction }) => {
+    const { collection, modified: newTodo } = transaction.mutations[0]!
+
+    await api.todos.create(newTodo)
+    await collection.invalidate()
+  },
+})
+```
+
+### Uni-directional data flow
+
+This combines to support a model of uni-directional data flow, extending the redux/flux style state management pattern beyond the client, to take in the server as well:
+
+<figure>
+  <a href="./unidirectional-data-flow.png" target="_blank">
+    <img src="./unidirectional-data-flow.png" />
+  </a>
+</figure>
+
+With a kind-of instant inner loop of optimistic state, that becomes superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
+
+## API reference
 
 - [Collections](#collections) define and sync data into collections
-- [Live Queries](#live-queries) bind live queries to your components
-- [Transactions](#transactions) allow you to make and handle local mutations
+- [Live queries](#live-queries) bind live queries to your components
+- [Transactional mutators](#transactions) allow you to make and handle local mutations
 
-
-## Collections
+### Collections
 
 Collections are typed sets of objects that can be populated with data.
 
 There are currently two built-in collection types (implemented in [`../packages/db-collections`](../packages/db-collections)):
 
-1. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-2. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
+1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
+2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 
 You can also use the [base Collection](#base-collection) to define your own collection types.
 
-### ElectricCollection
+#### QueryCollection
+
+[TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `createQueryCollection` to fetch data into a collection using TanStack Query:
+
+```ts
+const todoCollection = createQueryCollection({
+  queryKey: ['todoItems'],
+  queryFn: async () => fetch('/api/todos'),
+  getPrimaryKey: (item) => item.id
+})
+```
+
+The collection will be populated with the query results.
+
+#### ElectricCollection
 
 [Electric](https://electric-sql.com) is a read-path sync engine for Postgres. It allows you to sync subsets of data out of a Postgres database, [through your API](https://electric-sql.com/blog/2024/11/21/local-first-with-your-existing-api), into a TanStack DB collection.
 
@@ -85,36 +226,15 @@ If you need more control over what data syncs into the collection, Electric allo
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
 
-### QueryCollection
-
-[TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `createQueryCollection` to fetch data into a collection using TanStack Query:
-
-```ts
-const todoCollection = createQueryCollection({
-  queryKey: ['todoItems'],
-  queryFn: async () => fetch('/api/todos'),
-  getId: (item) => item.id
-})
-```
-
-The collection will be populated with the query results.
-
-### base Collection
+#### base Collection
 
 There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
 
 See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
 
+### Live queries
 
-## Live Queries
-
-Live queries are used to query data out of [Collections](#collections) and bind the query results to state variables in your components.
-
-Live queries are reactive: when the underlying data changes, the new result is automatically assigned to the state variable, triggering a re-render.
-
-TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update incrementally (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond.
-
-### `useLiveQuery` hook
+#### `useLiveQuery` hook
 
 Use the `useLiveQuery` hook to bind data to React components:
 
@@ -160,15 +280,14 @@ const Todos = () => {
 
 See the [query-builder tests](../packages/db/tests/query/query-builder) for more usage examples.
 
-
-## Transactions
+### Transactional mutators
 
 Transactions allow you to:
 
 - batch and stage local changes across collections with immediate application of local optimistic updates
 - sync to the backend using flexible mutationFns with automatic rollbacks and management of optimistic state
 
-### mutationFn
+#### mutationFn
 
 Transactions are created with a `mutationFn`. You can define a single, generic `mutationFn` for your whole app. Or you can define collection or mutation specific functions.
 
@@ -215,7 +334,7 @@ The key requirments for the server, in this case are:
 1. to be able to parse and ingest the payload format
 2. to return the database transaction ID that the changes were applied under; this then allows the mutationFn to monitor the replication stream for that `txid`, at which point the local optimistic state is discarded
 
-### useOptimisticMutation
+#### useOptimisticMutation
 
 Use the `useOptimisticMutation` hook to create transactions in your components:
 
@@ -248,9 +367,9 @@ Transactions progress through the following states:
 3. `completed`: Transaction has been successfully persisted
 4. `failed`: An error was thrown while persisting or syncing back the Transaction
 
-### Write operations
+#### Write operations
 
-#### Insert
+##### Insert
 
 ```typescript
 // Insert a single item
@@ -266,7 +385,7 @@ insert([
 insert({ text: "Buy groceries" }, { key: "grocery-task" })
 ```
 
-#### Update
+##### Update
 
 We use a proxy to capture updates as immutable draft optimistic updates.
 
@@ -289,7 +408,7 @@ update(todo, { metadata: { reason: "user update" } }, (draft) => {
 })
 ```
 
-#### Delete
+##### Delete
 
 ```typescript
 // Delete a single item
