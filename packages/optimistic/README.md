@@ -1,153 +1,38 @@
-# @TanStack/optimistic
 
-A core library for creating fast optimistic updates with flexible backend support.
+# @tanstack/db
 
-## Installation
+**A reactive client store for building super fast apps on sync**
 
-```bash
-pnpm add @TanStack/optimistic
-```
+TanStack DB extends TanStack Query with collections, live queries and transactional mutations that keep your UI reactive, consistent and blazing fast 🔥
 
-## Overview
+<p>
+  <a href="https://x.com/intent/post?text=TanStack%20DB&url=https://tanstack.com/db">
+    <img alt="#TanStack" src="https://img.shields.io/twitter/url?color=%2308a0e9&label=%23TanStack&style=social&url=https%3A%2F%2Ftwitter.com%2Fintent%2Ftweet%3Fbutton_hashtag%3DTanStack" /></a>
+  <a href="#status">
+    <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status - Alpha"></a>
+  <a href="https://npmjs.com/package/@tanstack/db">
+    <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" /></a>
+  <a href="https://discord.gg/yjUNbvbraC">
+    <img alt="" src="https://img.shields.io/badge/Discord-TanStack-%235865F2" /></a>
+  <a href="https://github.com/tanstack/db/discussions">
+    <img alt="Join the discussion on Github" src="https://img.shields.io/badge/Discussions-Chat%20now!-green" /></a>
+  <a href="https://x.com/tan_stack">
+    <img alt="" src="https://img.shields.io/twitter/follow/tan_stack.svg?style=social&label=Follow @TanStack" /></a>
+</p>
 
-`@TanStack/optimistic` provides a robust solution for managing data synchronization between your frontend application and backend services. It offers:
+## 💥 Visit the [TanStack/db](https://github.com/TanStack/db) repo for docs and details!
 
-- **Optimistic Updates**: Apply changes instantly in the UI while syncing in the background
-- **Flexible Backend Support**: Works with any backend or sync engine
-- **Immutable Snapshots**: Create immutable snapshots of updates that can be persisted and rolled back
+- 🔥 **blazing fast query engine**<br />
+  for sub-millisecond live queries &mdash; even for complex queries with joins and aggregates
+- 🎯 **fine-grained reactivity**<br />
+  to minimize component re-rendering
+- 💪 **robust transaction primitives**<br />
+  for easy optimistic mutations with sync and lifecycle support
+- 🌟 **normalized data**<br />
+  to keep your backend simple
 
-## Core Concepts
+***
 
-### Collections
+### [Become a Sponsor!](https://github.com/sponsors/tannerlinsley/)
 
-Collections are the central concept in `@TanStack/optimistic`. A collection represents a set of data that can be synchronized, queried, and modified. Each collection:
-
-- Has a unique identifier
-- Contains data items
-- Provides CRUD operations (insert, update, delete)
-- Manages its own sync and persistence logic
-
-### Transactions
-
-All mutations in `@TanStack/optimistic` are handled through transactions. Transactions:
-
-- Group related changes together
-- Track the state of mutations (pending, persisting, completed, failed)
-- Support rollback in case of errors
-- Provide optimistic updates to the UI
-
-### Proxies
-
-The library uses proxies to create immutable snapshots and track changes:
-
-- Deep change tracking at any level of object nesting
-- Special handling for various types (Date, RegExp, Map, Set)
-- Circular reference handling with WeakMap cache
-
-## Framework Adapters
-
-This is a core package that provides the fundamental optimistic update functionality. For most applications, you'll want to use this package with a framework-specific adapter:
-
-- `@TanStack/react-optimistic` - React adapter with hooks for easy integration
-- Other framework adapters (coming soon)
-
-The framework adapters provide idiomatic ways to use the core optimistic update functionality within your chosen framework.
-
-## API Reference
-
-### Data Operations
-
-#### Insert
-
-```typescript
-// Insert a single item
-insert({ text: "Buy groceries", completed: false })
-
-// Insert multiple items
-insert([
-  { text: "Buy groceries", completed: false },
-  { text: "Walk dog", completed: false },
-])
-
-// Insert with custom key
-insert({ text: "Buy groceries" }, { key: "grocery-task" })
-```
-
-#### Update
-
-We use a proxy to capture updates as immutable draft optimistic updates.
-
-```typescript
-// Update a single item
-update(todo, (draft) => {
-  draft.completed = true
-})
-
-// Update multiple items
-update([todo1, todo2], (drafts) => {
-  drafts.forEach((draft) => {
-    draft.completed = true
-  })
-})
-
-// Update with metadata
-update(todo, { metadata: { reason: "user update" } }, (draft) => {
-  draft.text = "Updated text"
-})
-```
-
-#### Delete
-
-```typescript
-// Delete a single item
-delete todo
-
-// Delete multiple items
-delete [todo1, todo2]
-
-// Delete with metadata
-delete (todo, { metadata: { reason: "completed" } })
-```
-
-### Schema Validation
-
-Collections can optionally include a [standard schema](https://github.com/standard-schema/standard-schema) for data validation:
-
-```typescript
-const todoCollection = createCollection({
-  id: "todos",
-  sync: {
-    /* sync config */
-  },
-  mutationFn: {
-    /* mutation functions */
-  },
-  schema: todoSchema, // Standard schema interface
-})
-```
-
-## Transaction Management
-
-The library includes a simple yet powerful transaction management system. Transactions are created using the `createTransaction` function:
-
-```typescript
-const tx = createTransaction({
-  mutationFn: async ({ transaction }) => {
-    // Implement your mutation logic here
-    // This function is called when the transaction is committed
-  },
-})
-
-// Apply mutations within the transaction
-tx.mutate(() => {
-  // All collection operations (insert/update/delete) within this callback
-  // will be part of this transaction
-})
-```
-
-Transactions progress through several states:
-
-1. `pending`: Initial state when a transaction is created
-2. `persisting`: Transaction is being persisted to the backend
-3. `completed`: Transaction has been successfully persisted
-4. `failed`: An error was thrown while persisting or syncing back the Transaction
+Enjoy this library? Try the entire [TanStack](https://tanstack.com), including [TanStack Query](https://tanstack.com/query), [TanStack Store](https://tanstack.com/store), etc.
