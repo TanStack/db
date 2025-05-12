@@ -101,7 +101,7 @@ The collection will be populated with the query results.
 
 ### base Collection
 
-There is a base `Collection` class in [`../packages/optimistic/src/collection.ts`](../packages/optimistic/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
+There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
 
 See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
 
@@ -158,7 +158,7 @@ const Todos = () => {
 }
 ```
 
-See the [query-builder tests](../packages/optimistic/tests/query/query-builder) for more usage examples.
+See the [query-builder tests](../packages/db/tests/query/query-builder) for more usage examples.
 
 
 ## Transactions

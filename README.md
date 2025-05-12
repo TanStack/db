@@ -112,7 +112,7 @@ See the [Usage guide](./docs/index.md) for more details, including how to do:
 - fine-grained reactivity
 - different strategies for data loading and handling mutations
 
-There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/optimistic/tests).
+There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/db/tests).
 
 ## 🧱 Core concepts
 

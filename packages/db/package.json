@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db",
-  "description": "Core optimistic updates library",
-  "version": "0.0.3",
+  "description": "A reactive client store for building super fast apps on sync",
+  "version": "0.0.1",
   "dependencies": {
     "@electric-sql/d2ts": "^0.1.5",
     "@standard-schema/spec": "^1.0.0",
@@ -37,8 +37,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/optimistic.git",
-    "directory": "packages/optimistic"
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/db"
   },
   "homepage": "https://tanstack.com/optimistic",
   "keywords": [

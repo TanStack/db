@@ -39,10 +39,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/optimistic.git",
+    "url": "https://github.com/TanStack/db.git",
     "directory": "packages/db-collections"
   },
-  "homepage": "https://tanstack.com/optimistic",
+  "homepage": "https://tanstack.com/db",
   "keywords": [
     "optimistic",
     "typescript"
