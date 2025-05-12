@@ -1,4 +1,3 @@
-
 # @tanstack/db
 
 **A reactive client store for building super fast apps on sync**
@@ -31,7 +30,7 @@ TanStack DB extends TanStack Query with collections, live queries and transactio
 - 🌟 **normalized data**<br />
   to keep your backend simple
 
-***
+---
 
 ### [Become a Sponsor!](https://github.com/sponsors/tannerlinsley/)
 
