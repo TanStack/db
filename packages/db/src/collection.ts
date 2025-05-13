@@ -288,11 +288,15 @@ export class Collection<T extends object = Record<string, unknown>> {
         prevDepVals,
       }) => {
         const prevDerivedState = prevDepVals?.[0] ?? new Map<string, T>()
+        const prevOptimisticOperations = prevDepVals?.[1] ?? []
         const changedKeys = new Set(this.syncedKeys)
         optimisticOperations
           .flat()
           .filter((op) => op.isActive)
           .forEach((op) => changedKeys.add(op.key))
+        prevOptimisticOperations.flat().forEach((op) => {
+          changedKeys.add(op.key)
+        })
 
         if (changedKeys.size === 0) {
           return []
@@ -309,12 +313,17 @@ export class Collection<T extends object = Record<string, unknown>> {
           } else if (!prevDerivedState.has(key) && derivedState.has(key)) {
             changes.push({ type: `insert`, key, value: derivedState.get(key)! })
           } else if (prevDerivedState.has(key) && derivedState.has(key)) {
-            changes.push({
-              type: `update`,
-              key,
-              value: derivedState.get(key)!,
-              previousValue: prevDerivedState.get(key),
-            })
+            const value = derivedState.get(key)!
+            const previousValue = prevDerivedState.get(key)
+            if (value !== previousValue) {
+              // Comparing objects by reference as records are not mutated
+              changes.push({
+                type: `update`,
+                key,
+                value,
+                previousValue,
+              })
+            }
           }
         }
 

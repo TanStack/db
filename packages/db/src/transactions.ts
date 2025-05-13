@@ -1,3 +1,4 @@
+import { batch } from "@tanstack/store"
 import { createDeferred } from "./deferred"
 import type { Deferred } from "./deferred"
 import type {
@@ -178,8 +179,10 @@ export class Transaction {
     try {
       await this.mutationFn({ transaction: this })
 
-      this.setState(`completed`)
-      this.touchCollection()
+      batch(() => {
+        this.setState(`completed`)
+        this.touchCollection()
+      })
 
       this.isPersisted.resolve(this)
     } catch (error) {
