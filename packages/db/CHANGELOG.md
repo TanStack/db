@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.2
+
+### Patch Changes
+
+- Fixed an issue with injecting the optimistic state removal into the reactive live query. ([#78](https://github.com/TanStack/db/pull/78))
+
 ## 0.0.3
 
 ### Patch Changes
