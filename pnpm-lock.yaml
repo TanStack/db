@@ -105,9 +105,12 @@ importers:
       '@tanstack/db-collections':
         specifier: workspace:*
         version: link:../../../packages/db-collections
-      '@tanstack/react-optimistic':
+      '@tanstack/query-core':
+        specifier: ^5.75.7
+        version: 5.75.7
+      '@tanstack/react-db':
         specifier: workspace:*
-        version: link:../../../packages/react-optimistic
+        version: link:../../../packages/react-db
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -200,26 +203,7 @@ importers:
         specifier: ^6.2.2
         version: 6.2.2(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)
 
-  packages/db-collections:
-    dependencies:
-      '@tanstack/optimistic':
-        specifier: workspace:*
-        version: link:../optimistic
-      '@tanstack/store':
-        specifier: ^0.7.0
-        version: 0.7.0
-      typescript:
-        specifier: '>=4.7'
-        version: 5.8.2
-    devDependencies:
-      '@electric-sql/client':
-        specifier: 1.0.0
-        version: 1.0.0
-      '@vitest/coverage-istanbul':
-        specifier: ^3.0.9
-        version: 3.0.9(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
-
-  packages/optimistic:
+  packages/db:
     dependencies:
       '@electric-sql/d2ts':
         specifier: ^0.1.5
@@ -238,11 +222,33 @@ importers:
         specifier: ^3.0.9
         version: 3.0.9(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
 
-  packages/react-optimistic:
+  packages/db-collections:
     dependencies:
-      '@tanstack/optimistic':
+      '@tanstack/db':
         specifier: workspace:*
-        version: link:../optimistic
+        version: link:../db
+      '@tanstack/query-core':
+        specifier: ^5.75.7
+        version: 5.75.7
+      '@tanstack/store':
+        specifier: ^0.7.0
+        version: 0.7.0
+      typescript:
+        specifier: '>=4.7'
+        version: 5.8.2
+    devDependencies:
+      '@electric-sql/client':
+        specifier: 1.0.0
+        version: 1.0.0
+      '@vitest/coverage-istanbul':
+        specifier: ^3.0.9
+        version: 3.0.9(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
+
+  packages/react-db:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
       '@tanstack/react-store':
         specifier: ^0.7.0
         version: 0.7.0(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -1587,6 +1593,9 @@ packages:
   '@tanstack/publish-config@0.1.0':
     resolution: {integrity: sha512-nI4F7/SpT6BMoigq1VmrrNe3A6Hsua9XcZNql+qzK2zJUOcKBRqMvC22n3eKcjsbZuWIFvkIC0ThsuBVYCKXfA==}
     engines: {node: '>=18'}
+
+  '@tanstack/query-core@5.75.7':
+    resolution: {integrity: sha512-4BHu0qnxUHOSnTn3ow9fIoBKTelh0GY08yn1IO9cxjBTsGvnxz1ut42CHZqUE3Vl/8FAjcHsj8RNJMoXvjgHEA==}
 
   '@tanstack/react-store@0.7.0':
     resolution: {integrity: sha512-S/Rq17HaGOk+tQHV/yrePMnG1xbsKZIl/VsNWnNXt4XW+tTY8dTlvpJH2ZQ3GRALsusG5K6Q3unAGJ2pd9W/Ng==}
@@ -5971,6 +5980,8 @@ snapshots:
       simple-git: 3.27.0
     transitivePeerDependencies:
       - supports-color
+
+  '@tanstack/query-core@5.75.7': {}
 
   '@tanstack/react-store@0.7.0(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
     dependencies:

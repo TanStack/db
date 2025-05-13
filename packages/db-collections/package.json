@@ -1,9 +1,10 @@
 {
   "name": "@tanstack/db-collections",
   "description": "A collection for (aspirationally) every way of loading your data",
-  "version": "0.0.3",
+  "version": "0.0.1",
   "dependencies": {
-    "@tanstack/optimistic": "workspace:*",
+    "@tanstack/db": "workspace:*",
+    "@tanstack/query-core": "^5.75.7",
     "@tanstack/store": "^0.7.0"
   },
   "devDependencies": {
@@ -38,10 +39,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/optimistic.git",
+    "url": "https://github.com/TanStack/db.git",
     "directory": "packages/db-collections"
   },
-  "homepage": "https://tanstack.com/optimistic",
+  "homepage": "https://tanstack.com/db",
   "keywords": [
     "optimistic",
     "typescript"

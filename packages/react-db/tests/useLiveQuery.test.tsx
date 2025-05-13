@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { act, renderHook } from "@testing-library/react"
-import { Collection } from "@tanstack/optimistic"
+import { Collection } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type {
@@ -9,7 +9,7 @@ import type {
   InitialQueryBuilder,
   PendingMutation,
   Schema,
-} from "@tanstack/optimistic"
+} from "@tanstack/db"
 
 type Person = {
   id: string

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { preloadCollection } from "../src/useCollection"
-import type { CollectionConfig } from "@tanstack/optimistic"
+import { preloadCollection } from "../src/collection"
+import type { CollectionConfig } from "../src/types"
 
 describe(`preloadCollection`, () => {
   beforeEach(() => {
@@ -29,11 +29,6 @@ describe(`preloadCollection`, () => {
           })
 
           // We'll call commit later in the test
-        },
-      },
-      mutationFn: {
-        persist: async () => {
-          // No-op function for testing
         },
       },
     }
@@ -78,11 +73,6 @@ describe(`preloadCollection`, () => {
           })
         },
       },
-      mutationFn: {
-        persist: async () => {
-          // No-op function for testing
-        },
-      },
     }
 
     // First call should create the collection and wait for commit
@@ -113,11 +103,6 @@ describe(`preloadCollection`, () => {
             type: `insert`,
           })
           // Don't commit yet
-        },
-      },
-      mutationFn: {
-        persist: async () => {
-          // No-op function for testing
         },
       },
     }
