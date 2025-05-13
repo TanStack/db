@@ -36,6 +36,7 @@ const Todos = () => {
 
   // Make local writes using optimistic mutations
   const updateTodo = useOptimisticMutation({ mutationFn })
+
   const complete = (todo) =>
     // Invokes the mutationFn to handle the write
     updateTodo.mutate(() =>
@@ -68,11 +69,11 @@ Collections can be populated in many ways, including:
 - storing local data, for example [in-memory client data or UI state](#)
 - from live collection queries, creating [derived collections as materialised views](#)
 
-Once you have your data in collections, you can query across them to bind results to your components.
+Once you have your data in collections, you can query across them using live queries in your components.
 
 ### Using live queries
 
-Live queries are used to query data out of collections and bind the query results to a state variable in your components. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the new result is automatically assigned to the state variable, triggering a re-render.
+Live queries are used to query data out of collections. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the result is incrementally updated and returned from the query, triggering a re-render.
 
 TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update *incrementally* (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
 
@@ -157,7 +158,7 @@ If provided, this should be a [Standard Schema](https://standardschema.dev) comp
 const todoCollection = createQueryCollection({
   queryKey: ['todoItems'],
   queryFn: async () => fetch('/api/todos'),
-  getPrimaryKey: (item) => item.id,
+  getId: (item) => item.id,
   schema: todoSchema // any standard schema
 })
 ```
@@ -217,7 +218,7 @@ export const myPendingTodos = createElectricCollection<Todo>({
 ```
 
 > [!TIP]
-> Shape where clauses, used to filter the data you sync into `ElectricCollection`s, are different from the [live queries](#live-queries) you use to bind data to components.
+> Shape where clauses, used to filter the data you sync into `ElectricCollection`s, are different from the [live queries](#live-queries) you use to query data in components.
 >
 > Live queries are much more expressive than shapes, allowing you to query across collections, join, aggregate, etc. Shapes just contain filtered database tables and are used to populate the data in a collection.
 
@@ -266,7 +267,7 @@ See the existing implementations in [`../packages/db-collections`](../packages/d
 
 #### `useLiveQuery` hook
 
-Use the `useLiveQuery` hook to bind data to React components:
+Use the `useLiveQuery` hook to assign live query results to a state variable in your React components:
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
@@ -411,7 +412,7 @@ tx.commit()
 
 Transactions progress through the following states:
 
-1. `pending`: Initial state when a transaction is created
+1. `pending`: Initial state when a transaction is created and optimistic mutations can be applied
 2. `persisting`: Transaction is being persisted to the backend
 3. `completed`: Transaction has been successfully persisted
 4. `failed`: An error was thrown while persisting or syncing back the Transaction
