@@ -17,6 +17,7 @@ type Person = {
   age: number
   email: string
   isActive: boolean
+  team: string
 }
 
 type Issue = {
@@ -33,6 +34,7 @@ const initialPersons: Array<Person> = [
     age: 30,
     email: `john.doe@example.com`,
     isActive: true,
+    team: `team1`,
   },
   {
     id: `2`,
@@ -40,6 +42,7 @@ const initialPersons: Array<Person> = [
     age: 25,
     email: `jane.doe@example.com`,
     isActive: true,
+    team: `team2`,
   },
   {
     id: `3`,
@@ -47,6 +50,7 @@ const initialPersons: Array<Person> = [
     age: 35,
     email: `john.smith@example.com`,
     isActive: true,
+    team: `team1`,
   },
 ]
 
@@ -72,7 +76,7 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
-  it.only(`should be able to query a collection`, async () => {
+  it(`should be able to query a collection`, async () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
@@ -118,20 +122,6 @@ describe(`Query Collections`, () => {
           .orderBy({ "@id": `asc` })
       )
     })
-    console.log(1)
-    console.log(result.current.collection)
-    console.log(2)
-    const { groupedResult } = renderHook(() => {
-      return useLiveQuery((q) =>
-        q
-          .from({ queryResult: result.current.collection })
-          .groupBy(`@name`)
-          .select(`@*`)
-      )
-    })
-    console.log(3)
-
-    console.log({ group: groupedResult.current })
 
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`3`)).toEqual({
@@ -605,6 +595,116 @@ describe(`Query Collections`, () => {
 
     // Restore console.log
     console.log = originalConsoleLog
+  })
+
+  it(`should be able to query a result collection`, async () => {
+    const emitter = mitt()
+
+    // Create collection with mutation capability
+    const collection = new Collection<Person>({
+      id: `optimistic-changes-test`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Listen for sync events
+          emitter.on(`*`, (_, changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync from initial state
+    act(() => {
+      emitter.emit(
+        `sync`,
+        initialPersons.map((person) => ({
+          key: person.id,
+          type: `insert`,
+          changes: person,
+        }))
+      )
+    })
+
+    // Initial query
+    const { result } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(`@age`, `>`, 30)
+          .keyBy(`@id`)
+          .select(`@id`, `@name`, `@team`)
+          .orderBy({ "@id": `asc` })
+      )
+    })
+
+    // Grouped query derived from initial query
+    const { result: groupedResult } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ queryResult: result.current.collection })
+          .groupBy(`@team`)
+          .keyBy(`@team`)
+          .select(`@team`, { count: { COUNT: `@id` } })
+      )
+    })
+
+    // Verify initial grouped results
+    expect(groupedResult.current.state.size).toBe(1)
+    expect(groupedResult.current.state.get(`team1`)).toEqual({
+      team: `team1`,
+      count: 1,
+    })
+
+    // Insert two new users in different teams
+    act(() => {
+      emitter.emit(`sync`, [
+        {
+          key: `5`,
+          type: `insert`,
+          changes: {
+            id: `5`,
+            name: `Sarah Jones`,
+            age: 32,
+            email: `sarah.jones@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        },
+        {
+          key: `6`,
+          type: `insert`,
+          changes: {
+            id: `6`,
+            name: `Mike Wilson`,
+            age: 38,
+            email: `mike.wilson@example.com`,
+            isActive: true,
+            team: `team2`,
+          },
+        },
+      ])
+    })
+
+    await waitForChanges()
+
+    // Verify the grouped results include the new team members
+    expect(groupedResult.current.state.size).toBe(2)
+    expect(groupedResult.current.state.get(`team1`)).toEqual({
+      team: `team1`,
+      count: 2,
+    })
+    expect(groupedResult.current.state.get(`team2`)).toEqual({
+      team: `team2`,
+      count: 1,
+    })
   })
 })
 
