@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useStore } from "@tanstack/react-store"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import type {
+  Collection,
   Context,
   InitialQueryBuilder,
   QueryBuilder,
@@ -12,6 +13,7 @@ import type {
 export interface UseLiveQueryReturn<T extends object> {
   state: Map<string, T>
   data: Array<T>
+  collection: Collection<T>
 }
 
 export function useLiveQuery<
@@ -47,13 +49,9 @@ export function useLiveQuery<
     }
   }, [compiledQuery])
 
-  console.log({
-    state,
-    data,
-  })
-
   return {
     state,
     data,
+    collection: compiledQuery.results,
   }
 }
