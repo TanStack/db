@@ -47,6 +47,11 @@ export function useLiveQuery<
     }
   }, [compiledQuery])
 
+  console.log({
+    state,
+    data,
+  })
+
   return {
     state,
     data,

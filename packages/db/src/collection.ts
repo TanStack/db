@@ -298,7 +298,17 @@ export class Collection<T extends object = Record<string, unknown>> {
           changedKeys.add(op.key)
         })
 
+        console.log(`+++++++++++++++++++++++++`)
+        console.log({
+          prevDerivedState,
+          derivedState,
+          syncedKeys: this.syncedKeys,
+          optimisticKeys: optimisticOperations.flat().map((op) => op.key),
+          optimisticOperations,
+        })
+
         if (changedKeys.size === 0) {
+          console.log(`no changes`)
           return []
         }
 
@@ -328,6 +338,8 @@ export class Collection<T extends object = Record<string, unknown>> {
         }
 
         this.syncedKeys.clear()
+
+        console.log({ changes })
 
         return changes
       },
