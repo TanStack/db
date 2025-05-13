@@ -58,7 +58,7 @@ const todoCollection = createQueryCollection<Todo>({
 })
 ```
 
-Bind live queries to your components:
+Use live queries in your components:
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db"
