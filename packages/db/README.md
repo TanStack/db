@@ -2,7 +2,7 @@
 
 **A reactive client store for building super fast apps on sync**
 
-TanStack DB extends TanStack Query with collections, live queries and transactional mutators that keep your UI reactive, consistent and blazing fast 🔥
+TanStack DB extends TanStack Query with collections, live queries and optimistic mutations that keep your UI reactive, consistent and blazing fast 🔥
 
 <p>
   <a href="https://x.com/intent/post?text=TanStack%20DB&url=https://tanstack.com/db">

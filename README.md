@@ -4,7 +4,7 @@
 
 **A reactive client store for building super fast apps on sync**
 
-TanStack DB extends TanStack Query with collections, live queries and transactional mutators that keep your UI reactive, consistent and blazing fast 🔥
+TanStack DB extends TanStack Query with collections, live queries and optimistic mutations that keep your UI reactive, consistent and blazing fast 🔥
 
 <p>
   <a href="https://x.com/intent/post?text=TanStack%20DB&url=https://tanstack.com/db">
@@ -50,7 +50,7 @@ Sync data into collections:
 ```ts
 import { createQueryCollection } from "@tanstack/db-collections"
 
-const todoCollection = createQueryCollection<TodoList>({
+const todoCollection = createQueryCollection<Todo>({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getId: (item) => item.id,
