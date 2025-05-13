@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useStore } from "@tanstack/react-store"
-import { compileQuery, queryBuilder } from "@tanstack/optimistic"
+import { compileQuery, queryBuilder } from "@tanstack/db"
 import type {
   Collection,
   Context,
@@ -8,7 +8,7 @@ import type {
   QueryBuilder,
   ResultsFromContext,
   Schema,
-} from "@tanstack/optimistic"
+} from "@tanstack/db"
 
 export interface UseLiveQueryReturn<T extends object> {
   state: Map<string, T>

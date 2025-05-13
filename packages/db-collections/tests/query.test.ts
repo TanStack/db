@@ -9,7 +9,7 @@ interface TestItem {
   value?: number
 }
 
-const getPrimaryKey = (item: TestItem) => item.id
+const getId = (item: TestItem) => item.id
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -49,7 +49,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey,
+      getId,
     }
 
     const collection = createQueryCollection(config)
@@ -100,7 +100,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey,
+      getId,
     }
 
     const collection = createQueryCollection(config)
@@ -168,7 +168,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey,
+      getId,
       retry: 0, // Disable retries for this test case
     })
 
@@ -217,7 +217,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey,
+      getId,
     })
 
     // Wait for the query to execute
@@ -264,7 +264,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey,
+      getId,
     })
 
     // Wait for initial data to load
@@ -320,7 +320,7 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockRestore()
   })
 
-  it(`should use the provided getPrimaryKey function to identify items`, async () => {
+  it(`should use the provided getId function to identify items`, async () => {
     const queryKey = [`customKeyTest`]
 
     // Items with a non-standard ID field
@@ -331,15 +331,15 @@ describe(`QueryCollection`, () => {
 
     const queryFn = vi.fn().mockResolvedValue(items)
 
-    // Create a spy for the getPrimaryKey function
-    const getPrimaryKeySpy = vi.fn((item: any) => item.customId)
+    // Create a spy for the getId function
+    const getIdSpy = vi.fn((item: any) => item.customId)
 
     const collection = createQueryCollection({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
-      getPrimaryKey: getPrimaryKeySpy,
+      getId: getIdSpy,
     })
 
     // Wait for initial data to load
@@ -348,10 +348,10 @@ describe(`QueryCollection`, () => {
       expect(collection.state.size).toBe(items.length)
     })
 
-    // Verify getPrimaryKey was called for each item
-    expect(getPrimaryKeySpy).toHaveBeenCalledTimes(items.length)
+    // Verify getId was called for each item
+    expect(getIdSpy).toHaveBeenCalledTimes(items.length)
     items.forEach((item) => {
-      expect(getPrimaryKeySpy).toHaveBeenCalledWith(item)
+      expect(getIdSpy).toHaveBeenCalledWith(item)
     })
 
     // Verify items are stored with the custom keys
@@ -368,7 +368,7 @@ describe(`QueryCollection`, () => {
     ]
 
     // Reset the spy to track new calls
-    getPrimaryKeySpy.mockClear()
+    getIdSpy.mockClear()
     queryFn.mockResolvedValueOnce(updatedItems)
 
     // Trigger a refetch
@@ -380,11 +380,11 @@ describe(`QueryCollection`, () => {
       expect(collection.state.size).toBe(updatedItems.length)
     })
 
-    // Verify getPrimaryKey was called at least once for each item
+    // Verify getId was called at least once for each item
     // It may be called multiple times per item during the diffing process
-    expect(getPrimaryKeySpy).toHaveBeenCalled()
+    expect(getIdSpy).toHaveBeenCalled()
     updatedItems.forEach((item) => {
-      expect(getPrimaryKeySpy).toHaveBeenCalledWith(item)
+      expect(getIdSpy).toHaveBeenCalledWith(item)
     })
 
     // Verify the state reflects the changes

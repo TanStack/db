@@ -53,7 +53,7 @@ import { createQueryCollection } from "@tanstack/db-collections"
 const todoCollection = createQueryCollection<TodoList>({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
-  getPrimaryKey: (item) => item.id,
+  getId: (item) => item.id,
   schema: todoSchema, // any standard schema
 })
 ```
@@ -61,7 +61,7 @@ const todoCollection = createQueryCollection<TodoList>({
 Bind live queries to your components:
 
 ```tsx
-import { useLiveQuery } from "@tanstack/react-optimistic"
+import { useLiveQuery } from "@tanstack/react-db"
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
@@ -75,7 +75,7 @@ const Todos = () => {
 Apply transactional writes with local optimistic state:
 
 ```tsx
-import { useOptimisticMutation } from "@tanstack/react-optimistic"
+import { useOptimisticMutation } from "@tanstack/react-db"
 
 const AddTodo = () => {
   const addTodo = useOptimisticMutation({
@@ -112,7 +112,7 @@ See the [Usage guide](./docs/index.md) for more details, including how to do:
 - fine-grained reactivity
 - different strategies for data loading and handling mutations
 
-There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/optimistic/tests).
+There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/db/tests).
 
 ## 🧱 Core concepts
 

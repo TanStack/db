@@ -1,4 +1,4 @@
-import { Collection } from "@tanstack/optimistic"
+import { Collection } from "@tanstack/db"
 import { QueryObserver } from "@tanstack/query-core"
 import type {
   QueryClient,
@@ -6,7 +6,7 @@ import type {
   QueryKey,
   QueryObserverOptions,
 } from "@tanstack/query-core"
-import type { CollectionConfig, SyncConfig } from "@tanstack/optimistic"
+import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 
 export interface QueryCollectionConfig<
   TItem extends object,
@@ -15,7 +15,7 @@ export interface QueryCollectionConfig<
 > extends Omit<CollectionConfig<TItem>, `sync`> {
   queryKey: TQueryKey
   queryFn: (context: QueryFunctionContext<TQueryKey>) => Promise<Array<TItem>>
-  getPrimaryKey: (item: TItem) => string
+  getId: (item: TItem) => string
 
   enabled?: boolean
   refetchInterval?: QueryObserverOptions<
@@ -71,11 +71,11 @@ export class QueryCollection<
     if (!queryClient)
       throw new Error(`[QueryCollection] queryClient must be provided.`)
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (!baseCollectionConfig.getPrimaryKey) {
-      throw new Error(`[QueryCollection] getPrimaryKey must be provided.`)
+    if (!baseCollectionConfig.getId) {
+      throw new Error(`[QueryCollection] getId must be provided.`)
     }
 
-    const getPrimaryKeyFn = baseCollectionConfig.getPrimaryKey
+    const getIdFn = baseCollectionConfig.getId
 
     const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
       const { begin, write, commit, collection } = params
@@ -124,7 +124,7 @@ export class QueryCollection<
           const newItemsMap = new Map<string, TItem>()
           newItemsArray.forEach((item) => {
             try {
-              const key = getPrimaryKeyFn(item)
+              const key = getIdFn(item)
               newItemsMap.set(key, item)
             } catch (e) {
               console.error(

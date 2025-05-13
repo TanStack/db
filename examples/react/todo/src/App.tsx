@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { useLiveQuery, useOptimisticMutation } from "@tanstack/react-optimistic"
+import { useLiveQuery, useOptimisticMutation } from "@tanstack/react-db"
 import {
   createElectricCollection,
   createQueryCollection,
@@ -11,7 +11,7 @@ import type {
   ElectricCollection,
   QueryCollection,
 } from "@tanstack/db-collections"
-import type { Collection, PendingMutation } from "@tanstack/react-optimistic"
+import type { Collection, PendingMutation } from "@tanstack/react-db"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
@@ -167,7 +167,7 @@ const createTodoCollection = (type: CollectionType) => {
             updated_at: todo.updated_at ? new Date(todo.updated_at) : undefined,
           }))
         },
-        getPrimaryKey: (item) => String(item.id),
+        getId: (item) => String(item.id),
         schema: updateTodoSchema,
         queryClient,
       })
@@ -220,7 +220,7 @@ const createConfigCollection = (type: CollectionType) => {
               : undefined,
           }))
         },
-        getPrimaryKey: (item) => String(item.id),
+        getId: (item) => String(item.id),
         schema: updateConfigSchema,
         queryClient,
       })
