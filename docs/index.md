@@ -17,8 +17,8 @@ TanStack DB is a reactive client store for building super fast apps on sync. It 
 TanStack DB works by:
 
 - [defining collections](#defining-collections) typed sets of objects that can be populated with data
-- [using live queries](#using-live-queries) to query data from/across collections and bind it to your components
-- [making local writes](#making-local-writes) with transactional mutators that manage optimistic state and background sync
+- [using live queries](#using-live-queries) to query data from/across collections
+- [making optimistic mutations](#making-optimistic-mutations) with transactional mutators
 
 ```tsx
 // Define collections to load data into
@@ -66,12 +66,13 @@ Collections can be populated in many ways, including:
 - fetching data, for example [from API endpoints using TanStack Query](#)
 - syncing data, for example [using a sync engine like ElectricSQL](#)
 - storing local data, for example [in-memory client data or UI state](#)
+- from live collection queries, creating [derived collections as materialised views](#)
 
 Once you have your data in collections, you can query across them to bind results to your components.
 
 ### Using live queries
 
-Live queries are used to query data out of collections and bind the results to state variables in your components. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the new result is automatically assigned to the state variable, triggering a re-render.
+Live queries are used to query data out of collections and bind the query results to a state variable in your components. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the new result is automatically assigned to the state variable, triggering a re-render.
 
 TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update *incrementally* (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
 
@@ -113,6 +114,8 @@ const updateTodo = useOptimisticMutation({
 })
 ```
 
+The collection blocks applying updates while this function runs. The optimistic state is dropped at the exact same time as the backend state is applied. There's never any flicker in the UI.
+
 ### Uni-directional data flow
 
 This combines to support a model of uni-directional data flow, extending the redux/flux style state management pattern beyond the client, to take in the server as well:
@@ -123,6 +126,9 @@ This combines to support a model of uni-directional data flow, extending the red
   </a>
 </figure>
 
+With an instant inner loop of optimistic state, superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
+
+
 ## API reference
 
 - [Collections](#collections) define and sync data into collections
@@ -131,12 +137,16 @@ This combines to support a model of uni-directional data flow, extending the red
 
 ### Collections
 
-There are currently two built-in collection types (implemented in [`../packages/db-collections`](../packages/db-collections)):
+There are a number of built-in collection types implemented in [`../packages/db-collections`](../packages/db-collections):
 
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
+3. [WIP] [`LocalCollection`](#localcollection) for in-memory client data or UI state
 
-You can also use the [base Collection](#base-collection) to define your own collection types.
+You can also use:
+
+- use live collection queries to [derive collections from other collections](#derived-collections)
+- the [base Collection](#base-collection) to define your own collection types
 
 #### QueryCollection
 
@@ -219,6 +229,37 @@ export const myPendingTodos = createElectricCollection<Todo>({
 If you need more control over what data syncs into the collection, Electric allows you to [use your API](https://electric-sql.com/blog/2024/11/21/local-first-with-your-existing-api#filtering) as a proxy to both authorise and filter data.
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
+
+#### LocalCollection
+
+This is WIP. Track progress at [#79](https://github.com/TanStack/db/issues/79).
+
+#### Derived collections
+
+Live queries return collections. This allows you to derive collections from other collections.
+
+For example:
+
+```ts
+import { compileQuery, queryBuilder } from "@tanstack/db"
+
+// Imagine you have a collections of todos.
+const todoCollection = createCollection({
+  // config
+})
+
+// You can derive a new collection that's a subset of it.
+const query = queryBuilder()
+  .from({ todoCollection })
+  .where('@completed', '=', true)
+
+const compiled = compileQuery(query)
+compiled.start()
+
+const completedTodoCollection = compiledQuery.results()
+```
+
+This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
 
 #### base Collection
 
@@ -330,17 +371,17 @@ The key requirments for the server, in this case are:
 
 #### useOptimisticMutation
 
-Use the `useOptimisticMutation` hook to create transactions in your components:
+Use the `useOptimisticMutation` hook to mutate data in your components:
 
 ```tsx
 import { useOptimisticMutation } from '@tanstack/react-db'
 
-const AddTodo = () => {
-  const tx = useOptimisticMutation({ mutationFn })
+const Todo = () => {
+  const addTodo = useOptimisticMutation({ mutationFn })
 
-  const addTodo = () => {
+  const handleClick = () => {
     // Triggers the mutationFn to sync data in the background.
-    tx.mutate(() =>
+    addTodo.mutate(() =>
       // Instantly applies the local optimistic state.
       todoCollection.insert({
         id: uuid(),
@@ -350,8 +391,26 @@ const AddTodo = () => {
     )
   }
 
-  return <Button onClick={ addTodo } />
+  return <Button onClick={ handleClick } />
 }
+```
+
+Transaction lifecycles can be manually controlled:
+
+```ts
+const addTodo = useOptimisticMutation({ mutationFn })
+
+const tx = addTodo.createTransaction()
+
+tx.mutate(() => {}
+
+// user reviews change
+
+// Another mutation
+tx.mutate(() => {}
+
+// Mutation is approved
+tx.commit()
 ```
 
 Transactions progress through the following states:
