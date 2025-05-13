@@ -579,7 +579,7 @@ describe(`Collection.subscribeChanges`, () => {
     const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string
     }>
-    expect(updateChanges).toHaveLength(4) // FIXME: should be 1
+    expect(updateChanges).toHaveLength(1)
 
     const updateChange = updateChanges[0]! as ChangeMessage<{
       value: string

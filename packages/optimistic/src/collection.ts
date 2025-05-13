@@ -313,12 +313,17 @@ export class Collection<T extends object = Record<string, unknown>> {
           } else if (!prevDerivedState.has(key) && derivedState.has(key)) {
             changes.push({ type: `insert`, key, value: derivedState.get(key)! })
           } else if (prevDerivedState.has(key) && derivedState.has(key)) {
-            changes.push({
-              type: `update`,
-              key,
-              value: derivedState.get(key)!,
-              previousValue: prevDerivedState.get(key),
-            })
+            const value = derivedState.get(key)!
+            const previousValue = prevDerivedState.get(key)
+            if (value !== previousValue) {
+              // Comparing objects by reference as records are not mutated
+              changes.push({
+                type: `update`,
+                key,
+                value,
+                previousValue,
+              })
+            }
           }
         }
 
