@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { act, renderHook } from "@testing-library/react"
-import { Collection } from "@tanstack/db"
+import { Collection, createTransaction } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type {
@@ -591,6 +591,182 @@ describe(`Query Collections`, () => {
 
     // Restore console.log
     console.log = originalConsoleLog
+  })
+
+  it(`optimistic state is dropped after commit`, async () => {
+    const emitter = mitt()
+    // Track renders and states
+    const renderStates: Array<{
+      stateSize: number
+      hasTempKey: boolean
+      hasPermKey: boolean
+      timestamp: number
+    }> = []
+
+    // Create person collection
+    const personCollection = new Collection<Person>({
+      id: `person-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-person`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Create issue collection
+    const issueCollection = new Collection<Issue>({
+      id: `issue-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-issue`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Issue,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync initial person data
+    act(() => {
+      emitter.emit(
+        `sync-person`,
+        initialPersons.map((person) => ({
+          key: person.id,
+          type: `insert`,
+          changes: person,
+        }))
+      )
+    })
+
+    // Sync initial issue data
+    act(() => {
+      emitter.emit(
+        `sync-issue`,
+        initialIssues.map((issue) => ({
+          key: issue.id,
+          type: `insert`,
+          changes: issue,
+        }))
+      )
+    })
+
+    // Render the hook with a query that joins persons and issues
+    const { result } = renderHook(() => {
+      const queryResult = useLiveQuery((q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({
+            type: `inner`,
+            from: { persons: personCollection },
+            on: [`@persons.id`, `=`, `@issues.userId`],
+          })
+          .select(`@issues.id`, `@issues.title`, `@persons.name`)
+          .keyBy(`@id`)
+      )
+
+      // Track each render state
+      useEffect(() => {
+        renderStates.push({
+          stateSize: queryResult.state.size,
+          hasTempKey: queryResult.state.has(`temp-key`),
+          hasPermKey: queryResult.state.has(`4`),
+          timestamp: Date.now(),
+        })
+      }, [queryResult.state])
+
+      return queryResult
+    })
+
+    await waitForChanges()
+
+    // Verify initial state
+    expect(result.current.state.size).toBe(3)
+
+    // Reset render states array for clarity in the remaining test
+    renderStates.length = 0
+
+    // Create a transaction to perform an optimistic mutation
+    const tx = createTransaction({
+      mutationFn: async () => {
+        act(() => {
+          emitter.emit(`sync-issue`, [
+            {
+              key: `4`,
+              type: `insert`,
+              changes: {
+                id: `4`,
+                title: `New Issue`,
+                description: `New Issue Description`,
+                userId: `1`,
+              },
+            },
+          ])
+        })
+        return Promise.resolve()
+      },
+    })
+
+    // Perform optimistic insert of a new issue
+    act(() => {
+      tx.mutate(() =>
+        issueCollection.insert(
+          {
+            id: `temp-key`,
+            title: `New Issue`,
+            description: `New Issue Description`,
+            userId: `1`,
+          },
+          { key: `temp-key` }
+        )
+      )
+    })
+
+    // Verify optimistic state is immediately reflected
+    expect(result.current.state.size).toBe(4)
+    expect(result.current.state.get(`temp-key`)).toEqual({
+      id: `temp-key`,
+      name: `John Doe`,
+      title: `New Issue`,
+    })
+
+    // Wait for the transaction to be committed
+    await tx.isPersisted.promise
+    await waitForChanges()
+
+    // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
+    const hadFlicker = renderStates.some(
+      (state) => !state.hasTempKey && !state.hasPermKey && state.stateSize === 3
+    )
+
+    expect(hadFlicker).toBe(false)
+
+    // Verify the temporary key is replaced by the permanent one
+    expect(result.current.state.size).toBe(4)
+    expect(result.current.state.get(`temp-key`)).toBeUndefined()
+    expect(result.current.state.get(`4`)).toEqual({
+      id: `4`,
+      name: `John Doe`,
+      title: `New Issue`,
+    })
   })
 })
 
