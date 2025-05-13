@@ -81,7 +81,7 @@ Live queries support joins across collections. This allows you to:
 1. load normalised data into collections and then de-normalise it through queries; simplifying your backend by avoiding the need for bespoke API endpoints that match your client
 2. join data from multiple sources; for example, syncing some data out of a database, fetching some other data from an external API and then joining these into a unified data model for your front-end code
 
-### Making local writes
+### Making optimistic mutations
 
 Collections support `insert`, `update` and `delete` operations. These operations must be made within the context of a transactional mutator:
 
