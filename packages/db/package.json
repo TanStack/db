@@ -40,7 +40,7 @@
     "url": "https://github.com/TanStack/db.git",
     "directory": "packages/db"
   },
-  "homepage": "https://tanstack.com/optimistic",
+  "homepage": "https://tanstack.com/db",
   "keywords": [
     "optimistic",
     "typescript"
