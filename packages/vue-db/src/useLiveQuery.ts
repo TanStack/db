@@ -1,4 +1,4 @@
-import { computed, onMounted, watch } from "vue"
+import { computed, watch } from "vue"
 import { useStore } from "@tanstack/vue-store"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import type {
@@ -31,7 +31,7 @@ export function useLiveQuery<
 
     const query = queryFn(queryBuilder())
     const compiled = compileQuery(query)
-
+    compiled.start()
     return compiled
   })
 
@@ -42,21 +42,15 @@ export function useLiveQuery<
     return useStore(compiledQuery.value.results.derivedArray).value
   })
 
-  watch(
-    compiledQuery,
-    (newQuery, oldQuery, onInvalidate) => {
+  watch(compiledQuery, (newQuery, oldQuery, onInvalidate) => {
+    if (newQuery.state === `stopped`) {
       newQuery.start()
+    }
 
-      if (newQuery.state === `stopped`) {
-        newQuery.start()
-      }
-
-      onInvalidate(() => {
-        oldQuery?.stop()
-      })
-    },
-    { immediate: true }
-  )
+    onInvalidate(() => {
+      oldQuery.stop()
+    })
+  })
 
   return {
     state,

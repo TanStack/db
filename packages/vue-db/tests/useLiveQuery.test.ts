@@ -413,16 +413,13 @@ describe(`Query Collections`, () => {
 
     const minAge = ref(30)
 
-    const { state } = useLiveQuery(
-      (q) => {
-        return q
-          .from({ collection })
-          .where(`@age`, `>`, minAge.value)
-          .keyBy(`@id`)
-          .select(`@id`, `@name`, `@age`)
-      },
-      [minAge]
-    )
+    const { state } = useLiveQuery((q) => {
+      return q
+        .from({ collection })
+        .where(`@age`, `>`, minAge.value)
+        .keyBy(`@id`)
+        .select(`@id`, `@name`, `@age`)
+    })
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
@@ -500,17 +497,15 @@ describe(`Query Collections`, () => {
       queryFn: (q: InitialQueryBuilder<Context<Schema>>) => any,
       deps: Array<Ref<unknown>>
     ): T {
-      const joinedDeps = computed(() => deps.map((dep) => dep.value).join(`,`))
-      console.log(`Creating new query with deps`, joinedDeps.value)
       const result = useLiveQuery(queryFn, deps)
 
-      // Will be called during cleanup
       watch(
-        joinedDeps,
+        () => deps.map((dep) => dep.value).join(`,`),
         (updatedDeps, _, fn) => {
+          console.log(`Creating new query with deps`, updatedDeps)
           fn(() => console.log(`Stopping query with deps`, updatedDeps))
         },
-        { immediate: false }
+        { immediate: true }
       )
 
       return result as T
@@ -551,12 +546,12 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Old query should be stopped and new query created
-    // expect(
-    //   logCalls.some((call) => call.includes(`Stopping query with deps 30`))
-    // ).toBe(true)
-    // expect(
-    //   logCalls.some((call) => call.includes(`Creating new query with deps 25`))
-    // ).toBe(true)
+    expect(
+      logCalls.some((call) => call.includes(`Stopping query with deps 30`))
+    ).toBe(true)
+    expect(
+      logCalls.some((call) => call.includes(`Creating new query with deps 25`))
+    ).toBe(true)
 
     // Restore console.log
     console.log = originalConsoleLog
