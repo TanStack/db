@@ -1,4 +1,4 @@
-import { computed, watch } from "vue"
+import { computed, toValue, watch } from "vue"
 import { useStore } from "@tanstack/vue-store"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import type {
@@ -9,7 +9,7 @@ import type {
   ResultsFromContext,
   Schema,
 } from "@tanstack/db"
-import type { ComputedRef, Ref } from "vue"
+import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
   state: ComputedRef<Map<string, T>>
@@ -23,11 +23,11 @@ export function useLiveQuery<
   queryFn: (
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>,
-  deps: Array<Ref<unknown>> = []
+  deps: Array<MaybeRefOrGetter<unknown>> = []
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
   const compiledQuery = computed(() => {
     // Just reference deps to make computed reactive to them
-    deps.forEach((dep) => dep.value)
+    deps.forEach((dep) => toValue(dep))
 
     const query = queryFn(queryBuilder())
     const compiled = compileQuery(query)
