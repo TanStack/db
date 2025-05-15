@@ -1,4 +1,4 @@
-import { onWatcherCleanup, shallowRef, toValue, watchEffect } from "vue"
+import { onWatcherCleanup, shallowRef, watchEffect } from "vue"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import { shallow } from "./useStore"
 import type {
@@ -22,8 +22,7 @@ export function useLiveQuery<
 >(
   queryFn: (
     q: InitialQueryBuilder<Context<Schema>>
-  ) => QueryBuilder<TResultContext>,
-  deps: () => Array<unknown> = () => []
+  ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
   const results = shallowRef() as Ref<
     ReturnType<typeof compileQuery<TResultContext>>[`results`]
@@ -35,8 +34,6 @@ export function useLiveQuery<
   const data = shallowRef() as Ref<Array<ResultsFromContext<TResultContext>>>
 
   watchEffect(() => {
-    toValue(deps)
-
     const query = queryFn(queryBuilder())
     const compiled = compileQuery(query)
     compiled.start()

@@ -414,16 +414,13 @@ describe(`Query Collections`, () => {
 
     const minAge = ref(30)
 
-    const { state } = useLiveQuery(
-      (q) => {
-        return q
-          .from({ collection })
-          .where(`@age`, `>`, minAge.value)
-          .keyBy(`@id`)
-          .select(`@id`, `@name`, `@age`)
-      },
-      () => [minAge.value]
-    )
+    const { state } = useLiveQuery((q) => {
+      return q
+        .from({ collection })
+        .where(`@age`, `>`, minAge.value)
+        .keyBy(`@id`)
+        .select(`@id`, `@name`, `@age`)
+    })
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
@@ -501,7 +498,7 @@ describe(`Query Collections`, () => {
       queryFn: (q: InitialQueryBuilder<Context<Schema>>) => any,
       deps: () => Array<unknown>
     ): T {
-      const result = useLiveQuery(queryFn, deps)
+      const result = useLiveQuery(queryFn)
 
       watchEffect(() => {
         const updatedDeps = deps().join(`,`)
