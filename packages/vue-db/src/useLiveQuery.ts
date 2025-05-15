@@ -9,7 +9,7 @@ import type {
   ResultsFromContext,
   Schema,
 } from "@tanstack/db"
-import type { MaybeRefOrGetter, Ref } from "vue"
+import type { Ref } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
   state: Readonly<Ref<Map<string, T>>>
