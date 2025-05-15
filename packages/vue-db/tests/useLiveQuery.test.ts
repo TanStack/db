@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { Collection, createTransaction } from "@tanstack/db"
-import { computed, onUnmounted, ref, watch, watchEffect } from "vue"
+import {
+  computed,
+  onUnmounted,
+  onWatcherCleanup,
+  ref,
+  watch,
+  watchEffect,
+} from "vue"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type { Ref } from "vue"
 import type {
@@ -411,15 +418,20 @@ describe(`Query Collections`, () => {
       }))
     )
 
+    await waitForChanges()
+
     const minAge = ref(30)
 
-    const { state } = useLiveQuery((q) => {
-      return q
-        .from({ collection })
-        .where(`@age`, `>`, minAge.value)
-        .keyBy(`@id`)
-        .select(`@id`, `@name`, `@age`)
-    })
+    const { state } = useLiveQuery(
+      (q) => {
+        return q
+          .from({ collection })
+          .where(`@age`, `>`, minAge.value)
+          .keyBy(`@id`)
+          .select(`@id`, `@name`, `@age`)
+      },
+      () => [minAge.value]
+    )
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
@@ -495,18 +507,17 @@ describe(`Query Collections`, () => {
     // Add a custom hook that wraps useLiveQuery to log when queries are created and stopped
     function useTrackedLiveQuery<T>(
       queryFn: (q: InitialQueryBuilder<Context<Schema>>) => any,
-      deps: Array<Ref<unknown>>
+      deps: () => Array<unknown>
     ): T {
       const result = useLiveQuery(queryFn, deps)
 
-      watch(
-        () => deps.map((dep) => dep.value).join(`,`),
-        (updatedDeps, _, fn) => {
-          console.log(`Creating new query with deps`, updatedDeps)
-          fn(() => console.log(`Stopping query with deps`, updatedDeps))
-        },
-        { immediate: true }
-      )
+      watchEffect(() => {
+        const updatedDeps = deps().join(`,`)
+        console.log(`Creating new query with deps`, updatedDeps)
+        onWatcherCleanup(() =>
+          console.log(`Stopping query with deps`, updatedDeps)
+        )
+      })
 
       return result as T
     }
@@ -529,7 +540,7 @@ describe(`Query Collections`, () => {
           .where(`@age`, `>`, minAge.value)
           .keyBy(`@id`)
           .select(`@id`, `@name`),
-      [minAge]
+      () => [minAge.value]
     )
 
     // Initial query should be created
@@ -604,7 +615,7 @@ describe(`Query Collections`, () => {
     // Grouped query derived from initial query
     const groupedResult = useLiveQuery((q) =>
       q
-        .from({ queryResult: result.collection.value })
+        .from({ queryResult: result.collection() })
         .groupBy(`@team`)
         .keyBy(`@team`)
         .select(`@team`, { count: { COUNT: `@id` } })

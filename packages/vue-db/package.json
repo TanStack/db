@@ -18,12 +18,12 @@
   "packageManager": "pnpm@10.5.2",
   "dependencies": {
     "@tanstack/db": "workspace:*",
-    "@tanstack/vue-store": "^0.7.0"
+    "@tanstack/store": "^0.7.0"
   },
   "devDependencies": {
     "@electric-sql/client": "1.0.0",
-    "@vitest/coverage-istanbul": "^3.0.9",
     "@vitejs/plugin-vue": "^5.2.4",
+    "@vitest/coverage-istanbul": "^3.0.9",
     "vue": "^3.5.13"
   },
   "exports": {
