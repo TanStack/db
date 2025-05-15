@@ -286,12 +286,6 @@ importers:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
-      '@tanstack/store':
-        specifier: ^0.7.0
-        version: 0.7.0
-      '@tanstack/vue-store':
-        specifier: ^0.7.0
-        version: 0.7.0(vue@3.5.13(typescript@5.8.2))
     devDependencies:
       '@electric-sql/client':
         specifier: 1.0.0
@@ -1638,15 +1632,6 @@ packages:
   '@tanstack/vite-config@0.1.0':
     resolution: {integrity: sha512-G6l2Q4hp/Yj43UyE9APz+Fj5sdC15G2UD2xXOSdQCZ6/4gjYd2c040TLk7ObGhypbeWBYvy93Gg18nS41F6eqg==}
     engines: {node: '>=18'}
-
-  '@tanstack/vue-store@0.7.0':
-    resolution: {integrity: sha512-oLB/WuD26caR86rxLz39LvS5YdY0KIThJFEHIW/mXujC2+M/z3GxVZFJsZianAzr3tH56sZQ8kkq4NvwwsOBkQ==}
-    peerDependencies:
-      '@vue/composition-api': ^1.2.1
-      vue: ^2.5.0 || ^3.0.0
-    peerDependenciesMeta:
-      '@vue/composition-api':
-        optional: true
 
   '@testing-library/dom@10.4.0':
     resolution: {integrity: sha512-pemlzrSESWbdAloYml3bAJMEfNh1Z7EduzqPKprCH5S341frlpYnUEW0H72dLxa6IsYr+mPno20GiSm+h9dEdQ==}
@@ -4715,17 +4700,6 @@ packages:
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
 
-  vue-demi@0.14.10:
-    resolution: {integrity: sha512-nMZBOwuzabUO0nLgIcc6rycZEebF6eeUfaiQx9+WSk8e29IbLvPU9feI6tqW4kTo3hvoYAJkMh8n8D0fuISphg==}
-    engines: {node: '>=12'}
-    hasBin: true
-    peerDependencies:
-      '@vue/composition-api': ^1.0.0-rc.1
-      vue: ^3.0.0-0 || ^2.6.0
-    peerDependenciesMeta:
-      '@vue/composition-api':
-        optional: true
-
   vue-eslint-parser@9.4.3:
     resolution: {integrity: sha512-2rYRLWlIpaiN8xbPiDyXZXRgLGOtWxERV7ND5fFAv5qo1D2N9Fu9MNajBNc6o13lZ+24DAWCkQCvj4klgmcITg==}
     engines: {node: ^14.17.0 || >=16.0.0}
@@ -6092,12 +6066,6 @@ snapshots:
       - supports-color
       - typescript
       - vite
-
-  '@tanstack/vue-store@0.7.0(vue@3.5.13(typescript@5.8.2))':
-    dependencies:
-      '@tanstack/store': 0.7.0
-      vue: 3.5.13(typescript@5.8.2)
-      vue-demi: 0.14.10(vue@3.5.13(typescript@5.8.2))
 
   '@testing-library/dom@10.4.0':
     dependencies:
@@ -9464,10 +9432,6 @@ snapshots:
       - yaml
 
   vscode-uri@3.1.0: {}
-
-  vue-demi@0.14.10(vue@3.5.13(typescript@5.8.2)):
-    dependencies:
-      vue: 3.5.13(typescript@5.8.2)
 
   vue-eslint-parser@9.4.3(eslint@9.22.0(jiti@2.4.2)):
     dependencies:
