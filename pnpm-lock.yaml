@@ -282,34 +282,44 @@ importers:
         version: 19.0.0(react@19.0.0)
 
   packages/svelte-db:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tanstack/svelte-store':
+        specifier: ^0.7.0
+        version: 0.7.0(svelte@5.28.6)
     devDependencies:
       '@sveltejs/adapter-auto':
-        specifier: ^6.0.0
+        specifier: ^6.0.1
         version: 6.0.1(@sveltejs/kit@2.21.0(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)))(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)))
       '@sveltejs/kit':
-        specifier: ^2.16.0
+        specifier: ^2.21.0
         version: 2.21.0(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)))(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
       '@sveltejs/package':
-        specifier: ^2.0.0
+        specifier: ^2.3.11
         version: 2.3.11(svelte@5.28.6)(typescript@5.8.2)
       '@sveltejs/vite-plugin-svelte':
-        specifier: ^5.0.0
+        specifier: ^5.0.3
         version: 5.0.3(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
+      '@testing-library/jest-dom':
+        specifier: ^6.6.3
+        version: 6.6.3
+      '@testing-library/svelte':
+        specifier: ^5.2.4
+        version: 5.2.7(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
+      '@vitest/coverage-istanbul':
+        specifier: ^3.0.9
+        version: 3.0.9(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))
       publint:
         specifier: ^0.3.2
         version: 0.3.9
       svelte:
-        specifier: ^5.0.0
+        specifier: ^5.28.6
         version: 5.28.6
       svelte-check:
-        specifier: ^4.0.0
+        specifier: ^4.2.0
         version: 4.2.0(picomatch@4.0.2)(svelte@5.28.6)(typescript@5.8.2)
-      typescript:
-        specifier: ^5.0.0
-        version: 5.8.2
-      vite:
-        specifier: ^6.2.6
-        version: 6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)
 
   packages/vue-db:
     dependencies:
@@ -1719,6 +1729,11 @@ packages:
   '@tanstack/store@0.7.0':
     resolution: {integrity: sha512-CNIhdoUsmD2NolYuaIs8VfWM467RK6oIBAW4nPEKZhg1smZ+/CwtCdpURgp7nxSqOaV9oKkzdWD80+bC66F/Jg==}
 
+  '@tanstack/svelte-store@0.7.0':
+    resolution: {integrity: sha512-FVuPuCLkGV/YcsJImIiJAZRh3s8DqI8C9jQMNXymELwsrpe538Vmb81fxHHNZx9MCtzsFcHfYOkImFB4r4QcfA==}
+    peerDependencies:
+      svelte: ^5.0.0
+
   '@tanstack/typedoc-config@0.1.0':
     resolution: {integrity: sha512-WaeDXvt9Dyds53SCOCZKGmwHdS6LGwNH7LyDeTtsmPW7zn7ApOaNyAPWlqjkEHGVd0ykvR+XA8CI8RPfLGGxmw==}
     engines: {node: '>=18'}
@@ -1757,6 +1772,19 @@ packages:
       '@types/react':
         optional: true
       '@types/react-dom':
+        optional: true
+
+  '@testing-library/svelte@5.2.7':
+    resolution: {integrity: sha512-aGhUaFmEXEVost4QOsbHUUbHLwi7ZZRRxAHFDO2Cmr0BZD3/3+XvaYEPq70Rdw0NRNjdqZHdARBEcrCOkPuAqw==}
+    engines: {node: '>= 10'}
+    peerDependencies:
+      svelte: ^3 || ^4 || ^5 || ^5.0.0-next.0
+      vite: '*'
+      vitest: '*'
+    peerDependenciesMeta:
+      vite:
+        optional: true
+      vitest:
         optional: true
 
   '@tybys/wasm-util@0.9.0':
@@ -6389,6 +6417,11 @@ snapshots:
 
   '@tanstack/store@0.7.0': {}
 
+  '@tanstack/svelte-store@0.7.0(svelte@5.28.6)':
+    dependencies:
+      '@tanstack/store': 0.7.0
+      svelte: 5.28.6
+
   '@tanstack/typedoc-config@0.1.0(typescript@5.8.2)':
     dependencies:
       typedoc: 0.27.9(typescript@5.8.2)
@@ -6446,6 +6479,14 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.0.12
       '@types/react-dom': 19.0.4(@types/react@19.0.12)
+
+  '@testing-library/svelte@5.2.7(svelte@5.28.6)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))(vitest@3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0))':
+    dependencies:
+      '@testing-library/dom': 10.4.0
+      svelte: 5.28.6
+    optionalDependencies:
+      vite: 6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)
+      vitest: 3.0.9(@types/node@22.13.10)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(tsx@4.19.3)(yaml@2.7.0)
 
   '@tybys/wasm-util@0.9.0':
     dependencies:
