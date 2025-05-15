@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { Collection, createTransaction } from "@tanstack/db"
 import { onWatcherCleanup, ref, watchEffect } from "vue"
-import { useLiveQuery } from "../src/useLiveQuery"
+import { useLiveQuery } from "../src/index"
 import type {
   Context,
   InitialQueryBuilder,
@@ -607,7 +607,7 @@ describe(`Query Collections`, () => {
     // Grouped query derived from initial query
     const groupedResult = useLiveQuery((q) =>
       q
-        .from({ queryResult: result.collection() })
+        .from({ queryResult: result.collection.value })
         .groupBy(`@team`)
         .keyBy(`@team`)
         .select(`@team`, { count: { COUNT: `@id` } })

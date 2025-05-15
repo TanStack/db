@@ -12,9 +12,9 @@ import type {
 import type { MaybeRefOrGetter, Ref } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
-  state: Ref<Map<string, T>>
-  data: Ref<Array<T>>
-  collection: () => Collection<T>
+  state: Readonly<Ref<Map<string, T>>>
+  data: Readonly<Ref<Array<T>>>
+  collection: Readonly<Ref<Collection<T>>>
 }
 
 export function useLiveQuery<
@@ -25,8 +25,8 @@ export function useLiveQuery<
   ) => QueryBuilder<TResultContext>,
   deps: () => Array<MaybeRefOrGetter<unknown>> = () => []
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const compiledQuery = shallowRef() as Ref<
-    ReturnType<typeof compileQuery<TResultContext>>
+  const results = shallowRef() as Ref<
+    ReturnType<typeof compileQuery<TResultContext>>[`results`]
   >
 
   const state = shallowRef() as Ref<
@@ -41,11 +41,11 @@ export function useLiveQuery<
     const compiled = compileQuery(query)
     compiled.start()
 
-    compiledQuery.value = compiled
+    const resultsRef = compiled.results
+    results.value = resultsRef
 
-    const results = compiled.results
-    const derivedState = results.derivedState
-    const derivedArray = results.derivedArray
+    const derivedState = resultsRef.derivedState
+    const derivedArray = resultsRef.derivedArray
     let stateRef = derivedState.state
     let dataRef = derivedArray.state
     state.value = stateRef
@@ -77,6 +77,6 @@ export function useLiveQuery<
   return {
     state,
     data,
-    collection: () => compiledQuery.value.results,
+    collection: results,
   }
 }
