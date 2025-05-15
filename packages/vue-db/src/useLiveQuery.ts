@@ -29,6 +29,11 @@ export function useLiveQuery<
     ReturnType<typeof compileQuery<TResultContext>>
   >
 
+  let stateRef: Map<string, ResultsFromContext<TResultContext>>
+  let dataRef: Array<ResultsFromContext<TResultContext>>
+  const state = shallowRef(stateRef!)
+  const data = shallowRef(dataRef!)
+
   watchEffect(() => {
     toValue(deps)
 
@@ -38,16 +43,7 @@ export function useLiveQuery<
 
     compiledQuery.value = compiled
 
-    onWatcherCleanup(compiled.stop)
-  })
-
-  let stateRef: Map<string, ResultsFromContext<TResultContext>>
-  let dataRef: Array<ResultsFromContext<TResultContext>>
-  const state = shallowRef(stateRef!)
-  const data = shallowRef(dataRef!)
-
-  watchEffect(() => {
-    const results = compiledQuery.value.results
+    const results = compiled.results
     const derivedState = results.derivedState
     const derivedArray = results.derivedArray
     stateRef = derivedState.state
@@ -72,6 +68,7 @@ export function useLiveQuery<
     })
 
     onWatcherCleanup(() => {
+      compiled.stop()
       unsubDerivedState()
       unsubDerivedArray()
     })
