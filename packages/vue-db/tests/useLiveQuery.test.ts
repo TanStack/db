@@ -1,16 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { Collection, createTransaction } from "@tanstack/db"
-import {
-  computed,
-  onUnmounted,
-  onWatcherCleanup,
-  ref,
-  watch,
-  watchEffect,
-} from "vue"
+import { onWatcherCleanup, ref, watchEffect } from "vue"
 import { useLiveQuery } from "../src/useLiveQuery"
-import type { Ref } from "vue"
 import type {
   Context,
   InitialQueryBuilder,
