@@ -23,7 +23,7 @@ export function useLiveQuery<
   queryFn: (
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>,
-  deps: () => Array<MaybeRefOrGetter<unknown>> = () => []
+  deps: () => Array<unknown> = () => []
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
   const results = shallowRef() as Ref<
     ReturnType<typeof compileQuery<TResultContext>>[`results`]
