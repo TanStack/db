@@ -1,5 +1,6 @@
 import { compileQuery, queryBuilder } from "@tanstack/db"
-import { createEffect, createMemo } from "solid-js"
+import { createMemo, onCleanup } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import type { Accessor } from "solid-js"
 import type {
   Collection,
@@ -23,43 +24,57 @@ export function useLiveQuery<
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
+  const NOOP = () => {}
+  let unsubCompiled = NOOP
+  let unsubDerivedState = NOOP
+  let unsubDerivedArray = NOOP
+
   const compiledQuery = createMemo(
     () => {
-      const query = queryFn(queryBuilder())
-      const compiled = compileQuery(query)
-      compiled.start()
+      unsubCompiled()
+      const compiled = compileQuery(queryFn(queryBuilder()))
+      unsubCompiled = compiled.start()
       return compiled
     },
     undefined,
     { name: `CompiledQueryMemo` }
   )
 
-  // TODO: Solid useStore needs to be updated to optionally
-  // receive a getter to receive updates from compiledQuery.
-  // For now, doing this should work and be reactive with updates
-  const state = () => compiledQuery().results.derivedState.state
-  const data = () => compiledQuery().results.derivedArray.state
+  const state = createMemo(() => {
+    const derivedState = compiledQuery().results.derivedState
+    const [slice, setSlice] = createStore({
+      value: derivedState.state,
+    })
 
-  // Clean up on unmount
-  createEffect(
-    () => {
-      const c = compiledQuery()
+    unsubDerivedState()
+    unsubDerivedState = derivedState.subscribe(() => {
+      setSlice(`value`, reconcile(derivedState.state))
+    })
+    return slice
+  })
 
-      return () => {
-        c.stop()
-      }
-    },
-    undefined,
-    { name: `ResetQueryEffect` }
-  )
+  const data = createMemo(() => {
+    const derivedArray = compiledQuery().results.derivedArray
+    const [slice, setSlice] = createStore({
+      value: derivedArray.state,
+    })
 
-  const collection = createMemo(() => compiledQuery().results, undefined, {
-    name: `CollectionMemo`,
+    unsubDerivedArray()
+    unsubDerivedArray = derivedArray.subscribe(() => {
+      setSlice(`value`, reconcile(derivedArray.state))
+    })
+    return slice
+  })
+
+  onCleanup(() => {
+    unsubCompiled()
+    unsubDerivedState()
+    unsubDerivedArray()
   })
 
   return {
-    state,
-    data,
-    collection,
+    state: () => state().value,
+    data: () => data().value,
+    collection: () => compiledQuery().results,
   }
 }
