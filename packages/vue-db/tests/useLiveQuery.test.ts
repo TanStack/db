@@ -118,15 +118,15 @@ describe(`Query Collections`, () => {
         .orderBy({ "@id": `asc` })
     )
 
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state().size).toBe(1)
+    expect(state().get(`3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
 
-    expect(data.value.length).toBe(1)
-    expect(data.value[0]).toEqual({
+    expect(data().length).toBe(1)
+    expect(data()[0]).toEqual({
       _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
@@ -149,25 +149,25 @@ describe(`Query Collections`, () => {
 
     await waitForChanges()
 
-    expect(state.value.size).toBe(2)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state().size).toBe(2)
+    expect(state().get(`3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
-    expect(state.value.get(`4`)).toEqual({
+    expect(state().get(`4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
 
-    expect(data.value.length).toBe(2)
-    expect(data.value).toContainEqual({
+    expect(data().length).toBe(2)
+    expect(data()).toContainEqual({
       _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
-    expect(data.value).toContainEqual({
+    expect(data()).toContainEqual({
       _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
@@ -186,15 +186,15 @@ describe(`Query Collections`, () => {
 
     await waitForChanges()
 
-    expect(state.value.size).toBe(2)
-    expect(state.value.get(`4`)).toEqual({
+    expect(state().size).toBe(2)
+    expect(state().get(`4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
 
-    expect(data.value.length).toBe(2)
-    expect(data.value).toContainEqual({
+    expect(data().length).toBe(2)
+    expect(data()).toContainEqual({
       _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
@@ -210,11 +210,11 @@ describe(`Query Collections`, () => {
 
     await waitForChanges()
 
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`4`)).toBeUndefined()
+    expect(state().size).toBe(1)
+    expect(state().get(`4`)).toBeUndefined()
 
-    expect(data.value.length).toBe(1)
-    expect(data.value).toContainEqual({
+    expect(data().length).toBe(1)
+    expect(data()).toContainEqual({
       _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
@@ -299,21 +299,21 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify that we have the expected joined results
-    expect(state.value.size).toBe(3)
+    expect(state().size).toBe(3)
 
-    expect(state.value.get(`1`)).toEqual({
+    expect(state().get(`1`)).toEqual({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`2`)).toEqual({
+    expect(state().get(`2`)).toEqual({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`3`)).toEqual({
+    expect(state().get(`3`)).toEqual({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -335,8 +335,8 @@ describe(`Query Collections`, () => {
 
     await waitForChanges()
 
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`4`)).toEqual({
+    expect(state().size).toBe(4)
+    expect(state().get(`4`)).toEqual({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -356,7 +356,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`2`)).toEqual({
+    expect(state().get(`2`)).toEqual({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -373,7 +373,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(state.value.get(`3`)).toBeUndefined()
+    expect(state().get(`3`)).toBeUndefined()
   })
 
   it(`should recompile query when parameters change and change results`, async () => {
@@ -423,8 +423,8 @@ describe(`Query Collections`, () => {
     })
 
     // Initially should return only people older than 30
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state().size).toBe(1)
+    expect(state().get(`3`)).toEqual({
       id: `3`,
       name: `John Smith`,
       age: 35,
@@ -436,18 +436,18 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Now should return all people as they're all older than 20
-    expect(state.value.size).toBe(3)
-    expect(state.value.get(`1`)).toEqual({
+    expect(state().size).toBe(3)
+    expect(state().get(`1`)).toEqual({
       id: `1`,
       name: `John Doe`,
       age: 30,
     })
-    expect(state.value.get(`2`)).toEqual({
+    expect(state().get(`2`)).toEqual({
       id: `2`,
       name: `Jane Doe`,
       age: 25,
     })
-    expect(state.value.get(`3`)).toEqual({
+    expect(state().get(`3`)).toEqual({
       id: `3`,
       name: `John Smith`,
       age: 35,
@@ -459,7 +459,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Should now be empty
-    expect(state.value.size).toBe(0)
+    expect(state().size).toBe(0)
   })
 
   it(`should stop old query when parameters change`, async () => {
@@ -604,15 +604,15 @@ describe(`Query Collections`, () => {
     // Grouped query derived from initial query
     const groupedResult = useLiveQuery((q) =>
       q
-        .from({ queryResult: result.collection.value })
+        .from({ queryResult: result.collection() })
         .groupBy(`@team`)
         .keyBy(`@team`)
         .select(`@team`, { count: { COUNT: `@id` } })
     )
 
     // Verify initial grouped results
-    expect(groupedResult.state.value.size).toBe(1)
-    expect(groupedResult.state.value.get(`team1`)).toEqual({
+    expect(groupedResult.state().size).toBe(1)
+    expect(groupedResult.state().get(`team1`)).toEqual({
       team: `team1`,
       count: 1,
     })
@@ -648,12 +648,12 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify the grouped results include the new team members
-    expect(groupedResult.state.value.size).toBe(2)
-    expect(groupedResult.state.value.get(`team1`)).toEqual({
+    expect(groupedResult.state().size).toBe(2)
+    expect(groupedResult.state().get(`team1`)).toEqual({
       team: `team1`,
       count: 2,
     })
-    expect(groupedResult.state.value.get(`team2`)).toEqual({
+    expect(groupedResult.state().get(`team2`)).toEqual({
       team: `team2`,
       count: 1,
     })
@@ -747,9 +747,9 @@ describe(`Query Collections`, () => {
     // Track each render state
     watchEffect(() => {
       renderStates.push({
-        stateSize: state.value.size,
-        hasTempKey: state.value.has(`temp-key`),
-        hasPermKey: state.value.has(`4`),
+        stateSize: state().size,
+        hasTempKey: state().has(`temp-key`),
+        hasPermKey: state().has(`4`),
         timestamp: Date.now(),
       })
     })
@@ -757,7 +757,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify initial state
-    expect(state.value.size).toBe(3)
+    expect(state().size).toBe(3)
 
     // Reset render states array for clarity in the remaining test
     renderStates.length = 0
@@ -795,8 +795,8 @@ describe(`Query Collections`, () => {
     )
 
     // Verify optimistic state is immediately reflected
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`temp-key`)).toEqual({
+    expect(state().size).toBe(4)
+    expect(state().get(`temp-key`)).toEqual({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
@@ -814,9 +814,9 @@ describe(`Query Collections`, () => {
     expect(hadFlicker).toBe(false)
 
     // Verify the temporary key is replaced by the permanent one
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`temp-key`)).toBeUndefined()
-    expect(state.value.get(`4`)).toEqual({
+    expect(state().size).toBe(4)
+    expect(state().get(`temp-key`)).toBeUndefined()
+    expect(state().get(`4`)).toEqual({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,

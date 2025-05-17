@@ -9,12 +9,11 @@ import type {
   ResultsFromContext,
   Schema,
 } from "@tanstack/db"
-import type { Ref } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
-  state: Readonly<Ref<Map<string, T>>>
-  data: Readonly<Ref<Array<T>>>
-  collection: Readonly<Ref<Collection<T>>>
+  state: () => Readonly<Map<string, T>>
+  data: () => Readonly<Array<T>>
+  collection: () => Collection<T>
 }
 
 export function useLiveQuery<
@@ -24,14 +23,9 @@ export function useLiveQuery<
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const results = shallowRef() as Ref<
-    ReturnType<typeof compileQuery<TResultContext>>[`results`]
-  >
-
-  const state = shallowRef() as Ref<
-    Map<string, ResultsFromContext<TResultContext>>
-  >
-  const data = shallowRef() as Ref<Array<ResultsFromContext<TResultContext>>>
+  const results = shallowRef()
+  const state = shallowRef()
+  const data = shallowRef()
 
   watchEffect(() => {
     const query = queryFn(queryBuilder())
@@ -72,8 +66,8 @@ export function useLiveQuery<
   })
 
   return {
-    state,
-    data,
-    collection: results,
+    state: () => state.value,
+    data: () => data.value,
+    collection: () => results.value,
   }
 }
