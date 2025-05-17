@@ -1,47 +1,47 @@
 {
   "name": "@tanstack/svelte-db",
   "description": "Svelte integration for @tanstack/db",
-	"version": "0.0.0",
-	"scripts": {
-	  "build": "svelte-package --input ./src --output ./dist",
-		"test": "npx vitest --run",
-		"lint": "eslint . --fix"
-	},
-	"files": [
-		"dist",
-		"!dist/**/*.test.*",
-		"!dist/**/*.spec.*"
-	],
-	"sideEffects": [
-		"**/*.css"
-	],
-	"svelte": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"type": "module",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"svelte": "./dist/index.js"
-		}
-	},
-	"dependencies": {
-	  "@tanstack/db": "workspace:*",
+  "version": "0.0.0",
+  "scripts": {
+    "build": "svelte-package --input ./src --output ./dist",
+    "test": "npx vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
     "@tanstack/svelte-store": "^0.7.0"
-	},
-	"peerDependencies": {
-		"svelte": "^5.0.0"
-	},
-	"devDependencies": {
-		"@sveltejs/package": "^2.3.11",
-		"@vitest/coverage-istanbul": "^3.0.9",
-		"@sveltejs/vite-plugin-svelte": "^5.0.3",
-		"publint": "^0.3.2",
-		"svelte": "^5.28.6",
-		"svelte-check": "^4.2.0"
-	},
-	"keywords": [
-	  "optimistic",
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/package": "^2.3.11",
+    "@vitest/coverage-istanbul": "^3.0.9",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "publint": "^0.3.2",
+    "svelte": "^5.28.6",
+    "svelte-check": "^4.2.0"
+  },
+  "keywords": [
+    "optimistic",
     "svelte",
     "typescript"
-	]
+  ]
 }

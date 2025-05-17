@@ -10,7 +10,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*", "tests", "vite.config.ts", "svelte.config.js"],
   "exclude": ["node_modules", "dist"]
