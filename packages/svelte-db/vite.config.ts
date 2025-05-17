@@ -1,9 +1,9 @@
-import { sveltekit } from "@sveltejs/kit/vite"
+import { svelte } from "@sveltejs/vite-plugin-svelte"
 import { defineConfig } from "vitest/config"
 import packageJson from "./package.json" with { type: "json" }
 
 export default defineConfig({
-  plugins: [sveltekit()],
+  plugins: [svelte()],
   test: {
     name: packageJson.name,
     dir: `./tests`,
