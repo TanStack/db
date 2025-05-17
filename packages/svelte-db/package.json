@@ -3,13 +3,9 @@
   "description": "Svelte integration for @tanstack/db",
 	"version": "0.0.0",
 	"scripts": {
-	  "test:types": "svelte-check --tsconfig ./tsconfig.json",
-    "test:eslint": "eslint ./src ./tests",
-    "test:lib": "vitest",
-    "test:lib:dev": "pnpm run test:lib --watch",
-    "test:build": "publint --strict",
-    "test": "npx vitest --run",
-    "build": "svelte-package --input ./src --output ./dist"
+	  "build": "svelte-package --input ./src --output ./dist",
+		"test": "npx vitest --run",
+		"lint": "eslint . --fix"
 	},
 	"files": [
 		"dist",
