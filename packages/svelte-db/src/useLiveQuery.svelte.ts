@@ -1,4 +1,3 @@
-import { useStore } from "@tanstack/svelte-store"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import type {
   Collection,
@@ -33,8 +32,8 @@ export function useLiveQuery<
     return compiled
   })
 
-  const state = () => useStore(compiledQuery.results.derivedState).current
-  const data = () => useStore(compiledQuery.results.derivedArray).current
+  const state = () => compiledQuery.results.derivedState.state
+  const data = () => compiledQuery.results.derivedArray.state
 
   $effect(() => {
     return () => {
