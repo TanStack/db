@@ -1,6 +1,6 @@
-import { computed, toValue, watch } from "vue"
-import { useStore } from "@tanstack/vue-store"
+import { computed, onScopeDispose, shallowRef } from "vue"
 import { compileQuery, queryBuilder } from "@tanstack/db"
+import { shallow } from "./useStore"
 import type {
   Collection,
   Context,
@@ -9,12 +9,11 @@ import type {
   ResultsFromContext,
   Schema,
 } from "@tanstack/db"
-import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
-  state: ComputedRef<Map<string, T>>
-  data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T>>
+  state: () => Readonly<Map<string, T>>
+  data: () => Readonly<Array<T>>
+  collection: () => Collection<T>
 }
 
 export function useLiveQuery<
@@ -22,39 +21,63 @@ export function useLiveQuery<
 >(
   queryFn: (
     q: InitialQueryBuilder<Context<Schema>>
-  ) => QueryBuilder<TResultContext>,
-  deps: Array<MaybeRefOrGetter<unknown>> = []
+  ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const compiledQuery = computed(() => {
-    // Just reference deps to make computed reactive to them
-    deps.forEach((dep) => toValue(dep))
+  const NOOP = () => {}
+  let unsubCompiled = NOOP
+  let unsubDerivedState = NOOP
+  let unsubDerivedArray = NOOP
 
-    const query = queryFn(queryBuilder())
-    const compiled = compileQuery(query)
-    compiled.start()
-    return compiled
-  })
+  const compiled = computed<ReturnType<typeof compileQuery<TResultContext>>>(
+    () => {
+      unsubCompiled()
+      const compiledRef = compileQuery(queryFn(queryBuilder()))
+      unsubCompiled = compiledRef.start()
+      return compiledRef
+    }
+  )
 
   const state = computed(() => {
-    return useStore(compiledQuery.value.results.derivedState).value
-  })
-  const data = computed(() => {
-    return useStore(compiledQuery.value.results.derivedArray).value
-  })
+    const derivedState = compiled.value.results.derivedState
+    let stateRef = derivedState.state
+    const ret = shallowRef(stateRef)
 
-  watch(compiledQuery, (newQuery, oldQuery, onInvalidate) => {
-    if (newQuery.state === `stopped`) {
-      newQuery.start()
-    }
+    unsubDerivedState()
+    unsubDerivedState = derivedState.subscribe(() => {
+      const newValue = derivedState.state
+      if (shallow(stateRef, newValue)) return
 
-    onInvalidate(() => {
-      oldQuery.stop()
+      stateRef = newValue
+      ret.value = newValue
     })
+    return ret
+  })
+
+  const data = computed(() => {
+    const derivedArray = compiled.value.results.derivedArray
+    let stateRef = derivedArray.state
+    const ret = shallowRef(stateRef)
+
+    unsubDerivedArray()
+    unsubDerivedArray = derivedArray.subscribe(() => {
+      const newValue = derivedArray.state
+      if (shallow(stateRef, newValue)) return
+
+      stateRef = newValue
+      ret.value = newValue
+    })
+    return ret
+  })
+
+  onScopeDispose(() => {
+    unsubCompiled()
+    unsubDerivedState()
+    unsubDerivedArray()
   })
 
   return {
-    state,
-    data,
-    collection: computed(() => compiledQuery.value.results),
+    state: () => state.value.value,
+    data: () => data.value.value,
+    collection: () => compiled.value.results,
   }
 }
