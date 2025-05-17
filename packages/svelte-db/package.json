@@ -36,8 +36,6 @@
 		"svelte": "^5.0.0"
 	},
 	"devDependencies": {
-	  "@testing-library/jest-dom": "^6.6.3",
-		"@testing-library/svelte": "^5.2.4",
 		"@sveltejs/adapter-auto": "^6.0.1",
 		"@sveltejs/kit": "^2.21.0",
 		"@sveltejs/package": "^2.3.11",
