@@ -1,4 +1,4 @@
-import { onWatcherCleanup, shallowRef, watchEffect } from "vue"
+import { computed, onScopeDispose, shallowRef } from "vue"
 import { compileQuery, queryBuilder } from "@tanstack/db"
 import { shallow } from "./useStore"
 import type {
@@ -23,51 +23,61 @@ export function useLiveQuery<
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const results = shallowRef()
-  const state = shallowRef()
-  const data = shallowRef()
+  const NOOP = () => {}
+  let unsubCompiled = NOOP
+  let unsubDerivedState = NOOP
+  let unsubDerivedArray = NOOP
 
-  watchEffect(() => {
-    const query = queryFn(queryBuilder())
-    const compiled = compileQuery(query)
-    compiled.start()
+  const compiled = computed<ReturnType<typeof compileQuery<TResultContext>>>(
+    () => {
+      unsubCompiled()
+      const compiledRef = compileQuery(queryFn(queryBuilder()))
+      unsubCompiled = compiledRef.start()
+      return compiledRef
+    }
+  )
 
-    const resultsRef = compiled.results
-    results.value = resultsRef
-
-    const derivedState = resultsRef.derivedState
-    const derivedArray = resultsRef.derivedArray
+  const state = computed(() => {
+    const derivedState = compiled.value.results.derivedState
     let stateRef = derivedState.state
-    let dataRef = derivedArray.state
-    state.value = stateRef
-    data.value = dataRef
+    const ret = shallowRef(stateRef)
 
-    const unsubDerivedState = derivedState.subscribe(() => {
+    unsubDerivedState()
+    unsubDerivedState = derivedState.subscribe(() => {
       const newValue = derivedState.state
       if (shallow(stateRef, newValue)) return
 
       stateRef = newValue
-      state.value = newValue
+      ret.value = newValue
     })
+    return ret
+  })
 
-    const unsubDerivedArray = derivedArray.subscribe(() => {
+  const data = computed(() => {
+    const derivedArray = compiled.value.results.derivedArray
+    let stateRef = derivedArray.state
+    const ret = shallowRef(stateRef)
+
+    unsubDerivedArray()
+    unsubDerivedArray = derivedArray.subscribe(() => {
       const newValue = derivedArray.state
-      if (shallow(dataRef, newValue)) return
+      if (shallow(stateRef, newValue)) return
 
-      dataRef = newValue
-      data.value = newValue
+      stateRef = newValue
+      ret.value = newValue
     })
+    return ret
+  })
 
-    onWatcherCleanup(() => {
-      compiled.stop()
-      unsubDerivedState()
-      unsubDerivedArray()
-    })
+  onScopeDispose(() => {
+    unsubCompiled()
+    unsubDerivedState()
+    unsubDerivedArray()
   })
 
   return {
-    state: () => state.value,
-    data: () => data.value,
-    collection: () => results.value,
+    state: () => state.value.value,
+    data: () => data.value.value,
+    collection: () => compiled.value.results,
   }
 }
