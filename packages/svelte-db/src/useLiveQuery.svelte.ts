@@ -32,6 +32,9 @@ export function useLiveQuery<
     return compiled
   })
 
+  // TODO: Svelte useStore needs to be updated to optionally
+  // receive a getter to receive updates from compiledQuery.
+  // For now, doing this should work and be reactive with updates.
   const state = () => compiledQuery.results.derivedState.state
   const data = () => compiledQuery.results.derivedArray.state
 
