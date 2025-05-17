@@ -286,9 +286,6 @@ importers:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
-      '@tanstack/svelte-store':
-        specifier: ^0.7.0
-        version: 0.7.0(svelte@5.28.6)
     devDependencies:
       '@sveltejs/package':
         specifier: ^2.3.11
@@ -1424,11 +1421,6 @@ packages:
 
   '@tanstack/store@0.7.0':
     resolution: {integrity: sha512-CNIhdoUsmD2NolYuaIs8VfWM467RK6oIBAW4nPEKZhg1smZ+/CwtCdpURgp7nxSqOaV9oKkzdWD80+bC66F/Jg==}
-
-  '@tanstack/svelte-store@0.7.0':
-    resolution: {integrity: sha512-FVuPuCLkGV/YcsJImIiJAZRh3s8DqI8C9jQMNXymELwsrpe538Vmb81fxHHNZx9MCtzsFcHfYOkImFB4r4QcfA==}
-    peerDependencies:
-      svelte: ^5.0.0
 
   '@tanstack/typedoc-config@0.1.0':
     resolution: {integrity: sha512-WaeDXvt9Dyds53SCOCZKGmwHdS6LGwNH7LyDeTtsmPW7zn7ApOaNyAPWlqjkEHGVd0ykvR+XA8CI8RPfLGGxmw==}
@@ -5821,11 +5813,6 @@ snapshots:
       use-sync-external-store: 1.4.0(react@19.0.0)
 
   '@tanstack/store@0.7.0': {}
-
-  '@tanstack/svelte-store@0.7.0(svelte@5.28.6)':
-    dependencies:
-      '@tanstack/store': 0.7.0
-      svelte: 5.28.6
 
   '@tanstack/typedoc-config@0.1.0(typescript@5.8.2)':
     dependencies:
