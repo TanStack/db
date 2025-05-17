@@ -686,59 +686,78 @@ describe(`Query Collections`, () => {
     })
   })
 
-  it(`optimistic state is dropped after commit`, () => {
+  it(`optimistic state is dropped after commit`, async () => {
+    const emitter = mitt()
+    // Track renders and states
+    const renderStates: Array<{
+      stateSize: number
+      hasTempKey: boolean
+      hasPermKey: boolean
+      timestamp: number
+    }> = []
+
+    // Create person collection
+    const personCollection = new Collection<Person>({
+      id: `person-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-person`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Create issue collection
+    const issueCollection = new Collection<Issue>({
+      id: `issue-collection-test-bug`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // @ts-expect-error Mitt typing doesn't match our usage
+          emitter.on(`sync-issue`, (changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                key: change.key,
+                type: change.type,
+                value: change.changes as Issue,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Create a transaction to perform an optimistic mutation
+    const tx = createTransaction({
+      mutationFn: async () => {
+        emitter.emit(`sync-issue`, [
+          {
+            key: `4`,
+            type: `insert`,
+            changes: {
+              id: `4`,
+              title: `New Issue`,
+              description: `New Issue Description`,
+              userId: `1`,
+            },
+          },
+        ])
+        return Promise.resolve()
+      },
+    })
+
     cleanup = $effect.root(() => {
-      const emitter = mitt()
-      // Track renders and states
-      const renderStates: Array<{
-        stateSize: number
-        hasTempKey: boolean
-        hasPermKey: boolean
-        timestamp: number
-      }> = []
-
-      // Create person collection
-      const personCollection = new Collection<Person>({
-        id: `person-collection-test-bug`,
-        sync: {
-          sync: ({ begin, write, commit }) => {
-            // @ts-expect-error Mitt typing doesn't match our usage
-            emitter.on(`sync-person`, (changes: Array<PendingMutation>) => {
-              begin()
-              changes.forEach((change) => {
-                write({
-                  key: change.key,
-                  type: change.type,
-                  value: change.changes as Person,
-                })
-              })
-              commit()
-            })
-          },
-        },
-      })
-
-      // Create issue collection
-      const issueCollection = new Collection<Issue>({
-        id: `issue-collection-test-bug`,
-        sync: {
-          sync: ({ begin, write, commit }) => {
-            // @ts-expect-error Mitt typing doesn't match our usage
-            emitter.on(`sync-issue`, (changes: Array<PendingMutation>) => {
-              begin()
-              changes.forEach((change) => {
-                write({
-                  key: change.key,
-                  type: change.type,
-                  value: change.changes as Issue,
-                })
-              })
-              commit()
-            })
-          },
-        },
-      })
-
       // Sync initial person data
       emitter.emit(
         `sync-person`,
@@ -794,25 +813,6 @@ describe(`Query Collections`, () => {
       // Reset render states array for clarity in the remaining test
       renderStates.length = 0
 
-      // Create a transaction to perform an optimistic mutation
-      const tx = createTransaction({
-        mutationFn: async () => {
-          emitter.emit(`sync-issue`, [
-            {
-              key: `4`,
-              type: `insert`,
-              changes: {
-                id: `4`,
-                title: `New Issue`,
-                description: `New Issue Description`,
-                userId: `1`,
-              },
-            },
-          ])
-          return Promise.resolve()
-        },
-      })
-
       // Perform optimistic insert of a new issue
       tx.mutate(() =>
         issueCollection.insert(
@@ -833,27 +833,41 @@ describe(`Query Collections`, () => {
         name: `John Doe`,
         title: `New Issue`,
       })
+    })
 
-      // Wait for the transaction to be committed
-      // await tx.isPersisted.promise
-      // flushSync()
+    // Wait for the transaction to be committed
+    await tx.isPersisted.promise
+    flushSync()
 
-      // // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
-      // const hadFlicker = renderStates.some(
-      //   (state) =>
-      //     !state.hasTempKey && !state.hasPermKey && state.stateSize === 3
-      // )
+    $effect.root(() => {
+      const result = useLiveQuery((q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({
+            type: `inner`,
+            from: { persons: personCollection },
+            on: [`@persons.id`, `=`, `@issues.userId`],
+          })
+          .select(`@issues.id`, `@issues.title`, `@persons.name`)
+          .keyBy(`@id`)
+      )
 
-      // expect(hadFlicker).toBe(false)
+      // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
+      const hadFlicker = renderStates.some(
+        (state) =>
+          !state.hasTempKey && !state.hasPermKey && state.stateSize === 3
+      )
 
-      // // Verify the temporary key is replaced by the permanent one
-      // expect(result.state.size).toBe(4)
-      // expect(result.state.get(`temp-key`)).toBeUndefined()
-      // expect(result.state.get(`4`)).toEqual({
-      //   id: `4`,
-      //   name: `John Doe`,
-      //   title: `New Issue`,
-      // })
+      expect(hadFlicker).toBe(false)
+
+      // Verify the temporary key is replaced by the permanent one
+      expect(result.state.size).toBe(4)
+      expect(result.state.get(`temp-key`)).toBeUndefined()
+      expect(result.state.get(`4`)).toEqual({
+        id: `4`,
+        name: `John Doe`,
+        title: `New Issue`,
+      })
     })
   })
 })
