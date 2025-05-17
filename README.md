@@ -134,8 +134,10 @@ There's also an example [React todo app](./examples/react/todo) and usage exampl
 ## 🔧 Install
 
 ```bash
-npm install @tanstack/db
+npm install @tanstack/react-db @tanstack/db-collections
 ```
+
+Other framework integrations are in progress.
 
 ## ❓ FAQ
 
