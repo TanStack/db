@@ -9,14 +9,6 @@ import type {
   Schema,
 } from "@tanstack/db"
 
-type ComputedRef<T> = {
-  get current(): T
-}
-
-type Getter<T> = () => T
-
-function toValue<T>() {}
-
 export interface UseLiveQueryReturn<T extends object> {
   state: Map<string, T>
   data: Array<T>
@@ -29,11 +21,11 @@ export function useLiveQuery<
   queryFn: (
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>,
-  deps: Array<Getter<unknown>> = []
+  deps: Array<() => unknown> = []
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
   const compiledQuery = $derived.by(() => {
     // Just reference deps to make derived reactive to them
-    // deps.forEach((dep) => toValue(dep))
+    deps.forEach((dep) => dep())
 
     const query = queryFn(queryBuilder())
     const compiled = compileQuery(query)
@@ -41,15 +33,10 @@ export function useLiveQuery<
     return compiled
   })
 
-  const state = $derived(useStore(compiledQuery.results.derivedState).current)
-  const data = $derived(useStore(compiledQuery.results.derivedArray).current)
-  const collection = $derived(compiledQuery.results)
+  const state = () => useStore(compiledQuery.results.derivedState).current
+  const data = () => useStore(compiledQuery.results.derivedArray).current
 
   $effect(() => {
-    if (compiledQuery.state === `stopped`) {
-      compiledQuery.start()
-    }
-
     return () => {
       compiledQuery.stop()
     }
@@ -57,13 +44,15 @@ export function useLiveQuery<
 
   return {
     get state() {
-      return state
+      return state()
     },
     get data() {
-      return data
+      return data()
     },
     get collection() {
-      return collection as any
+      return compiledQuery.results as unknown as Collection<
+        ResultsFromContext<TResultContext>
+      >
     },
   }
 }

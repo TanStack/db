@@ -3,14 +3,13 @@
   "description": "Svelte integration for @tanstack/db",
 	"version": "0.0.0",
 	"scripts": {
-		"dev": "vite dev",
-		"build": "vite build && npm run prepack",
-		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
-		"prepack": "svelte-kit sync && svelte-package && publint",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test": "npx vitest --run"
+	  "test:types": "svelte-check --tsconfig ./tsconfig.json",
+    "test:eslint": "eslint ./src ./tests",
+    "test:lib": "vitest",
+    "test:lib:dev": "pnpm run test:lib --watch",
+    "test:build": "publint --strict",
+    "test": "npx vitest --run",
+    "build": "svelte-package --input ./src --output ./dist"
 	},
 	"files": [
 		"dist",
