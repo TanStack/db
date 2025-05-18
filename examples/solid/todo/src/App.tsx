@@ -620,26 +620,29 @@ export default function App() {
 
               <footer class="text-[14px] text-[#777] py-[10px] px-[15px] h-[40px] relative border-t border-[#e6e6e6] flex justify-between items-center">
                 <span class="text-[inherit]">
-                  {activeTodos.length}
+                  {activeTodos().length}
                   {` `}
-                  {activeTodos.length === 1 ? `item` : `items`} left
+                  {activeTodos().length === 1 ? `item` : `items`} left
                 </span>
-                {completedTodos.length > 0 && (
-                  <button
-                    onClick={() => {
-                      deleteTodo.mutate(() =>
-                        todoCollection.delete(
-                          Array.from(todoCollection.state.values()).filter(
-                            (t) => completedTodos().some((ct) => ct.id === t.id)
+                <Show when={completedTodos().length > 0}>
+                  {
+                    <button
+                      onClick={() => {
+                        deleteTodo.mutate(() =>
+                          todoCollection.delete(
+                            Array.from(todoCollection.state.values()).filter(
+                              (t) =>
+                                completedTodos().some((ct) => ct.id === t.id)
+                            )
                           )
                         )
-                      )
-                    }}
-                    class="text-inherit hover:underline"
-                  >
-                    Clear completed
-                  </button>
-                )}
+                      }}
+                      class="text-inherit hover:underline"
+                    >
+                      Clear completed
+                    </button>
+                  }
+                </Show>
               </footer>
             </Show>
           </div>
