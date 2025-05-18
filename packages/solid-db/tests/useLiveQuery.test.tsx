@@ -506,7 +506,7 @@ describe(`Query Collections`, () => {
 
       function getMinAgeFromUseLiveQueryOwner() {
         return owner?.owned
-          ?.find((o) => o.name === `CompiledQueryMemo`)
+          ?.find((o) => o.name === `TanstackDBCompiledQueryMemo`)
           ?.sources?.find((s) => s.name === `MinAge`)?.value
       }
 
@@ -725,7 +725,7 @@ describe(`Query Collections`, () => {
             hasPermKey: queryResult.state().has(`4`),
             timestamp: Date.now(),
           })
-        }, [queryResult.state])
+        })
 
         return queryResult
       })

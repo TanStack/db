@@ -1,5 +1,5 @@
 import { compileQuery, queryBuilder } from "@tanstack/db"
-import { createMemo, onCleanup } from "solid-js"
+import { createComputed, createMemo, onCleanup } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import type { Accessor } from "solid-js"
 import type {
@@ -24,57 +24,61 @@ export function useLiveQuery<
     q: InitialQueryBuilder<Context<Schema>>
   ) => QueryBuilder<TResultContext>
 ): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const NOOP = () => {}
-  let unsubCompiled = NOOP
-  let unsubDerivedState = NOOP
-  let unsubDerivedArray = NOOP
-
   const compiledQuery = createMemo(
     () => {
-      unsubCompiled()
       const compiled = compileQuery(queryFn(queryBuilder()))
-      unsubCompiled = compiled.start()
+      const unsubCompiled = compiled.start()
+
+      onCleanup(() => {
+        unsubCompiled()
+      })
+
       return compiled
     },
     undefined,
-    { name: `CompiledQueryMemo` }
+    { name: `TanstackDBCompiledQueryMemo` }
   )
 
-  const state = createMemo(() => {
-    const derivedState = compiledQuery().results.derivedState
-    const [slice, setSlice] = createStore({
-      value: derivedState.state,
-    })
-
-    unsubDerivedState()
-    unsubDerivedState = derivedState.subscribe(() => {
-      setSlice(`value`, reconcile(derivedState.state))
-    })
-    return slice
+  const [state, setState] = createStore({
+    value: compiledQuery().results.derivedState.state,
   })
 
-  const data = createMemo(() => {
-    const derivedArray = compiledQuery().results.derivedArray
-    const [slice, setSlice] = createStore({
-      value: derivedArray.state,
-    })
+  createComputed(
+    () => {
+      setState({ value: compiledQuery().results.derivedState.state })
+      const unsub = compiledQuery().results.derivedState.subscribe((v) => {
+        setState({ value: reconcile(v.currentVal)(v.prevVal) })
+      })
 
-    unsubDerivedArray()
-    unsubDerivedArray = derivedArray.subscribe(() => {
-      setSlice(`value`, reconcile(derivedArray.state))
-    })
-    return slice
-  })
+      onCleanup(() => {
+        unsub()
+      })
+    },
+    undefined,
+    { name: `TanstackDBStateComputed` }
+  )
 
-  onCleanup(() => {
-    unsubCompiled()
-    unsubDerivedState()
-    unsubDerivedArray()
-  })
+  const [data, setData] = createStore(
+    compiledQuery().results.derivedArray.state
+  )
+  createComputed(
+    () => {
+      setData(compiledQuery().results.derivedArray.state)
+      const unsub = compiledQuery().results.derivedArray.subscribe((v) => {
+        setData(reconcile(v.currentVal)(v.prevVal))
+      })
+
+      onCleanup(() => {
+        unsub()
+      })
+    },
+    undefined,
+    { name: `TanstackDBDataComputed` }
+  )
 
   return {
-    state: () => state().value,
-    data: () => data().value,
+    state: () => state.value,
+    data: () => data,
     collection: () => compiledQuery().results,
   }
 }
