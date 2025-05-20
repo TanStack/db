@@ -98,7 +98,7 @@ updateTodo.mutate(() =>
 )
 ```
 
-Rather than mutating the collection data directly, the collection internally treats its synced/loaded data as immutable and maintains a seperate set of local mutations as optimistic state. When live queries read from the collection, they see a local view that overlays the local optimistic mutations on-top-of the immutable synced data.
+Rather than mutating the collection data directly, the collection internally treats its synced/loaded data as immutable and maintains a separate set of local mutations as optimistic state. When live queries read from the collection, they see a local view that overlays the local optimistic mutations on-top-of the immutable synced data.
 
 In addition, the local mutations are passed to the async `mutationFn` that's passed in when creating the mutator. This mutationFn is responsible for handling the writes, usually by sending them to a server or a database. TanStack DB waits for the function to resolve before then removing the optimistic state that was applied when the local writes was made.
 
