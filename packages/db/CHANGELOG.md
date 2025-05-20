@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.3
+
+### Patch Changes
+
+- fix a bug where query results would not correctly update ([#87](https://github.com/TanStack/db/pull/87))
+
 ## 0.0.2
 
 ### Patch Changes

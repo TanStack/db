@@ -1,5 +1,12 @@
 # @tanstack/db-collections
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`b29420b`](https://github.com/TanStack/db/commit/b29420bcdae30dfeffeef63a8753b83306a54e5a)]:
+  - @tanstack/db@0.0.3
+
 ## 0.0.2
 
 ### Patch Changes
