@@ -1,5 +1,11 @@
 # @tanstack/db-collections
 
+## 0.0.4
+
+### Patch Changes
+
+- Added staleTime support for QueryCollection ([#104](https://github.com/TanStack/db/pull/104))
+
 ## 0.0.3
 
 ### Patch Changes
