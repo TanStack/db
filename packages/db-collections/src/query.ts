@@ -39,6 +39,13 @@ export interface QueryCollectionConfig<
     Array<TItem>,
     TQueryKey
   >[`retryDelay`]
+  staleTime?: QueryObserverOptions<
+    Array<TItem>,
+    TError,
+    Array<TItem>,
+    Array<TItem>,
+    TQueryKey
+  >[`staleTime`]
   queryClient: QueryClient
 }
 
@@ -59,6 +66,7 @@ export class QueryCollection<
       refetchInterval,
       retry,
       retryDelay,
+      staleTime,
       ...baseCollectionConfig
     } = config
 
@@ -93,6 +101,7 @@ export class QueryCollection<
         refetchInterval: refetchInterval,
         retry: retry,
         retryDelay: retryDelay,
+        staleTime: staleTime,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
       }
