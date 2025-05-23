@@ -128,7 +128,7 @@ describe(`QueryCollection`, () => {
       // Item 2 removed
     ]
 
-    // Invalidate the query to trigger a refetch
+    // Invalidate the query to trigger a refetch in the background.
     await collection.invalidate()
 
     // Wait for the refetch and collection update
@@ -145,6 +145,18 @@ describe(`QueryCollection`, () => {
     expect(collection.state.get(`1`)).toEqual(updatedItem)
     expect(collection.state.get(`3`)).toEqual(newItem)
     expect(collection.state.get(`2`)).toBeUndefined()
+
+    // Now update the data again.
+    const item4 = { id: `4`, name: `Item 4` }
+    currentItems = [...currentItems, item4]
+
+    // Refetch the query to trigger a refetch.
+    await collection.refetch()
+
+    // No need to `vi.waitFor` this time.
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(collection.state.size).toBe(3)
+    expect(collection.state.get(`4`)).toEqual(item4)
   })
 
   it(`should handle query errors gracefully`, async () => {

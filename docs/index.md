@@ -102,7 +102,7 @@ Rather than mutating the collection data directly, the collection internally tre
 
 In addition, the local mutations are passed to the async `mutationFn` that's passed in when creating the mutator. This mutationFn is responsible for handling the writes, usually by sending them to a server or a database. TanStack DB waits for the function to resolve before then removing the optimistic state that was applied when the local writes was made.
 
-For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.update(updatedTodo)` and then calls `await collection.invalidate()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
+For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.update(updatedTodo)` and then calls `await collection.refetch()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
 
 ```ts
 const updateTodo = useOptimisticMutation({
@@ -110,7 +110,7 @@ const updateTodo = useOptimisticMutation({
     const { collection, modified: updatedTodo } = transaction.mutations[0]!
 
     await api.todos.update(updatedTodo)
-    await collection.invalidate()
+    await collection.refetch()
   },
 })
 ```
@@ -362,7 +362,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
   // Wait for the transaction to be synced back from the server
   // before discarding the optimistic state.
   const collection: Collection = transaction.mutations[0]!.collection
-  await collection.invalidate()
+  await collection.refetch()
 }
 ```
 
@@ -555,7 +555,7 @@ const Todos = () => {
       // This blocks until the collection is up-to-date.
       // The local app avoids flickering and always converges
       // on the server state as the source of truth.
-      await todoCollection.invalidate()
+      await todoCollection.refetch()
     },
   })
 
@@ -566,7 +566,7 @@ const Todos = () => {
       const { changes: newList } = transaction.mutations[0]!
 
       await api.todoLists.create(newList)
-      await todoListCollection.invalidate()
+      await todoListCollection.refetch()
     },
   })
 

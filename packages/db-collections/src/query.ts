@@ -233,6 +233,26 @@ export class QueryCollection<
       throw error
     }
   }
+
+  public async refetch(): Promise<void> {
+    console.log(
+      `[QueryCollection] refetch() called for ${String(this.queryConfig.queryKey)}`
+    )
+    try {
+      await this.queryClient.refetchQueries({
+        queryKey: this.queryConfig.queryKey,
+      })
+      console.log(
+        `[QueryCollection] Refetch successful for ${String(this.queryConfig.queryKey)}.`
+      )
+    } catch (error) {
+      console.error(
+        `[QueryCollection] Error during refetch for ${String(this.queryConfig.queryKey)}:`,
+        error
+      )
+      throw error
+    }
+  }
 }
 
 export function createQueryCollection<
