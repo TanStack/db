@@ -201,7 +201,7 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // The txid should be tracked and awaitTxid should resolve immediately
+      // The txid should be tracked and awaitTxId should resolve immediately
       await expect(collection.awaitTxId(testTxid)).resolves.toBe(true)
     })
 
@@ -243,7 +243,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should resolve when a txid arrives after awaitTxid is called`, async () => {
+    it(`should resolve when a txid arrives after awaitTxId is called`, async () => {
       const laterTxid = 1000
 
       // Start waiting for a txid that hasn't arrived yet

@@ -638,7 +638,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
   // stream for the database transaction ID that the writes we made
   // were applied under. When this syncs through, we can safely
   // discard the local optimistic state.
-  await collection.config.sync.awaitTxid(result.txid)
+  await collection.awaitTxId(result.txid)
 }
 
 // We can now use the same mutationFn for any local write operations.
