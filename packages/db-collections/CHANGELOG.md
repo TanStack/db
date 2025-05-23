@@ -1,5 +1,14 @@
 # @tanstack/db-collections
 
+## 0.0.5
+
+### Patch Changes
+
+- Replace `queryCollection.invalidate()` with `queryCollection.refetch()`. ([#109](https://github.com/TanStack/db/pull/109))
+
+  This means that we actually wait for the collection to be updated before
+  discarding local optimistic state.
+
 ## 0.0.4
 
 ### Patch Changes
