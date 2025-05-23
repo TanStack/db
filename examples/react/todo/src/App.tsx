@@ -237,7 +237,7 @@ async function collectionSync(
   txid: number
 ) {
   if (type === CollectionType.Query) {
-    await (mutation.collection as QueryCollection<UpdateTodo>).invalidate()
+    await (mutation.collection as QueryCollection<UpdateTodo>).refetch()
   } else {
     await (mutation.collection as ElectricCollection<UpdateTodo>).awaitTxId(
       txid

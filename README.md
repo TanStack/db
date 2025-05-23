@@ -83,7 +83,7 @@ const AddTodo = () => {
       const { collection, modified: newTodo } = transaction.mutations[0]!
 
       await api.todos.create(newTodo)
-      await collection.invalidate()
+      await collection.refetch()
     },
   })
 

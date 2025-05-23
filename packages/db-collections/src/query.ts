@@ -214,20 +214,20 @@ export class QueryCollection<
     this.queryClient = queryClient
   }
 
-  public async invalidate(): Promise<void> {
+  public async refetch(): Promise<void> {
     console.log(
-      `[QueryCollection] invalidate() called for ${String(this.queryConfig.queryKey)}`
+      `[QueryCollection] refetch() called for ${String(this.queryConfig.queryKey)}`
     )
     try {
-      await this.queryClient.invalidateQueries({
+      await this.queryClient.refetchQueries({
         queryKey: this.queryConfig.queryKey,
       })
       console.log(
-        `[QueryCollection] Invalidation successful for ${String(this.queryConfig.queryKey)}.`
+        `[QueryCollection] Refetch successful for ${String(this.queryConfig.queryKey)}.`
       )
     } catch (error) {
       console.error(
-        `[QueryCollection] Error during invalidate for ${String(this.queryConfig.queryKey)}:`,
+        `[QueryCollection] Error during refetch for ${String(this.queryConfig.queryKey)}:`,
         error
       )
       throw error

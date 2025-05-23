@@ -128,23 +128,32 @@ describe(`QueryCollection`, () => {
       // Item 2 removed
     ]
 
-    // Invalidate the query to trigger a refetch
-    await collection.invalidate()
+    // Refetch the query.
+    await collection.refetch()
 
-    // Wait for the refetch and collection update
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      // Check for update, addition, and removal
-      expect(collection.state.size).toBe(2)
-      expect(collection.state.has(`1`)).toBe(true)
-      expect(collection.state.has(`3`)).toBe(true)
-      expect(collection.state.has(`2`)).toBe(false)
-    })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    // Check for update, addition, and removal
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.has(`1`)).toBe(true)
+    expect(collection.state.has(`3`)).toBe(true)
+    expect(collection.state.has(`2`)).toBe(false)
 
     // Verify the final state more thoroughly
     expect(collection.state.get(`1`)).toEqual(updatedItem)
     expect(collection.state.get(`3`)).toEqual(newItem)
     expect(collection.state.get(`2`)).toBeUndefined()
+
+    // Now update the data again.
+    const item4 = { id: `4`, name: `Item 4` }
+    currentItems = [...currentItems, item4]
+
+    // Refetch the query to trigger a refetch.
+    await collection.refetch()
+
+    // Verify expected.
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(collection.state.size).toBe(3)
+    expect(collection.state.get(`4`)).toEqual(item4)
   })
 
   it(`should handle query errors gracefully`, async () => {
@@ -179,14 +188,12 @@ describe(`QueryCollection`, () => {
       expect(collection.state.get(`1`)).toEqual(initialItem)
     })
 
-    // Trigger an error by invalidating
-    await collection.invalidate()
+    // Trigger an error by refetching
+    await collection.refetch()
 
     // Wait for the error to be logged
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(consoleErrorSpy).toHaveBeenCalled()
-    })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(consoleErrorSpy).toHaveBeenCalled()
 
     // Verify the error was logged correctly
     const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
@@ -279,18 +286,15 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockClear()
 
     // Trigger first refetch - should not cause an update due to shallow equality
-    await collection.invalidate()
+    await collection.refetch()
 
-    // Wait for the refetch to complete
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      // Verify invalidation was logged
-      expect(
-        consoleSpy.mock.calls.some((call) =>
-          call[0].includes(`Invalidation successful for ${String(queryKey)}`)
-        )
-      ).toBe(true)
-    })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    // Verify refetch was logged
+    expect(
+      consoleSpy.mock.calls.some((call) =>
+        call[0].includes(`Refetch successful for ${String(queryKey)}`)
+      )
+    ).toBe(true)
 
     // Since the data is identical (though a different object reference),
     // the state object reference should remain the same due to shallow equality
@@ -299,18 +303,15 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockClear()
 
     // Trigger second refetch - should cause an update due to actual data change
-    await collection.invalidate()
+    await collection.refetch()
 
-    // Wait for the refetch to complete
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(3)
-      // Verify invalidation was logged
-      expect(
-        consoleSpy.mock.calls.some((call) =>
-          call[0].includes(`Invalidation successful for ${String(queryKey)}`)
-        )
-      ).toBe(true)
-    })
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    // Verify refetch was logged
+    expect(
+      consoleSpy.mock.calls.some((call) =>
+        call[0].includes(`Refetch successful for ${String(queryKey)}`)
+      )
+    ).toBe(true)
 
     // Now the state should be updated with the new value
     const updatedItem = collection.state.get(`1`)
@@ -372,13 +373,10 @@ describe(`QueryCollection`, () => {
     queryFn.mockResolvedValueOnce(updatedItems)
 
     // Trigger a refetch
-    await collection.invalidate()
+    await collection.refetch()
 
-    // Wait for the refetch to complete
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(collection.state.size).toBe(updatedItems.length)
-    })
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(collection.state.size).toBe(updatedItems.length)
 
     // Verify getId was called at least once for each item
     // It may be called multiple times per item during the diffing process
