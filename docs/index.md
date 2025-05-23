@@ -560,7 +560,7 @@ const Todos = () => {
   })
 
   // Here we define another mutator with its own specific mutationFn.
-  // This knows the api call to make and the collection to invalidate.
+  // This knows the api call to make and the collection to refetch.
   const addList = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
       const { changes: newList } = transaction.mutations[0]!

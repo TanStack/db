@@ -2,4 +2,7 @@
 "@tanstack/db-collections": patch
 ---
 
-Provide `queryCollection.refetch()` as an alternative to `queryCollection.invalidate()` that actually waits for thr collection to be updated.
+Replace `queryCollection.invalidate()` with `queryCollection.refetch()`.
+
+This means that we actually wait for the collection to be updated before
+discarding local optimistic state.
