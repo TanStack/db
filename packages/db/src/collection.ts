@@ -199,21 +199,27 @@ export class Collection<T extends object = Record<string, unknown>> {
             const isActive = ![`completed`, `failed`].includes(
               transaction.state
             )
-            return transaction.mutations.map((mutation) => {
-              const message: OptimisticChangeMessage<T> = {
-                type: mutation.type,
-                key: mutation.key,
-                value: mutation.modified as T,
-                isActive,
-              }
-              if (
-                mutation.metadata !== undefined &&
-                mutation.metadata !== null
-              ) {
-                message.metadata = mutation.metadata as Record<string, unknown>
-              }
-              return message
-            })
+            return transaction.mutations
+              .filter((mutation) => mutation.collection === this)
+              .map((mutation) => {
+                console.log(`HERE1`)
+                const message: OptimisticChangeMessage<T> = {
+                  type: mutation.type,
+                  key: mutation.key,
+                  value: mutation.modified as T,
+                  isActive,
+                }
+                if (
+                  mutation.metadata !== undefined &&
+                  mutation.metadata !== null
+                ) {
+                  message.metadata = mutation.metadata as Record<
+                    string,
+                    unknown
+                  >
+                }
+                return message
+              })
           })
           .flat()
 
