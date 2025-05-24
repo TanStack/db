@@ -202,7 +202,6 @@ export class Collection<T extends object = Record<string, unknown>> {
             return transaction.mutations
               .filter((mutation) => mutation.collection === this)
               .map((mutation) => {
-                console.log(`HERE1`)
                 const message: OptimisticChangeMessage<T> = {
                   type: mutation.type,
                   key: mutation.key,
