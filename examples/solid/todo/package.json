@@ -1,0 +1,44 @@
+{
+  "name": "examples/solid/todo",
+  "private": true,
+  "version": "0.0.4",
+  "dependencies": {
+    "@tanstack/db-collections": "workspace:*",
+    "@tanstack/query-core": "^5.75.7",
+    "@tanstack/solid-db": "workspace:*",
+    "cors": "^2.8.5",
+    "drizzle-orm": "^0.40.1",
+    "drizzle-zod": "^0.7.0",
+    "express": "^4.19.2",
+    "postgres": "^3.4.5",
+    "solid-js": "^1.9.4",
+    "tailwindcss": "^4.0.17",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0-alpha.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
+    "vite-plugin-solid": "^2.11.6",
+    "concurrently": "^9.1.2",
+    "dotenv": "^16.3.1",
+    "drizzle-kit": "^0.30.5",
+    "pg": "^8.14.1",
+    "tsx": "^4.6.2",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  },
+  "scripts": {
+    "api:dev": "tsx watch src/api/server.ts",
+    "build": "tsc -b && vite build",
+    "db:ensure-config": "tsx scripts/ensure-default-config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "tsx scripts/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "dev": "docker compose up -d && concurrently \"pnpm api:dev\" \"vite\"",
+    "preview": "vite preview"
+  },
+  "type": "module"
+}
