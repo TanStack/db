@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.4
+
+### Patch Changes
+
+- fix a bug where optimistic operations could be applied to the wrong collection ([#113](https://github.com/TanStack/db/pull/113))
+
 ## 0.0.3
 
 ### Patch Changes
