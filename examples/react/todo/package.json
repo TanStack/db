@@ -1,7 +1,7 @@
 {
   "name": "examples/react/todo",
   "private": true,
-  "version": "0.0.7",
+  "version": "0.0.8",
   "dependencies": {
     "@tanstack/db-collections": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
