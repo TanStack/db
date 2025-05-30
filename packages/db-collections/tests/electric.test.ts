@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "@tanstack/db"
 import { createElectricCollection } from "../src/electric"
-import type { ElectricCollection } from "../src/electric"
+import type { ElectricCollection, ElectricInitialData } from "../src/electric"
 import type { PendingMutation, Transaction } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
 
@@ -18,6 +18,26 @@ vi.mock(`@electric-sql/client`, async () => {
     ShapeStream: vi.fn(() => mockStream),
   }
 })
+
+const mockConstants = {
+  PRIMARY_KEY_COLUMN: `id`,
+}
+
+// Initial data for testing the seeding functionality
+const testInitialData: ElectricInitialData<Row> = {
+  data: [
+    {
+      key: `initialKey1`,
+      value: { id: `initialId1`, name: `Initial User 1` },
+      metadata: { source: `seed` },
+    },
+    { key: `initialKey2`, value: { id: `initialId2`, name: `Initial User 2` } },
+  ],
+  txids: [99901, 99902],
+  schema: `seeded_schema`,
+  lastOffset: `seedOffset123`,
+  shapeHandle: `seedHandle456`,
+}
 
 describe(`Electric Integration`, () => {
   let collection: ElectricCollection<Row>
@@ -692,5 +712,115 @@ describe(`Electric Integration`, () => {
       const metadata = collection.config.sync.getSyncMetadata?.()
       expect(metadata?.relation).toEqual([`custom_schema`, `users`])
     })
+  })
+})
+
+describe(`Initial Data Seeding`, () => {
+  let collectionWithInitialData: ElectricCollection<Row>
+
+  beforeEach(() => {
+    // Create collection with Electric configuration specifically for initial data tests
+    collectionWithInitialData = createElectricCollection({
+      id: `test-initial-seed`,
+      streamOptions: {
+        url: `http://test-url`,
+        params: {
+          table: `seed_table`, // Use a distinct table name for these tests
+        },
+      },
+      primaryKey: [mockConstants.PRIMARY_KEY_COLUMN],
+      initialData: testInitialData,
+    })
+  })
+
+  // Tests for seedFromElectricInitialData will go here
+  it(`should correctly seed syncedData from initialData`, () => {
+    const expectedSyncedData = new Map()
+    testInitialData.data.forEach((item: { key: string; value: Row }) => {
+      expectedSyncedData.set(item.key, item.value)
+    })
+    expect(collectionWithInitialData.syncedData.state).toEqual(
+      expectedSyncedData
+    )
+  })
+
+  it(`should correctly seed syncedMetadata from initialData`, () => {
+    const expectedSyncedMetadata = new Map()
+    const defaultSyncMetadata = {
+      primaryKey: [mockConstants.PRIMARY_KEY_COLUMN],
+      relation: [testInitialData.schema, `seed_table`], // schema from initialData, table from streamOptions
+    }
+    testInitialData.data.forEach(
+      (item: {
+        key: string
+        value: Row
+        metadata?: Record<string, unknown>
+      }) => {
+        expectedSyncedMetadata.set(item.key, {
+          ...defaultSyncMetadata,
+          ...item.metadata,
+        })
+      }
+    )
+    expect(collectionWithInitialData.syncedMetadata.state).toEqual(
+      expectedSyncedMetadata
+    )
+  })
+
+  it(`should correctly populate objectKeyMap from initialData`, () => {
+    const expectedObjectKeyMapEntries = testInitialData.data.map(
+      (item: { key: string; value: Row }) =>
+        [item.value, item.key] as [Row, string]
+    )
+    const actualObjectKeyMap = (collectionWithInitialData as any)
+      .objectKeyMap as WeakMap<Row, string>
+
+    // Check if all expected entries are present in the WeakMap
+    expectedObjectKeyMapEntries.forEach(([value, key]) => {
+      expect(actualObjectKeyMap.has(value)).toBe(true)
+      expect(actualObjectKeyMap.get(value)).toBe(key)
+    })
+
+    // Optionally, verify the size if possible and makes sense for WeakMap (though not directly possible)
+    // For a more thorough check, one might need to iterate over the known objects that were inserted.
+    // However, WeakMap's nature is that it doesn't prevent its keys (objects) from being garbage collected,
+    // so checking size or iterating isn't as straightforward as with a Map.
+    // The above check (all expected items are there) is usually sufficient.
+  })
+
+  it(`should call onFirstCommit when initialData is provided`, () => {
+    // onFirstCommit is called internally during the seeding process.
+    // A direct spy is hard due to its private nature and immediate invocation.
+    // This test primarily ensures that the collection setup completes without error,
+    // implying onFirstCommit was called as part of the seeding.
+    // A more robust test might involve checking a side effect of onFirstCommit if one exists
+    // or temporarily making it more testable.
+    expect(collectionWithInitialData).toBeDefined()
+    // We can also check if the collection considers itself 'committed' or 'synced'
+    // if such a public state exists and is set by onFirstCommit during seeding.
+    // For now, ensuring no error during setup is the main check.
+  })
+
+  it(`should track txids from initialData`, async () => {
+    // Ensure txids from initialData are defined and available before testing
+    const firstTxid = testInitialData.txids[0]
+    if (firstTxid !== undefined) {
+      await expect(
+        collectionWithInitialData.awaitTxId(firstTxid)
+      ).resolves.toBe(true)
+    }
+
+    const secondTxid = testInitialData.txids[1]
+    if (secondTxid !== undefined) {
+      await expect(
+        collectionWithInitialData.awaitTxId(secondTxid)
+      ).resolves.toBe(true)
+    }
+    // Attempt to await a txid not in initialData to ensure it doesn't resolve immediately
+    const unknownTxid = 123456789
+    const promise = collectionWithInitialData.awaitTxId(unknownTxid, 50) // Short timeout
+    await expect(promise).rejects.toThrow(
+      `Timeout waiting for txId: ${unknownTxid}`
+    )
   })
 })

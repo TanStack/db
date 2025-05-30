@@ -68,11 +68,41 @@ export class ElectricCollection<
     super({
       ...config,
       sync,
-      initialData:
-        config.initialData?.data.map((item) => item.value) || undefined,
+      initialData: undefined,
     })
 
     this.seenTxids = seenTxids
+
+    if (config.initialData?.data && config.initialData.data.length > 0) {
+      this.seedFromElectricInitialData(config.initialData.data)
+    }
+  }
+
+  private seedFromElectricInitialData(
+    items: Array<{ key: string; value: T; metadata?: Record<string, unknown> }>
+  ): void {
+    const keys = new Set<string>()
+
+    this.syncedData.setState((prevData) => {
+      const newData = new Map(prevData)
+      items.forEach(({ key, value }) => {
+        keys.add(key)
+        newData.set(key, value)
+        this.objectKeyMap.set(value, key)
+      })
+      return newData
+    })
+
+    this.syncedMetadata.setState((prevMetadata) => {
+      const newMetadata = new Map(prevMetadata)
+      items.forEach(({ key, metadata }) => {
+        const syncMetadata = this.config.sync.getSyncMetadata?.() || {}
+        newMetadata.set(key, { ...syncMetadata, ...metadata })
+      })
+      return newMetadata
+    })
+
+    this.onFirstCommit(() => {})
   }
 
   /**
