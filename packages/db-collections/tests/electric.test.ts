@@ -398,4 +398,299 @@ describe(`Electric Integration`, () => {
     expect(metadata).toHaveProperty(`primaryKey`)
     expect(metadata.primaryKey).toEqual([`id`])
   })
+
+  // Tests for initial data functionality
+  describe(`initial data support`, () => {
+    it(`should accept initial data during construction`, () => {
+      const initialData = {
+        data: [
+          {
+            key: `user1`,
+            value: { id: 1, name: `Alice` },
+            metadata: { source: `server` },
+          },
+          {
+            key: `user2`,
+            value: { id: 2, name: `Bob` },
+            metadata: { source: `server` },
+          },
+        ],
+        txids: [100, 101],
+        schema: `public`,
+        lastOffset: `1234567890`,
+        shapeHandle: `shape_abc123`,
+      }
+
+      const collection = createElectricCollection({
+        id: `test-with-initial-data`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Should have initial data immediately available
+      expect(collection.state.size).toBe(2)
+
+      // Check that the data is present (keys will be auto-generated)
+      const values = Array.from(collection.state.values())
+      expect(values).toContainEqual({ id: 1, name: `Alice` })
+      expect(values).toContainEqual({ id: 2, name: `Bob` })
+    })
+
+    it(`should track txids from initial data`, async () => {
+      const initialData = {
+        data: [{ key: `user1`, value: { id: 1, name: `Alice` } }],
+        txids: [555, 556],
+        schema: `public`,
+        lastOffset: `1234567890`,
+        shapeHandle: `shape_abc123`,
+      }
+
+      const collection = createElectricCollection({
+        id: `test-txids`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Should have txids from initial data immediately available
+      await expect(collection.awaitTxId(555)).resolves.toBe(true)
+      await expect(collection.awaitTxId(556)).resolves.toBe(true)
+    })
+
+    it(`should resume from lastOffset and shapeHandle in stream options`, async () => {
+      // Get the actual mock from vitest
+      const electricModule = await import(`@electric-sql/client`)
+      const ShapeStreamMock = vi.mocked(electricModule.ShapeStream)
+
+      const initialData = {
+        data: [],
+        txids: [],
+        lastOffset: `resume_offset_123`,
+        shapeHandle: `shape_handle_abc`,
+      }
+
+      createElectricCollection({
+        id: `test-resume`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Verify ShapeStream was constructed with resume options
+      expect(ShapeStreamMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `http://test-url`,
+          params: { table: `users` },
+          offset: `resume_offset_123`,
+          shapeHandle: `shape_handle_abc`,
+        })
+      )
+    })
+
+    it(`should have proper object key mappings for initial data`, () => {
+      const initialData = {
+        data: [
+          { key: `user1`, value: { id: 1, name: `Alice` } },
+          { key: `user2`, value: { id: 2, name: `Bob` } },
+        ],
+        txids: [100],
+        schema: `public`,
+      }
+
+      const collection = createElectricCollection({
+        id: `test-key-mapping`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Verify object key mappings are set correctly
+      const alice = Array.from(collection.state.values()).find(
+        (item) => item.name === `Alice`
+      )!
+      const bob = Array.from(collection.state.values()).find(
+        (item) => item.name === `Bob`
+      )!
+
+      expect(collection.objectKeyMap.get(alice)).toBeDefined()
+      expect(collection.objectKeyMap.get(bob)).toBeDefined()
+
+      // The keys should be different
+      expect(collection.objectKeyMap.get(alice)).not.toBe(
+        collection.objectKeyMap.get(bob)
+      )
+    })
+
+    it(`should handle empty initial data gracefully`, () => {
+      const initialData = {
+        data: [],
+        txids: [],
+      }
+
+      const collection = createElectricCollection({
+        id: `test-empty-initial`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      expect(collection.state.size).toBe(0)
+    })
+
+    it(`should work normally when no initial data is provided`, () => {
+      const collection = createElectricCollection({
+        id: `test-no-initial`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+      })
+
+      expect(collection.state.size).toBe(0)
+
+      // Should still handle sync messages normally
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(collection.state.get(`1`)).toEqual({ id: 1, name: `Test User` })
+    })
+
+    it(`should merge incoming sync data with initial data correctly`, () => {
+      const initialData = {
+        data: [{ key: `user1`, value: { id: 1, name: `Alice` } }],
+        txids: [100],
+        lastOffset: `initial_offset`,
+        shapeHandle: `initial_handle`,
+      }
+
+      const collection = createElectricCollection({
+        id: `test-merge`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Should have initial data
+      const initialValues = Array.from(collection.state.values())
+      expect(initialValues).toContainEqual({ id: 1, name: `Alice` })
+
+      // Sync new data from server
+      subscriber([
+        {
+          key: `user2`,
+          value: { id: 2, name: `Bob` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Should have both initial and synced data
+      expect(collection.state.size).toBe(2)
+      const allValues = Array.from(collection.state.values())
+      expect(allValues).toContainEqual({ id: 1, name: `Alice` })
+      expect(allValues).toContainEqual({ id: 2, name: `Bob` })
+    })
+
+    it(`should update existing initial data with sync changes`, () => {
+      const initialData = {
+        data: [{ key: `user1`, value: { id: 1, name: `Alice` } }],
+        txids: [100],
+      }
+
+      const collection = createElectricCollection({
+        id: `test-update`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Should have initial data
+      const initialValues = Array.from(collection.state.values())
+      expect(initialValues).toContainEqual({ id: 1, name: `Alice` })
+
+      // Find the auto-generated key for the initial user
+      const aliceKey = Array.from(collection.state.entries()).find(
+        ([key, value]) => value.name === `Alice`
+      )?.[0]
+
+      // Update the existing user via sync using the same auto-generated key
+      subscriber([
+        {
+          key: aliceKey!,
+          value: { id: 1, name: `Alice Updated`, email: `alice@example.com` },
+          headers: { operation: `update` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Should have updated data
+      const updatedValues = Array.from(collection.state.values())
+      expect(updatedValues).toContainEqual({
+        id: 1,
+        name: `Alice Updated`,
+        email: `alice@example.com`,
+      })
+    })
+
+    it(`should handle schema from initial data`, () => {
+      const mockShapeStreamConstructor = vi.mocked(
+        require(`@electric-sql/client`).ShapeStream
+      )
+
+      const initialData = {
+        data: [],
+        txids: [],
+        schema: `custom_schema`,
+      }
+
+      const collection = createElectricCollection({
+        id: `test-schema`,
+        streamOptions: {
+          url: `http://test-url`,
+          params: { table: `users` },
+        },
+        primaryKey: [`id`],
+        initialData,
+      })
+
+      // Verify getSyncMetadata includes the schema from initial data
+      const metadata = collection.config.sync.getSyncMetadata?.()
+      expect(metadata?.relation).toEqual([`custom_schema`, `users`])
+    })
+  })
 })

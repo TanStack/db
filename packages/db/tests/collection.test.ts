@@ -626,3 +626,361 @@ describe(`Collection with schema validation`, () => {
     }
   })
 })
+
+// Tests for initial data functionality
+describe(`initial data support`, () => {
+  it(`should accept initial data during construction`, () => {
+    const initialData = [
+      { id: 1, name: `Alice`, email: `alice@example.com` },
+      { id: 2, name: `Bob`, email: `bob@example.com` },
+      { id: 3, name: `Charlie`, email: `charlie@example.com` },
+    ]
+
+    const collection = new Collection<{
+      id: number
+      name: string
+      email: string
+    }>({
+      id: `test-with-initial-data`,
+      sync: {
+        sync: () => {
+          // No-op sync for this test
+        },
+      },
+      initialData,
+    })
+
+    // Should have initial data immediately available
+    expect(collection.state.size).toBe(3)
+
+    // Check each item was added with correct generated key
+    const items = Array.from(collection.state.values())
+    expect(items).toContainEqual({
+      id: 1,
+      name: `Alice`,
+      email: `alice@example.com`,
+    })
+    expect(items).toContainEqual({
+      id: 2,
+      name: `Bob`,
+      email: `bob@example.com`,
+    })
+    expect(items).toContainEqual({
+      id: 3,
+      name: `Charlie`,
+      email: `charlie@example.com`,
+    })
+  })
+
+  it(`should have proper object key mappings for initial data`, () => {
+    const initialData = [
+      { id: 1, name: `Alice` },
+      { id: 2, name: `Bob` },
+    ]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-key-mapping`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Verify object key mappings are set correctly
+    const alice = Array.from(collection.state.values()).find(
+      (item) => item.name === `Alice`
+    )!
+    const bob = Array.from(collection.state.values()).find(
+      (item) => item.name === `Bob`
+    )!
+
+    expect(collection.objectKeyMap.get(alice)).toBeDefined()
+    expect(collection.objectKeyMap.get(bob)).toBeDefined()
+
+    // The keys should be different
+    expect(collection.objectKeyMap.get(alice)).not.toBe(
+      collection.objectKeyMap.get(bob)
+    )
+  })
+
+  it(`should mark hasReceivedFirstCommit as true when seeded with initial data`, async () => {
+    const initialData = [{ id: 1, name: `Test` }]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-first-commit`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Should resolve immediately since first commit already happened with initial data
+    const state = await collection.stateWhenReady()
+    expect(state.size).toBe(1)
+  })
+
+  it(`should trigger onFirstCommit callbacks for initial data`, () => {
+    const callback = vi.fn()
+    const initialData = [{ id: 1, name: `Test` }]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-callbacks`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Register callback after construction (should not be called since commit already happened)
+    collection.onFirstCommit(callback)
+
+    // Since initial data already triggered first commit, new callbacks won't be called
+    expect(callback).not.toHaveBeenCalled()
+  })
+
+  it(`should resolve stateWhenReady immediately when seeded with initial data`, async () => {
+    const initialData = [{ id: 1, name: `Alice` }]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-ready`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Should resolve immediately since we have initial data
+    const state = await collection.stateWhenReady()
+    expect(state.size).toBe(1)
+    expect(Array.from(state.values())[0]).toEqual({ id: 1, name: `Alice` })
+  })
+
+  it(`should resolve toArrayWhenReady immediately when seeded with initial data`, async () => {
+    const initialData = [
+      { id: 1, name: `Alice` },
+      { id: 2, name: `Bob` },
+    ]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-array-ready`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Should resolve immediately since we have initial data
+    const items = await collection.toArrayWhenReady()
+    expect(items.length).toBe(2)
+    expect(items).toContainEqual({ id: 1, name: `Alice` })
+    expect(items).toContainEqual({ id: 2, name: `Bob` })
+  })
+
+  it(`should handle empty initial data gracefully`, () => {
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-empty-initial`,
+      sync: {
+        sync: () => {},
+      },
+      initialData: [],
+    })
+
+    expect(collection.state.size).toBe(0)
+    // Should have marked as having received first commit even with empty data
+    expect(collection.state.size).toBe(0)
+  })
+
+  it(`should work normally when no initial data is provided`, () => {
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-no-initial`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            key: `user1`,
+            value: { id: 1, name: `Synced User` },
+          })
+          commit()
+        },
+      },
+    })
+
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(`user1`)).toEqual({
+      id: 1,
+      name: `Synced User`,
+    })
+  })
+
+  it(`should merge sync data with initial data correctly`, () => {
+    const initialData = [{ id: 1, name: `Alice` }]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-merge`,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            key: `user2`,
+            value: { id: 2, name: `Synced Bob` },
+          })
+          commit()
+        },
+      },
+      initialData,
+    })
+
+    // Should have both initial and synced data
+    expect(collection.state.size).toBe(2)
+
+    const values = Array.from(collection.state.values())
+    expect(values).toContainEqual({ id: 1, name: `Alice` })
+    expect(values).toContainEqual({ id: 2, name: `Synced Bob` })
+  })
+
+  it(`should handle mutations on initial data`, async () => {
+    const initialData = [{ id: 1, name: `Alice`, value: `initial` }]
+
+    const collection = new Collection<{
+      id: number
+      name: string
+      value: string
+    }>({
+      id: `test-mutations`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    const mutationFn: MutationFn = () => {
+      // Mock successful persistence
+      return Promise.resolve()
+    }
+
+    // Find the initial item
+    const alice = Array.from(collection.state.values()).find(
+      (item) => item.name === `Alice`
+    )!
+
+    // Create transaction and update the item
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => {
+      collection.update(alice, (draft) => {
+        draft.value = `updated`
+      })
+    })
+
+    // The optimistic update should be visible immediately (before persistence)
+    const updatedAlice = Array.from(collection.state.values()).find(
+      (item) => item.name === `Alice`
+    )!
+    expect(updatedAlice.value).toBe(`updated`)
+
+    await tx.isPersisted.promise
+  })
+
+  it(`should include initial data in currentStateAsChanges`, () => {
+    const initialData = [
+      { id: 1, name: `Alice` },
+      { id: 2, name: `Bob` },
+    ]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-changes`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    const changes = collection.currentStateAsChanges()
+    expect(changes.length).toBe(2)
+
+    // All changes should be inserts
+    expect(changes.every((change) => change.type === `insert`)).toBe(true)
+
+    // Values should match initial data
+    const values = changes.map((change) => change.value)
+    expect(values).toContainEqual({ id: 1, name: `Alice` })
+    expect(values).toContainEqual({ id: 2, name: `Bob` })
+  })
+
+  it(`should emit initial data through subscribeChanges`, () => {
+    const changeCallback = vi.fn()
+    const initialData = [{ id: 1, name: `Alice` }]
+
+    const collection = new Collection<{ id: number; name: string }>({
+      id: `test-subscribe`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Subscribe to changes
+    collection.subscribeChanges(changeCallback)
+
+    // Should have been called with initial data
+    expect(changeCallback).toHaveBeenCalledTimes(1)
+    const changes = changeCallback.mock.calls[0]![0]
+    expect(changes.length).toBe(1)
+    expect(changes[0].type).toBe(`insert`)
+    expect(changes[0].value).toEqual({ id: 1, name: `Alice` })
+  })
+
+  it(`should generate different keys for identical objects in initial data`, () => {
+    const initialData = [
+      { name: `Duplicate` },
+      { name: `Duplicate` },
+      { name: `Duplicate` },
+    ]
+
+    const collection = new Collection<{ name: string }>({
+      id: `test-duplicate-keys`,
+      sync: {
+        sync: () => {},
+      },
+      initialData,
+    })
+
+    // Should have all 3 items despite being identical (due to index suffix)
+    expect(collection.state.size).toBe(3)
+
+    // All keys should be different
+    const keys = Array.from(collection.state.keys())
+    expect(new Set(keys).size).toBe(3)
+  })
+
+  it(`should respect schema validation for initial data if provided`, () => {
+    const schema = z.object({
+      id: z.number(),
+      name: z.string().min(1),
+      email: z.string().email(),
+    })
+
+    // This should work fine with valid data
+    expect(() => {
+      new Collection<{ id: number; name: string; email: string }>({
+        id: `test-valid-schema`,
+        sync: { sync: () => {} },
+        schema,
+        initialData: [{ id: 1, name: `Alice`, email: `alice@example.com` }],
+      })
+    }).not.toThrow()
+
+    // This should throw with invalid data
+    expect(() => {
+      new Collection<{ id: number; name: string; email: string }>({
+        id: `test-invalid-schema`,
+        sync: { sync: () => {} },
+        schema,
+        initialData: [
+          { id: `not-a-number` as any, name: ``, email: `not-an-email` },
+        ],
+      })
+    }).toThrow(SchemaValidationError)
+  })
+})
