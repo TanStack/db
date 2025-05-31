@@ -1,4 +1,4 @@
-import { CollectionProviders } from "./CollectionProviders"
+import Providers from "./providers"
 import type { Metadata } from "next"
 import "./globals.css"
 
@@ -15,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <CollectionProviders>{children}</CollectionProviders>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

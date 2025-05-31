@@ -1,16 +1,7 @@
 "use client"
 
 import * as React from "react"
-import type { ElectricCollection } from "@tanstack/db-collections"
-
-export interface CollectionClient {
-  getCollection: <T extends { id?: number }>(
-    name: string
-  ) => ElectricCollection<T>
-  mount: () => void
-  unmount: () => void
-  getAllCollections: () => Record<string, ElectricCollection<any>>
-}
+import type { CollectionClient } from "./CollectionHydrationBoundary"
 
 export const CollectionClientContext = React.createContext<
   CollectionClient | undefined
@@ -41,13 +32,6 @@ export const CollectionClientProvider = ({
   client,
   children,
 }: CollectionClientProviderProps): React.JSX.Element => {
-  React.useEffect(() => {
-    client.mount()
-    return () => {
-      client.unmount()
-    }
-  }, [client])
-
   return (
     <CollectionClientContext.Provider value={client}>
       {children}

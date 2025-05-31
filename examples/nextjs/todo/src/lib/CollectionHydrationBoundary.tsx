@@ -2,9 +2,12 @@
 
 import * as React from "react"
 import { useCollectionClient } from "./CollectionClientProvider"
-import type { CollectionClient } from "./CollectionClientProvider"
-import type { DehydratedState } from "@tanstack/db-collections"
+import type {
+  DehydratedState,
+  ElectricCollection,
+} from "@tanstack/db-collections"
 
+export type CollectionClient = Record<string, ElectricCollection>
 export interface CollectionHydrationBoundaryProps {
   state?: DehydratedState
   children?: React.ReactNode
@@ -20,7 +23,7 @@ export const CollectionHydrationBoundary = ({
 
   React.useMemo(() => {
     if (state && Object.keys(state).length > 0) {
-      const collections = client.getAllCollections()
+      const collections = client
       Object.entries(state).forEach(([collectionName, collectionState]) => {
         collections[collectionName].hydrate(collectionState)
       })
