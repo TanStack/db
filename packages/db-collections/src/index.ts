@@ -8,4 +8,8 @@ export type {
   DehydratedState,
   ElectricCollectionConfig,
 } from "./electric"
-export { QueryCollection, createQueryCollection } from "./query"
+export {
+  QueryCollection,
+  type QueryCollectionConfig,
+  createQueryCollection,
+} from "./query"
