@@ -48,12 +48,22 @@ export interface ElectricCollectionConfig<T extends Row<unknown>>
 }
 
 /**
+ * Dehydrated state interface
+ */
+export interface DehydratedState {
+  [key: string]: ElectricInitialData<any>
+}
+
+/**
  * Specialized Collection class for ElectricSQL integration
  */
 export class ElectricCollection<
   T extends Row<unknown> = Record<string, unknown>,
 > extends Collection<T> {
   private seenTxids: Store<Set<number>>
+  private schema: Store<string | undefined>
+  private lastOffset: Store<string | undefined>
+  private shapeHandle: Store<string | undefined>
 
   constructor(config: ElectricCollectionConfig<T>) {
     const initialTxids = config.initialData?.txids || [Math.random()]
@@ -73,8 +83,47 @@ export class ElectricCollection<
 
     this.seenTxids = seenTxids
 
+    // Initialize stores for Electric-specific data
+    this.schema = new Store<string | undefined>(config.initialData?.schema)
+    this.lastOffset = new Store<string | undefined>(
+      config.initialData?.lastOffset
+    )
+    this.shapeHandle = new Store<string | undefined>(
+      config.initialData?.shapeHandle
+    )
+
     if (config.initialData?.data && config.initialData.data.length > 0) {
       this.seedFromElectricInitialData(config.initialData.data)
+    }
+  }
+
+  /**
+   * Hydrates the collection with new data, typically from server-side rendering
+   * or a cache. This method updates the collection's data and transaction IDs.
+   * @param dataToHydrate The data to hydrate the collection with.
+   */
+  public hydrate(dataToHydrate: ElectricInitialData<T>): void {
+    if (dataToHydrate.txids.length > 0) {
+      this.seenTxids.setState((currentTxids) => {
+        const updatedTxids = new Set(currentTxids)
+        dataToHydrate.txids.forEach((txid) => updatedTxids.add(txid))
+        return updatedTxids
+      })
+    }
+
+    // Update Electric-specific data
+    if (dataToHydrate.schema !== undefined) {
+      this.schema.setState(() => dataToHydrate.schema)
+    }
+    if (dataToHydrate.lastOffset !== undefined) {
+      this.lastOffset.setState(() => dataToHydrate.lastOffset)
+    }
+    if (dataToHydrate.shapeHandle !== undefined) {
+      this.shapeHandle.setState(() => dataToHydrate.shapeHandle)
+    }
+
+    if (dataToHydrate.data.length > 0) {
+      this.seedFromElectricInitialData(dataToHydrate.data)
     }
   }
 
@@ -129,6 +178,37 @@ export class ElectricCollection<
         }
       })
     })
+  }
+
+  /**
+   * Dehydrates the collection's state into a serializable format
+   * @returns ElectricInitialData containing the collection's current state
+   */
+  public dehydrate(): ElectricInitialData<T> {
+    const collectionData: Array<{
+      key: string
+      value: T
+      metadata?: Record<string, unknown>
+    }> = []
+
+    this.state.forEach((value, key) => {
+      const metadata = this.syncedMetadata.state.get(key) as
+        | Record<string, unknown>
+        | undefined
+      collectionData.push({
+        key,
+        value,
+        metadata,
+      })
+    })
+
+    return {
+      data: collectionData,
+      txids: Array.from(this.seenTxids.state),
+      schema: this.schema.state,
+      lastOffset: this.lastOffset.state,
+      shapeHandle: this.shapeHandle.state,
+    }
   }
 }
 
@@ -287,4 +367,21 @@ export interface ElectricSyncOptions {
    * Array of column names that form the primary key of the shape
    */
   primaryKey: Array<string>
+}
+
+/**
+ * Dehydrates multiple collections into a serializable format
+ * @param collections Record of collection instances to dehydrate
+ * @returns DehydratedState containing all collections' states
+ */
+export function dehydrateCollections(
+  collections: Record<string, ElectricCollection<any>>
+): DehydratedState {
+  const dehydratedState: DehydratedState = {}
+
+  Object.entries(collections).forEach(([key, collection]) => {
+    dehydratedState[key] = collection.dehydrate()
+  })
+
+  return dehydratedState
 }

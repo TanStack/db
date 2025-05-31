@@ -1,11 +1,11 @@
 export {
   ElectricCollection,
   createElectricCollection,
-  type ElectricCollectionConfig,
-  type ElectricInitialData,
+  dehydrateCollections,
 } from "./electric"
-export {
-  QueryCollection,
-  createQueryCollection,
-  type QueryCollectionConfig,
-} from "./query"
+export type {
+  ElectricInitialData,
+  DehydratedState,
+  ElectricCollectionConfig,
+} from "./electric"
+export { QueryCollection, createQueryCollection } from "./query"
