@@ -7,10 +7,11 @@ import type { CollectionClient } from "./CollectionClientProvider"
 // Hook to use todos collection (similar to useQuery)
 export function useTodosCollection(collectionClient?: CollectionClient) {
   const client = useCollectionClient(collectionClient)
+  const todoCollection = client.getCollection<UpdateTodo>(`todos`)
 
   const { data: todos } = useLiveQuery((q) =>
     q
-      .from({ todoCollection: client.todoCollection as Collection<UpdateTodo> })
+      .from({ todoCollection: todoCollection as Collection<UpdateTodo> })
       .keyBy(`@id`)
       .orderBy({ "@created_at": `desc` })
       .select(`@id`, `@created_at`, `@text`, `@completed`)
@@ -18,18 +19,19 @@ export function useTodosCollection(collectionClient?: CollectionClient) {
 
   return {
     data: todos,
-    collection: client.todoCollection,
+    collection: todoCollection,
   }
 }
 
 // Hook to use config collection (similar to useQuery)
 export function useConfigCollection(collectionClient?: CollectionClient) {
   const client = useCollectionClient(collectionClient)
+  const configCollection = client.getCollection<UpdateConfig>(`config`)
 
   const { data: configData } = useLiveQuery((q) =>
     q
       .from({
-        configCollection: client.configCollection as Collection<UpdateConfig>,
+        configCollection: configCollection as Collection<UpdateConfig>,
       })
       .keyBy(`@id`)
       .select(`@id`, `@key`, `@value`)
@@ -37,6 +39,6 @@ export function useConfigCollection(collectionClient?: CollectionClient) {
 
   return {
     data: configData,
-    collection: client.configCollection,
+    collection: configCollection,
   }
 }

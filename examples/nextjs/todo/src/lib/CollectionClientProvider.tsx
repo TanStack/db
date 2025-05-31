@@ -1,12 +1,12 @@
 "use client"
 
 import * as React from "react"
-import type { UpdateConfig, UpdateTodo } from "../db/validation"
 import type { ElectricCollection } from "@tanstack/db-collections"
 
 export interface CollectionClient {
-  todoCollection: ElectricCollection<UpdateTodo>
-  configCollection: ElectricCollection<UpdateConfig>
+  getCollection: <T extends { id?: number }>(
+    name: string
+  ) => ElectricCollection<T>
   mount: () => void
   unmount: () => void
   getAllCollections: () => Record<string, ElectricCollection<any>>

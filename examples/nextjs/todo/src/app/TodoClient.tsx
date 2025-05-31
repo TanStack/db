@@ -8,10 +8,12 @@ import {
 import { useTodos } from "../hooks/useTodos"
 import { useConfig } from "../hooks/useConfig"
 import { getComplementaryColor } from "../lib/utils"
+import { useCollectionClient } from "../lib/CollectionClientProvider"
 import type { UpdateTodo } from "../db/validation"
 import type { FormEvent } from "react"
 
 export default function TodoClient() {
+  const collectionClient = useCollectionClient()
   const [newTodo, setNewTodo] = useState(``)
   const [mounted, setMounted] = useState(false)
 
@@ -29,7 +31,7 @@ export default function TodoClient() {
     configCollection
   )
 
-  const backgroundColor = getConfigValue(`backgroundColor`)
+  const backgroundColor = getConfigValue(`backgroundColor`) || `#f5f5f5`
   const titleColor = getComplementaryColor(backgroundColor)
 
   const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,14 +42,12 @@ export default function TodoClient() {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (!newTodo.trim()) return
-
-    addTodo.mutate(() =>
-      todoCollection.insert({
-        text: newTodo,
-        completed: false,
-        id: Math.round(Math.random() * 1000000),
-      })
-    )
+    const newTodoItem = {
+      text: newTodo,
+      completed: false,
+      id: Math.round(Math.random() * 1000000),
+    }
+    addTodo.mutate(() => todoCollection.insert(newTodoItem))
     setNewTodo(``)
   }
 

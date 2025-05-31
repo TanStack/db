@@ -9,16 +9,7 @@ export function CollectionProviders({
 }: {
   children: React.ReactNode
 }) {
-  const [collectionClient] = React.useState(() =>
-    createCollectionClient(
-      {},
-      {
-        defaultOptions: {
-          staleTime: 60 * 1000,
-        },
-      }
-    )
-  )
+  const [collectionClient] = React.useState(() => createCollectionClient())
 
   return (
     <CollectionClientProvider client={collectionClient}>
