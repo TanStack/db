@@ -9,15 +9,27 @@ import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 import type {
   ControlMessage,
   Message,
+  Offset,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
 
 /**
+ * Initial data structure for server-side rendering
+ */
+export interface ElectricInitialData<T extends Row<unknown>> {
+  data: Array<{ key: string; value: T; metadata?: Record<string, unknown> }>
+  txids: Array<number>
+  schema?: string
+  lastOffset?: string
+  shapeHandle?: string
+}
+
+/**
  * Configuration interface for ElectricCollection
  */
 export interface ElectricCollectionConfig<T extends Row<unknown>>
-  extends Omit<CollectionConfig<T>, `sync`> {
+  extends Omit<CollectionConfig<T>, `sync` | `initialData`> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
@@ -27,6 +39,12 @@ export interface ElectricCollectionConfig<T extends Row<unknown>>
    * Array of column names that form the primary key of the shape
    */
   primaryKey: Array<string>
+
+  /**
+   * Initial data from server-side rendering
+   * Allows hydration from server-loaded Electric data
+   */
+  initialData?: ElectricInitialData<T>
 }
 
 /**
@@ -38,15 +56,53 @@ export class ElectricCollection<
   private seenTxids: Store<Set<number>>
 
   constructor(config: ElectricCollectionConfig<T>) {
-    const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
+    const initialTxids = config.initialData?.txids || [Math.random()]
+    const seenTxids = new Store<Set<number>>(new Set(initialTxids))
+
     const sync = createElectricSync<T>(config.streamOptions, {
       primaryKey: config.primaryKey,
       seenTxids,
+      initialData: config.initialData,
     })
 
-    super({ ...config, sync })
+    super({
+      ...config,
+      sync,
+      initialData: undefined,
+    })
 
     this.seenTxids = seenTxids
+
+    if (config.initialData?.data && config.initialData.data.length > 0) {
+      this.seedFromElectricInitialData(config.initialData.data)
+    }
+  }
+
+  private seedFromElectricInitialData(
+    items: Array<{ key: string; value: T; metadata?: Record<string, unknown> }>
+  ): void {
+    const keys = new Set<string>()
+
+    this.syncedData.setState((prevData) => {
+      const newData = new Map(prevData)
+      items.forEach(({ key, value }) => {
+        keys.add(key)
+        newData.set(key, value)
+        this.objectKeyMap.set(value, key)
+      })
+      return newData
+    })
+
+    this.syncedMetadata.setState((prevMetadata) => {
+      const newMetadata = new Map(prevMetadata)
+      items.forEach(({ key, metadata }) => {
+        const syncMetadata = this.config.sync.getSyncMetadata?.() || {}
+        newMetadata.set(key, { ...syncMetadata, ...metadata })
+      })
+      return newMetadata
+    })
+
+    this.onFirstCommit(() => {})
   }
 
   /**
@@ -114,12 +170,18 @@ export function createElectricCollection<T extends Row<unknown>>(
  */
 function createElectricSync<T extends Row<unknown>>(
   streamOptions: ShapeStreamOptions,
-  options: { primaryKey: Array<string>; seenTxids: Store<Set<number>> }
+  options: {
+    primaryKey: Array<string>
+    seenTxids: Store<Set<number>>
+    initialData?: ElectricInitialData<T>
+  }
 ): SyncConfig<T> {
-  const { primaryKey, seenTxids } = options
+  const { primaryKey, seenTxids, initialData } = options
 
   // Store for the relation schema information
-  const relationSchema = new Store<string | undefined>(undefined)
+  const relationSchema = new Store<string | undefined>(
+    initialData?.schema || undefined
+  )
 
   /**
    * Get the sync metadata for insert operations
@@ -140,7 +202,19 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(streamOptions)
+
+      // Resume from where server left off if we have initial data
+      const resumeOptions: ShapeStreamOptions = {
+        ...streamOptions,
+        ...(initialData?.lastOffset && {
+          offset: initialData.lastOffset as Offset,
+        }),
+        ...(initialData?.shapeHandle && {
+          shapeHandle: initialData.shapeHandle,
+        }),
+      }
+
+      const stream = new ShapeStream(resumeOptions)
       let transactionStarted = false
       let newTxids = new Set<number>()
 

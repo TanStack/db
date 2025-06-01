@@ -2,6 +2,7 @@ export {
   ElectricCollection,
   createElectricCollection,
   type ElectricCollectionConfig,
+  type ElectricInitialData,
 } from "./electric"
 export {
   QueryCollection,

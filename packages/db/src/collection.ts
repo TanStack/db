@@ -344,6 +344,11 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     this.derivedState.mount()
 
+    // Seed with initial data if provided
+    if (config.initialData && config.initialData.length > 0) {
+      this.seedFromInitialData(config.initialData)
+    }
+
     // Start the sync process
     config.sync.sync({
       collection: this,
@@ -387,6 +392,52 @@ export class Collection<T extends object = Record<string, unknown>> {
         this.commitPendingTransactions()
       },
     })
+  }
+
+  /**
+   * Seeds the collection with initial data from server-side rendering
+   * @param items Array of items to seed the collection with
+   */
+  private seedFromInitialData(items: Array<T>): void {
+    this.hasReceivedFirstCommit = true
+
+    const keys = new Set<string>()
+
+    batch(() => {
+      items.forEach((item, index) => {
+        // Validate the data against the schema if one exists
+        const validatedData = this.validateData(item, `insert`)
+
+        // Generate unique key even for identical objects by including index
+        const key = `${this.generateKey(item)}_${index}`
+        keys.add(key)
+
+        this.syncedKeys.add(key)
+
+        this.syncedData.setState((prevData) => {
+          const newData = new Map(prevData)
+          newData.set(key, validatedData)
+          return newData
+        })
+
+        this.syncedMetadata.setState((prevData) => {
+          const newData = new Map(prevData)
+          newData.set(key, this.config.sync.getSyncMetadata?.() || {})
+          return newData
+        })
+      })
+    })
+
+    keys.forEach((key) => {
+      const value = this.syncedData.state.get(key)
+      if (value) {
+        this.objectKeyMap.set(value, key)
+      }
+    })
+
+    const callbacks = [...this.onFirstCommitCallbacks]
+    this.onFirstCommitCallbacks = []
+    callbacks.forEach((callback) => callback())
   }
 
   /**
