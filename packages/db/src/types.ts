@@ -118,6 +118,11 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
   id: string
   sync: SyncConfig<T>
   schema?: StandardSchema<T>
+  /**
+   * Initial data for server-side rendering
+   * Allows hydration from server-loaded data
+   */
+  initialData?: Array<T>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

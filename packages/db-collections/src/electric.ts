@@ -9,15 +9,27 @@ import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 import type {
   ControlMessage,
   Message,
+  Offset,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
 
 /**
+ * Initial data structure for server-side rendering
+ */
+export interface ElectricInitialData<T extends Row<unknown>> {
+  data: Array<{ key: string; value: T; metadata?: Record<string, unknown> }>
+  txids: Array<number>
+  schema?: string
+  lastOffset?: string
+  shapeHandle?: string
+}
+
+/**
  * Configuration interface for ElectricCollection
  */
 export interface ElectricCollectionConfig<T extends Row<unknown>>
-  extends Omit<CollectionConfig<T>, `sync`> {
+  extends Omit<CollectionConfig<T>, `sync` | `initialData`> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
@@ -27,6 +39,19 @@ export interface ElectricCollectionConfig<T extends Row<unknown>>
    * Array of column names that form the primary key of the shape
    */
   primaryKey: Array<string>
+
+  /**
+   * Initial data from server-side rendering
+   * Allows hydration from server-loaded Electric data
+   */
+  initialData?: ElectricInitialData<T>
+}
+
+/**
+ * Dehydrated state interface
+ */
+export interface DehydratedState {
+  [key: string]: ElectricInitialData<any>
 }
 
 /**
@@ -36,17 +61,97 @@ export class ElectricCollection<
   T extends Row<unknown> = Record<string, unknown>,
 > extends Collection<T> {
   private seenTxids: Store<Set<number>>
+  private schema: Store<string | undefined>
+  private lastOffset: Store<string | undefined>
+  private shapeHandle: Store<string | undefined>
 
   constructor(config: ElectricCollectionConfig<T>) {
-    const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
+    const initialTxids = config.initialData?.txids || [Math.random()]
+    const seenTxids = new Store<Set<number>>(new Set(initialTxids))
+
     const sync = createElectricSync<T>(config.streamOptions, {
       primaryKey: config.primaryKey,
       seenTxids,
+      initialData: config.initialData,
     })
 
-    super({ ...config, sync })
+    super({
+      ...config,
+      sync,
+      initialData: undefined,
+    })
 
     this.seenTxids = seenTxids
+
+    // Initialize stores for Electric-specific data
+    this.schema = new Store<string | undefined>(config.initialData?.schema)
+    this.lastOffset = new Store<string | undefined>(
+      config.initialData?.lastOffset
+    )
+    this.shapeHandle = new Store<string | undefined>(
+      config.initialData?.shapeHandle
+    )
+
+    if (config.initialData?.data && config.initialData.data.length > 0) {
+      this.seedFromElectricInitialData(config.initialData.data)
+    }
+  }
+
+  /**
+   * Hydrates the collection with new data, typically from server-side rendering
+   * or a cache. This method updates the collection's data and transaction IDs.
+   * @param dataToHydrate The data to hydrate the collection with.
+   */
+  public hydrate(dataToHydrate: ElectricInitialData<T>): void {
+    if (dataToHydrate.txids.length > 0) {
+      this.seenTxids.setState((currentTxids) => {
+        const updatedTxids = new Set(currentTxids)
+        dataToHydrate.txids.forEach((txid) => updatedTxids.add(txid))
+        return updatedTxids
+      })
+    }
+
+    // Update Electric-specific data
+    if (dataToHydrate.schema !== undefined) {
+      this.schema.setState(() => dataToHydrate.schema)
+    }
+    if (dataToHydrate.lastOffset !== undefined) {
+      this.lastOffset.setState(() => dataToHydrate.lastOffset)
+    }
+    if (dataToHydrate.shapeHandle !== undefined) {
+      this.shapeHandle.setState(() => dataToHydrate.shapeHandle)
+    }
+
+    if (dataToHydrate.data.length > 0) {
+      this.seedFromElectricInitialData(dataToHydrate.data)
+    }
+  }
+
+  private seedFromElectricInitialData(
+    items: Array<{ key: string; value: T; metadata?: Record<string, unknown> }>
+  ): void {
+    const keys = new Set<string>()
+
+    this.syncedData.setState((prevData) => {
+      const newData = new Map(prevData)
+      items.forEach(({ key, value }) => {
+        keys.add(key)
+        newData.set(key, value)
+        this.objectKeyMap.set(value, key)
+      })
+      return newData
+    })
+
+    this.syncedMetadata.setState((prevMetadata) => {
+      const newMetadata = new Map(prevMetadata)
+      items.forEach(({ key, metadata }) => {
+        const syncMetadata = this.config.sync.getSyncMetadata?.() || {}
+        newMetadata.set(key, { ...syncMetadata, ...metadata })
+      })
+      return newMetadata
+    })
+
+    this.onFirstCommit(() => {})
   }
 
   /**
@@ -73,6 +178,37 @@ export class ElectricCollection<
         }
       })
     })
+  }
+
+  /**
+   * Dehydrates the collection's state into a serializable format
+   * @returns ElectricInitialData containing the collection's current state
+   */
+  public dehydrate(): ElectricInitialData<T> {
+    const collectionData: Array<{
+      key: string
+      value: T
+      metadata?: Record<string, unknown>
+    }> = []
+
+    this.state.forEach((value, key) => {
+      const metadata = this.syncedMetadata.state.get(key) as
+        | Record<string, unknown>
+        | undefined
+      collectionData.push({
+        key,
+        value,
+        metadata,
+      })
+    })
+
+    return {
+      data: collectionData,
+      txids: Array.from(this.seenTxids.state),
+      schema: this.schema.state,
+      lastOffset: this.lastOffset.state,
+      shapeHandle: this.shapeHandle.state,
+    }
   }
 }
 
@@ -114,12 +250,18 @@ export function createElectricCollection<T extends Row<unknown>>(
  */
 function createElectricSync<T extends Row<unknown>>(
   streamOptions: ShapeStreamOptions,
-  options: { primaryKey: Array<string>; seenTxids: Store<Set<number>> }
+  options: {
+    primaryKey: Array<string>
+    seenTxids: Store<Set<number>>
+    initialData?: ElectricInitialData<T>
+  }
 ): SyncConfig<T> {
-  const { primaryKey, seenTxids } = options
+  const { primaryKey, seenTxids, initialData } = options
 
   // Store for the relation schema information
-  const relationSchema = new Store<string | undefined>(undefined)
+  const relationSchema = new Store<string | undefined>(
+    initialData?.schema || undefined
+  )
 
   /**
    * Get the sync metadata for insert operations
@@ -140,7 +282,19 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(streamOptions)
+
+      // Resume from where server left off if we have initial data
+      const resumeOptions: ShapeStreamOptions = {
+        ...streamOptions,
+        ...(initialData?.lastOffset && {
+          offset: initialData.lastOffset as Offset,
+        }),
+        ...(initialData?.shapeHandle && {
+          shapeHandle: initialData.shapeHandle,
+        }),
+      }
+
+      const stream = new ShapeStream(resumeOptions)
       let transactionStarted = false
       let newTxids = new Set<number>()
 
@@ -213,4 +367,21 @@ export interface ElectricSyncOptions {
    * Array of column names that form the primary key of the shape
    */
   primaryKey: Array<string>
+}
+
+/**
+ * Dehydrates multiple collections into a serializable format
+ * @param collections Record of collection instances to dehydrate
+ * @returns DehydratedState containing all collections' states
+ */
+export function dehydrateCollections(
+  collections: Record<string, ElectricCollection<any>>
+): DehydratedState {
+  const dehydratedState: DehydratedState = {}
+
+  Object.entries(collections).forEach(([key, collection]) => {
+    dehydratedState[key] = collection.dehydrate()
+  })
+
+  return dehydratedState
 }
