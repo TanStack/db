@@ -41,7 +41,7 @@ describe(`Electric Integration`, () => {
           table: `test_table`,
         },
       },
-      primaryKey: [`id`], // Using 'id' as the primary key column
+      getId: (item) => item.id,
     })
   })
 
@@ -63,7 +63,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[`1`, { id: 1, name: `Test User` }]])
+      new Map([[`KEY::${collection.id}/1`, { id: 1, name: `Test User` }]])
     )
   })
 
@@ -95,8 +95,8 @@ describe(`Electric Integration`, () => {
 
     expect(collection.state).toEqual(
       new Map([
-        [`1`, { id: 1, name: `Test User` }],
-        [`2`, { id: 2, name: `Another User` }],
+        [`KEY::${collection.id}/1`, { id: 1, name: `Test User` }],
+        [`KEY::${collection.id}/2`, { id: 2, name: `Another User` }],
       ])
     )
   })
@@ -128,7 +128,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[`1`, { id: 1, name: `Updated User` }]])
+      new Map([[`KEY::${collection.id}/1`, { id: 1, name: `Updated User` }]])
     )
   })
 
@@ -149,7 +149,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: {},
+        value: { id: `1` },
         headers: { operation: `delete` },
       },
       {
@@ -367,35 +367,8 @@ describe(`Electric Integration`, () => {
       // Check that the data was added to the collection
       // Note: In a real implementation, the collection would be updated by the sync process
       // This is just verifying our test setup worked correctly
-      expect(fakeBackend.data.has(`item1`)).toBe(true)
-      expect(collection.state.has(`item1`)).toBe(true)
+      expect(fakeBackend.data.has(`KEY::${collection.id}/1`)).toBe(true)
+      expect(collection.state.has(`KEY::${collection.id}/1`)).toBe(true)
     })
-  })
-
-  it(`should include primaryKey in the metadata`, () => {
-    // Simulate incoming insert message
-    subscriber([
-      {
-        key: `1`,
-        value: { id: 1, name: `Test User` },
-        headers: { operation: `insert` },
-      },
-    ])
-
-    // Send up-to-date control message to commit transaction
-    subscriber([
-      {
-        headers: { control: `up-to-date` },
-      },
-    ])
-
-    // Get the metadata for the inserted item
-    const metadata = collection.syncedMetadata.state.get(`1`) as {
-      primaryKey: string
-    }
-
-    // Verify that the primaryKey is included in the metadata
-    expect(metadata).toHaveProperty(`primaryKey`)
-    expect(metadata.primaryKey).toEqual([`id`])
   })
 })
