@@ -22,11 +22,6 @@ export interface ElectricCollectionConfig<T extends Row<unknown>>
    * Configuration options for the ElectricSQL ShapeStream
    */
   streamOptions: ShapeStreamOptions
-
-  /**
-   * Array of column names that form the primary key of the shape
-   */
-  primaryKey: Array<string>
 }
 
 /**
@@ -40,7 +35,6 @@ export class ElectricCollection<
   constructor(config: ElectricCollectionConfig<T>) {
     const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
     const sync = createElectricSync<T>(config.streamOptions, {
-      primaryKey: config.primaryKey,
       seenTxids,
       getId: config.getId,
     })
@@ -116,26 +110,24 @@ export function createElectricCollection<T extends Row<unknown>>(
 function createElectricSync<T extends Row<unknown>>(
   streamOptions: ShapeStreamOptions,
   options: {
-    primaryKey: Array<string>
     seenTxids: Store<Set<number>>
     getId: (item: T) => string
   }
 ): SyncConfig<T> {
-  const { primaryKey, seenTxids, getId } = options
+  const { seenTxids, getId } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
   /**
    * Get the sync metadata for insert operations
-   * @returns Record containing primaryKey and relation information
+   * @returns Record containing relation information
    */
   const getSyncMetadata = (): Record<string, unknown> => {
     // Use the stored schema if available, otherwise default to 'public'
     const schema = relationSchema.state || `public`
 
     return {
-      primaryKey,
       relation: streamOptions.params?.table
         ? [schema, streamOptions.params.table]
         : undefined,
@@ -194,7 +186,6 @@ function createElectricSync<T extends Row<unknown>>(
             // Include the primary key and relation info in the metadata
             const enhancedMetadata = {
               ...message.headers,
-              primaryKey,
             }
 
             write({
@@ -224,14 +215,4 @@ function createElectricSync<T extends Row<unknown>>(
     // Expose the getSyncMetadata function
     getSyncMetadata,
   }
-}
-
-/**
- * Configuration options for ElectricSync
- */
-export interface ElectricSyncOptions {
-  /**
-   * Array of column names that form the primary key of the shape
-   */
-  primaryKey: Array<string>
 }
