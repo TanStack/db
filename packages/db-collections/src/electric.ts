@@ -36,7 +36,6 @@ export class ElectricCollection<
     const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
     const sync = createElectricSync<T>(config.streamOptions, {
       seenTxids,
-      getId: config.getId,
     })
 
     super({ ...config, sync })
@@ -111,10 +110,9 @@ function createElectricSync<T extends Row<unknown>>(
   streamOptions: ShapeStreamOptions,
   options: {
     seenTxids: Store<Set<number>>
-    getId: (item: T) => string
   }
 ): SyncConfig<T> {
-  const { seenTxids, getId } = options
+  const { seenTxids } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -165,23 +163,7 @@ function createElectricSync<T extends Row<unknown>>(
               transactionStarted = true
             }
 
-            // Use the original key from the message or generate one using getId if available
-            let key = message.key
             const value = message.value as unknown as T
-
-            // Use getId to generate the key for insert operations
-            if (message.headers.operation === `insert`) {
-              try {
-                const generatedKey = getId(value)
-                key = generatedKey
-              } catch (error) {
-                // If getId fails, fall back to the original key
-                console.warn(
-                  `Failed to generate key using getId function:`,
-                  error
-                )
-              }
-            }
 
             // Include the primary key and relation info in the metadata
             const enhancedMetadata = {
@@ -189,7 +171,6 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             write({
-              key,
               type: message.headers.operation,
               value,
               metadata: enhancedMetadata,

@@ -14,7 +14,9 @@ import type { Context, Schema } from "./types.js"
 export function compileQuery<TContext extends Context<Schema>>(
   queryBuilder: QueryBuilder<TContext>
 ) {
-  return new CompiledQuery<ResultsFromContext<TContext>>(queryBuilder)
+  return new CompiledQuery<
+    ResultsFromContext<TContext> & { _key?: string | number }
+  >(queryBuilder)
 }
 
 export class CompiledQuery<TResults extends object = Record<string, unknown>> {
@@ -68,7 +70,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
               }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
               .forEach((changes, rawKey) => {
                 const { deletes, inserts, value } = changes
-                const valueWithKey = { _key: rawKey, ...value }
+                const valueWithKey = { ...value, _key: rawKey }
                 if (inserts && !deletes) {
                   write({
                     value: valueWithKey,
@@ -98,7 +100,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     this.resultCollection = new Collection<TResults>({
       id: crypto.randomUUID(), // TODO: remove when we don't require any more
       getId: (val) => {
-        return val._key
+        return (val as any)._key
       },
       sync: {
         sync,

@@ -51,7 +51,7 @@ type Value<TExtensions = never> =
   | null
   | TExtensions
   | Array<Value<TExtensions>>
-  | { [key: any]: Value<TExtensions> }
+  | { [key: string | number | symbol]: Value<TExtensions> }
 
 export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 

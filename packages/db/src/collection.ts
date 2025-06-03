@@ -80,6 +80,7 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
         config.id,
         new Collection<T>({
           id: config.id,
+          getId: config.getId,
           sync: config.sync,
           schema: config.schema,
         })
@@ -700,7 +701,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       }
 
       return item
-    }) as Array<TItem>
+    }) as unknown as Array<TItem>
 
     let changesArray
     if (isArray) {
