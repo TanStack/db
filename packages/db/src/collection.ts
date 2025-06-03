@@ -550,17 +550,6 @@ export class Collection<T extends object = Record<string, unknown>> {
     return result.value as T
   }
 
-  private generateKey(data: unknown): string {
-    const str = JSON.stringify(data)
-    let h = 0
-
-    for (let i = 0; i < str.length; i++) {
-      h = (Math.imul(31, h) + str.charCodeAt(i)) | 0
-    }
-
-    return `${this.id}/${Math.abs(h).toString(36)}`
-  }
-
   /**
    * Inserts one or more items into the collection
    * @param items - Single item or array of items to insert
