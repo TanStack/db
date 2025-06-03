@@ -157,9 +157,6 @@ export class Collection<T extends object = Record<string, unknown>> {
   public config: CollectionConfig<T>
   private hasReceivedFirstCommit = false
 
-  // WeakMap to associate objects with their keys
-  public objectKeyMap = new WeakMap<object, string>()
-
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
 
@@ -251,13 +248,6 @@ export class Collection<T extends object = Record<string, unknown>> {
             }
           }
         }
-
-        // Update object => key mappings
-        optimisticKeys.forEach((key) => {
-          if (combined.has(key)) {
-            this.objectKeyMap.set(combined.get(key)!, key)
-          }
-        })
 
         return combined
       },
@@ -353,7 +343,7 @@ export class Collection<T extends object = Record<string, unknown>> {
           operations: [],
         })
       },
-      write: (message: ChangeMessage<T>) => {
+      write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
         const pendingTransaction =
           this.pendingSyncedTransactions[
             this.pendingSyncedTransactions.length - 1
@@ -365,6 +355,13 @@ export class Collection<T extends object = Record<string, unknown>> {
           throw new Error(
             `The pending sync transaction is already committed, you can't still write to it.`
           )
+        }
+        const message: ChangeMessage<T> = {
+          ...messageWithoutKey,
+          key: this.generateObjectKey(
+            this.config.getId(messageWithoutKey.value),
+            messageWithoutKey.value
+          ),
         }
         pendingTransaction.operations.push(message)
       },
@@ -399,11 +396,9 @@ export class Collection<T extends object = Record<string, unknown>> {
         ({ state }) => state === `persisting`
       )
     ) {
-      const keys = new Set<string>()
       batch(() => {
         for (const transaction of this.pendingSyncedTransactions) {
           for (const operation of transaction.operations) {
-            keys.add(operation.key)
             this.syncedKeys.add(operation.key)
             this.syncedMetadata.setState((prevData) => {
               switch (operation.type) {
@@ -443,13 +438,6 @@ export class Collection<T extends object = Record<string, unknown>> {
         }
       })
 
-      keys.forEach((key) => {
-        const curValue = this.state.get(key)
-        if (curValue) {
-          this.objectKeyMap.set(curValue, key)
-        }
-      })
-
       this.pendingSyncedTransactions = []
 
       // Call any registered one-time commit listeners
@@ -471,6 +459,29 @@ export class Collection<T extends object = Record<string, unknown>> {
     throw new Error(
       `Schema must either implement the standard-schema interface or be a Zod schema`
     )
+  }
+
+  private getKeyFromId(id: unknown): string {
+    if (typeof id === `undefined`) {
+      throw new Error(`id is undefined`)
+    }
+    if (typeof id === `string` && id.startsWith(`KEY::`)) {
+      return id
+    } else {
+      // if it's not a string, then it's some other
+      // primitive type and needs turned into a key.
+      return this.generateObjectKey(id, null)
+    }
+  }
+
+  public generateObjectKey(id: any, item: any): string {
+    if (typeof id === `undefined`) {
+      throw new Error(
+        `An object was created without a defined id: ${JSON.stringify(item)}`
+      )
+    }
+
+    return `KEY::${this.id}/${id}`
   }
 
   private validateData(
@@ -579,18 +590,9 @@ export class Collection<T extends object = Record<string, unknown>> {
     const mutations: Array<PendingMutation<T>> = []
 
     // Handle keys - convert to array if string, or generate if not provided
-    let keys: Array<string>
-    if (config?.key) {
-      const configKeys = Array.isArray(config.key) ? config.key : [config.key]
-      // If keys are provided, ensure we have the right number or allow sparse array
-      if (Array.isArray(config.key) && configKeys.length > items.length) {
-        throw new Error(`More keys provided than items to insert`)
-      }
-      keys = items.map((_, i) => configKeys[i] ?? this.generateKey(items[i]))
-    } else {
-      // No keys provided, generate for all items
-      keys = items.map((item) => this.generateKey(item))
-    }
+    const keys: Array<unknown> = items.map((item) =>
+      this.generateObjectKey(this.config.getId(item), item)
+    )
 
     // Create mutations for each item
     items.forEach((item, index) => {
@@ -645,24 +647,43 @@ export class Collection<T extends object = Record<string, unknown>> {
    * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
 
+  /**
+   * Updates one or more items in the collection using a callback function
+   * @param ids - Single ID or array of IDs to update
+   * @param configOrCallback - Either update configuration or update callback
+   * @param maybeCallback - Update callback if config was provided
+   * @returns A Transaction object representing the update operation(s)
+   * @throws {SchemaValidationError} If the updated data fails schema validation
+   * @example
+   * // Update a single item
+   * update("todo-1", (draft) => { draft.completed = true })
+   *
+   * // Update multiple items
+   * update(["todo-1", "todo-2"], (drafts) => {
+   *   drafts.forEach(draft => { draft.completed = true })
+   * })
+   *
+   * // Update with metadata
+   * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
+   */
   update<TItem extends object = T>(
-    item: TItem,
+    id: unknown,
     configOrCallback: ((draft: TItem) => void) | OperationConfig,
     maybeCallback?: (draft: TItem) => void
   ): Transaction
 
   update<TItem extends object = T>(
-    items: Array<TItem>,
+    ids: Array<unknown>,
     configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: Array<TItem>) => void
   ): Transaction
 
   update<TItem extends object = T>(
-    items: TItem | Array<TItem>,
+    ids: unknown | Array<unknown>,
     configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
-    if (typeof items === `undefined`) {
+    if (typeof ids === `undefined`) {
       throw new Error(`The first argument to update is missing`)
     }
 
@@ -671,28 +692,26 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw `no transaction found when calling collection.update`
     }
 
-    const isArray = Array.isArray(items)
-    const itemsArray = Array.isArray(items) ? items : [items]
+    const isArray = Array.isArray(ids)
+    const idsArray = (Array.isArray(ids) ? ids : [ids]).map((id) =>
+      this.getKeyFromId(id)
+    )
     const callback =
       typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
 
-    const keys = itemsArray.map((item) => {
-      if (typeof item === `object` && (item as unknown) !== null) {
-        const key = this.objectKeyMap.get(item)
-        if (key === undefined) {
-          throw new Error(`Object not found in collection`)
-        }
-        return key
-      }
-      throw new Error(`Invalid item type for update - must be an object`)
-    })
-
     // Get the current objects or empty objects if they don't exist
-    const currentObjects = keys.map((key) => ({
-      ...(this.state.get(key) || {}),
-    })) as Array<TItem>
+    const currentObjects = idsArray.map((id) => {
+      const item = this.state.get(id)
+      if (!item) {
+        throw new Error(
+          `The id "${id}" was passed to update but an object for this ID was not found in the collection`
+        )
+      }
+
+      return item
+    }) as Array<TItem>
 
     let changesArray
     if (isArray) {
@@ -710,8 +729,8 @@ export class Collection<T extends object = Record<string, unknown>> {
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T>> = keys
-      .map((key, index) => {
+    const mutations: Array<PendingMutation<T>> = idsArray
+      .map((id, index) => {
         const changes = changesArray[index]
 
         // Skip items with no changes
@@ -720,19 +739,19 @@ export class Collection<T extends object = Record<string, unknown>> {
         }
 
         // Validate the changes for this item
-        const validatedData = this.validateData(changes, `update`, key)
+        const validatedData = this.validateData(changes, `update`, id)
 
         return {
           mutationId: crypto.randomUUID(),
-          original: (this.state.get(key) || {}) as Record<string, unknown>,
+          original: (this.state.get(id) || {}) as Record<string, unknown>,
           modified: {
-            ...(this.state.get(key) || {}),
+            ...(this.state.get(id) || {}),
             ...validatedData,
           } as Record<string, unknown>,
           changes: validatedData as Record<string, unknown>,
-          key,
+          key: id,
           metadata: config.metadata as unknown,
-          syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+          syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<
             string,
             unknown
           >,
@@ -761,57 +780,39 @@ export class Collection<T extends object = Record<string, unknown>> {
 
   /**
    * Deletes one or more items from the collection
-   * @param items - Single item/key or array of items/keys to delete
+   * @param ids - Single ID or array of IDs to delete
    * @param config - Optional configuration including metadata
    * @returns A Transaction object representing the delete operation(s)
    * @example
    * // Delete a single item
-   * delete(todo)
+   * delete("todo-1")
    *
    * // Delete multiple items
-   * delete([todo1, todo2])
+   * delete(["todo-1", "todo-2"])
    *
    * // Delete with metadata
-   * delete(todo, { metadata: { reason: "completed" } })
+   * delete("todo-1", { metadata: { reason: "completed" } })
    */
-  delete = (
-    items: Array<T | string> | T | string,
-    config?: OperationConfig
-  ) => {
+  delete = (ids: Array<string> | string, config?: OperationConfig) => {
     const transaction = getActiveTransaction()
     if (typeof transaction === `undefined`) {
       throw `no transaction found when calling collection.delete`
     }
 
-    const itemsArray = Array.isArray(items) ? items : [items]
+    const idsArray = (Array.isArray(ids) ? ids : [ids]).map((id) =>
+      this.getKeyFromId(id)
+    )
     const mutations: Array<PendingMutation<T>> = []
 
-    for (const item of itemsArray) {
-      let key: string
-      if (typeof item === `object` && (item as unknown) !== null) {
-        const objectKey = this.objectKeyMap.get(item)
-        if (objectKey === undefined) {
-          throw new Error(
-            `Object not found in collection: ${JSON.stringify(item)}`
-          )
-        }
-        key = objectKey
-      } else if (typeof item === `string`) {
-        key = item
-      } else {
-        throw new Error(
-          `Invalid item type for delete - must be an object or string key`
-        )
-      }
-
+    for (const id of idsArray) {
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: (this.state.get(key) || {}) as Record<string, unknown>,
-        modified: { _deleted: true },
-        changes: { _deleted: true },
-        key,
+        original: (this.state.get(id) || {}) as Record<string, unknown>,
+        modified: (this.state.get(id) || {}) as Record<string, unknown>,
+        changes: (this.state.get(id) || {}) as Record<string, unknown>,
+        key: id,
         metadata: config?.metadata as unknown,
-        syncMetadata: (this.syncedMetadata.state.get(key) || {}) as Record<
+        syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<
           string,
           unknown
         >,
@@ -823,14 +824,6 @@ export class Collection<T extends object = Record<string, unknown>> {
 
       mutations.push(mutation)
     }
-
-    // Delete object => key mapping.
-    mutations.forEach((mutation) => {
-      const curValue = this.state.get(mutation.key)
-      if (curValue) {
-        this.objectKeyMap.delete(curValue)
-      }
-    })
 
     transaction.applyMutations(mutations)
 

@@ -13,7 +13,7 @@ export interface PendingMutation<T extends object = Record<string, unknown>> {
   original: Record<string, unknown>
   modified: Record<string, unknown>
   changes: Record<string, unknown>
-  key: string
+  key: any
   type: OperationType
   metadata: unknown
   syncMetadata: Record<string, unknown>
@@ -51,7 +51,7 @@ type Value<TExtensions = never> =
   | null
   | TExtensions
   | Array<Value<TExtensions>>
-  | { [key: string]: Value<TExtensions> }
+  | { [key: any]: Value<TExtensions> }
 
 export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
@@ -61,7 +61,7 @@ export interface SyncConfig<T extends object = Record<string, unknown>> {
   sync: (params: {
     collection: Collection<T>
     begin: () => void
-    write: (message: ChangeMessage<T>) => void
+    write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
   }) => void
 
@@ -73,7 +73,7 @@ export interface SyncConfig<T extends object = Record<string, unknown>> {
 }
 
 export interface ChangeMessage<T extends object = Record<string, unknown>> {
-  key: string
+  key: any
   value: T
   previousValue?: T
   type: OperationType
@@ -110,7 +110,6 @@ export interface OperationConfig {
 }
 
 export interface InsertConfig {
-  key?: string | Array<string | undefined>
   metadata?: Record<string, unknown>
 }
 
@@ -118,6 +117,16 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
   id: string
   sync: SyncConfig<T>
   schema?: StandardSchema<T>
+  /**
+   * Function to extract the ID from an object
+   * This is required for update/delete operations which now only accept IDs
+   * @param item The item to extract the ID from
+   * @returns The ID string for the item
+   * @example
+   * // For a collection with a 'uuid' field as the primary key
+   * getId: (item) => item.uuid
+   */
+  getId: (item: T) => any
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

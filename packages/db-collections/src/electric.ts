@@ -42,6 +42,7 @@ export class ElectricCollection<
     const sync = createElectricSync<T>(config.streamOptions, {
       primaryKey: config.primaryKey,
       seenTxids,
+      getId: config.getId,
     })
 
     super({ ...config, sync })
@@ -114,9 +115,13 @@ export function createElectricCollection<T extends Row<unknown>>(
  */
 function createElectricSync<T extends Row<unknown>>(
   streamOptions: ShapeStreamOptions,
-  options: { primaryKey: Array<string>; seenTxids: Store<Set<number>> }
+  options: {
+    primaryKey: Array<string>
+    seenTxids: Store<Set<number>>
+    getId: (item: T) => string
+  }
 ): SyncConfig<T> {
-  const { primaryKey, seenTxids } = options
+  const { primaryKey, seenTxids, getId } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -168,7 +173,23 @@ function createElectricSync<T extends Row<unknown>>(
               transactionStarted = true
             }
 
-            const key = message.key
+            // Use the original key from the message or generate one using getId if available
+            let key = message.key
+            const value = message.value as unknown as T
+
+            // Use getId to generate the key for insert operations
+            if (message.headers.operation === `insert`) {
+              try {
+                const generatedKey = getId(value)
+                key = generatedKey
+              } catch (error) {
+                // If getId fails, fall back to the original key
+                console.warn(
+                  `Failed to generate key using getId function:`,
+                  error
+                )
+              }
+            }
 
             // Include the primary key and relation info in the metadata
             const enhancedMetadata = {
@@ -179,7 +200,7 @@ function createElectricSync<T extends Row<unknown>>(
             write({
               key,
               type: message.headers.operation,
-              value: message.value as unknown as T,
+              value,
               metadata: enhancedMetadata,
             })
           } else if (isUpToDateMessage(message)) {

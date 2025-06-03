@@ -291,9 +291,13 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Verify refetch was logged
     expect(
-      consoleSpy.mock.calls.some((call) =>
-        call[0].includes(`Refetch successful for ${String(queryKey)}`)
-      )
+      consoleSpy.mock.calls.some((call) => {
+        if (typeof call[0] === `string`) {
+          return call[0].includes(`Refetch successful for ${String(queryKey)}`)
+        } else {
+          return false
+        }
+      })
     ).toBe(true)
 
     // Since the data is identical (though a different object reference),
@@ -308,9 +312,13 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(3)
     // Verify refetch was logged
     expect(
-      consoleSpy.mock.calls.some((call) =>
-        call[0].includes(`Refetch successful for ${String(queryKey)}`)
-      )
+      consoleSpy.mock.calls.some((call) => {
+        if (typeof call[0] === `string`) {
+          return call[0].includes(`Refetch successful for ${String(queryKey)}`)
+        } else {
+          return false
+        }
+      })
     ).toBe(true)
 
     // Now the state should be updated with the new value

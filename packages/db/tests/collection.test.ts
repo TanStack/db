@@ -19,13 +19,13 @@ describe(`Collection`, () => {
     // Create a collection with sync but no mutationFn
     const collection = new Collection<{ value: string }>({
       id: `foo`,
+      getId: (item) => item.value,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately execute the sync cycle
           begin()
           write({
             type: `insert`,
-            key: `initial`,
             value: { value: `initial value` },
           })
           commit()
@@ -37,16 +37,18 @@ describe(`Collection`, () => {
     await collection.stateWhenReady()
 
     // Verify initial state
-    expect(collection.state.get(`initial`)).toEqual({ value: `initial value` })
+    expect(Array.from(collection.state.values())).toEqual([
+      { value: `initial value` },
+    ])
 
     // Verify that insert throws an error
     expect(() => {
-      collection.insert({ value: `new value` }, { key: `new-key` })
+      collection.insert({ value: `new value` })
     }).toThrow(`no transaction found when calling collection.insert`)
 
     // Verify that update throws an error
     expect(() => {
-      collection.update(collection.state.get(`initial`)!, (draft) => {
+      collection.update(`initial`, (draft) => {
         draft.value = `updated value`
       })
     }).toThrow(`no transaction found when calling collection.update`)
@@ -61,6 +63,7 @@ describe(`Collection`, () => {
     // Create a collection with a mock sync plugin
     new Collection<{ name: string }>({
       id: `foo`,
+      getId: (item) => item.name,
       sync: {
         sync: ({ collection, begin, write, commit }) => {
           // Initial state should be empty
@@ -70,9 +73,11 @@ describe(`Collection`, () => {
           begin()
 
           // Write some test data
-          const operations: Array<ChangeMessage<{ name: string }>> = [
-            { key: `user1`, value: { name: `Alice` }, type: `insert` },
-            { key: `user2`, value: { name: `Bob` }, type: `insert` },
+          const operations: Array<
+            Omit<ChangeMessage<{ name: string }>, `key`>
+          > = [
+            { value: { name: `Alice` }, type: `insert` },
+            { value: { name: `Bob` }, type: `insert` },
           ]
 
           for (const op of operations) {
@@ -85,11 +90,8 @@ describe(`Collection`, () => {
           commit()
 
           // Now the data should be visible
-          const expectedData = new Map([
-            [`user1`, { name: `Alice` }],
-            [`user2`, { name: `Bob` }],
-          ])
-          expect(collection.state).toEqual(expectedData)
+          const expectedData = [{ name: `Alice` }, { name: `Bob` }]
+          expect(Array.from(collection.state.values())).toEqual(expectedData)
         },
       },
     })
@@ -104,6 +106,7 @@ describe(`Collection`, () => {
     // new collection w/ mock sync/mutation
     const collection = new Collection<{ value: string; newProp?: string }>({
       id: `mock`,
+      getId: (item) => item.value,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust mitt's typing
@@ -111,7 +114,6 @@ describe(`Collection`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 // @ts-expect-error TODO type changes
                 value: change.changes,
@@ -214,8 +216,10 @@ describe(`Collection`, () => {
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
-    tx2.mutate(() => collection.insert({ value: `baz` }, { key: `custom-key` }))
-    expect(collection.state.get(`custom-key`)).toEqual({ value: `baz` })
+    tx2.mutate(() => collection.insert({ value: `baz` }))
+    expect(collection.state.get(collection.generateObjectKey(`baz`))).toEqual({
+      value: `baz`,
+    })
     await tx2.isPersisted.promise
 
     // Test bulk insert
@@ -232,7 +236,7 @@ describe(`Collection`, () => {
     const tx4 = createTransaction({ mutationFn })
     // Test update with callback
     tx4.mutate(() =>
-      collection.update([collection.state.get(insertedKey)!], (item) => {
+      collection.update([insertedKey], (item) => {
         // @ts-expect-error possibly undefined is ok in test
         item[0].value = `bar2`
       })
@@ -246,7 +250,7 @@ describe(`Collection`, () => {
     // Test update with config and callback
     tx5.mutate(() =>
       collection.update(
-        collection.state.get(insertedKey)!,
+        insertedKey,
         { metadata: { updated: true } },
         (item) => {
           item.value = `bar3`
@@ -268,7 +272,7 @@ describe(`Collection`, () => {
     // Test update with config and callback
     tx55.mutate(() => {
       collection.update(
-        collection.state.get(insertedKey)!,
+        insertedKey,
         { metadata: { updated: true } },
         (item) => {
           item.value = `bar3.1`
@@ -276,7 +280,7 @@ describe(`Collection`, () => {
         }
       )
       collection.update(
-        collection.state.get(insertedKey)!,
+        insertedKey,
         { metadata: { updated: true } },
         (item) => {
           item.value = `bar3`
@@ -303,11 +307,15 @@ describe(`Collection`, () => {
       collection.state.get(keys[3])!,
     ]
     tx6.mutate(() =>
-      collection.update(items, { metadata: { bulkUpdate: true } }, (drafts) => {
-        drafts.forEach((draft) => {
-          draft.value += `-updated`
-        })
-      })
+      collection.update(
+        [keys[2], keys[3]],
+        { metadata: { bulkUpdate: true } },
+        (drafts) => {
+          drafts.forEach((draft) => {
+            draft.value += `-updated`
+          })
+        }
+      )
     )
 
     // Check bulk updates
@@ -318,33 +326,31 @@ describe(`Collection`, () => {
     await tx6.isPersisted.promise
 
     const tx7 = createTransaction({ mutationFn })
-    const toBeDeleted = collection.state.get(insertedKey)!
     // Test delete single item
-    tx7.mutate(() => collection.delete(toBeDeleted))
+    tx7.mutate(() => collection.delete(insertedKey))
     expect(collection.state.has(insertedKey)).toBe(false)
-    expect(collection.objectKeyMap.has(toBeDeleted)).toBe(false)
+    // objectKeyMap check removed as it no longer exists
     await tx7.isPersisted.promise
 
     // Test delete with metadata
+    const tx8Insert = createTransaction({ mutationFn })
+    tx8Insert.mutate(() => collection.insert({ value: `foostyle` }))
+    // @ts-expect-error possibly undefined is ok in test
+    const tx8insertKey = tx8Insert.mutations[0].key
+    await tx8Insert.isPersisted.promise
     const tx8 = createTransaction({ mutationFn })
     tx8.mutate(() =>
-      collection.delete(collection.state.get(`custom-key`)!, {
-        metadata: { reason: `test` },
+      collection.delete(tx8insertKey, {
+        metadata: { reason: `test delete` },
       })
     )
-    expect(collection.state.has(`custom-key`)).toBe(false)
+    expect(tx8.mutations[0]?.metadata).toEqual({ reason: `test delete` })
+    expect(collection.state.has(tx8insertKey)).toBe(false)
     await tx8.isPersisted.promise
 
     // Test bulk delete
     const tx9 = createTransaction({ mutationFn })
-    tx9.mutate(() =>
-      collection.delete([
-        // @ts-expect-error possibly undefined is ok in test
-        collection.state.get(keys[2])!,
-        // @ts-expect-error possibly undefined is ok in test
-        collection.state.get(keys[3])!,
-      ])
-    )
+    tx9.mutate(() => collection.delete([keys[2], keys[3]]))
     // @ts-expect-error possibly undefined is ok in test
     expect(collection.state.has(keys[2])).toBe(false)
     // @ts-expect-error possibly undefined is ok in test
@@ -352,12 +358,15 @@ describe(`Collection`, () => {
     await tx9.isPersisted.promise
   })
 
-  it(`synced updates should be applied while there's an ongoing transaction`, async () => {
+  it(`synced updates should *not* be applied while there's a persisting transaction`, async () => {
     const emitter = mitt()
 
     // new collection w/ mock sync/mutation
-    const collection = new Collection<{ value: string }>({
+    const collection = new Collection<{ id: number; value: string }>({
       id: `mock`,
+      getId: (item) => {
+        return item.id
+      },
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust Mitt's typing and this works.
@@ -365,7 +374,6 @@ describe(`Collection`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 // @ts-expect-error TODO type changes
                 value: change.changes,
@@ -381,13 +389,15 @@ describe(`Collection`, () => {
       // Sync something and check that that it isn't applied because
       // we're still in the middle of persisting a transaction.
       emitter.emit(`update`, [
-        { key: `the-key`, type: `insert`, changes: { bar: `value` } },
+        { type: `insert`, changes: { id: 1, bar: `value` } },
         // This update is ignored because the optimistic update overrides it.
-        { key: `foo`, type: `update`, changes: { bar: `value2` } },
+        { type: `update`, changes: { id: 2, bar: `value2` } },
       ])
-      expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
+      expect(collection.state).toEqual(
+        new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
+      )
       // Remove it so we don't have to assert against it below
-      emitter.emit(`update`, [{ key: `the-key`, type: `delete` }])
+      emitter.emit(`update`, [{ changes: { id: 2 }, type: `delete` }])
 
       emitter.emit(`update`, transaction.mutations)
       return Promise.resolve()
@@ -397,29 +407,30 @@ describe(`Collection`, () => {
 
     // insert
     tx1.mutate(() =>
-      collection.insert(
-        {
-          value: `bar`,
-        },
-        { key: `foo` }
-      )
+      collection.insert({
+        id: 1,
+        value: `bar`,
+      })
     )
 
     // The merged value should immediately contain the new insert
-    expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
+    expect(collection.state).toEqual(
+      new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
+    )
 
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
       Array.from(collection.transactions.state.values())[0].mutations[0].changes
     ).toEqual({
+      id: 1,
       value: `bar`,
     })
 
     // Check the optimistic operation is there
     const insertOperation: OptimisticChangeMessage = {
-      key: `foo`,
-      value: { value: `bar` },
+      key: `KEY::${collection.id}/1`,
+      value: { id: 1, value: `bar` },
       type: `insert`,
       isActive: true,
     }
@@ -427,72 +438,15 @@ describe(`Collection`, () => {
 
     await tx1.isPersisted.promise
 
-    expect(collection.state).toEqual(new Map([[`foo`, { value: `bar` }]]))
-  })
-
-  it(`should handle sparse key arrays for bulk inserts`, () => {
-    const collection = new Collection<{ value: string }>({
-      id: `test`,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-    })
-    const mutationFn = async () => {}
-
-    // Insert multiple items with a sparse key array
-    const items = [
-      { value: `item1` },
-      { value: `item2` },
-      { value: `item3` },
-      { value: `item4` },
-    ]
-
-    const tx1 = createTransaction({ mutationFn })
-    // Only provide keys for first and third items
-    tx1.mutate(() =>
-      collection.insert(items, {
-        key: [`key1`, undefined, `key3`],
-      })
+    expect(collection.state).toEqual(
+      new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
     )
-
-    // Get all keys from the transaction
-    const keys = tx1.mutations.map((m) => m.key)
-
-    // Verify explicit keys were used
-    expect(keys[0]).toBe(`key1`)
-    expect(keys[2]).toBe(`key3`)
-
-    // Verify auto-generated keys for undefined positions
-    expect(keys[1]).toHaveLength(43)
-    expect(keys[3]).toHaveLength(43)
-
-    // Verify all items were inserted with correct values
-    // @ts-expect-error possibly undefined is ok in test
-    expect(collection.state.get(keys[0])).toEqual({ value: `item1` })
-    // @ts-expect-error possibly undefined is ok in test
-    expect(collection.state.get(keys[1])).toEqual({ value: `item2` })
-    // @ts-expect-error possibly undefined is ok in test
-    expect(collection.state.get(keys[2])).toEqual({ value: `item3` })
-    // @ts-expect-error possibly undefined is ok in test
-    expect(collection.state.get(keys[3])).toEqual({ value: `item4` })
-
-    const tx2 = createTransaction({ mutationFn })
-    // Test error case: more keys than items
-    expect(() => {
-      tx2.mutate(() =>
-        collection.insert([{ value: `test` }], {
-          key: [`key1`, `key2`],
-        })
-      )
-    }).toThrow(`More keys provided than items to insert`)
   })
 
   it(`should throw errors when deleting items not in the collection`, () => {
     const collection = new Collection<{ name: string }>({
       id: `delete-errors`,
+      getId: (val) => val.name,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -508,19 +462,14 @@ describe(`Collection`, () => {
     const tx1 = createTransaction({ mutationFn })
     tx1.mutate(() => collection.insert(item))
 
-    // Should throw when trying to delete an object not in the collection
-    const notInCollection = { name: `Not In Collection` }
+    // Should not throw when trying to delete a non-existent ID
     const tx2 = createTransaction({ mutationFn })
-    expect(() => tx2.mutate(() => collection.delete(notInCollection))).toThrow(
-      `Object not found in collection`
-    )
+    expect(() =>
+      tx2.mutate(() => collection.delete(`non-existent-id`))
+    ).not.toThrow()
 
     // Should throw when trying to delete an invalid type
     const tx3 = createTransaction({ mutationFn })
-    // @ts-expect-error testing error handling with invalid type
-    expect(() => tx3.mutate(() => collection.delete(123))).toThrow(
-      `Invalid item type for delete - must be an object or string key`
-    )
 
     // Should not throw when deleting by string key (even if key doesn't exist)
     const tx4 = createTransaction({ mutationFn })
@@ -528,9 +477,11 @@ describe(`Collection`, () => {
       tx4.mutate(() => collection.delete(`non-existent-key`))
     ).not.toThrow()
 
-    // Should not throw when deleting an object that exists in the collection
+    // Should not throw when deleting by ID
     const tx5 = createTransaction({ mutationFn })
-    expect(() => tx5.mutate(() => collection.delete(item))).not.toThrow()
+    // Get the ID from the first item that was inserted
+    const itemId = Array.from(collection.state.keys())[0]
+    expect(() => tx5.mutate(() => collection.delete(itemId!))).not.toThrow()
   })
 })
 
@@ -546,6 +497,7 @@ describe(`Collection with schema validation`, () => {
     // Create a collection with the schema
     const collection = new Collection<z.infer<typeof userSchema>>({
       id: `test`,
+      getId: (item) => item.name,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -564,7 +516,7 @@ describe(`Collection with schema validation`, () => {
     }
 
     const tx1 = createTransaction({ mutationFn })
-    tx1.mutate(() => collection.insert(validUser, { key: `user1` }))
+    tx1.mutate(() => collection.insert(validUser))
 
     // Invalid data should throw SchemaValidationError
     const invalidUser = {
@@ -575,7 +527,7 @@ describe(`Collection with schema validation`, () => {
 
     try {
       const tx2 = createTransaction({ mutationFn })
-      tx2.mutate(() => collection.insert(invalidUser, { key: `user2` }))
+      tx2.mutate(() => collection.insert(invalidUser))
       // Should not reach here
       expect(true).toBe(false)
     } catch (error) {
@@ -599,7 +551,7 @@ describe(`Collection with schema validation`, () => {
     // Partial updates should work with valid data
     const tx3 = createTransaction({ mutationFn })
     tx3.mutate(() =>
-      collection.update(collection.state.get(`user1`)!, (draft) => {
+      collection.update(`Alice`, (draft) => {
         draft.age = 31
       })
     )
@@ -608,7 +560,7 @@ describe(`Collection with schema validation`, () => {
     try {
       const tx4 = createTransaction({ mutationFn })
       tx4.mutate(() =>
-        collection.update(collection.state.get(`user1`)!, (draft) => {
+        collection.update(`Alice`, (draft) => {
           draft.age = -1
         })
       )
