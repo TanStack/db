@@ -57,6 +57,10 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 export function preloadCollection<T extends object = Record<string, unknown>>(
   config: CollectionConfig<T>
 ): Promise<Collection<T>> {
+  if (!config.id) {
+    throw new Error(`The id property is required for preloadCollection`)
+  }
+
   // If the collection is already fully loaded, return a resolved promise
   if (
     collectionsStore.state.has(config.id) &&
@@ -76,6 +80,9 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   if (!collectionsStore.state.has(config.id)) {
     collectionsStore.setState((prev) => {
       const next = new Map(prev)
+      if (!config.id) {
+        throw new Error(`The id property is required for preloadCollection`)
+      }
       next.set(
         config.id,
         new Collection<T>({
@@ -101,6 +108,9 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
 
   // Register a one-time listener for the first commit
   collection.onFirstCommit(() => {
+    if (!config.id) {
+      throw new Error(`The id property is required for preloadCollection`)
+    }
     if (loadingCollections.has(config.id)) {
       loadingCollections.delete(config.id)
       resolveFirstCommit()
