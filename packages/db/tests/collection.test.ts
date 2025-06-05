@@ -450,9 +450,8 @@ describe(`Collection`, () => {
       // Sync something and check that that it isn't applied because
       // we're still in the middle of persisting a transaction.
       emitter.emit(`update`, [
-        { type: `insert`, changes: { id: 1, bar: `value` } },
         // This update is ignored because the optimistic update overrides it.
-        { type: `update`, changes: { id: 2, bar: `value2` } },
+        { type: `insert`, changes: { id: 2, bar: `value2` } },
       ])
       expect(collection.state).toEqual(
         new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
@@ -543,6 +542,41 @@ describe(`Collection`, () => {
     // Get the ID from the first item that was inserted
     const itemId = Array.from(collection.state.keys())[0]
     expect(() => tx5.mutate(() => collection.delete(itemId!))).not.toThrow()
+  })
+
+  it(`should not allow inserting documents with IDs that already exist`, async () => {
+    const collection = new Collection<{ id: number; value: string }>({
+      id: `duplicate-id-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    // Try to insert a document with the same ID
+    expect(() => {
+      tx.mutate(() => collection.insert({ id: 1, value: `duplicate value` }))
+    }).toThrow(
+      `Cannot insert document with ID "1" because it already exists in the collection`
+    )
+
+    // Should be able to insert a document with a different ID
+    const tx2 = createTransaction({ mutationFn })
+    expect(() => {
+      tx2.mutate(() => collection.insert({ id: 2, value: `new value` }))
+    }).not.toThrow()
   })
 })
 

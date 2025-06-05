@@ -355,12 +355,29 @@ export class Collection<T extends object = Record<string, unknown>> {
             `The pending sync transaction is already committed, you can't still write to it.`
           )
         }
+        const key = this.generateObjectKey(
+          this.config.getId(messageWithoutKey.value),
+          messageWithoutKey.value
+        )
+
+        // Check if an item with this ID already exists when inserting
+        if (messageWithoutKey.type === `insert`) {
+          if (
+            this.syncedData.state.has(key) &&
+            !pendingTransaction.operations.some(
+              (op) => op.key === key && op.type === `delete`
+            )
+          ) {
+            const id = this.config.getId(messageWithoutKey.value)
+            throw new Error(
+              `Cannot insert document with ID "${id}" from sync because it already exists in the collection "${this.id}"`
+            )
+          }
+        }
+
         const message: ChangeMessage<T> = {
           ...messageWithoutKey,
-          key: this.generateObjectKey(
-            this.config.getId(messageWithoutKey.value),
-            messageWithoutKey.value
-          ),
+          key,
         }
         pendingTransaction.operations.push(message)
       },
@@ -587,6 +604,12 @@ export class Collection<T extends object = Record<string, unknown>> {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
       const key = keys[index]!
+
+      // Check if an item with this ID already exists in the collection
+      const id = this.config.getId(item)
+      if (this.state.has(key)) {
+        throw `Cannot insert document with ID "${id}" because it already exists in the collection`
+      }
 
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
