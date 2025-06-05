@@ -607,7 +607,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
       // Check if an item with this ID already exists in the collection
       const id = this.config.getId(item)
-      if (this.state.has(key)) {
+      if (this.state.has(this.getKeyFromId(id))) {
         throw `Cannot insert document with ID "${id}" because it already exists in the collection`
       }
 

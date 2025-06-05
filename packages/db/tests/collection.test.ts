@@ -143,6 +143,7 @@ describe(`Collection`, () => {
     const collection = new Collection<{
       id: number
       value: string
+      boolean?: boolean
       newProp?: string
     }>({
       id: `mock`,
@@ -355,12 +356,6 @@ describe(`Collection`, () => {
 
     const tx6 = createTransaction({ mutationFn })
     // Test bulk update
-    const items = [
-      // @ts-expect-error possibly undefined is ok in test
-      collection.state.get(keys[2])!,
-      // @ts-expect-error possibly undefined is ok in test
-      collection.state.get(keys[3])!,
-    ]
     tx6.mutate(() =>
       collection.update(
         [keys[2], keys[3]],
@@ -368,6 +363,7 @@ describe(`Collection`, () => {
         (drafts) => {
           drafts.forEach((draft) => {
             draft.value += `-updated`
+            draft.boolean = true
           })
         }
       )
@@ -376,11 +372,13 @@ describe(`Collection`, () => {
     // Check bulk updates
     // @ts-expect-error possibly undefined is ok in test
     expect(collection.state.get(keys[2])).toEqual({
+      boolean: true,
       id: 3,
       value: `item1-updated`,
     })
     // @ts-expect-error possibly undefined is ok in test
     expect(collection.state.get(keys[3])).toEqual({
+      boolean: true,
       id: 4,
       value: `item2-updated`,
     })

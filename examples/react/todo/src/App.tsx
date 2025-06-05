@@ -149,7 +149,7 @@ const createTodoCollection = (type: CollectionType) => {
             timestamptz: (date: string) => new Date(date),
           },
         },
-        primaryKey: [`id`],
+        getId: (item) => item.id,
         schema: updateTodoSchema,
       })
     } else {
@@ -198,7 +198,7 @@ const createConfigCollection = (type: CollectionType) => {
             },
           },
         },
-        primaryKey: [`id`],
+        getId: (item) => item.id,
         schema: updateConfigSchema,
       })
     } else {
@@ -220,7 +220,7 @@ const createConfigCollection = (type: CollectionType) => {
               : undefined,
           }))
         },
-        getId: (item) => String(item.id),
+        getId: (item) => item.id,
         schema: updateConfigSchema,
         queryClient,
       })
@@ -290,10 +290,19 @@ export default function App() {
 
   const updateTodo = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
-      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
-      const { original, changes } = mutation
-      const response = await api.todos.update(original.id, changes)
-      await collectionSync(collectionType, mutation, response.txid)
+      const txids = await Promise.all(
+        transaction.mutations.map(async (mutation) => {
+          const { original, changes } = mutation
+          const response = await api.todos.update(original.id, changes)
+          return response.txid
+        })
+      )
+      await Promise.all(
+        txids.map(async (txid, i) => {
+          const mutation = transaction.mutations[i]
+          return await collectionSync(collectionType, mutation, txid)
+        })
+      )
     },
   })
 
@@ -349,12 +358,9 @@ export default function App() {
     for (const config of configData) {
       if (config.key === key) {
         updateConfig.mutate(() =>
-          configCollection.update(
-            Array.from(configCollection.state.values())[0]! as UpdateConfig,
-            (draft) => {
-              draft.value = value
-            }
-          )
+          configCollection.update(config.id, (draft) => {
+            draft.value = value
+          })
         )
 
         return
@@ -439,14 +445,9 @@ export default function App() {
 
   const toggleTodo = (todo: UpdateTodo) => {
     updateTodo.mutate(() =>
-      todoCollection.update(
-        Array.from(todoCollection.state.values()).find(
-          (t) => t.id === todo.id
-        )!,
-        (draft) => {
-          draft.completed = !draft.completed
-        }
-      )
+      todoCollection.update(todo.id, (draft) => {
+        draft.completed = !draft.completed
+      })
     )
   }
 
@@ -544,9 +545,7 @@ export default function App() {
                     todosToToggle.forEach((t) => togglingIds.add(t.id))
                     updateTodo.mutate(() =>
                       todoCollection.update(
-                        Array.from(todoCollection.state.values()).filter((t) =>
-                          togglingIds.has(t.id)
-                        ),
+                        todosToToggle.map((todo) => todo.id),
                         (drafts) => {
                           drafts.forEach(
                             (draft) => (draft.completed = !allCompleted)
@@ -596,11 +595,7 @@ export default function App() {
                         <button
                           onClick={() => {
                             deleteTodo.mutate(() =>
-                              todoCollection.delete(
-                                Array.from(todoCollection.state.values()).find(
-                                  (t) => t.id === todo.id
-                                )!
-                              )
+                              todoCollection.delete(todo.id)
                             )
                           }}
                           className="hidden group-hover:block absolute right-[10px] w-[40px] h-[40px] my-auto top-0 bottom-0 text-[30px] text-[#cc9a9a] hover:text-[#af5b5e] transition-colors"
@@ -623,9 +618,7 @@ export default function App() {
                       onClick={() => {
                         deleteTodo.mutate(() =>
                           todoCollection.delete(
-                            Array.from(todoCollection.state.values()).filter(
-                              (t) => completedTodos.some((ct) => ct.id === t.id)
-                            )
+                            completedTodos.map((todo) => todo.id)
                           )
                         )
                       }}
