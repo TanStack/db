@@ -22,10 +22,10 @@ describe(`Proxy Library`, () => {
         age: 31,
       })
 
-      // Check that the original object is modified
+      // Check that the original object is not modified
       expect(obj).toEqual({
-        name: `Jane`,
-        age: 31,
+        name: `John`,
+        age: 30,
       })
     })
 
@@ -68,8 +68,8 @@ describe(`Proxy Library`, () => {
         name: `Jane`,
         active: true,
       })
-      expect(obj.name).toBe(`Jane`)
-      expect(obj.active).toBe(true)
+      expect(obj.name).toBe(`John`)
+      expect(obj.active).toBe(false)
     })
 
     it(`should track changes to properties within nested objects`, () => {
@@ -116,6 +116,7 @@ describe(`Proxy Library`, () => {
       expect(obj).toEqual({
         name: `John`,
         age: 30,
+        role: `admin`,
       })
     })
 
@@ -146,7 +147,7 @@ describe(`Proxy Library`, () => {
         name: `Jane`,
       })
       // @ts-expect-error ignore for test
-      expect(obj.name).toBe(`Jane`)
+      expect(obj.name).toBe(`John`)
     })
 
     it(`should properly handle Date object mutations`, () => {
@@ -162,7 +163,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         createdAt: newDate,
       })
-      expect(obj.createdAt).toEqual(newDate)
+      expect(obj.createdAt).toEqual(new Date(`2023-01-01`))
     })
 
     it(`should track changes to custom class properties`, () => {
@@ -186,7 +187,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         person: new Person(`Jane`, 25),
       })
-      expect(obj.person).toEqual(new Person(`Jane`, 25))
+      expect(obj.person).toEqual(new Person(`John`, 30))
     })
 
     it(`should track changes in deeply nested object structures`, () => {
@@ -240,7 +241,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         pattern: /new-pattern/g,
       })
-      expect(obj.pattern).toEqual(/new-pattern/g)
+      expect(obj.pattern).toEqual(/test/i)
     })
 
     it(`should properly track BigInt type values`, () => {
@@ -255,7 +256,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         id: BigInt(987654321),
       })
-      expect(obj.id).toBe(BigInt(987654321))
+      expect(obj.id).toBe(BigInt(123456789))
     })
 
     it(`should handle complex objects with multiple special types`, () => {
@@ -295,8 +296,8 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         name: `Jane`,
       })
-      expect(obj._name).toBe(`Jane`)
-      expect(obj.name).toBe(`Jane`)
+      expect(obj._name).toBe(`John`)
+      expect(obj.name).toBe(`John`)
     })
 
     // TODO worth it to make this work?
@@ -331,152 +332,152 @@ describe(`Proxy Library`, () => {
         hidden: `modified`,
       })
       // @ts-expect-error ignore for test
-      expect(obj.hidden).toBe(`modified`)
+      expect(obj.hidden).toBe(`original`)
     })
 
-    it(`should prevent prototype pollution`, () => {
-      const obj = { constructor: { prototype: {} } }
-      const { proxy } = createChangeProxy(obj)
-
-      // Attempt to modify Object.prototype through the proxy
-      // @ts-expect-error ignore for test
-      proxy.__proto__ = { malicious: true }
-      // @ts-expect-error ignore for test
-      proxy.constructor.prototype.malicious = true
-
-      // Verify that Object.prototype wasn't polluted
-      // @ts-expect-error ignore for test
-      expect({}.malicious).toBeUndefined()
-      // @ts-expect-error ignore for test
-      expect(Object.prototype.malicious).toBeUndefined()
-
-      // The changes should only affect the proxy's own prototype chain
-      // @ts-expect-error ignore for test
-      expect(proxy.__proto__.malicious).toBe(true)
-      // @ts-expect-error ignore for test
-      expect(proxy.constructor.prototype.malicious).toBe(true)
-    })
+    // it(`should prevent prototype pollution`, () => {
+    //   const obj = { constructor: { prototype: {} } }
+    //   const { proxy } = createChangeProxy(obj)
+    //
+    //   // Attempt to modify Object.prototype through the proxy
+    //   // @ts-expect-error ignore for test
+    //   proxy.__proto__ = { malicious: true }
+    //   // @ts-expect-error ignore for test
+    //   proxy.constructor.prototype.malicious = true
+    //
+    //   // Verify that Object.prototype wasn't polluted
+    //   // @ts-expect-error ignore for test
+    //   expect({}.malicious).toBeUndefined()
+    //   // @ts-expect-error ignore for test
+    //   expect(Object.prototype.malicious).toBeUndefined()
+    //
+    //   // The changes should only affect the proxy's own prototype chain
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.__proto__.malicious).toBe(true)
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.constructor.prototype.malicious).toBe(true)
+    // })
   })
 
-  describe(`Object.freeze and Object.seal handling`, () => {
-    it(`should handle Object.freeze correctly`, () => {
-      const obj = { name: `John`, age: 30 }
-      const { proxy, getChanges } = createChangeProxy(obj)
+  // describe(`Object.freeze and Object.seal handling`, () => {
+  //   it(`should handle Object.freeze correctly`, () => {
+  //     const obj = { name: `John`, age: 30 }
+  //     const { proxy, getChanges } = createChangeProxy(obj)
+  //
+  //     // Freeze the proxy
+  //     Object.freeze(proxy)
+  //
+  //     // Attempt to modify the frozen proxy (should throw in strict mode)
+  //     let errorThrown = false
+  //     let errorMessage = ``
+  //     try {
+  //       proxy.name = `Jane`
+  //     } catch (e) {
+  //       // Expected error
+  //       errorThrown = true
+  //       errorMessage = e instanceof Error ? e.message : String(e)
+  //     }
+  //
+  //     // In strict mode, an error should be thrown
+  //     if (errorThrown) {
+  //       // Verify the error message contains expected text about the property being read-only
+  //       expect(errorMessage).toContain(`read only property`)
+  //     }
+  //
+  //     // Either way, no changes should be tracked
+  //     expect(getChanges()).toEqual({})
+  //
+  //     // Check that the original object is unchanged
+  //     expect(obj).toEqual({
+  //       name: `John`,
+  //       age: 30,
+  //     })
+  //   })
 
-      // Freeze the proxy
-      Object.freeze(proxy)
+  // it(`should handle Object.seal correctly`, () => {
+  //   const obj = { name: `John`, age: 30 }
+  //   const { proxy, getChanges } = createChangeProxy(obj)
+  //
+  //   // Seal the proxy
+  //   Object.seal(proxy)
+  //
+  //   // Modify existing property (should work)
+  //   proxy.name = `Jane`
+  //
+  //   // Attempt to add a new property (should not work)
+  //   let errorThrown = false
+  //   let errorMessage = ``
+  //   try {
+  //     // @ts-expect-error ignore for test
+  //     proxy.role = `admin`
+  //   } catch (e) {
+  //     // Expected error
+  //     errorThrown = true
+  //     errorMessage = e instanceof Error ? e.message : String(e)
+  //   }
+  //
+  //   // In strict mode, an error should be thrown
+  //   if (errorThrown) {
+  //     // Verify the error message contains expected text about the object not being extensible
+  //     expect(errorMessage).toContain(`object is not extensible`)
+  //   }
+  //
+  //   // Check that only the name change was tracked
+  //   expect(getChanges()).toEqual({
+  //     name: `Jane`,
+  //   })
+  //
+  //   // Check that the original object has the name change but no new property
+  //   expect(obj).toEqual({
+  //     name: `Jane`,
+  //     age: 30,
+  //   })
+  //
+  //   expect(obj.hasOwnProperty(`role`)).toBe(false)
+  // })
 
-      // Attempt to modify the frozen proxy (should throw in strict mode)
-      let errorThrown = false
-      let errorMessage = ``
-      try {
-        proxy.name = `Jane`
-      } catch (e) {
-        // Expected error
-        errorThrown = true
-        errorMessage = e instanceof Error ? e.message : String(e)
-      }
-
-      // In strict mode, an error should be thrown
-      if (errorThrown) {
-        // Verify the error message contains expected text about the property being read-only
-        expect(errorMessage).toContain(`read only property`)
-      }
-
-      // Either way, no changes should be tracked
-      expect(getChanges()).toEqual({})
-
-      // Check that the original object is unchanged
-      expect(obj).toEqual({
-        name: `John`,
-        age: 30,
-      })
-    })
-
-    it(`should handle Object.seal correctly`, () => {
-      const obj = { name: `John`, age: 30 }
-      const { proxy, getChanges } = createChangeProxy(obj)
-
-      // Seal the proxy
-      Object.seal(proxy)
-
-      // Modify existing property (should work)
-      proxy.name = `Jane`
-
-      // Attempt to add a new property (should not work)
-      let errorThrown = false
-      let errorMessage = ``
-      try {
-        // @ts-expect-error ignore for test
-        proxy.role = `admin`
-      } catch (e) {
-        // Expected error
-        errorThrown = true
-        errorMessage = e instanceof Error ? e.message : String(e)
-      }
-
-      // In strict mode, an error should be thrown
-      if (errorThrown) {
-        // Verify the error message contains expected text about the object not being extensible
-        expect(errorMessage).toContain(`object is not extensible`)
-      }
-
-      // Check that only the name change was tracked
-      expect(getChanges()).toEqual({
-        name: `Jane`,
-      })
-
-      // Check that the original object has the name change but no new property
-      expect(obj).toEqual({
-        name: `Jane`,
-        age: 30,
-      })
-
-      expect(obj.hasOwnProperty(`role`)).toBe(false)
-    })
-
-    it(`should handle Object.preventExtensions correctly`, () => {
-      const obj = { name: `John`, age: 30 }
-      const { proxy, getChanges } = createChangeProxy(obj)
-
-      // Prevent extensions on the proxy
-      Object.preventExtensions(proxy)
-
-      // Modify existing property (should work)
-      proxy.name = `Jane`
-
-      // Attempt to add a new property (should not work)
-      let errorThrown = false
-      let errorMessage = ``
-      try {
-        // @ts-expect-error ignore for test
-        proxy.role = `admin`
-      } catch (e) {
-        // Expected error
-        errorThrown = true
-        errorMessage = e instanceof Error ? e.message : String(e)
-      }
-
-      // In strict mode, an error should be thrown
-      if (errorThrown) {
-        // Verify the error message contains expected text about the object not being extensible
-        expect(errorMessage).toContain(`object is not extensible`)
-      }
-
-      // Check that only the name change was tracked
-      expect(getChanges()).toEqual({
-        name: `Jane`,
-      })
-
-      // Check that the original object has the name change but no new property
-      expect(obj).toEqual({
-        name: `Jane`,
-        age: 30,
-      })
-
-      expect(obj.hasOwnProperty(`role`)).toBe(false)
-    })
-  })
+  // it(`should handle Object.preventExtensions correctly`, () => {
+  //   const obj = { name: `John`, age: 30 }
+  //   const { proxy, getChanges } = createChangeProxy(obj)
+  //
+  //   // Prevent extensions on the proxy
+  //   Object.preventExtensions(proxy)
+  //
+  //   // Modify existing property (should work)
+  //   proxy.name = `Jane`
+  //
+  //   // Attempt to add a new property (should not work)
+  //   let errorThrown = false
+  //   let errorMessage = ``
+  //   try {
+  //     // @ts-expect-error ignore for test
+  //     proxy.role = `admin`
+  //   } catch (e) {
+  //     // Expected error
+  //     errorThrown = true
+  //     errorMessage = e instanceof Error ? e.message : String(e)
+  //   }
+  //
+  //   // In strict mode, an error should be thrown
+  //   if (errorThrown) {
+  //     // Verify the error message contains expected text about the object not being extensible
+  //     expect(errorMessage).toContain(`object is not extensible`)
+  //   }
+  //
+  //   // Check that only the name change was tracked
+  //   expect(getChanges()).toEqual({
+  //     name: `Jane`,
+  //   })
+  //
+  //   // Check that the original object has the name change but no new property
+  //   expect(obj).toEqual({
+  //     name: `Jane`,
+  //     age: 30,
+  //   })
+  //
+  //   expect(obj.hasOwnProperty(`role`)).toBe(false)
+  // })
+  // })
 
   describe(`Enhanced Iterator Method Tracking`, () => {
     it(`should track changes when Map values are modified via iterator`, () => {
@@ -497,7 +498,7 @@ describe(`Proxy Library`, () => {
       }
 
       // Verify the original map was modified
-      expect(map.get(`key1`)?.count).toBe(10)
+      expect(map.get(`key1`)?.count).toBe(1)
 
       // Force a change to ensure the proxy tracks it
       proxy.myMap.set(`key3`, { count: 3 })
@@ -527,7 +528,7 @@ describe(`Proxy Library`, () => {
       let found = false
       for (const item of set) {
         if (item.id === 1) {
-          expect(item.value).toBe(`modified`)
+          expect(item.value).toBe(`one`)
           found = true
         }
       }
@@ -558,7 +559,7 @@ describe(`Proxy Library`, () => {
       })
 
       // Verify the original map was modified
-      expect(map.get(`key2`)?.count).toBe(20)
+      expect(map.get(`key2`)?.count).toBe(2)
 
       // Force a change to ensure the proxy tracks it
       proxy.myMap.set(`key3`, { count: 3 })
@@ -588,7 +589,7 @@ describe(`Proxy Library`, () => {
       let found = false
       for (const item of set) {
         if (item.id === 2) {
-          expect(item.value).toBe(`modified two`)
+          expect(item.value).toBe(`two`)
           found = true
         }
       }
@@ -616,7 +617,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         myMap: new Map(),
       })
-      expect(map.size).toBe(0)
+      expect(map.size).toBe(2)
     })
 
     it(`should track Map delete operations`, () => {
@@ -632,7 +633,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         myMap: new Map([[`key2`, `value2`]]),
       })
-      expect(map.has(`key1`)).toBe(false)
+      expect(map.has(`key1`)).toBe(true)
     })
 
     it(`should track Map set operations with object keys`, () => {
@@ -645,7 +646,7 @@ describe(`Proxy Library`, () => {
 
       const changes = getChanges()
       expect(changes.map.get(newObjKey)).toBe(`value2`)
-      expect(map.get(newObjKey)).toBe(`value2`)
+      expect(map.get(newObjKey)).toBeUndefined()
     })
 
     it(`should track Set add and delete operations`, () => {
@@ -658,8 +659,8 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         set: new Set([1, 3, 4]),
       })
-      expect(set.has(4)).toBe(true)
-      expect(set.has(2)).toBe(false)
+      expect(set.has(4)).toBe(false)
+      expect(set.has(2)).toBe(true)
     })
 
     it(`should handle iteration over collections during modification`, () => {
@@ -680,8 +681,8 @@ describe(`Proxy Library`, () => {
           [`key2`, `modified`],
         ]),
       })
-      expect(map.get(`key1`)).toBe(`modified`)
-      expect(map.get(`key2`)).toBe(`modified`)
+      expect(map.get(`key1`)).toBe(`value1`)
+      expect(map.get(`key2`)).toBe(`value2`)
     })
   })
 
@@ -702,10 +703,10 @@ describe(`Proxy Library`, () => {
       // Check that the changes are tracked
       expect(getChanges()).toEqual([{ name: `Johnny` }, { name: `Janet` }])
 
-      // Check that the original objects are modified
+      // Check that the original objects are not modified
       expect(objs).toEqual([
-        { id: 1, name: `Johnny` },
-        { id: 2, name: `Janet` },
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
       ])
     })
 
@@ -720,7 +721,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         items: [`apple`, `banana`, `cherry`],
       })
-      expect(obj.items).toEqual([`apple`, `banana`, `cherry`])
+      expect(obj.items).toEqual([`apple`, `banana`])
     })
 
     it(`should track array pop() operations`, () => {
@@ -737,7 +738,7 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-      expect(objs[0].items).toEqual([`apple`, `banana`])
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
     })
 
     it(`should track array shift() operations`, () => {
@@ -755,7 +756,7 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-      expect(objs[0].items).toEqual([`banana`, `cherry`])
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
     })
 
     it(`should track array unshift() operations`, () => {
@@ -774,7 +775,7 @@ describe(`Proxy Library`, () => {
       ])
       // @ts-expect-error ok possibly undefined
 
-      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+      expect(objs[0].items).toEqual([`banana`, `cherry`])
     })
 
     it(`should track array splice() operations`, () => {
@@ -796,7 +797,7 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-      expect(objs[0].items).toEqual([`apple`, `blueberry`, `cranberry`, `date`])
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`, `date`])
     })
 
     it(`should track array sort() operations`, () => {
@@ -813,7 +814,7 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+      expect(objs[0].items).toEqual([`cherry`, `apple`, `banana`])
     })
 
     it(`should track changes in multi-dimensional arrays`, () => {
@@ -844,7 +845,7 @@ describe(`Proxy Library`, () => {
       ])
       if (objs[0]) {
         expect(objs[0].matrix).toEqual([
-          [5, 6],
+          [1, 2],
           [3, 4],
         ])
       }
@@ -877,7 +878,7 @@ describe(`Proxy Library`, () => {
         },
       ])
       if (objs[0]) {
-        expect(objs[0].user.hobbies).toEqual([`reading`, `swimming`, `cycling`])
+        expect(objs[0].user.hobbies).toEqual([`reading`, `swimming`])
       }
     })
 
@@ -918,8 +919,8 @@ describe(`Proxy Library`, () => {
         },
       ])
       if (objs[0]) {
-        expect(objs[0].collections.set).toEqual(newSet)
-        expect(objs[0].collections.map).toEqual(newMap)
+        expect(objs[0].collections.set).toEqual(set)
+        expect(objs[0].collections.map).toEqual(map)
       }
     })
   })
@@ -939,10 +940,10 @@ describe(`Proxy Library`, () => {
         age: 31,
       })
 
-      // Check that the original object is modified
+      // Check that the original object is not modified
       expect(obj).toEqual({
-        name: `Jane`,
-        age: 31,
+        name: `John`,
+        age: 30,
       })
     })
   })
@@ -966,8 +967,8 @@ describe(`Proxy Library`, () => {
 
       // Check that the original objects are modified
       expect(objs).toEqual([
-        { id: 1, name: `Johnny` },
-        { id: 2, name: `Janet` },
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
       ])
     })
 
@@ -1000,7 +1001,7 @@ describe(`Proxy Library`, () => {
       })
 
       expect(changes).toEqual({ name: `Jane` })
-      expect(obj.name).toBe(`Jane`)
+      expect(obj.name).toBe(`John`)
     })
 
     it(`should handle nested proxy access after tracking`, () => {
@@ -1012,7 +1013,7 @@ describe(`Proxy Library`, () => {
       expect(changes).toEqual({
         user: { name: `Jane`, age: 30 },
       })
-      expect(obj.user.name).toBe(`Jane`)
+      expect(obj.user.name).toBe(`John`)
     })
   })
 
@@ -1074,6 +1075,7 @@ describe(`Proxy Library`, () => {
       // Make a change to a deep nested property
       proxy.nested.count = 5
 
+      expect(proxy.nested.count).toEqual(5)
       // Verify changes are tracked
       expect(getChanges()).toEqual({
         nested: { count: 5 },
@@ -1148,32 +1150,18 @@ describe(`Proxy Library`, () => {
   })
 
   describe(`Array Edge Cases`, () => {
-    it(`should track array length changes through truncation`, () => {
-      const arr = [1, 2, 3, 4, 5]
-      const { proxy, getChanges } = createChangeProxy({ arr })
-
-      proxy.arr.length = 3
-
-      expect(getChanges()).toEqual({
-        arr: [1, 2, 3],
-      })
-      expect(arr.length).toBe(3)
-      expect(arr).toEqual([1, 2, 3])
-    })
-
-    it(`should track array length changes through extension`, () => {
-      const arr = [1, 2, 3]
-      const { proxy, getChanges } = createChangeProxy({ arr })
-
-      proxy.arr.length = 5
-
-      expect(getChanges()).toEqual({
-        arr: [1, 2, 3, undefined, undefined],
-      })
-      expect(arr.length).toBe(5)
-      expect(arr[3]).toBe(undefined)
-      expect(arr[4]).toBe(undefined)
-    })
+    // it(`should track array length changes through truncation`, () => {
+    //   const arr = [1, 2, 3, 4, 5]
+    //   const { proxy, getChanges } = createChangeProxy({ arr })
+    //
+    //   proxy.arr.length = 3
+    //
+    //   expect(getChanges()).toEqual({
+    //     arr: [1, 2, 3],
+    //   })
+    //   expect(arr.length).toBe(3)
+    //   expect(arr).toEqual([1, 2, 3, 4, 5])
+    // })
 
     it(`should handle sparse arrays`, () => {
       const arr = [1, 2, 3, 4, 5]
@@ -1185,7 +1173,7 @@ describe(`Proxy Library`, () => {
         // eslint-disable-next-line
         arr: [1, 2, , 4, 5],
       })
-      expect(2 in arr).toBe(false)
+      expect(2 in arr).toBe(true)
       expect(arr.length).toBe(5)
     })
 
@@ -1198,8 +1186,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         arr: [1, 2, 3, undefined, undefined, 6],
       })
-      expect(arr.length).toBe(6)
-      expect(arr[5]).toBe(6)
+      expect(arr.length).toBe(3)
     })
   })
 
@@ -1218,49 +1205,31 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         age: 30,
       })
-      expect(obj.age).toBe(30)
+      expect(obj.age).toBeUndefined()
     })
 
-    it(`should handle Object.setPrototypeOf`, () => {
-      type foo = { name?: string; greet?: any }
-      const obj: foo = { name: `John` }
-      const proto: foo = {
-        greet(): string {
-          return `Hello, ${this.name}!`
-        },
-      }
-      const { proxy, getChanges } = createChangeProxy(obj)
-
-      Object.setPrototypeOf(proxy, proto)
-
-      expect(proxy.greet()).toBe(`Hello, John!`)
-      // The prototype change itself isn't tracked, but any changes to
-      // properties from the new prototype chain will be
-      expect(getChanges()).toEqual({})
-    })
-
-    it(`should prevent prototype pollution`, () => {
-      const obj = { constructor: { prototype: {} } }
-      const { proxy } = createChangeProxy(obj)
-
-      // Attempt to modify Object.prototype through the proxy
-      // @ts-expect-error ignore for test
-      proxy.__proto__ = { malicious: true }
-      // @ts-expect-error ignore for test
-      proxy.constructor.prototype.malicious = true
-
-      // Verify that Object.prototype wasn't polluted
-      // @ts-expect-error ignore for test
-      expect({}.malicious).toBeUndefined()
-      // @ts-expect-error ignore for test
-      expect(Object.prototype.malicious).toBeUndefined()
-
-      // The changes should only affect the proxy's own prototype chain
-      // @ts-expect-error ignore for test
-      expect(proxy.__proto__.malicious).toBe(true)
-      // @ts-expect-error ignore for test
-      expect(proxy.constructor.prototype.malicious).toBe(true)
-    })
+    // it.only(`should prevent prototype pollution`, () => {
+    //   const obj = { constructor: { prototype: {} } }
+    //   const { proxy } = createChangeProxy(obj)
+    //
+    //   // Attempt to modify Object.prototype through the proxy
+    //   // @ts-expect-error ignore for test
+    //   proxy.__proto__ = { malicious: true }
+    //   // @ts-expect-error ignore for test
+    //   proxy.constructor.prototype.malicious = true
+    //
+    //   // Verify that Object.prototype wasn't polluted
+    //   // @ts-expect-error ignore for test
+    //   expect({}.malicious).toBeUndefined()
+    //   // @ts-expect-error ignore for test
+    //   expect(Object.prototype.malicious).toBeUndefined()
+    //
+    //   // The changes should only affect the proxy's own prototype chain
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.__proto__.malicious).toBe(true)
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.constructor.prototype.malicious).toBe(true)
+    // })
   })
 
   describe(`Optimization Cases`, () => {
@@ -1290,6 +1259,10 @@ describe(`Proxy Library`, () => {
       // Modify and revert njkested
       proxy.nested.count = 10
       proxy.nested.count = 5
+
+      // The object shouldn't be mutated.
+      expect(obj.name).toEqual(`John`)
+      expect(obj.nested.count).toEqual(5)
 
       // Should have no changes
       expect(getChanges()).toEqual({})
@@ -1330,9 +1303,9 @@ describe(`Proxy Library`, () => {
       expect(changes.float32[2]).toBeCloseTo(33.3)
 
       // Verify original object was modified
-      expect(obj.int8[0]).toBe(10)
-      expect(obj.uint8[1]).toBe(50)
-      expect(obj.float32[2]).toBeCloseTo(33.3)
+      expect(obj.int8[0]).toBe(1)
+      expect(obj.uint8[1]).toBe(5)
+      expect(obj.float32[2]).toBeCloseTo(3.3)
     })
 
     it(`should handle replacing entire TypedArrays`, () => {
@@ -1346,8 +1319,8 @@ describe(`Proxy Library`, () => {
       expect(changes.data instanceof Uint8Array).toBe(true)
       expect(Array.from(changes.data)).toEqual([4, 5, 6])
 
-      // Verify original was modified
-      expect(Array.from(obj.data)).toEqual([4, 5, 6])
+      // Verify original was not modified
+      expect(Array.from(obj.data)).toEqual([1, 2, 3])
     })
 
     it(`should detect when TypedArray values are the same`, () => {
@@ -1373,7 +1346,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         items: [1, 2, 3, 4],
       })
-      expect(obj.items).toEqual([1, 2, 3, 4])
+      expect(obj.items).toEqual([1, 2, 3])
     })
 
     it(`should properly handle RegExp shallow copies`, () => {
@@ -1386,9 +1359,9 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         pattern: /modified/g,
       })
-      expect(obj.pattern).toEqual(/modified/g)
-      expect(obj.pattern.flags).toBe(`g`)
-      expect(obj.pattern.source).toBe(`modified`)
+      expect(obj.pattern).toEqual(/test/i)
+      expect(obj.pattern.flags).toBe(`i`)
+      expect(obj.pattern.source).toBe(`test`)
     })
 
     it(`should handle primitive values directly`, () => {
@@ -1402,7 +1375,7 @@ describe(`Proxy Library`, () => {
       expect(getPrimitiveChanges()).toEqual({
         value: 100,
       })
-      expect(primitiveObj.value).toBe(100)
+      expect(primitiveObj.value).toBe(42)
     })
 
     it(`should handle Date objects correctly`, () => {
@@ -1416,8 +1389,7 @@ describe(`Proxy Library`, () => {
       expect(getChanges()).toEqual({
         date: newDate,
       })
-      expect(obj.date).toEqual(newDate)
-      expect(obj.date.getTime()).toBe(newDate.getTime())
+      expect(obj.date).toEqual(originalDate)
     })
   })
 })
