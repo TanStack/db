@@ -114,7 +114,9 @@ export interface InsertConfig {
 }
 
 export interface CollectionConfig<T extends object = Record<string, unknown>> {
-  id: string
+  // If an id isn't passed in, a UUID will be
+  // generated for it.
+  id?: string
   sync: SyncConfig<T>
   schema?: StandardSchema<T>
   /**
