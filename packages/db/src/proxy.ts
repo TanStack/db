@@ -266,7 +266,7 @@ function memoizedCreateChangeProxy<
   proxy: T
   getChanges: () => Record<string | symbol, any>
 } {
-  debugLog(`Object ID:`, target.constructor.name, JSON.stringify(target))
+  debugLog(`Object ID:`, target.constructor.name)
   if (changeProxyCache.has(target)) {
     return changeProxyCache.get(target) as {
       proxy: T
