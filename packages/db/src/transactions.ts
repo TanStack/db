@@ -141,20 +141,15 @@ export class Transaction {
 
     this.setState(`failed`)
 
-    // See if there's any other transactions w/ mutations on the same keys
+    // See if there's any other transactions w/ mutations on the same ids
     // and roll them back as well.
     if (!isSecondaryRollback) {
-      const mutationKeys = new Set()
-      this.mutations.forEach((m) => mutationKeys.add(m.key))
-
+      const mutationIds = new Set()
+      this.mutations.forEach((m) => mutationIds.add(m.key))
       for (const t of transactions) {
-        if (
-          t.id !== this.id &&
-          t.state === `pending` &&
-          t.mutations.some((m) => mutationKeys.has(m.key))
-        ) {
+        t.state === `pending` &&
+          t.mutations.some((m) => mutationIds.has(m.key)) &&
           t.rollback({ isSecondaryRollback: true })
-        }
       }
     }
 

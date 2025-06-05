@@ -22,12 +22,10 @@ describe(`Collection getters`, () => {
         begin()
         write({
           type: `insert`,
-          key: `item1`,
           value: { id: `item1`, name: `Item 1` },
         })
         write({
           type: `insert`,
-          key: `item2`,
           value: { id: `item2`, name: `Item 2` },
         })
         commit()
@@ -40,8 +38,8 @@ describe(`Collection getters`, () => {
 
     config = {
       id: `test-collection`,
+      getId: (val) => val.id,
       sync: mockSync,
-      mutationFn: mockMutationFn,
     }
 
     collection = new Collection(config)
@@ -52,8 +50,14 @@ describe(`Collection getters`, () => {
       const state = collection.state
       expect(state).toBeInstanceOf(Map)
       expect(state.size).toBe(2)
-      expect(state.get(`item1`)).toEqual({ id: `item1`, name: `Item 1` })
-      expect(state.get(`item2`)).toEqual({ id: `item2`, name: `Item 2` })
+      expect(state.get(`KEY::${collection.id}/item1`)).toEqual({
+        id: `item1`,
+        name: `Item 1`,
+      })
+      expect(state.get(`KEY::${collection.id}/item2`)).toEqual({
+        id: `item2`,
+        name: `Item 2`,
+      })
     })
   })
 
@@ -75,7 +79,6 @@ describe(`Collection getters`, () => {
           begin()
           write({
             type: `insert`,
-            key: `delayed-item`,
             value: { id: `delayed-item`, name: `Delayed Item` },
           })
           // Save the commit function for later
@@ -85,8 +88,8 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = new Collection({
         id: `delayed-collection`,
+        getId: (val) => val.id,
         sync: delayedSyncMock,
-        mutationFn: mockMutationFn,
       })
 
       // Start the stateWhenReady promise
@@ -100,7 +103,7 @@ describe(`Collection getters`, () => {
       // Now the promise should resolve
       const state = await statePromise
       expect(state).toBeInstanceOf(Map)
-      expect(state.get(`delayed-item`)).toEqual({
+      expect(state.get(`KEY::${delayedCollection.id}/delayed-item`)).toEqual({
         id: `delayed-item`,
         name: `Delayed Item`,
       })
@@ -135,7 +138,7 @@ describe(`Collection getters`, () => {
           begin()
           write({
             type: `insert`,
-            key: `delayed-item`,
+            id: `delayed-item`,
             value: { id: `delayed-item`, name: `Delayed Item` },
           })
           // Save the commit function for later
@@ -145,8 +148,8 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = new Collection({
         id: `delayed-collection`,
+        getId: (val) => val.id,
         sync: delayedSyncMock,
-        mutationFn: mockMutationFn,
       })
 
       // Start the toArrayWhenReady promise

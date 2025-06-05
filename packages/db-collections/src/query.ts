@@ -175,7 +175,7 @@ export class QueryCollection<
           currentSyncedItems.forEach((oldItem, key) => {
             const newItem = newItemsMap.get(key)
             if (!newItem) {
-              write({ type: `delete`, key, value: oldItem })
+              write({ type: `delete`, value: oldItem })
             } else if (
               !shallowEqual(
                 oldItem as Record<string, any>,
@@ -183,13 +183,13 @@ export class QueryCollection<
               )
             ) {
               // Only update if there are actual differences in the properties
-              write({ type: `update`, key, value: newItem })
+              write({ type: `update`, value: newItem })
             }
           })
 
           newItemsMap.forEach((newItem, key) => {
             if (!currentSyncedItems.has(key)) {
-              write({ type: `insert`, key, value: newItem })
+              write({ type: `insert`, value: newItem })
             }
           })
 
