@@ -252,33 +252,6 @@ function getProxyCount() {
   return count
 }
 
-const changeProxyCache = new Map<object, object>()
-
-function memoizedCreateChangeProxy<
-  T extends Record<string | symbol, any | undefined>,
->(
-  target: T,
-  parent?: {
-    tracker: ChangeTracker<Record<string | symbol, unknown>>
-    prop: string | symbol
-  }
-): {
-  proxy: T
-  getChanges: () => Record<string | symbol, any>
-} {
-  debugLog(`Object ID:`, target.constructor.name)
-  if (changeProxyCache.has(target)) {
-    return changeProxyCache.get(target) as {
-      proxy: T
-      getChanges: () => Record<string | symbol, any>
-    }
-  } else {
-    const changeProxy = createChangeProxy(target, parent)
-    changeProxyCache.set(target, changeProxy)
-    return changeProxy
-  }
-}
-
 /**
  * Creates a proxy that tracks changes to the target object
  *
@@ -299,6 +272,32 @@ export function createChangeProxy<
 
   getChanges: () => Record<string | symbol, any>
 } {
+  const changeProxyCache = new Map<object, object>()
+
+  function memoizedCreateChangeProxy<
+    T extends Record<string | symbol, any | undefined>,
+  >(
+    target: T,
+    parent?: {
+      tracker: ChangeTracker<Record<string | symbol, unknown>>
+      prop: string | symbol
+    }
+  ): {
+    proxy: T
+    getChanges: () => Record<string | symbol, any>
+  } {
+    debugLog(`Object ID:`, target.constructor.name)
+    if (changeProxyCache.has(target)) {
+      return changeProxyCache.get(target) as {
+        proxy: T
+        getChanges: () => Record<string | symbol, any>
+      }
+    } else {
+      const changeProxy = createChangeProxy(target, parent)
+      changeProxyCache.set(target, changeProxy)
+      return changeProxy
+    }
+  }
   // Create a WeakMap to cache proxies for nested objects
   // This prevents creating multiple proxies for the same object
   // and handles circular references
