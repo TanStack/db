@@ -230,11 +230,9 @@ export class Collection<T extends object = Record<string, unknown>> {
     this.derivedState = new Derived({
       fn: ({ currDepVals: [syncedData, operations] }) => {
         const combined = new Map<string, T>(syncedData)
-        const optimisticKeys = new Set<string>()
 
         // Apply the optimistic operations on top of the synced state.
         for (const operation of operations) {
-          optimisticKeys.add(operation.key)
           if (operation.isActive) {
             switch (operation.type) {
               case `insert`:
@@ -721,24 +719,39 @@ export class Collection<T extends object = Record<string, unknown>> {
     // Create mutations for each object that has changes
     const mutations: Array<PendingMutation<T>> = idsArray
       .map((id, index) => {
-        const changes = changesArray[index]
+        const itemChanges = changesArray[index] // User-provided changes for this specific item
 
         // Skip items with no changes
-        if (!changes || Object.keys(changes).length === 0) {
+        if (!itemChanges || Object.keys(itemChanges).length === 0) {
           return null
         }
 
-        // Validate the changes for this item
-        const validatedData = this.validateData(changes, `update`, id)
+        const originalItem = currentObjects[index] as unknown as T
+        // Validate the user-provided changes for this item
+        const validatedUpdatePayload = this.validateData(
+          itemChanges,
+          `update`,
+          id
+        )
+
+        // Construct the full modified item by applying the validated update payload to the original item
+        const modifiedItem = { ...originalItem, ...validatedUpdatePayload }
+
+        // Check if the ID of the item is being changed
+        const originalItemId = this.config.getId(originalItem)
+        const modifiedItemId = this.config.getId(modifiedItem)
+
+        if (originalItemId !== modifiedItemId) {
+          throw new Error(
+            `Updating the ID of an item is not allowed. Original ID: "${originalItemId}", Attempted new ID: "${modifiedItemId}". Please delete the old item and create a new one if an ID change is necessary.`
+          )
+        }
 
         return {
           mutationId: crypto.randomUUID(),
-          original: (this.state.get(id) || {}) as Record<string, unknown>,
-          modified: {
-            ...(this.state.get(id) || {}),
-            ...validatedData,
-          } as Record<string, unknown>,
-          changes: validatedData as Record<string, unknown>,
+          original: originalItem as Record<string, unknown>,
+          modified: modifiedItem as Record<string, unknown>,
+          changes: validatedUpdatePayload as Record<string, unknown>,
           key: id,
           metadata: config.metadata as unknown,
           syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<

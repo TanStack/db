@@ -423,7 +423,7 @@ describe(`Collection.subscribeChanges`, () => {
         previousValue: {
           // TODO why isn't this working?
           id: 2,
-          value: `updated optimistic value`,
+          value: `optimistic value`,
         },
       },
     ])
