@@ -179,8 +179,8 @@ export function processOrderBy(
       // All elements are equal up to the minimum length
       return a.length - b.length
     }
-    // if a and b are both null/undefined, return 0
-    if (a == null && b == null) {
+    // if a or b are null/undefined, return 0
+    if (a == null || b == null) {
       return 0
     }
     // Fallback to string comparison for all other cases
