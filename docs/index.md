@@ -259,9 +259,9 @@ This also works with joins to derive collections from multiple source collection
 
 #### base Collection
 
-There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
+There is a base `Collection` class in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
 
-See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
+See the existing implementations in [`../packages/db-collections`](https://github.com/TanStack/db/blob/main/packages/db-collections) for reference.
 
 ### Live queries
 
@@ -331,7 +331,7 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [query-builder tests](../packages/db/tests/query/query-builder) for many more usage examples.
+See the [query-builder tests](https://github.com/TanStack/db/blob/main/packages/db/tests/query/query-builder) for many more usage examples.
 
 ### Transactional mutators
 
