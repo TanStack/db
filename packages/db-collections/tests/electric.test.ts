@@ -35,7 +35,7 @@ describe(`Electric Integration`, () => {
     // Create collection with Electric configuration
     collection = createElectricCollection({
       id: `test`,
-      streamOptions: {
+      shapeOptions: {
         url: `http://test-url`,
         params: {
           table: `test_table`,
