@@ -139,7 +139,7 @@ const createTodoCollection = (type: CollectionType) => {
     if (type === CollectionType.Electric) {
       newCollection = createElectricCollection<UpdateTodo>({
         id: `todos`,
-        streamOptions: {
+        shapeOptions: {
           url: `http://localhost:3003/v1/shape`,
           params: {
             table: `todos`,
@@ -186,7 +186,7 @@ const createConfigCollection = (type: CollectionType) => {
     if (type === CollectionType.Electric) {
       newCollection = createElectricCollection<UpdateConfig>({
         id: `config`,
-        streamOptions: {
+        shapeOptions: {
           url: `http://localhost:3003/v1/shape`,
           params: {
             table: `config`,
