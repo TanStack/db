@@ -1,11 +1,11 @@
 import { groupBy, groupByOperators, map } from "@electric-sql/d2ts"
 import {
-  evaluateOperandOnNestedRow,
-  extractValueFromNestedRow,
+  evaluateOperandOnNamespacedRow,
+  extractValueFromNamespacedRow,
 } from "./extractors"
 import { isAggregateFunctionCall } from "./utils"
 import type { ConditionOperand, FunctionCall, Query } from "./schema"
-import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type { NamespacedAndKeyedStream } from "../types.js"
 
 const { sum, count, avg, min, max, median, mode } = groupByOperators
 
@@ -13,7 +13,7 @@ const { sum, count, avg, min, max, median, mode } = groupByOperators
  * Process the groupBy clause in a D2QL query
  */
 export function processGroupBy(
-  pipeline: IStreamBuilder<Record<string, unknown>>,
+  pipeline: NamespacedAndKeyedStream,
   query: Query,
   mainTableAlias: string
 ) {
@@ -23,7 +23,7 @@ export function processGroupBy(
     : [query.groupBy]
 
   // Create a key extractor function for the groupBy operator
-  const keyExtractor = (nestedRow: Record<string, unknown>) => {
+  const keyExtractor = (namespacedRow: Record<string, unknown>) => {
     const key: Record<string, unknown> = {}
 
     // Extract each groupBy column value
@@ -34,8 +34,8 @@ export function processGroupBy(
           ? columnRef.split(`.`)[1]
           : columnRef
 
-        key[columnName!] = extractValueFromNestedRow(
-          nestedRow,
+        key[columnName!] = extractValueFromNamespacedRow(
+          namespacedRow,
           columnRef,
           mainTableAlias
         )
@@ -96,17 +96,17 @@ export function getAggregateFunction(
   mainTableAlias: string
 ) {
   // Create a value extractor function for the column to aggregate
-  const valueExtractor = (nestedRow: Record<string, unknown>) => {
+  const valueExtractor = (namespacedRow: Record<string, unknown>) => {
     let value: unknown
     if (typeof columnRef === `string` && columnRef.startsWith(`@`)) {
-      value = extractValueFromNestedRow(
-        nestedRow,
+      value = extractValueFromNamespacedRow(
+        namespacedRow,
         columnRef.substring(1),
         mainTableAlias
       )
     } else {
-      value = evaluateOperandOnNestedRow(
-        nestedRow,
+      value = evaluateOperandOnNamespacedRow(
+        namespacedRow,
         columnRef as ConditionOperand,
         mainTableAlias
       )

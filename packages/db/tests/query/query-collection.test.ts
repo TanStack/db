@@ -103,7 +103,6 @@ describe(`Query Collections`, () => {
     const query = queryBuilder()
       .from({ collection })
       .where(`@age`, `>`, 30)
-      .keyBy(`@id`)
       .select(`@id`, `@name`)
 
     const compiledQuery = compileQuery(query)
@@ -254,7 +253,6 @@ describe(`Query Collections`, () => {
         on: [`@persons.id`, `=`, `@issues.userId`],
       })
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
-      .keyBy(`@id`)
 
     const compiledQuery = compileQuery(query)
     compiledQuery.start()
@@ -381,7 +379,6 @@ describe(`Query Collections`, () => {
     // Test ascending order by age
     const ascendingQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy(`@age`)
       .select(`@id`, `@name`, `@age`)
 
@@ -403,7 +400,6 @@ describe(`Query Collections`, () => {
     // Test descending order by age
     const descendingQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy({ "@age": `desc` })
       .select(`@id`, `@name`, `@age`)
 
@@ -425,7 +421,6 @@ describe(`Query Collections`, () => {
     // Test multiple order by fields
     const multiOrderQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy([`@isActive`, { "@age": `asc` }])
       .select(`@id`, `@name`, `@age`, `@isActive`)
 
@@ -501,7 +496,6 @@ describe(`Query Collections`, () => {
     // Create a query that orders by age in ascending order
     const query = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy(`@age`)
       .select(`@id`, `@name`, `@age`)
 
@@ -656,7 +650,6 @@ describe(`Query Collections`, () => {
         on: [`@persons.id`, `=`, `@issues.userId`],
       })
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
-      .keyBy(`@id`)
 
     const compiledQuery = compileQuery(query)
     compiledQuery.start()

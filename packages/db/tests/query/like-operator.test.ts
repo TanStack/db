@@ -71,7 +71,7 @@ describe(`Query - LIKE Operator`, () => {
 
   function runQuery(query: Query): Array<any> {
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<TestItem>()
+    const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -83,14 +83,17 @@ describe(`Query - LIKE Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(v([1, 0]), new MultiSet(testData.map((item) => [item, 1])))
+    input.sendData(
+      v([1, 0]),
+      new MultiSet(testData.map((item) => [[item.id, item], 1]))
+    )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     return (
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data) || []
+      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
     )
   }
 
@@ -148,7 +151,7 @@ describe(`Query - LIKE Operator`, () => {
 
     // Create a separate graph for this test with our specific SKU test items
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<TestItem>()
+    const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -163,7 +166,7 @@ describe(`Query - LIKE Operator`, () => {
     // Use the special SKU test items
     input.sendData(
       v([1, 0]),
-      new MultiSet(skuTestItems.map((item) => [item, 1]))
+      new MultiSet(skuTestItems.map((item) => [[item.id, item], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -171,7 +174,7 @@ describe(`Query - LIKE Operator`, () => {
 
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data) || []
+      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
 
     // Both 'TECH-ABC-2023' and 'TECH-XYZ-2023' should match 'TECH-___-2023'
     expect(results).toHaveLength(2)
