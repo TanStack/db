@@ -12,7 +12,7 @@ import type {
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
-    expect(() => new Collection()).toThrow(`Collection requires a sync config`)
+    expect(() => new Collection()).toThrow(`Collection requires a config`)
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
