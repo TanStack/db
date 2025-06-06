@@ -7,15 +7,13 @@ import {
   topKWithFractionalIndex,
   topKWithIndex,
 } from "@electric-sql/d2ts"
-import { evaluateOperandOnNestedRow } from "./extractors"
+import { evaluateOperandOnNamespacedRow } from "./extractors"
 import { isOrderIndexFunctionCall } from "./utils"
 import type { ConditionOperand, Query } from "./schema"
-import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type { NamespacedAndKeyedStream } from "../types"
 
 export function processOrderBy(
-  resultPipeline: IStreamBuilder<
-    Record<string, unknown> | [string | number, Record<string, unknown>]
-  >,
+  resultPipeline: NamespacedAndKeyedStream,
   query: Query,
   mainTableAlias: string
 ) {
@@ -82,14 +80,14 @@ export function processOrderBy(
   const valueExtractor = (value: unknown) => {
     const row = value as Record<string, unknown>
 
-    // Create a nested row structure for evaluateOperandOnNestedRow
-    const nestedRow: Record<string, unknown> = { [mainTableAlias]: row }
+    // Create a nested row structure for evaluateOperandOnNamespacedRow
+    const namespacedRow: Record<string, unknown> = { [mainTableAlias]: row }
 
     // For multiple orderBy columns, create a composite key
     if (orderByItems.length > 1) {
       return orderByItems.map((item) => {
-        const val = evaluateOperandOnNestedRow(
-          nestedRow,
+        const val = evaluateOperandOnNamespacedRow(
+          namespacedRow,
           item.operand,
           mainTableAlias
         )
@@ -106,8 +104,8 @@ export function processOrderBy(
     } else if (orderByItems.length === 1) {
       // For a single orderBy column, use the value directly
       const item = orderByItems[0]
-      const val = evaluateOperandOnNestedRow(
-        nestedRow,
+      const val = evaluateOperandOnNamespacedRow(
+        namespacedRow,
         item!.operand,
         mainTableAlias
       )
