@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.0.5
+
+### Patch Changes
+
+- Collections must have a getId function & use an id for update/delete operators ([#134](https://github.com/TanStack/db/pull/134))
+
+- update d2ts to to latest version that improves hashing performance ([#136](https://github.com/TanStack/db/pull/136))
+
 ## 0.0.4
 
 ### Patch Changes
