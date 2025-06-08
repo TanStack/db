@@ -141,7 +141,10 @@ export function processJoinResults(
     pipeline: IStreamBuilder<
       [
         key: string,
-        [[string, NamespacedRow], [string, NamespacedRow] | undefined],
+        [
+          [string, NamespacedRow] | undefined,
+          [string, NamespacedRow] | undefined,
+        ],
       ]
     >
   ): NamespacedAndKeyedStream {
@@ -149,8 +152,8 @@ export function processJoinResults(
       // Process the join result and handle nulls in the same step
       map((result) => {
         const [_key, [main, joined]] = result
-        const mainKey = main[0]
-        const mainNamespacedRow = main[1]
+        const mainKey = main?.[0]
+        const mainNamespacedRow = main?.[1]
         const joinedKey = joined?.[0]
         const joinedNamespacedRow = joined?.[1]
 

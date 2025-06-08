@@ -216,7 +216,7 @@ export interface BaseQuery<TContext extends Context = Context> {
   // to expressions. Plain strings starting with "@" denote column references.
   // Plain string "@*" denotes all columns from all tables.
   // Plain string "@table.*" denotes all columns from a specific table.
-  select: Array<Select<TContext>>
+  select?: Array<Select<TContext>>
   as?: As<TContext>
   from: From<TContext>
   join?: Array<JoinClause<TContext>>
