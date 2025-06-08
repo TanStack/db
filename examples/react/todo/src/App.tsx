@@ -265,7 +265,6 @@ export default function App() {
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todoCollection: todoCollection as Collection<UpdateTodo> })
-      .keyBy(`@id`)
       .orderBy(`@created_at`)
       .select(`@id`, `@created_at`, `@text`, `@completed`)
   )
@@ -273,7 +272,6 @@ export default function App() {
   const { data: configData } = useLiveQuery((q) =>
     q
       .from({ configCollection: configCollection as Collection<UpdateConfig> })
-      .keyBy(`@id`)
       .select(`@id`, `@key`, `@value`)
   )
 
