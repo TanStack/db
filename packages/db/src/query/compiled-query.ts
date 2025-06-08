@@ -115,13 +115,13 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     const multiSetArray: MultiSetArray<unknown> = []
     for (const change of changes) {
       if (change.type === `insert`) {
-        multiSetArray.push([change.value, 1])
+        multiSetArray.push([[change.key, change.value], 1])
       } else if (change.type === `update`) {
-        multiSetArray.push([change.previousValue, -1])
-        multiSetArray.push([change.value, 1])
+        multiSetArray.push([[change.key, change.previousValue], -1])
+        multiSetArray.push([[change.key, change.value], 1])
       } else {
         // change.type === `delete`
-        multiSetArray.push([change.value, -1])
+        multiSetArray.push([[change.key, change.value], -1])
       }
     }
     input.sendData(this.version, new MultiSet(multiSetArray))

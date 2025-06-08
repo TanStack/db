@@ -1,3 +1,4 @@
+import type { IStreamBuilder } from "@electric-sql/d2ts"
 import type { Collection } from "./collection"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
@@ -123,3 +124,32 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>
 >
+
+/**
+ * An input row from a collection
+ */
+export type InputRow = [unknown, Record<string, unknown>]
+
+/**
+ * A keyed stream is a stream of rows
+ * This is used as the inputs from a collection to a query
+ */
+export type KeyedStream = IStreamBuilder<InputRow>
+
+/**
+ * A namespaced row is a row withing a pipeline that had each table wrapped in its alias
+ */
+export type NamespacedRow = Record<string, Record<string, unknown>>
+
+/**
+ * A keyed namespaced row is a row with a key and a namespaced row
+ * This is the main representation of a row in a query pipeline
+ */
+export type KeyedNamespacedRow = [unknown, NamespacedRow]
+
+/**
+ * A namespaced and keyed stream is a stream of rows
+ * This is used throughout a query pipeline and as the output from a query without
+ * a `select` clause.
+ */
+export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>

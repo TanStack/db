@@ -67,7 +67,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { users: input })
 
       const messages: Array<Message<any>> = []
@@ -82,7 +82,7 @@ describe(`Query`, () => {
       // Send data to the input
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -92,7 +92,7 @@ describe(`Query`, () => {
       // Check the results
       const results = messages
         .filter((m) => m.type === MessageType.DATA)
-        .flatMap((m) => m.data.collection.getInner().map(([data]) => data))
+        .flatMap((m) => m.data.collection.getInner().map(([data]) => data[1]))
 
       // Should only include users over 20
       expect(results).toHaveLength(3)
@@ -132,7 +132,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { users: input })
 
       const messages: Array<Message<any>> = []
@@ -147,7 +147,7 @@ describe(`Query`, () => {
       // Send data to the input
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -157,7 +157,7 @@ describe(`Query`, () => {
       // Check the results
       const results = messages
         .filter((m) => m.type === MessageType.DATA)
-        .flatMap((m) => m.data.collection.getInner().map(([data]) => data))
+        .flatMap((m) => m.data.collection.getInner().map(([data]) => data[1]))
 
       // Should only include active users over 20
       expect(results).toHaveLength(2)
@@ -182,36 +182,12 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
 
       // Should throw an error because the CTE is missing the 'as' property
       expect(() => {
         compileQueryPipeline(invalidQuery as any, { users: input })
       }).toThrow(`WITH query must have an "as" property`)
-    })
-
-    test(`error handling - CTE with keyBy property`, () => {
-      // Define an invalid query with a CTE that has a keyBy property
-      const invalidQuery = {
-        with: [
-          {
-            select: [`@id`, `@name`],
-            from: `users`,
-            as: `adult_users`,
-            keyBy: `@id`, // WithQuery cannot have keyBy
-          },
-        ],
-        select: [`@id`, `@name`],
-        from: `adult_users`,
-      }
-
-      const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
-
-      // Should throw an error because the CTE has a keyBy property
-      expect(() => {
-        compileQueryPipeline(invalidQuery as any, { users: input })
-      }).toThrow(`WITH query cannot have a "keyBy" property`)
     })
 
     test(`error handling - duplicate CTE names`, () => {
@@ -236,7 +212,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
 
       // Should throw an error because of duplicate CTE names
       expect(() => {
@@ -260,7 +236,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
 
       // Should throw an error because the referenced CTE doesn't exist
       expect(() => {

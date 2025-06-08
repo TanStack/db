@@ -108,7 +108,7 @@ describe(`Query - HAVING Clause`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -122,7 +122,7 @@ describe(`Query - HAVING Clause`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -132,7 +132,7 @@ describe(`Query - HAVING Clause`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(4)
     expect(results.every((p) => p.price > 300)).toBe(true)
@@ -152,7 +152,7 @@ describe(`Query - HAVING Clause`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -166,7 +166,7 @@ describe(`Query - HAVING Clause`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -176,7 +176,7 @@ describe(`Query - HAVING Clause`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(3)
     expect(results.every((p) => p.inStock === true)).toBe(true)
@@ -201,7 +201,7 @@ describe(`Query - HAVING Clause`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -215,7 +215,7 @@ describe(`Query - HAVING Clause`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -225,7 +225,7 @@ describe(`Query - HAVING Clause`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -255,7 +255,7 @@ describe(`Query - HAVING Clause`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -269,7 +269,7 @@ describe(`Query - HAVING Clause`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -279,7 +279,7 @@ describe(`Query - HAVING Clause`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     // Expected: inexpensive electronics or in-stock furniture
     expect(results).toHaveLength(3)

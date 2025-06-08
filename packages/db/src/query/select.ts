@@ -1,29 +1,29 @@
 import { map } from "@electric-sql/d2ts"
 import {
-  evaluateOperandOnNestedRow,
-  extractValueFromNestedRow,
+  evaluateOperandOnNamespacedRow,
+  extractValueFromNamespacedRow,
 } from "./extractors"
-import type { IStreamBuilder } from "@electric-sql/d2ts"
 import type { ConditionOperand, Query } from "./schema"
+import type { KeyedStream, NamespacedAndKeyedStream } from "../types"
 
 export function processSelect(
-  pipeline: IStreamBuilder<Record<string, unknown>>,
+  pipeline: NamespacedAndKeyedStream,
   query: Query,
   mainTableAlias: string,
-  inputs: Record<string, IStreamBuilder<Record<string, unknown>>>
-) {
+  inputs: Record<string, KeyedStream>
+): KeyedStream {
   return pipeline.pipe(
-    map((nestedRow: Record<string, unknown>) => {
+    map(([key, namespacedRow]) => {
       const result: Record<string, unknown> = {}
 
       // Check if this is a grouped result (has no nested table structure)
       // If it's a grouped result, we need to handle it differently
       const isGroupedResult =
         query.groupBy &&
-        Object.keys(nestedRow).some(
-          (key) =>
-            !Object.keys(inputs).includes(key) &&
-            typeof nestedRow[key] !== `object`
+        Object.keys(namespacedRow).some(
+          (namespaceKey) =>
+            !Object.keys(inputs).includes(namespaceKey) &&
+            typeof namespacedRow[namespaceKey] !== `object`
         )
 
       for (const item of query.select) {
@@ -32,10 +32,13 @@ export function processSelect(
           if ((item as string) === `@*`) {
             // For grouped results, just return the row as is
             if (isGroupedResult) {
-              Object.assign(result, nestedRow)
+              Object.assign(result, namespacedRow)
             } else {
               // Extract all columns from all tables
-              Object.assign(result, extractAllColumnsFromAllTables(nestedRow))
+              Object.assign(
+                result,
+                extractAllColumnsFromAllTables(namespacedRow)
+              )
             }
             continue
           }
@@ -56,7 +59,7 @@ export function processSelect(
               // Extract all columns from the specified table
               Object.assign(
                 result,
-                extractAllColumnsFromTable(nestedRow, tableAlias)
+                extractAllColumnsFromTable(namespacedRow, tableAlias)
               )
             }
             continue
@@ -68,12 +71,12 @@ export function processSelect(
             const alias = columnRef
 
             // For grouped results, check if the column is directly in the row first
-            if (isGroupedResult && columnRef in nestedRow) {
-              result[alias] = nestedRow[columnRef]
+            if (isGroupedResult && columnRef in namespacedRow) {
+              result[alias] = namespacedRow[columnRef]
             } else {
               // Extract the value from the nested structure
-              result[alias] = extractValueFromNestedRow(
-                nestedRow,
+              result[alias] = extractValueFromNamespacedRow(
+                namespacedRow,
                 columnRef,
                 mainTableAlias,
                 undefined
@@ -95,12 +98,12 @@ export function processSelect(
               const columnRef = (expr as string).substring(1)
 
               // For grouped results, check if the column is directly in the row first
-              if (isGroupedResult && columnRef in nestedRow) {
-                result[alias] = nestedRow[columnRef]
+              if (isGroupedResult && columnRef in namespacedRow) {
+                result[alias] = namespacedRow[columnRef]
               } else {
                 // Extract the value from the nested structure
-                result[alias] = extractValueFromNestedRow(
-                  nestedRow,
+                result[alias] = extractValueFromNamespacedRow(
+                  namespacedRow,
                   columnRef,
                   mainTableAlias,
                   undefined
@@ -108,12 +111,14 @@ export function processSelect(
               }
             } else if (typeof expr === `object`) {
               // For grouped results, the aggregate results are already in the row
-              if (isGroupedResult && alias in nestedRow) {
-                result[alias] = nestedRow[alias]
+              if (isGroupedResult && alias in namespacedRow) {
+                result[alias] = namespacedRow[alias]
+              } else if ((expr as { ORDER_INDEX: unknown }).ORDER_INDEX) {
+                result[alias] = namespacedRow[mainTableAlias]![alias]
               } else {
                 // This might be a function call
-                result[alias] = evaluateOperandOnNestedRow(
-                  nestedRow,
+                result[alias] = evaluateOperandOnNamespacedRow(
+                  namespacedRow,
                   expr as ConditionOperand,
                   mainTableAlias,
                   undefined
@@ -124,23 +129,26 @@ export function processSelect(
         }
       }
 
-      return result
+      return [key, result] as [string, typeof result]
     })
   )
 }
 
 // Helper function to extract all columns from all tables in a nested row
 function extractAllColumnsFromAllTables(
-  nestedRow: Record<string, unknown>
+  namespacedRow: Record<string, unknown>
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
 
   // Process each table in the nested row
-  for (const [tableAlias, tableData] of Object.entries(nestedRow)) {
+  for (const [tableAlias, tableData] of Object.entries(namespacedRow)) {
     if (tableData && typeof tableData === `object`) {
       // Add all columns from this table to the result
       // If there are column name conflicts, the last table's columns will overwrite previous ones
-      Object.assign(result, extractAllColumnsFromTable(nestedRow, tableAlias))
+      Object.assign(
+        result,
+        extractAllColumnsFromTable(namespacedRow, tableAlias)
+      )
     }
   }
 
@@ -149,13 +157,13 @@ function extractAllColumnsFromAllTables(
 
 // Helper function to extract all columns from a table in a nested row
 function extractAllColumnsFromTable(
-  nestedRow: Record<string, unknown>,
+  namespacedRow: Record<string, unknown>,
   tableAlias: string
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {}
 
   // Get the table data
-  const tableData = nestedRow[tableAlias] as
+  const tableData = namespacedRow[tableAlias] as
     | Record<string, unknown>
     | null
     | undefined

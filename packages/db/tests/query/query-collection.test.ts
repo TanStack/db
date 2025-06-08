@@ -104,7 +104,6 @@ describe(`Query Collections`, () => {
     const query = queryBuilder()
       .from({ collection })
       .where(`@age`, `>`, 30)
-      .keyBy(`@id`)
       .select(`@id`, `@name`)
 
     const compiledQuery = compileQuery(query)
@@ -251,7 +250,6 @@ describe(`Query Collections`, () => {
         on: [`@persons.id`, `=`, `@issues.userId`],
       })
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
-      .keyBy(`@id`)
 
     const compiledQuery = compileQuery(query)
     compiledQuery.start()
@@ -263,19 +261,19 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`1`)).toEqual({
+    expect(result.state.get(`[1,1]`)).toEqual({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.state.get(`2`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.state.get(`3`)).toEqual({
+    expect(result.state.get(`[3,1]`)).toEqual({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -298,7 +296,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`4`)).toEqual({
+    expect(result.state.get(`[4,2]`)).toEqual({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -318,7 +316,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`2`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -374,7 +372,6 @@ describe(`Query Collections`, () => {
     // Test ascending order by age
     const ascendingQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy(`@age`)
       .select(`@id`, `@name`, `@age`)
 
@@ -396,7 +393,6 @@ describe(`Query Collections`, () => {
     // Test descending order by age
     const descendingQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy({ "@age": `desc` })
       .select(`@id`, `@name`, `@age`)
 
@@ -418,7 +414,6 @@ describe(`Query Collections`, () => {
     // Test multiple order by fields
     const multiOrderQuery = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy([`@isActive`, { "@age": `asc` }])
       .select(`@id`, `@name`, `@age`, `@isActive`)
 
@@ -480,7 +475,6 @@ describe(`Query Collections`, () => {
     // Create a query that orders by age in ascending order
     const query = queryBuilder()
       .from({ collection })
-      .keyBy(`@id`)
       .orderBy(`@age`)
       .select(`@id`, `@name`, `@age`)
 
@@ -638,7 +632,6 @@ describe(`Query Collections`, () => {
         on: [`@persons.id`, `=`, `@issues.userId`],
       })
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
-      .keyBy(`@id`)
 
     const compiledQuery = compileQuery(query)
     compiledQuery.start()
@@ -684,17 +677,25 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`temp-key`)).toEqual({
+
+    // `[temp-key,1]` is the optimistic state for the new issue, its a composite key
+    // from the join in the query
+    expect(result.state.get(`[temp-key,1]`)).toEqual({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
 
+    // `[4,1]` would be the synced state for the new issue, but it's not in the
+    // optimistic state because the transaction synced back yet
+    expect(result.state.get(`[4,1]`)).toBeUndefined()
+
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`4`)).toBeDefined()
+    expect(result.state.get(`[temp-key,1]`)).toBeUndefined()
+    expect(result.state.get(`[4,1]`)).toBeDefined()
   })
 })
 

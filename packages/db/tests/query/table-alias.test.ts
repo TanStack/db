@@ -86,7 +86,7 @@ describe(`Query - Table Aliasing`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -100,7 +100,7 @@ describe(`Query - Table Aliasing`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -110,7 +110,7 @@ describe(`Query - Table Aliasing`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(4)
 
@@ -131,7 +131,7 @@ describe(`Query - Table Aliasing`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -145,7 +145,7 @@ describe(`Query - Table Aliasing`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -155,7 +155,7 @@ describe(`Query - Table Aliasing`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -175,7 +175,7 @@ describe(`Query - Table Aliasing`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -189,7 +189,7 @@ describe(`Query - Table Aliasing`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -199,7 +199,7 @@ describe(`Query - Table Aliasing`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -229,7 +229,7 @@ describe(`Query - Table Aliasing`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -243,7 +243,7 @@ describe(`Query - Table Aliasing`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -253,7 +253,7 @@ describe(`Query - Table Aliasing`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     // The condition @p.price > 100 AND @inStock = true should match:
     // - Laptop (price: 1200, inStock: true)
@@ -287,7 +287,7 @@ describe(`Query - Table Aliasing`, () => {
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
-    const input = graph.newInput<Product>()
+    const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
     const messages: Array<Message<any>> = []
@@ -301,7 +301,7 @@ describe(`Query - Table Aliasing`, () => {
 
     input.sendData(
       v([1, 0]),
-      new MultiSet(sampleProducts.map((product) => [product, 1]))
+      new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
     input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -311,7 +311,7 @@ describe(`Query - Table Aliasing`, () => {
     const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
     const results = dataMessages[0]!.data.collection
       .getInner()
-      .map(([data]) => data)
+      .map(([data]) => data[1])
 
     // Should return Smartphone (Electronics < 1000) and Book (Books with rating >= 4.5)
     expect(results).toHaveLength(2)

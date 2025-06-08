@@ -52,7 +52,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -66,7 +66,7 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -83,13 +83,16 @@ describe(`Query`, () => {
       const results = collection.getInner().map(([data]) => data)
 
       // The results should contain objects with only the selected columns
-      expect(results).toContainEqual({
-        id: 1,
-        name: `Alice`,
-        age: 25,
-        email: `alice@example.com`,
-        active: true,
-      })
+      expect(results).toContainEqual([
+        1,
+        {
+          id: 1,
+          name: `Alice`,
+          age: 25,
+          email: `alice@example.com`,
+          active: true,
+        },
+      ])
     })
 
     test(`select with aliased columns`, () => {
@@ -99,7 +102,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -113,7 +116,7 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -126,15 +129,18 @@ describe(`Query`, () => {
         .map(([data]) => data)
 
       // The results should contain objects with only the selected columns and aliases
-      expect(results).toContainEqual({
-        id: 1,
-        user_name: `Alice`,
-        years_old: 25,
-      })
+      expect(results).toContainEqual([
+        1,
+        {
+          id: 1,
+          user_name: `Alice`,
+          years_old: 25,
+        },
+      ])
 
       // Check that all users are included and have the correct structure
       expect(results).toHaveLength(4)
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(Object.keys(result).sort()).toEqual(
           [`id`, `user_name`, `years_old`].sort()
         )
@@ -149,7 +155,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -163,7 +169,7 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -179,12 +185,12 @@ describe(`Query`, () => {
       expect(results).toHaveLength(3) // Alice, Charlie, Dave
 
       // Check that all results have age > 20
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.age).toBeGreaterThan(20)
       })
 
       // Check that specific users are included
-      const includedIds = results.map((r) => r.id).sort()
+      const includedIds = results.map(([_key, r]) => r.id).sort()
       expect(includedIds).toEqual([1, 3, 4]) // Alice, Charlie, Dave
     })
 
@@ -196,7 +202,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<User>()
+      const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -210,7 +216,7 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleUsers.map((user) => [user, 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -226,7 +232,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(2) // Alice and Dave
 
       // Check that specific users are included
-      const includedIds = results.map((r) => r.id).sort()
+      const includedIds = results.map(([_key, r]) => r.id).sort()
       expect(includedIds).toEqual([1, 4]) // Alice and Dave
     })
   })
