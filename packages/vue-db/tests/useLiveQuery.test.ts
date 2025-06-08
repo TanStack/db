@@ -90,7 +90,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -249,7 +248,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -270,7 +268,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -410,7 +407,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -497,7 +493,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -594,7 +589,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -717,7 +711,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -739,7 +732,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -821,15 +813,12 @@ describe(`Query Collections`, () => {
 
     // Perform optimistic insert of a new issue
     tx.mutate(() =>
-      issueCollection.insert(
-        {
-          id: `temp-key`,
-          title: `New Issue`,
-          description: `New Issue Description`,
-          userId: `1`,
-        },
-        { key: `temp-key` }
-      )
+      issueCollection.insert({
+        id: `temp-key`,
+        title: `New Issue`,
+        description: `New Issue Description`,
+        userId: `1`,
+      })
     )
 
     // Verify optimistic state is immediately reflected

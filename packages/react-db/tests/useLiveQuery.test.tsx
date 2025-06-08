@@ -1,8 +1,7 @@
-import { cursorTo } from "node:readline"
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { act, renderHook } from "@testing-library/react"
-import { Collection, collectionsStore, createTransaction } from "@tanstack/db"
+import { Collection, createTransaction } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type {
@@ -262,7 +261,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -283,7 +281,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -785,7 +782,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -897,15 +893,12 @@ describe(`Query Collections`, () => {
     // Perform optimistic insert of a new issue
     act(() => {
       tx.mutate(() =>
-        issueCollection.insert(
-          {
-            id: `temp-key`,
-            title: `New Issue`,
-            description: `New Issue Description`,
-            userId: `1`,
-          },
-          { key: `temp-key` }
-        )
+        issueCollection.insert({
+          id: `temp-key`,
+          title: `New Issue`,
+          description: `New Issue Description`,
+          userId: `1`,
+        })
       )
     })
 
