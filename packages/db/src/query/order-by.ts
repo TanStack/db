@@ -24,7 +24,9 @@ export function processOrderBy(
   let orderIndexAlias = ``
 
   // Scan the SELECT clause for ORDER_INDEX functions
-  for (const item of query.select) {
+  // TODO: Select is going to be optional in future - we will automatically add an
+  // attribute for the index column
+  for (const item of query.select!) {
     if (typeof item === `object`) {
       for (const [alias, expr] of Object.entries(item)) {
         if (typeof expr === `object` && isOrderIndexFunctionCall(expr)) {
@@ -230,7 +232,7 @@ export function processOrderBy(
       )
     }
   } else {
-    // Use regular orderBy if no index column is requested and but a keyBy is requested
+    // Use regular orderBy if no index column is requested
     resultPipeline = resultPipeline.pipe(
       orderBy(valueExtractor, {
         limit: query.limit,

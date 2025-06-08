@@ -51,6 +51,10 @@ export function processGroupBy(
   // Create aggregate functions for any aggregated columns in the SELECT clause
   const aggregates: Record<string, any> = {}
 
+  if (!query.select) {
+    throw new Error(`SELECT clause is required for GROUP BY`)
+  }
+
   // Scan the SELECT clause for aggregate functions
   for (const item of query.select) {
     if (typeof item === `object`) {

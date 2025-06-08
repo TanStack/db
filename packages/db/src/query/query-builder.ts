@@ -755,25 +755,6 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   }
 
   /**
-   * Specify which column(s) to use as keys in the output keyed stream.
-   *
-   * @param keyBy The column(s) to use as keys
-   * @returns A new QueryBuilder with the keyBy clause set
-   */
-  keyBy(
-    keyBy: PropertyReference<TContext> | Array<PropertyReference<TContext>>
-  ): QueryBuilder<TContext> {
-    // Create a new builder with a copy of the current query
-    const newBuilder = new BaseQueryBuilder<TContext>()
-    Object.assign(newBuilder.query, this.query)
-
-    // Set the keyBy clause
-    newBuilder.query.keyBy = keyBy
-
-    return newBuilder as QueryBuilder<TContext>
-  }
-
-  /**
    * Add a groupBy clause to group the results by one or more columns.
    *
    * @param groupBy The column(s) to group by

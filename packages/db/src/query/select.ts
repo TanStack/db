@@ -26,6 +26,10 @@ export function processSelect(
             typeof namespacedRow[namespaceKey] !== `object`
         )
 
+      if (!query.select) {
+        throw new Error(`Cannot process missing SELECT clause`)
+      }
+
       for (const item of query.select) {
         if (typeof item === `string`) {
           // Handle wildcard select - all columns from all tables

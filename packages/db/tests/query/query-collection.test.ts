@@ -333,7 +333,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`3`)).toBeUndefined()
+    expect(result.state.get(`[3,1]`)).toBeUndefined()
   })
 
   it(`should order results by specified fields`, async () => {
