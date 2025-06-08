@@ -14,7 +14,9 @@ import type { Context, Schema } from "./types.js"
 export function compileQuery<TContext extends Context<Schema>>(
   queryBuilder: QueryBuilder<TContext>
 ) {
-  return new CompiledQuery<ResultsFromContext<TContext>>(queryBuilder)
+  return new CompiledQuery<
+    ResultsFromContext<TContext> & { _key?: string | number }
+  >(queryBuilder)
 }
 
 export class CompiledQuery<TResults extends object = Record<string, unknown>> {
@@ -67,24 +69,21 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
                 return acc
               }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
               .forEach((changes, rawKey) => {
-                const key = (rawKey as any).toString()
                 const { deletes, inserts, value } = changes
+                const valueWithKey = { ...value, _key: rawKey }
                 if (inserts && !deletes) {
                   write({
-                    key,
-                    value: value,
+                    value: valueWithKey,
                     type: `insert`,
                   })
                 } else if (inserts >= deletes) {
                   write({
-                    key,
-                    value: value,
+                    value: valueWithKey,
                     type: `update`,
                   })
                 } else if (deletes > 0) {
                   write({
-                    key,
-                    value: value,
+                    value: valueWithKey,
                     type: `delete`,
                   })
                 }
@@ -100,6 +99,9 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     this.inputs = inputs
     this.resultCollection = new Collection<TResults>({
       id: crypto.randomUUID(), // TODO: remove when we don't require any more
+      getId: (val) => {
+        return (val as any)._key
+      },
       sync: {
         sync,
       },
@@ -114,14 +116,20 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     const input = this.inputs[inputKey]!
     const multiSetArray: MultiSetArray<unknown> = []
     for (const change of changes) {
+      // We remove the KEY::{UUID} prefix from the key used as the key for the D2
+      // pipeline otherwise it will accumulate on subsequent queries and we end up with
+      // long and complex keys
+      const key = change.key.startsWith(`KEY::`)
+        ? change.key.slice(42)
+        : change.key
       if (change.type === `insert`) {
-        multiSetArray.push([[change.key, change.value], 1])
+        multiSetArray.push([[key, change.value], 1])
       } else if (change.type === `update`) {
-        multiSetArray.push([[change.key, change.previousValue], -1])
-        multiSetArray.push([[change.key, change.value], 1])
+        multiSetArray.push([[key, change.previousValue], -1])
+        multiSetArray.push([[key, change.value], 1])
       } else {
         // change.type === `delete`
-        multiSetArray.push([[change.key, change.value], -1])
+        multiSetArray.push([[key, change.value], -1])
       }
     }
     input.sendData(this.version, new MultiSet(multiSetArray))

@@ -72,13 +72,21 @@ describe(`QueryCollection`, () => {
 
     // Verify the collection state contains our items
     expect(collection.state.size).toBe(initialItems.length)
-    expect(collection.state.get(`1`)).toEqual(initialItems[0])
-    expect(collection.state.get(`2`)).toEqual(initialItems[1])
+    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
+      initialItems[0]
+    )
+    expect(collection.state.get(`KEY::${collection.id}/2`)).toEqual(
+      initialItems[1]
+    )
 
     // Verify the synced data
     expect(collection.syncedData.state.size).toBe(initialItems.length)
-    expect(collection.syncedData.state.get(`1`)).toEqual(initialItems[0])
-    expect(collection.syncedData.state.get(`2`)).toEqual(initialItems[1])
+    expect(collection.syncedData.state.get(`KEY::${collection.id}/1`)).toEqual(
+      initialItems[0]
+    )
+    expect(collection.syncedData.state.get(`KEY::${collection.id}/2`)).toEqual(
+      initialItems[1]
+    )
   })
 
   it(`should update collection when query data changes`, async () => {
@@ -113,8 +121,12 @@ describe(`QueryCollection`, () => {
 
     // Verify initial state
     expect(collection.state.size).toBe(initialItems.length)
-    expect(collection.state.get(`1`)).toEqual(initialItems[0])
-    expect(collection.state.get(`2`)).toEqual(initialItems[1])
+    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
+      initialItems[0]
+    )
+    expect(collection.state.get(`KEY::${collection.id}/2`)).toEqual(
+      initialItems[1]
+    )
 
     // Now update the data that will be returned by queryFn
     // 1. Modify an existing item
@@ -134,14 +146,14 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Check for update, addition, and removal
     expect(collection.state.size).toBe(2)
-    expect(collection.state.has(`1`)).toBe(true)
-    expect(collection.state.has(`3`)).toBe(true)
-    expect(collection.state.has(`2`)).toBe(false)
+    expect(collection.state.has(`KEY::${collection.id}/1`)).toBe(true)
+    expect(collection.state.has(`KEY::${collection.id}/3`)).toBe(true)
+    expect(collection.state.has(`KEY::${collection.id}/2`)).toBe(false)
 
     // Verify the final state more thoroughly
-    expect(collection.state.get(`1`)).toEqual(updatedItem)
-    expect(collection.state.get(`3`)).toEqual(newItem)
-    expect(collection.state.get(`2`)).toBeUndefined()
+    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(updatedItem)
+    expect(collection.state.get(`KEY::${collection.id}/3`)).toEqual(newItem)
+    expect(collection.state.get(`KEY::${collection.id}/2`)).toBeUndefined()
 
     // Now update the data again.
     const item4 = { id: `4`, name: `Item 4` }
@@ -153,7 +165,7 @@ describe(`QueryCollection`, () => {
     // Verify expected.
     expect(queryFn).toHaveBeenCalledTimes(3)
     expect(collection.state.size).toBe(3)
-    expect(collection.state.get(`4`)).toEqual(item4)
+    expect(collection.state.get(`KEY::${collection.id}/4`)).toEqual(item4)
   })
 
   it(`should handle query errors gracefully`, async () => {
@@ -185,7 +197,9 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.state.size).toBe(1)
-      expect(collection.state.get(`1`)).toEqual(initialItem)
+      expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
+        initialItem
+      )
     })
 
     // Trigger an error by refetching
@@ -204,7 +218,7 @@ describe(`QueryCollection`, () => {
 
     // The collection should maintain its previous state
     expect(collection.state.size).toBe(1)
-    expect(collection.state.get(`1`)).toEqual(initialItem)
+    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(initialItem)
 
     // Clean up the spy
     consoleErrorSpy.mockRestore()
@@ -278,11 +292,13 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.state.size).toBe(1)
-      expect(collection.state.get(`1`)).toEqual(initialItem)
+      expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
+        initialItem
+      )
     })
 
     // Store the initial state object reference to check if it changes
-    const initialStateRef = collection.state.get(`1`)
+    const initialStateRef = collection.state.get(`KEY::${collection.id}/1`)
     consoleSpy.mockClear()
 
     // Trigger first refetch - should not cause an update due to shallow equality
@@ -291,14 +307,20 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Verify refetch was logged
     expect(
-      consoleSpy.mock.calls.some((call) =>
-        call[0].includes(`Refetch successful for ${String(queryKey)}`)
-      )
+      consoleSpy.mock.calls.some((call) => {
+        if (typeof call[0] === `string`) {
+          return call[0].includes(`Refetch successful for ${String(queryKey)}`)
+        } else {
+          return false
+        }
+      })
     ).toBe(true)
 
     // Since the data is identical (though a different object reference),
     // the state object reference should remain the same due to shallow equality
-    expect(collection.state.get(`1`)).toBe(initialStateRef) // Same reference
+    expect(collection.state.get(`KEY::${collection.id}/1`)).toBe(
+      initialStateRef
+    ) // Same reference
 
     consoleSpy.mockClear()
 
@@ -308,13 +330,17 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(3)
     // Verify refetch was logged
     expect(
-      consoleSpy.mock.calls.some((call) =>
-        call[0].includes(`Refetch successful for ${String(queryKey)}`)
-      )
+      consoleSpy.mock.calls.some((call) => {
+        if (typeof call[0] === `string`) {
+          return call[0].includes(`Refetch successful for ${String(queryKey)}`)
+        } else {
+          return false
+        }
+      })
     ).toBe(true)
 
     // Now the state should be updated with the new value
-    const updatedItem = collection.state.get(`1`)
+    const updatedItem = collection.state.get(`KEY::${collection.id}/1`)
     expect(updatedItem).not.toBe(initialStateRef) // Different reference
     expect(updatedItem).toEqual({ id: `1`, name: `Test Item`, count: 43 }) // Updated value
 
@@ -350,16 +376,20 @@ describe(`QueryCollection`, () => {
     })
 
     // Verify getId was called for each item
-    expect(getIdSpy).toHaveBeenCalledTimes(items.length)
+    expect(getIdSpy).toHaveBeenCalledTimes(items.length * 2)
     items.forEach((item) => {
       expect(getIdSpy).toHaveBeenCalledWith(item)
     })
 
     // Verify items are stored with the custom keys
-    expect(collection.state.has(`item1`)).toBe(true)
-    expect(collection.state.has(`item2`)).toBe(true)
-    expect(collection.state.get(`item1`)).toEqual(items[0])
-    expect(collection.state.get(`item2`)).toEqual(items[1])
+    expect(collection.state.has(`KEY::${collection.id}/item1`)).toBe(true)
+    expect(collection.state.has(`KEY::${collection.id}/item2`)).toBe(true)
+    expect(collection.state.get(`KEY::${collection.id}/item1`)).toEqual(
+      items[0]
+    )
+    expect(collection.state.get(`KEY::${collection.id}/item2`)).toEqual(
+      items[1]
+    )
 
     // Now update an item and add a new one
     const updatedItems = [
@@ -386,10 +416,14 @@ describe(`QueryCollection`, () => {
     })
 
     // Verify the state reflects the changes
-    expect(collection.state.has(`item1`)).toBe(true)
-    expect(collection.state.has(`item2`)).toBe(false) // Removed
-    expect(collection.state.has(`item3`)).toBe(true) // Added
-    expect(collection.state.get(`item1`)).toEqual(updatedItems[0])
-    expect(collection.state.get(`item3`)).toEqual(updatedItems[1])
+    expect(collection.state.has(`KEY::${collection.id}/item1`)).toBe(true)
+    expect(collection.state.has(`KEY::${collection.id}/item2`)).toBe(false) // Removed
+    expect(collection.state.has(`KEY::${collection.id}/item3`)).toBe(true) // Added
+    expect(collection.state.get(`KEY::${collection.id}/item1`)).toEqual(
+      updatedItems[0]
+    )
+    expect(collection.state.get(`KEY::${collection.id}/item3`)).toEqual(
+      updatedItems[1]
+    )
   })
 })

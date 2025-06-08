@@ -275,26 +275,26 @@ export function createChangeProxy<
   const changeProxyCache = new Map<object, object>()
 
   function memoizedCreateChangeProxy<
-    T extends Record<string | symbol, any | undefined>,
+    TInner extends Record<string | symbol, any | undefined>,
   >(
-    target: T,
-    parent?: {
+    innerTarget: TInner,
+    innerParent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
     }
   ): {
-    proxy: T
+    proxy: TInner
     getChanges: () => Record<string | symbol, any>
   } {
-    debugLog(`Object ID:`, target.constructor.name)
-    if (changeProxyCache.has(target)) {
-      return changeProxyCache.get(target) as {
-        proxy: T
+    debugLog(`Object ID:`, innerTarget.constructor.name)
+    if (changeProxyCache.has(innerTarget)) {
+      return changeProxyCache.get(innerTarget) as {
+        proxy: TInner
         getChanges: () => Record<string | symbol, any>
       }
     } else {
-      const changeProxy = createChangeProxy(target, parent)
-      changeProxyCache.set(target, changeProxy)
+      const changeProxy = createChangeProxy(innerTarget, innerParent)
+      changeProxyCache.set(innerTarget, changeProxy)
       return changeProxy
     }
   }

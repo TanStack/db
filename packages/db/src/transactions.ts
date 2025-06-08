@@ -24,6 +24,7 @@ function generateUUID() {
 }
 
 const transactions: Array<Transaction> = []
+let transactionStack: Array<Transaction> = []
 
 export function createTransaction(config: TransactionConfig): Transaction {
   if (typeof config.mutationFn === `undefined`) {
@@ -35,12 +36,11 @@ export function createTransaction(config: TransactionConfig): Transaction {
     transactionId = generateUUID()
   }
   const newTransaction = new Transaction({ ...config, id: transactionId })
+
   transactions.push(newTransaction)
 
   return newTransaction
 }
-
-let transactionStack: Array<Transaction> = []
 
 export function getActiveTransaction(): Transaction | undefined {
   if (transactionStack.length > 0) {
@@ -56,6 +56,13 @@ function registerTransaction(tx: Transaction) {
 
 function unregisterTransaction(tx: Transaction) {
   transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+}
+
+function removeFromPendingList(tx: Transaction) {
+  const index = transactions.findIndex((t) => t.id === tx.id)
+  if (index !== -1) {
+    transactions.splice(index, 1)
+  }
 }
 
 export class Transaction {
@@ -85,6 +92,10 @@ export class Transaction {
 
   setState(newState: TransactionState) {
     this.state = newState
+
+    if (newState === `completed` || newState === `failed`) {
+      removeFromPendingList(this)
+    }
   }
 
   mutate(callback: () => void): Transaction {
@@ -130,22 +141,20 @@ export class Transaction {
 
     this.setState(`failed`)
 
-    // See if there's any other transactions w/ mutations on the same keys
+    // See if there's any other transactions w/ mutations on the same ids
     // and roll them back as well.
     if (!isSecondaryRollback) {
-      const mutationKeys = new Set()
-      this.mutations.forEach((m) => mutationKeys.add(m.key))
-      transactions.forEach(
-        (t) =>
-          t.state === `pending` &&
-          t.mutations.some((m) => mutationKeys.has(m.key)) &&
+      const mutationIds = new Set()
+      this.mutations.forEach((m) => mutationIds.add(m.key))
+      for (const t of transactions) {
+        t.state === `pending` &&
+          t.mutations.some((m) => mutationIds.has(m.key)) &&
           t.rollback({ isSecondaryRollback: true })
-      )
+      }
     }
 
     // Reject the promise
     this.isPersisted.reject(this.error?.error)
-
     this.touchCollection()
 
     return this
@@ -154,13 +163,13 @@ export class Transaction {
   // Tell collection that something has changed with the transaction
   touchCollection(): void {
     const hasCalled = new Set()
-    this.mutations.forEach((mutation) => {
+    for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
         mutation.collection.transactions.setState((state) => state)
         mutation.collection.commitPendingTransactions()
         hasCalled.add(mutation.collection.id)
       }
-    })
+    }
   }
 
   async commit(): Promise<Transaction> {

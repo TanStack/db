@@ -73,6 +73,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -80,7 +81,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -95,7 +95,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
-        key: person.id,
         type: `insert`,
         changes: person,
       }))
@@ -113,7 +112,8 @@ describe(`Query Collections`, () => {
     const result = compiledQuery.results
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`3`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+      _key: `3`,
       id: `3`,
       name: `John Smith`,
     })
@@ -136,11 +136,13 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`3`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+      _key: `3`,
       id: `3`,
       name: `John Smith`,
     })
-    expect(result.state.get(`4`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+      _key: `4`,
       id: `4`,
       name: `Kyle Doe`,
     })
@@ -148,9 +150,9 @@ describe(`Query Collections`, () => {
     // Update the person
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `update`,
         changes: {
+          id: 4,
           name: `Kyle Doe 2`,
         },
       },
@@ -159,23 +161,26 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`4`)).toEqual({
-      id: `4`,
+    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+      _key: `4`,
+      id: 4,
       name: `Kyle Doe 2`,
     })
 
     // Delete the person
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `delete`,
+        changes: {
+          id: 4,
+        },
       },
     ])
 
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`4`)).toBeUndefined()
+    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
   })
 
   it(`should join collections and return combined results`, async () => {
@@ -184,13 +189,13 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -204,13 +209,13 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -225,7 +230,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync-person`,
       initialPersons.map((person) => ({
-        key: person.id,
         type: `insert`,
         changes: person,
       }))
@@ -235,7 +239,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync-issue`,
       initialIssues.map((issue) => ({
-        key: issue.id,
         type: `insert`,
         changes: issue,
       }))
@@ -261,19 +264,22 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`[1,1]`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+      _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.state.get(`[2,2]`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+      _key: `[2,2]`,
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.state.get(`[3,1]`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+      _key: `[3,1]`,
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -296,7 +302,8 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`[4,2]`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+      _key: `[4,2]`,
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -305,9 +312,9 @@ describe(`Query Collections`, () => {
     // Update an issue we're already joined with
     emitter.emit(`sync-issue`, [
       {
-        key: `2`,
         type: `update`,
         changes: {
+          id: 2,
           title: `Updated Issue 2`,
         },
       },
@@ -316,8 +323,9 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`[2,2]`)).toEqual({
-      id: `2`,
+    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+      _key: `[2,2]`,
+      id: 2,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
     })
@@ -325,7 +333,7 @@ describe(`Query Collections`, () => {
     // Delete an issue
     emitter.emit(`sync-issue`, [
       {
-        key: `3`,
+        changes: { id: `3` },
         type: `delete`,
       },
     ])
@@ -333,7 +341,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`[3,1]`)).toBeUndefined()
+    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
   })
 
   it(`should order results by specified fields`, async () => {
@@ -342,13 +350,13 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `order-by-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -363,7 +371,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
-        key: person.id,
         type: `insert`,
         changes: person,
       }))
@@ -385,9 +392,9 @@ describe(`Query Collections`, () => {
     // Verify ascending order
     const ascendingArray = Array.from(ascendingResult.toArray)
     expect(ascendingArray).toEqual([
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
-      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
-      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
     ])
 
     // Test descending order by age
@@ -406,9 +413,9 @@ describe(`Query Collections`, () => {
     // Verify descending order
     const descendingArray = Array.from(descendingResult.toArray)
     expect(descendingArray).toEqual([
-      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
-      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
     ])
 
     // Test multiple order by fields
@@ -428,14 +435,29 @@ describe(`Query Collections`, () => {
     const multiOrderArray = Array.from(multiOrderResult.toArray)
     expect(multiOrderArray).toEqual([
       {
+        _key: `3`,
         id: `3`,
         name: `John Smith`,
         age: 35,
         isActive: false,
         _orderByIndex: 0,
       },
-      { id: `2`, name: `Jane Doe`, age: 25, isActive: true, _orderByIndex: 1 },
-      { id: `1`, name: `John Doe`, age: 30, isActive: true, _orderByIndex: 2 },
+      {
+        _key: `2`,
+        id: `2`,
+        name: `Jane Doe`,
+        age: 25,
+        isActive: true,
+        _orderByIndex: 1,
+      },
+      {
+        _key: `1`,
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+        isActive: true,
+        _orderByIndex: 2,
+      },
     ])
   })
 
@@ -445,13 +467,13 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `order-update-test`,
+      getId: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -466,7 +488,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
-        key: person.id,
         type: `insert`,
         changes: person,
       }))
@@ -486,15 +507,14 @@ describe(`Query Collections`, () => {
     // Verify initial ordering
     let currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
-      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
-      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
     ])
 
     // Add a new person with the youngest age
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `insert`,
         changes: {
           id: `4`,
@@ -511,18 +531,18 @@ describe(`Query Collections`, () => {
     // Verify order is updated with the new person at the beginning
     currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
-      { id: `1`, name: `John Doe`, age: 30, _orderByIndex: 2 },
-      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 3 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 2 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 3 },
     ])
 
     // Update a person's age to move them in the ordering
     emitter.emit(`sync`, [
       {
-        key: `1`,
         type: `update`,
         changes: {
+          id: `1`,
           age: 40, // Update John Doe to be the oldest
         },
       },
@@ -533,16 +553,16 @@ describe(`Query Collections`, () => {
     // Verify order is updated with John Doe now at the end
     currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
-      { id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
-      { id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
     ])
 
     // Delete a person in the middle of the ordering
     emitter.emit(`sync`, [
       {
-        key: `3`,
+        changes: { id: `3` },
         type: `delete`,
       },
     ])
@@ -552,9 +572,9 @@ describe(`Query Collections`, () => {
     // Verify order is updated with John Smith removed
     currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
-      { id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
-      { id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
     ])
   })
 
@@ -564,6 +584,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test-bug`,
+      getId: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -571,7 +592,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -585,6 +605,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test-bug`,
+      getId: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -592,7 +613,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -607,7 +627,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync-person`,
       initialPersons.map((person) => ({
-        key: person.id,
         type: `insert`,
         changes: person,
       }))
@@ -617,7 +636,6 @@ describe(`Query Collections`, () => {
     emitter.emit(
       `sync-issue`,
       initialIssues.map((issue) => ({
-        key: issue.id,
         type: `insert`,
         changes: issue,
       }))
@@ -648,7 +666,6 @@ describe(`Query Collections`, () => {
       mutationFn: async () => {
         emitter.emit(`sync-issue`, [
           {
-            key: `4`,
             type: `insert`,
             changes: {
               id: `4`,
@@ -664,15 +681,12 @@ describe(`Query Collections`, () => {
 
     // Perform optimistic insert of a new issue
     tx.mutate(() =>
-      issueCollection.insert(
-        {
-          id: `temp-key`,
-          title: `New Issue`,
-          description: `New Issue Description`,
-          userId: `1`,
-        },
-        { key: `temp-key` }
-      )
+      issueCollection.insert({
+        id: `temp-key`,
+        title: `New Issue`,
+        description: `New Issue Description`,
+        userId: `1`,
+      })
     )
 
     // Verify optimistic state is immediately reflected
@@ -680,22 +694,23 @@ describe(`Query Collections`, () => {
 
     // `[temp-key,1]` is the optimistic state for the new issue, its a composite key
     // from the join in the query
-    expect(result.state.get(`[temp-key,1]`)).toEqual({
+    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toEqual({
       id: `temp-key`,
+      _key: `[temp-key,1]`,
       name: `John Doe`,
       title: `New Issue`,
     })
 
     // `[4,1]` would be the synced state for the new issue, but it's not in the
     // optimistic state because the transaction synced back yet
-    expect(result.state.get(`[4,1]`)).toBeUndefined()
+    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`[temp-key,1]`)).toBeUndefined()
-    expect(result.state.get(`[4,1]`)).toBeDefined()
+    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toBeUndefined()
+    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeDefined()
   })
 })
 

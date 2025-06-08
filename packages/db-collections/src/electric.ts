@@ -21,12 +21,7 @@ export interface ElectricCollectionConfig<T extends Row<unknown>>
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  streamOptions: ShapeStreamOptions
-
-  /**
-   * Array of column names that form the primary key of the shape
-   */
-  primaryKey: Array<string>
+  shapeOptions: ShapeStreamOptions
 }
 
 /**
@@ -39,8 +34,7 @@ export class ElectricCollection<
 
   constructor(config: ElectricCollectionConfig<T>) {
     const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
-    const sync = createElectricSync<T>(config.streamOptions, {
-      primaryKey: config.primaryKey,
+    const sync = createElectricSync<T>(config.shapeOptions, {
       seenTxids,
     })
 
@@ -96,7 +90,7 @@ function hasTxids<T extends Row<unknown> = Row>(
 /**
  * Creates an ElectricSQL sync configuration
  *
- * @param streamOptions - Configuration options for the ShapeStream
+ * @param shapeOptions - Configuration options for the ShapeStream
  * @param options - Options for the ElectricSync configuration
  * @returns ElectricSync configuration
  */
@@ -113,26 +107,27 @@ export function createElectricCollection<T extends Row<unknown>>(
  * Internal function to create ElectricSQL sync configuration
  */
 function createElectricSync<T extends Row<unknown>>(
-  streamOptions: ShapeStreamOptions,
-  options: { primaryKey: Array<string>; seenTxids: Store<Set<number>> }
+  shapeOptions: ShapeStreamOptions,
+  options: {
+    seenTxids: Store<Set<number>>
+  }
 ): SyncConfig<T> {
-  const { primaryKey, seenTxids } = options
+  const { seenTxids } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
   /**
    * Get the sync metadata for insert operations
-   * @returns Record containing primaryKey and relation information
+   * @returns Record containing relation information
    */
   const getSyncMetadata = (): Record<string, unknown> => {
     // Use the stored schema if available, otherwise default to 'public'
     const schema = relationSchema.state || `public`
 
     return {
-      primaryKey,
-      relation: streamOptions.params?.table
-        ? [schema, streamOptions.params.table]
+      relation: shapeOptions.params?.table
+        ? [schema, shapeOptions.params.table]
         : undefined,
     }
   }
@@ -140,7 +135,7 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(streamOptions)
+      const stream = new ShapeStream(shapeOptions)
       let transactionStarted = false
       let newTxids = new Set<number>()
 
@@ -168,18 +163,16 @@ function createElectricSync<T extends Row<unknown>>(
               transactionStarted = true
             }
 
-            const key = message.key
+            const value = message.value as unknown as T
 
             // Include the primary key and relation info in the metadata
             const enhancedMetadata = {
               ...message.headers,
-              primaryKey,
             }
 
             write({
-              key,
               type: message.headers.operation,
-              value: message.value as unknown as T,
+              value,
               metadata: enhancedMetadata,
             })
           } else if (isUpToDateMessage(message)) {
@@ -203,14 +196,4 @@ function createElectricSync<T extends Row<unknown>>(
     // Expose the getSyncMetadata function
     getSyncMetadata,
   }
-}
-
-/**
- * Configuration options for ElectricSync
- */
-export interface ElectricSyncOptions {
-  /**
-   * Array of column names that form the primary key of the shape
-   */
-  primaryKey: Array<string>
 }

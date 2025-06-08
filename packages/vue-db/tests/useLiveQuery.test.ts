@@ -82,6 +82,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -110,7 +111,11 @@ describe(`Query Collections`, () => {
       }))
     )
 
-    const { state, data } = useLiveQuery((q) =>
+    const {
+      state,
+      data,
+      collection: qColl,
+    } = useLiveQuery((q) =>
       q
         .from({ collection })
         .where(`@age`, `>`, 30)
@@ -119,9 +124,10 @@ describe(`Query Collections`, () => {
     )
 
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
     })
 
@@ -129,13 +135,13 @@ describe(`Query Collections`, () => {
     expect(data.value[0]).toEqual({
       _orderByIndex: 0,
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
     })
 
     // Insert a new person
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `insert`,
         changes: {
           id: `4`,
@@ -150,14 +156,16 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(2)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
     })
-    expect(state.value.get(`4`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
+      _key: `4`,
       name: `Kyle Doe`,
     })
 
@@ -165,20 +173,22 @@ describe(`Query Collections`, () => {
     expect(data.value).toContainEqual({
       _orderByIndex: 0,
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
     })
     expect(data.value).toContainEqual({
       _orderByIndex: 1,
       id: `4`,
+      _key: `4`,
       name: `Kyle Doe`,
     })
 
     // Update the person
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `update`,
         changes: {
+          id: `4`,
           name: `Kyle Doe 2`,
         },
       },
@@ -187,9 +197,10 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(2)
-    expect(state.value.get(`4`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
+      _key: `4`,
       name: `Kyle Doe 2`,
     })
 
@@ -197,26 +208,30 @@ describe(`Query Collections`, () => {
     expect(data.value).toContainEqual({
       _orderByIndex: 1,
       id: `4`,
+      _key: `4`,
       name: `Kyle Doe 2`,
     })
 
     // Delete the person
     emitter.emit(`sync`, [
       {
-        key: `4`,
         type: `delete`,
+        changes: {
+          id: `4`,
+        },
       },
     ])
 
     await waitForChanges()
 
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`4`)).toBeUndefined()
+    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toBeUndefined()
 
     expect(data.value.length).toBe(1)
     expect(data.value).toContainEqual({
       _orderByIndex: 0,
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
     })
   })
@@ -227,6 +242,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -247,6 +263,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -284,7 +301,7 @@ describe(`Query Collections`, () => {
       }))
     )
 
-    const { state } = useLiveQuery((q) =>
+    const { state, collection: qColl } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({
@@ -300,20 +317,23 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(state.value.size).toBe(3)
 
-    expect(state.value.get(`[1,1]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[1,1]`)).toEqual({
+      _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`[2,2]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[2,2]`)).toEqual({
       id: `2`,
+      _key: `[2,2]`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`[3,1]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[3,1]`)).toEqual({
       id: `3`,
+      _key: `[3,1]`,
       name: `John Doe`,
       title: `Issue 3`,
     })
@@ -321,7 +341,6 @@ describe(`Query Collections`, () => {
     // Add a new issue for user 1
     emitter.emit(`sync-issue`, [
       {
-        key: `4`,
         type: `insert`,
         changes: {
           id: `4`,
@@ -335,8 +354,9 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[4,2]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[4,2]`)).toEqual({
       id: `4`,
+      _key: `[4,2]`,
       name: `Jane Doe`,
       title: `Issue 4`,
     })
@@ -344,9 +364,9 @@ describe(`Query Collections`, () => {
     // Update an issue we're already joined with
     emitter.emit(`sync-issue`, [
       {
-        key: `2`,
         type: `update`,
         changes: {
+          id: `2`,
           title: `Updated Issue 2`,
         },
       },
@@ -355,8 +375,9 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`[2,2]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[2,2]`)).toEqual({
       id: `2`,
+      _key: `[2,2]`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
     })
@@ -364,15 +385,15 @@ describe(`Query Collections`, () => {
     // Delete an issue
     emitter.emit(`sync-issue`, [
       {
-        key: `3`,
         type: `delete`,
+        changes: { id: `3` },
       },
     ])
 
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(state.value.get(`[3,1]`)).toBeUndefined()
+    expect(state.value.get(`KEY::${qColl.value.id}/[3,1]`)).toBeUndefined()
   })
 
   it(`should recompile query when parameters change and change results`, async () => {
@@ -381,6 +402,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `params-change-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -411,7 +433,7 @@ describe(`Query Collections`, () => {
 
     const minAge = ref(30)
 
-    const { state } = useLiveQuery((q) => {
+    const { state, collection: qColl } = useLiveQuery((q) => {
       return q
         .from({ collection })
         .where(`@age`, `>`, minAge.value)
@@ -420,8 +442,9 @@ describe(`Query Collections`, () => {
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
       age: 35,
     })
@@ -433,18 +456,21 @@ describe(`Query Collections`, () => {
 
     // Now should return all people as they're all older than 20
     expect(state.value.size).toBe(3)
-    expect(state.value.get(`1`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/1`)).toEqual({
       id: `1`,
+      _key: `1`,
       name: `John Doe`,
       age: 30,
     })
-    expect(state.value.get(`2`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/2`)).toEqual({
       id: `2`,
+      _key: `2`,
       name: `Jane Doe`,
       age: 25,
     })
-    expect(state.value.get(`3`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
       id: `3`,
+      _key: `3`,
       name: `John Smith`,
       age: 35,
     })
@@ -464,6 +490,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `stop-query-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -559,6 +586,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -606,8 +634,12 @@ describe(`Query Collections`, () => {
 
     // Verify initial grouped results
     expect(groupedResult.state.value.size).toBe(1)
-    // the `{"team":"team1"}` key is generated by the groupBy operator
-    expect(groupedResult.state.value.get(`{"team":"team1"}`)).toEqual({
+    expect(
+      groupedResult.state.value.get(
+        `KEY::${groupedResult.collection.value.id}/{"team":"team1"}`
+      )
+    ).toEqual({
+      _key: `{"team":"team1"}`,
       team: `team1`,
       count: 1,
     })
@@ -644,12 +676,22 @@ describe(`Query Collections`, () => {
 
     // Verify the grouped results include the new team members
     expect(groupedResult.state.value.size).toBe(2)
-    expect(groupedResult.state.value.get(`{"team":"team1"}`)).toEqual({
+    expect(
+      groupedResult.state.value.get(
+        `KEY::${groupedResult.collection.value.id}/{"team":"team1"}`
+      )
+    ).toEqual({
       team: `team1`,
+      _key: `{"team":"team1"}`,
       count: 2,
     })
-    expect(groupedResult.state.value.get(`{"team":"team2"}`)).toEqual({
+    expect(
+      groupedResult.state.value.get(
+        `KEY::${groupedResult.collection.value.id}/{"team":"team2"}`
+      )
+    ).toEqual({
       team: `team2`,
+      _key: `{"team":"team2"}`,
       count: 1,
     })
   })
@@ -667,6 +709,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test-bug`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -688,6 +731,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test-bug`,
+      getId: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -727,7 +771,7 @@ describe(`Query Collections`, () => {
     )
 
     // Render the hook with a query that joins persons and issues
-    const { state } = useLiveQuery((q) =>
+    const { state, collection: qColl } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({
@@ -790,8 +834,9 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toEqual({
+    expect(state.value.get(`KEY::${qColl.value.id}/[temp-key,1]`)).toEqual({
       id: `temp-key`,
+      _key: `[temp-key,1]`,
       name: `John Doe`,
       title: `New Issue`,
     })
@@ -803,19 +848,20 @@ describe(`Query Collections`, () => {
 
     // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
     const hadFlicker = renderStates.some(
-      (renderState) =>
-        !renderState.hasTempKey &&
-        !renderState.hasPermKey &&
-        renderState.stateSize === 3
+      (state2) =>
+        !state2.hasTempKey && !state2.hasPermKey && state2.stateSize === 3
     )
 
     expect(hadFlicker).toBe(false)
 
     // Verify the temporary key is replaced by the permanent one
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
-    expect(state.value.get(`[4,1]`)).toEqual({
+    expect(
+      state.value.get(`KEY::${qColl.value.id}/[temp-key,1]`)
+    ).toBeUndefined()
+    expect(state.value.get(`KEY::${qColl.value.id}/[4,1]`)).toEqual({
       id: `4`,
+      _key: `[4,1]`,
       name: `John Doe`,
       title: `New Issue`,
     })
