@@ -183,6 +183,131 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
   })
 
+  it(`should be able to query a collection without a select`, async () => {
+    const emitter = mitt()
+
+    // Create collection with mutation capability
+    const collection = new Collection<Person>({
+      id: `optimistic-changes-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Listen for sync events
+          emitter.on(`sync`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync from initial state
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    const query = queryBuilder().from({ collection }).where(`@age`, `>`, 30)
+
+    const compiledQuery = compileQuery(query)
+
+    compiledQuery.start()
+
+    const result = compiledQuery.results
+
+    expect(result.state.size).toBe(1)
+    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+      _key: `3`,
+      age: 35,
+      email: `john.smith@example.com`,
+      id: `3`,
+      isActive: false,
+      name: `John Smith`,
+    })
+
+    // Insert a new person
+    emitter.emit(`sync`, [
+      {
+        key: `4`,
+        type: `insert`,
+        changes: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(2)
+    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+      _key: `3`,
+      age: 35,
+      email: `john.smith@example.com`,
+      id: `3`,
+      isActive: false,
+      name: `John Smith`,
+    })
+    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+      _key: `4`,
+      age: 40,
+      email: `kyle.doe@example.com`,
+      id: `4`,
+      isActive: true,
+      name: `Kyle Doe`,
+    })
+
+    // Update the person
+    emitter.emit(`sync`, [
+      {
+        type: `update`,
+        changes: {
+          id: 4,
+          name: `Kyle Doe 2`,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(2)
+    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+      _key: `4`,
+      age: 40,
+      email: `kyle.doe@example.com`,
+      id: 4,
+      isActive: true,
+      name: `Kyle Doe 2`,
+    })
+
+    // Delete the person
+    emitter.emit(`sync`, [
+      {
+        type: `delete`,
+        changes: {
+          id: 4,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(1)
+    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
+  })
+
   it(`should join collections and return combined results`, async () => {
     const emitter = mitt()
 
@@ -328,6 +453,216 @@ describe(`Query Collections`, () => {
       id: 2,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
+    })
+
+    // Delete an issue
+    emitter.emit(`sync-issue`, [
+      {
+        changes: { id: `3` },
+        type: `delete`,
+      },
+    ])
+
+    await waitForChanges()
+
+    // After deletion, user 3 should no longer have a joined result
+    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
+  })
+
+  it(`should join collections and return combined results with no select`, async () => {
+    const emitter = mitt()
+
+    // Create person collection
+    const personCollection = new Collection<Person>({
+      id: `person-collection-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          emitter.on(`sync-person`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Create issue collection
+    const issueCollection = new Collection<Issue>({
+      id: `issue-collection-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          emitter.on(`sync-issue`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                type: change.type,
+                value: change.changes as Issue,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync initial person data
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    // Sync initial issue data
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        type: `insert`,
+        changes: issue,
+      }))
+    )
+
+    // Create a query with a join between persons and issues
+    const query = queryBuilder()
+      .from({ issues: issueCollection })
+      .join({
+        type: `inner`,
+        from: { persons: personCollection },
+        on: [`@persons.id`, `=`, `@issues.userId`],
+      })
+
+    const compiledQuery = compileQuery(query)
+    compiledQuery.start()
+
+    const result = compiledQuery.results
+
+    await waitForChanges()
+
+    // Verify that we have the expected joined results
+    expect(result.state.size).toBe(3)
+
+    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+      _key: `[1,1]`,
+      issues: {
+        description: `Issue 1 description`,
+        id: `1`,
+        title: `Issue 1`,
+        userId: `1`,
+      },
+      persons: {
+        age: 30,
+        email: `john.doe@example.com`,
+        id: `1`,
+        isActive: true,
+        name: `John Doe`,
+      },
+    })
+
+    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+      _key: `[2,2]`,
+      issues: {
+        description: `Issue 2 description`,
+        id: `2`,
+        title: `Issue 2`,
+        userId: `2`,
+      },
+      persons: {
+        age: 25,
+        email: `jane.doe@example.com`,
+        id: `2`,
+        isActive: true,
+        name: `Jane Doe`,
+      },
+    })
+
+    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+      _key: `[3,1]`,
+      issues: {
+        description: `Issue 3 description`,
+        id: `3`,
+        title: `Issue 3`,
+        userId: `1`,
+      },
+      persons: {
+        age: 30,
+        email: `john.doe@example.com`,
+        id: `1`,
+        isActive: true,
+        name: `John Doe`,
+      },
+    })
+
+    // Add a new issue for user 1
+    emitter.emit(`sync-issue`, [
+      {
+        key: `4`,
+        type: `insert`,
+        changes: {
+          id: `4`,
+          title: `Issue 4`,
+          description: `Issue 4 description`,
+          userId: `2`,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(4)
+    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+      _key: `[4,2]`,
+      issues: {
+        description: `Issue 4 description`,
+        id: `4`,
+        title: `Issue 4`,
+        userId: `2`,
+      },
+      persons: {
+        age: 25,
+        email: `jane.doe@example.com`,
+        id: `2`,
+        isActive: true,
+        name: `Jane Doe`,
+      },
+    })
+
+    // Update an issue we're already joined with
+    emitter.emit(`sync-issue`, [
+      {
+        type: `update`,
+        changes: {
+          id: 2,
+          title: `Updated Issue 2`,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // The updated title should be reflected in the joined results
+    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+      _key: `[2,2]`,
+      issues: {
+        description: `Issue 2 description`,
+        id: 2,
+        title: `Updated Issue 2`,
+        userId: `2`,
+      },
+      persons: {
+        age: 25,
+        email: `jane.doe@example.com`,
+        id: `2`,
+        isActive: true,
+        name: `Jane Doe`,
+      },
     })
 
     // Delete an issue
