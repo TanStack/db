@@ -112,10 +112,12 @@ describe(`Query`, () => {
         select: [`@id`, `@name`, `@category`],
         from: `products`,
         where: [
-          [`@category`, `=`, `Books`],
-          `or`,
-          [`@category`, `=`, `Furniture`],
-        ] as NestedCompositeCondition,
+          [
+            [`@category`, `=`, `Books`],
+            `or`,
+            [`@category`, `=`, `Furniture`],
+          ] as NestedCompositeCondition,
+        ],
       }
 
       // Run the query and check results
@@ -140,10 +142,12 @@ describe(`Query`, () => {
         select: [`@id`, `@name`, `@category`, `@inStock`],
         from: `products`,
         where: [
-          [`@category`, `=`, `Electronics`],
-          `and`,
-          [`@inStock`, `=`, true],
-        ] as NestedCompositeCondition,
+          [
+            [`@category`, `=`, `Electronics`],
+            `and`,
+            [`@inStock`, `=`, true],
+          ] as NestedCompositeCondition,
+        ],
       }
 
       // Run the query and check results
@@ -165,18 +169,20 @@ describe(`Query`, () => {
         select: [`@id`, `@name`, `@rating`, `@price`],
         from: `products`,
         where: [
-          `@category`,
-          `=`,
-          `Electronics`,
-          `and`,
-          `@rating`,
-          `>`,
-          4,
-          `and`,
-          `@price`,
-          `<`,
-          1000,
-        ] as FlatCompositeCondition,
+          [
+            `@category`,
+            `=`,
+            `Electronics`,
+            `and`,
+            `@rating`,
+            `>`,
+            4,
+            `and`,
+            `@price`,
+            `<`,
+            1000,
+          ] as FlatCompositeCondition,
+        ],
       }
 
       // Run the query and check results
@@ -199,25 +205,27 @@ describe(`Query`, () => {
         from: `products`,
         where: [
           [
-            `@category`,
-            `=`,
-            `Electronics`,
-            `and`,
-            `@price`,
-            `>`,
-            500,
-          ] as FlatCompositeCondition,
-          `or`,
-          [
-            `@category`,
-            `=`,
-            `Furniture`,
-            `and`,
-            `@inStock`,
-            `=`,
-            true,
-          ] as FlatCompositeCondition,
-        ] as NestedCompositeCondition,
+            [
+              `@category`,
+              `=`,
+              `Electronics`,
+              `and`,
+              `@price`,
+              `>`,
+              500,
+            ] as FlatCompositeCondition,
+            `or`,
+            [
+              `@category`,
+              `=`,
+              `Furniture`,
+              `and`,
+              `@inStock`,
+              `=`,
+              true,
+            ] as FlatCompositeCondition,
+          ] as NestedCompositeCondition,
+        ],
       }
 
       // Run the query and check results
@@ -246,35 +254,37 @@ describe(`Query`, () => {
         from: `products`,
         where: [
           [
-            `@category`,
-            `=`,
-            `Electronics`,
-            `and`,
-            `@price`,
-            `>`,
-            1000,
-          ] as FlatCompositeCondition,
-          `or`,
-          [
-            `@category`,
-            `=`,
-            `Books`,
-            `and`,
-            `@rating`,
-            `>`,
-            4.5,
-          ] as FlatCompositeCondition,
-          `or`,
-          [
-            `@category`,
-            `=`,
-            `Furniture`,
-            `and`,
-            `@price`,
-            `<`,
-            200,
-          ] as FlatCompositeCondition,
-        ] as NestedCompositeCondition,
+            [
+              `@category`,
+              `=`,
+              `Electronics`,
+              `and`,
+              `@price`,
+              `>`,
+              1000,
+            ] as FlatCompositeCondition,
+            `or`,
+            [
+              `@category`,
+              `=`,
+              `Books`,
+              `and`,
+              `@rating`,
+              `>`,
+              4.5,
+            ] as FlatCompositeCondition,
+            `or`,
+            [
+              `@category`,
+              `=`,
+              `Furniture`,
+              `and`,
+              `@price`,
+              `<`,
+              200,
+            ] as FlatCompositeCondition,
+          ] as NestedCompositeCondition,
+        ],
       }
 
       // Run the query and check results

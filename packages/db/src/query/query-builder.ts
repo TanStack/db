@@ -325,7 +325,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     let condition: any
 
     // Determine if this is a callback, complete condition, or individual parts
-    if (typeof leftOrConditionOrCallback === 'function') {
+    if (typeof leftOrConditionOrCallback === `function`) {
       // It's a callback function
       condition = leftOrConditionOrCallback
     } else if (operator !== undefined && right !== undefined) {
@@ -390,7 +390,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     let condition: any
 
     // Determine if this is a callback, complete condition, or individual parts
-    if (typeof leftOrConditionOrCallback === 'function') {
+    if (typeof leftOrConditionOrCallback === `function`) {
       // It's a callback function
       condition = leftOrConditionOrCallback
     } else if (operator !== undefined && right !== undefined) {

@@ -86,7 +86,7 @@ describe(`QueryBuilder.groupBy`, () => {
 
     const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@d.name`)
-    expect(builtQuery.having).toEqual([{ SUM: `@e.salary` }, `>`, 100000])
+    expect(builtQuery.having).toEqual([[{ SUM: `@e.salary` }, `>`, 100000]])
   })
 
   it(`can be combined with other query methods`, () => {

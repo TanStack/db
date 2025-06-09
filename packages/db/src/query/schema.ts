@@ -200,10 +200,12 @@ export type From<TContext extends Context = Context> = InputReference<{
 }>
 
 export type WhereCallback<TContext extends Context = Context> = (
-  context: TContext["schema"]
+  context: TContext[`schema`]
 ) => boolean
 
-export type Where<TContext extends Context = Context> = Array<Condition<TContext> | WhereCallback<TContext>>
+export type Where<TContext extends Context = Context> = Array<
+  Condition<TContext> | WhereCallback<TContext>
+>
 
 // Having is the same implementation as a where clause, its just run after the group by
 export type Having<TContext extends Context = Context> = Where<TContext>

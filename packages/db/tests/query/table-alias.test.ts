@@ -127,7 +127,7 @@ describe(`Query - Table Aliasing`, () => {
       select: [`@p.id`, `@p.name`, `@p.price`],
       from: `products`,
       as: `p`,
-      where: [`@p.category`, `=`, `Electronics`] as Condition,
+      where: [[`@p.category`, `=`, `Electronics`] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -171,7 +171,7 @@ describe(`Query - Table Aliasing`, () => {
       select: [`@p.id`, `@p.name`, `@p.price`],
       from: `products`,
       as: `p`,
-      having: [`@p.price`, `>`, 500] as Condition,
+      having: [[`@p.price`, `>`, 500] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -222,10 +222,12 @@ describe(`Query - Table Aliasing`, () => {
       from: `products`,
       as: `p`,
       where: [
-        [`@p.price`, `>`, 100], // Aliased condition
-        `and`,
-        [`@inStock`, `=`, true], // Non-aliased condition
-      ] as unknown as Condition,
+        [
+          [`@p.price`, `>`, 100], // Aliased condition
+          `and`,
+          [`@inStock`, `=`, true], // Non-aliased condition
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -280,10 +282,12 @@ describe(`Query - Table Aliasing`, () => {
       from: `products`,
       as: `p`,
       where: [
-        [[`@p.category`, `=`, `Electronics`], `and`, [`@p.price`, `<`, 1000]],
-        `or`,
-        [[`@p.category`, `=`, `Books`], `and`, [`@p.rating`, `>=`, 4.5]],
-      ] as unknown as Condition,
+        [
+          [[`@p.category`, `=`, `Electronics`], `and`, [`@p.price`, `<`, 1000]],
+          `or`,
+          [[`@p.category`, `=`, `Books`], `and`, [`@p.rating`, `>=`, 4.5]],
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })

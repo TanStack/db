@@ -101,7 +101,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@name`, `like`, `Laptop%`] as Condition,
+      where: [[`@name`, `like`, `Laptop%`] as Condition],
     }
 
     const results = runQuery(query)
@@ -115,7 +115,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@description`],
       from: `items`,
-      where: [`@description`, `like`, `%laptop%`] as Condition,
+      where: [[`@description`, `like`, `%laptop%`] as Condition],
     }
 
     const results = runQuery(query)
@@ -146,7 +146,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@SKU`],
       from: `items`,
-      where: [`@SKU`, `like`, `TECH-___-2023`] as Condition,
+      where: [[`@SKU`, `like`, `TECH-___-2023`] as Condition],
     }
 
     // Create a separate graph for this test with our specific SKU test items
@@ -185,7 +185,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@SKU`],
       from: `items`,
-      where: [`@SKU`, `like`, `TECH-__%-____`] as Condition,
+      where: [[`@SKU`, `like`, `TECH-__%-____`] as Condition],
     }
 
     const results = runQuery(query)
@@ -198,7 +198,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@name`, `like`, `Office Desk 60\\%`] as Condition,
+      where: [[`@name`, `like`, `Office Desk 60\\%`] as Condition],
     }
 
     const results = runQuery(query)
@@ -211,7 +211,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@category`],
       from: `items`,
-      where: [`@category`, `not like`, `Elec%`] as Condition,
+      where: [[`@category`, `not like`, `Elec%`] as Condition],
     }
 
     const results = runQuery(query)
@@ -224,7 +224,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@description`],
       from: `items`,
-      where: [`@description`, `like`, `%[0-9]%`] as Condition, // Using regex special char
+      where: [[`@description`, `like`, `%[0-9]%`] as Condition], // Using regex special char
     }
 
     const results = runQuery(query)
@@ -238,7 +238,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@description`],
       from: `items`,
-      where: [`@description`, `like`, `%2-%`] as Condition, // Looking for "2-" in description
+      where: [[`@description`, `like`, `%2-%`] as Condition], // Looking for "2-" in description
     }
 
     const results = runQuery(query)
@@ -252,7 +252,7 @@ describe(`Query - LIKE Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@name`, `like`, `laptop%`] as Condition, // lowercase, but data has uppercase
+      where: [[`@name`, `like`, `laptop%`] as Condition], // lowercase, but data has uppercase
     }
 
     const results = runQuery(query)

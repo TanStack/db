@@ -22,8 +22,8 @@ export function evaluateWhereOnNamespacedRow(
 ): boolean {
   // Where is always an array of conditions and/or callbacks
   // Evaluate all items and combine with AND logic
-  return where.every(item => {
-    if (typeof item === 'function') {
+  return where.every((item) => {
+    if (typeof item === `function`) {
       return (item as WhereCallback)(namespacedRow)
     } else {
       return evaluateConditionOnNamespacedRow(

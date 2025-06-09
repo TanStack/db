@@ -86,7 +86,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`],
         from: `products`,
-        where: [`@category`, `=`, `Electronics`],
+        where: [[`@category`, `=`, `Electronics`]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -131,7 +131,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@category`],
         from: `products`,
-        where: [`@category`, `!=`, `Electronics`],
+        where: [[`@category`, `!=`, `Electronics`]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -176,7 +176,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@price`],
         from: `products`,
-        where: [`@price`, `>`, 500],
+        where: [[`@price`, `>`, 500]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -221,7 +221,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@discount`],
         from: `products`,
-        where: [`@discount`, `is not`, null],
+        where: [[`@discount`, `is not`, null]],
       }
 
       // In our test data, only the Smartphone has a non-null discount
@@ -270,7 +270,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@price`, `@category`],
         from: `products`,
-        where: [`@price`, `<`, 500],
+        where: [[`@price`, `<`, 500]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -315,7 +315,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@price`, `@category`],
         from: `products`,
-        where: [`@category`, `=`, `Electronics`, `and`, `@price`, `<`, 500],
+        where: [[`@category`, `=`, `Electronics`, `and`, `@price`, `<`, 500]],
       }
 
       // Verify our test data - only Headphones should match both conditions
@@ -366,7 +366,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@price`, `@category`],
         from: `products`,
-        where: [`@category`, `=`, `Electronics`, `or`, `@price`, `<`, 100],
+        where: [[`@category`, `=`, `Electronics`, `or`, `@price`, `<`, 100]],
       }
 
       // Verify our test data - should match Electronics OR price < 100
@@ -424,17 +424,19 @@ describe(`Query`, () => {
         from: `products`,
         where: [
           [
-            `@category`,
-            `=`,
-            `Electronics`,
-            `and`,
-            `@price`,
-            `>`,
-            200,
-          ] as FlatCompositeCondition,
-          `or` as LogicalOperator,
-          [`@category`, `=`, `Books`], // Simple condition for the right side
-        ] as NestedCompositeCondition,
+            [
+              `@category`,
+              `=`,
+              `Electronics`,
+              `and`,
+              `@price`,
+              `>`,
+              200,
+            ] as FlatCompositeCondition,
+            `or` as LogicalOperator,
+            [`@category`, `=`, `Books`], // Simple condition for the right side
+          ] as NestedCompositeCondition,
+        ],
       }
 
       // Verify our test data manually to confirm what should match

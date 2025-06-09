@@ -82,7 +82,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@category`],
       from: `items`,
-      where: [`@category`, `in`, [`Electronics`, `Books`]] as Condition,
+      where: [[`@category`, `in`, [`Electronics`, `Books`]] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -119,7 +119,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@category`, `in`, [`electronics`, `books`]] as Condition, // lowercase categories
+      where: [[`@category`, `in`, [`electronics`, `books`]] as Condition], // lowercase categories
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -156,7 +156,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@category`],
       from: `items`,
-      where: [`@category`, `not in`, [`Electronics`, `Books`]] as Condition,
+      where: [[`@category`, `not in`, [`Electronics`, `Books`]] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -194,7 +194,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@id`, `in`, [`1`, `2`, `3`]] as Condition, // String IDs instead of numbers
+      where: [[`@id`, `in`, [`1`, `2`, `3`]] as Condition], // String IDs instead of numbers
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -238,8 +238,10 @@ describe(`Query - IN Operator`, () => {
       select: [`@id`, `@name`, `@tags`],
       from: `items`,
       where: [
-        [`@tags`, `in`, [[`electronics`], [`audio`]]] as unknown as Condition,
-      ] as unknown as Condition,
+        [
+          [`@tags`, `in`, [[`electronics`], [`audio`]]] as unknown as Condition,
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -274,7 +276,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@isActive`],
       from: `items`,
-      where: [`@isActive`, `in`, [null, false]] as Condition,
+      where: [[`@isActive`, `in`, [null, false]] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -318,13 +320,15 @@ describe(`Query - IN Operator`, () => {
       select: [`@id`, `@name`, `@metadata`],
       from: `items`,
       where: [
-        `@metadata`,
-        `in`,
         [
-          { value: { brand: `TechBrand`, model: `X15` } },
-          { value: { brand: `OtherBrand`, model: `Y20` } },
-        ],
-      ] as Condition,
+          `@metadata`,
+          `in`,
+          [
+            { value: { brand: `TechBrand`, model: `X15` } },
+            { value: { brand: `OtherBrand`, model: `Y20` } },
+          ],
+        ] as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -359,7 +363,7 @@ describe(`Query - IN Operator`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`],
       from: `items`,
-      where: [`@category`, `in`, []] as Condition, // Empty array
+      where: [[`@category`, `in`, []] as Condition], // Empty array
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -396,10 +400,12 @@ describe(`Query - IN Operator`, () => {
       select: [`@id`, `@name`, `@category`, `@price`],
       from: `items`,
       where: [
-        [`@category`, `in`, [`Electronics`, `Books`]],
-        `and`,
-        [`@price`, `>`, 100],
-      ] as unknown as Condition,
+        [
+          [`@category`, `in`, [`Electronics`, `Books`]],
+          `and`,
+          [`@price`, `>`, 100],
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })

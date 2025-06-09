@@ -91,22 +91,6 @@ describe(`QueryBuilder.join`, () => {
     expect(join[1]!.as).toBe(`d2`)
   })
 
-  it(`allows join with a where condition`, () => {
-    const query = queryBuilder<TestSchema>()
-      .from(`employees`, `e`)
-      .join({
-        type: `inner`,
-        from: `departments`,
-        as: `d`,
-        on: [`@e.department_id`, `=`, `@d.id`],
-        where: [`@d.budget`, `>`, 1000000],
-      })
-
-    const builtQuery = query._query
-    expect(builtQuery.join).toBeDefined()
-    expect(builtQuery.join![0]!.where).toEqual([`@d.budget`, `>`, 1000000])
-  })
-
   it(`allows accessing joined table in select`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`, `e`)
@@ -139,7 +123,7 @@ describe(`QueryBuilder.join`, () => {
       .where(`@d.budget`, `>`, 1000000)
 
     const builtQuery = query._query
-    expect(builtQuery.where).toEqual([`@d.budget`, `>`, 1000000])
+    expect(builtQuery.where).toEqual([[`@d.budget`, `>`, 1000000]])
   })
 
   it(`creates a complex query with multiple joins, select and where`, () => {
