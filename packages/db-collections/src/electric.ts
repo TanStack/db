@@ -4,7 +4,11 @@ import {
   isControlMessage,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
-import type { CollectionConfig, SyncConfig } from "@tanstack/db"
+import type {
+  CollectionConfig,
+  MutationFnParams,
+  SyncConfig,
+} from "@tanstack/db"
 import type {
   ControlMessage,
   Message,
@@ -28,6 +32,30 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
   schema?: CollectionConfig<T>[`schema`]
   getId: CollectionConfig<T>[`getId`]
   sync?: CollectionConfig<T>[`sync`]
+
+  /**
+   * Optional asynchronous handler function called before an insert operation
+   * Must return an object containing a txid string
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to an object with txid
+   */
+  onInsert?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
+
+  /**
+   * Optional asynchronous handler function called before an update operation
+   * Must return an object containing a txid string
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to an object with txid
+   */
+  onUpdate?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
+
+  /**
+   * Optional asynchronous handler function called before a delete operation
+   * Must return an object containing a txid string
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to an object with txid
+   */
+  onDelete?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
 }
 
 function isUpToDateMessage<T extends Row<unknown> = Row>(
@@ -57,20 +85,20 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T>
 ): {
   collectionOptions: CollectionConfig<T>
-  awaitTxId: (txId: number, timeout?: number) => Promise<boolean>
+  awaitTxId: (txId: string, timeout?: number) => Promise<boolean>
 } {
-  const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
+  const seenTxids = new Store<Set<string>>(new Set([`${Math.random()}`]))
   const sync = createElectricSync<T>(config.shapeOptions, {
     seenTxids,
   })
 
   /**
    * Wait for a specific transaction ID to be synced
-   * @param txId The transaction ID to wait for
+   * @param txId The transaction ID to wait for as a string
    * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
    * @returns Promise that resolves when the txId is synced
    */
-  const awaitTxId = async (txId: number, timeout = 30000): Promise<boolean> => {
+  const awaitTxId = async (txId: string, timeout = 30000): Promise<boolean> => {
     const hasTxid = seenTxids.state.has(txId)
     if (hasTxid) return true
 
@@ -90,13 +118,65 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     })
   }
 
+  // Create wrapper handlers for direct persistence operations that handle txid awaiting
+  const wrappedOnInsert = config.onInsert
+    ? async (params: MutationFnParams) => {
+        const handlerResult = (await config.onInsert!(params)) ?? {}
+        const txid = (handlerResult as { txid?: string }).txid
+
+        if (!txid) {
+          throw new Error(
+            `Electric collection onInsert handler must return a txid`
+          )
+        }
+
+        await awaitTxId(txid)
+        return handlerResult
+      }
+    : undefined
+
+  const wrappedOnUpdate = config.onUpdate
+    ? async (params: MutationFnParams) => {
+        const handlerResult = await config.onUpdate!(params)
+        const txid = (handlerResult as { txid?: string }).txid
+
+        if (!txid) {
+          throw new Error(
+            `Electric collection onUpdate handler must return a txid`
+          )
+        }
+
+        await awaitTxId(txid)
+        return handlerResult
+      }
+    : undefined
+
+  const wrappedOnDelete = config.onDelete
+    ? async (params: MutationFnParams) => {
+        const handlerResult = await config.onDelete!(params)
+        const txid = (handlerResult as { txid?: string }).txid
+
+        if (!txid) {
+          throw new Error(
+            `Electric collection onDelete handler must return a txid`
+          )
+        }
+
+        await awaitTxId(txid)
+        return handlerResult
+      }
+    : undefined
+
   // Extract standard Collection config properties
-  const { shapeOptions, ...restConfig } = config
+  const { shapeOptions, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   return {
     collectionOptions: {
       ...restConfig,
       sync,
+      onInsert: wrappedOnInsert,
+      onUpdate: wrappedOnUpdate,
+      onDelete: wrappedOnDelete,
     },
     awaitTxId,
   }
@@ -108,7 +188,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions,
   options: {
-    seenTxids: Store<Set<number>>
+    seenTxids: Store<Set<string>>
   }
 ): SyncConfig<T> {
   const { seenTxids } = options
@@ -136,7 +216,7 @@ function createElectricSync<T extends Row<unknown>>(
       const { begin, write, commit } = params
       const stream = new ShapeStream(shapeOptions)
       let transactionStarted = false
-      let newTxids = new Set<number>()
+      let newTxids = new Set<string>()
 
       stream.subscribe((messages: Array<Message<Row>>) => {
         let hasUpToDate = false
@@ -144,7 +224,7 @@ function createElectricSync<T extends Row<unknown>>(
         for (const message of messages) {
           // Check for txids in the message and add them to our store
           if (hasTxids(message) && message.headers.txids) {
-            message.headers.txids.forEach((txid) => newTxids.add(txid))
+            message.headers.txids.forEach((txid) => newTxids.add(String(txid)))
           }
 
           // Check if the message contains schema information
@@ -183,7 +263,7 @@ function createElectricSync<T extends Row<unknown>>(
           commit()
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set(currentTxids)
-            newTxids.forEach((txid) => clonedSeen.add(txid))
+            newTxids.forEach((txid) => clonedSeen.add(String(txid)))
 
             newTxids = new Set()
             return clonedSeen
