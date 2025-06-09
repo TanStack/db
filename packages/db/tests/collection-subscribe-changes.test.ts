@@ -207,7 +207,11 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn = async ({
+      transaction,
+    }: {
+      transaction: Transaction
+    }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -220,12 +224,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Perform optimistic insert
     const tx = createTransaction({ mutationFn })
-    tx.mutate(() =>
-      collection.insert(
-        { id: 1, value: `optimistic value` },
-        { key: `optimisticItem` }
-      )
-    )
+    tx.mutate(() => collection.insert({ id: 1, value: `optimistic value` }))
 
     // Verify that insert was emitted immediately (optimistically)
     expect(callback).toHaveBeenCalledTimes(1)
@@ -287,7 +286,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Perform optimistic delete
     const deleteTx = createTransaction({ mutationFn })
-    deleteTx.mutate(() => collection.delete(item.id))
+    deleteTx.mutate(() => collection.delete(String(item.id)))
 
     // Verify that delete was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -338,7 +337,11 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn = async ({
+      transaction,
+    }: {
+      transaction: Transaction
+    }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -503,7 +506,11 @@ describe(`Collection.subscribeChanges`, () => {
         },
       },
     })
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn = async ({
+      transaction,
+    }: {
+      transaction: Transaction
+    }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -532,7 +539,6 @@ describe(`Collection.subscribeChanges`, () => {
     )
 
     // Verify only the 3 new items were emitted, not the existing ones
-    console.log(JSON.stringify(callback.mock.calls, null, 2))
     expect(callback).toHaveBeenCalledTimes(1)
     const batchChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string

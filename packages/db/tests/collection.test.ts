@@ -3,11 +3,7 @@ import mitt from "mitt"
 import { z } from "zod"
 import { Collection, SchemaValidationError } from "../src/collection"
 import { createTransaction } from "../src/transactions"
-import type {
-  ChangeMessage,
-  MutationFn,
-  PendingMutation,
-} from "../src/types"
+import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -217,7 +213,10 @@ describe(`Collection`, () => {
     // Check the optimistic operation is there
     const insertKey = `KEY::${collection.id}/1`
     expect(collection.derivedUpserts.has(insertKey)).toBe(true)
-    expect(collection.derivedUpserts.get(insertKey)).toEqual({ id: 1, value: `bar` })
+    expect(collection.derivedUpserts.get(insertKey)).toEqual({
+      id: 1,
+      value: `bar`,
+    })
 
     // Check persist data (moved outside the persist callback)
     // @ts-expect-error possibly undefined is ok in test
@@ -263,10 +262,12 @@ describe(`Collection`, () => {
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
     tx2.mutate(() => collection.insert({ id: 2, value: `baz` }))
-    expect(collection.state.get(collection.generateObjectKey(2, null))).toEqual({
-      id: 2,
-      value: `baz`,
-    })
+    expect(collection.state.get(collection.generateObjectKey(2, null))).toEqual(
+      {
+        id: 2,
+        value: `baz`,
+      }
+    )
     await tx2.isPersisted.promise
 
     // Test bulk insert
@@ -484,7 +485,10 @@ describe(`Collection`, () => {
     // Check the optimistic operation is there
     const insertKey = `KEY::${collection.id}/1`
     expect(collection.derivedUpserts.has(insertKey)).toBe(true)
-    expect(collection.derivedUpserts.get(insertKey)).toEqual({ id: 1, value: `bar` })
+    expect(collection.derivedUpserts.get(insertKey)).toEqual({
+      id: 1,
+      value: `bar`,
+    })
 
     await tx1.isPersisted.promise
 

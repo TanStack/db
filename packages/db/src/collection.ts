@@ -172,18 +172,23 @@ export class SchemaValidationError extends Error {
 
 export class Collection<T extends object = Record<string, unknown>> {
   public transactions: SortedMap<string, Transaction>
-  
+
   // Core state - make public for testing
   public syncedData = new Map<string, T>()
   public syncedMetadata = new Map<string, unknown>()
-  
-  // Optimistic state tracking - make public for testing  
+
+  // Optimistic state tracking - make public for testing
   public derivedUpserts = new Map<string, T>()
   public derivedDeletes = new Set<string>()
 
   // Event system
   private eventListeners = new Set<EventListener<T>>()
   private keyListeners = new Map<string, Set<KeyListener<T>>>()
+
+  // Batching for subscribeChanges
+  private changesBatchListeners = new Set<
+    (changes: Array<ChangeMessage<T>>) => void
+  >()
 
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   private syncedKeys = new Set<string>()
@@ -333,16 +338,21 @@ export class Collection<T extends object = Record<string, unknown>> {
       }
     }
 
-    // Emit events for changes
-    this.emitOptimisticChanges(previousState, previousDeletes)
+    // Collect events for changes
+    const events: Array<CollectionEvent<T>> = []
+    this.collectOptimisticChanges(previousState, previousDeletes, events)
+
+    // Emit all events at once
+    this.emitEvents(events)
   }
 
   /**
-   * Emit events for optimistic changes
+   * Collect events for optimistic changes
    */
-  private emitOptimisticChanges(
+  private collectOptimisticChanges(
     previousUpserts: Map<string, T>,
-    previousDeletes: Set<string>
+    previousDeletes: Set<string>,
+    events: Array<CollectionEvent<T>>
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -360,15 +370,15 @@ export class Collection<T extends object = Record<string, unknown>> {
       )
 
       if (previousValue !== undefined && currentValue === undefined) {
-        this.emitEvent({ type: `delete`, key, value: previousValue })
+        events.push({ type: `delete`, key, value: previousValue })
       } else if (previousValue === undefined && currentValue !== undefined) {
-        this.emitEvent({ type: `insert`, key, value: currentValue })
+        events.push({ type: `insert`, key, value: currentValue })
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
         previousValue !== currentValue
       ) {
-        this.emitEvent({
+        events.push({
           type: `update`,
           key,
           value: currentValue,
@@ -396,7 +406,38 @@ export class Collection<T extends object = Record<string, unknown>> {
   }
 
   /**
-   * Emit an event to all listeners
+   * Emit multiple events at once to all listeners
+   */
+  private emitEvents(events: Array<CollectionEvent<T>>): void {
+    // Emit to individual event listeners
+    for (const event of events) {
+      this.emitEvent(event)
+    }
+
+    // Convert to ChangeMessage format and emit to subscribeChanges listeners
+    if (events.length > 0) {
+      const changeMessages: Array<ChangeMessage<T>> = events.map((event) => {
+        const changeMessage: ChangeMessage<T> = {
+          type: event.type,
+          key: event.key,
+          value: event.value,
+        }
+
+        if (event.previousValue) {
+          ;(changeMessage as any).previousValue = event.previousValue
+        }
+
+        return changeMessage
+      })
+
+      for (const listener of this.changesBatchListeners) {
+        listener([...changeMessages])
+      }
+    }
+  }
+
+  /**
+   * Emit an event to individual listeners (not batched)
    */
   private emitEvent(event: CollectionEvent<T>): void {
     // Emit to general listeners
@@ -454,12 +495,12 @@ export class Collection<T extends object = Record<string, unknown>> {
     if (this.derivedDeletes.has(key)) {
       return undefined
     }
-    
+
     // Check optimistic upserts first
     if (this.derivedUpserts.has(key)) {
       return this.derivedUpserts.get(key)
     }
-    
+
     // Fall back to synced data
     return this.syncedData.get(key)
   }
@@ -472,12 +513,12 @@ export class Collection<T extends object = Record<string, unknown>> {
     if (this.derivedDeletes.has(key)) {
       return false
     }
-    
+
     // Check optimistic upserts first
     if (this.derivedUpserts.has(key)) {
       return true
     }
-    
+
     // Fall back to synced data
     return this.syncedData.has(key)
   }
@@ -548,6 +589,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       )
     ) {
       const changedKeys = new Set<string>()
+      const events: Array<CollectionEvent<T>> = []
 
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
@@ -574,7 +616,7 @@ export class Collection<T extends object = Record<string, unknown>> {
               break
           }
 
-          // Update synced data and emit events
+          // Update synced data and collect events
           const previousValue = this.syncedData.get(operation.key)
 
           switch (operation.type) {
@@ -584,7 +626,7 @@ export class Collection<T extends object = Record<string, unknown>> {
                 !this.derivedDeletes.has(operation.key) &&
                 !this.derivedUpserts.has(operation.key)
               ) {
-                this.emitEvent({
+                events.push({
                   type: `insert`,
                   key: operation.key,
                   value: operation.value,
@@ -602,7 +644,7 @@ export class Collection<T extends object = Record<string, unknown>> {
                 !this.derivedDeletes.has(operation.key) &&
                 !this.derivedUpserts.has(operation.key)
               ) {
-                this.emitEvent({
+                events.push({
                   type: `update`,
                   key: operation.key,
                   value: updatedValue,
@@ -618,7 +660,7 @@ export class Collection<T extends object = Record<string, unknown>> {
                 !this.derivedUpserts.has(operation.key)
               ) {
                 if (previousValue) {
-                  this.emitEvent({
+                  events.push({
                     type: `delete`,
                     key: operation.key,
                     value: previousValue,
@@ -629,6 +671,9 @@ export class Collection<T extends object = Record<string, unknown>> {
           }
         }
       }
+
+      // Emit all events at once
+      this.emitEvents(events)
 
       this.pendingSyncedTransactions = []
 
@@ -1074,7 +1119,19 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    return Array.from(this.values())
+    const array = Array.from(this.values())
+
+    // Currently a query with an orderBy will add a _orderByIndex to the items
+    // so for now we need to sort the array by _orderByIndex if it exists
+    // TODO: in the future it would be much better is the keys are sorted - this
+    // should be done by the query engine.
+    if (array[0] && (array[0] as { _orderByIndex?: number })._orderByIndex) {
+      return (array as Array<{ _orderByIndex: number }>).sort(
+        (a, b) => a._orderByIndex - b._orderByIndex
+      ) as Array<T>
+    }
+
+    return array
   }
 
   /**
@@ -1120,27 +1177,12 @@ export class Collection<T extends object = Record<string, unknown>> {
     // First send the current state as changes
     callback(this.currentStateAsChanges())
 
-    // Convert collection events to change messages
-    const events: Array<ChangeMessage<T>> = []
+    // Add to batched listeners
+    this.changesBatchListeners.add(callback)
 
-    const unsubscribe = this.subscribe((event) => {
-      const changeMessage: ChangeMessage<T> = {
-        type: event.type,
-        key: event.key,
-        value: event.value,
-      }
-
-      if (event.previousValue) {
-        ;(changeMessage as any).previousValue = event.previousValue
-      }
-
-      events.push(changeMessage)
-
-      // Emit immediately (synchronous)
-      callback([changeMessage])
-    })
-
-    return unsubscribe
+    return () => {
+      this.changesBatchListeners.delete(callback)
+    }
   }
 
   /**
