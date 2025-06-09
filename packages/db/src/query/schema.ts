@@ -200,7 +200,7 @@ export type From<TContext extends Context = Context> = InputReference<{
 }>
 
 export type WhereCallback<TContext extends Context = Context> = (
-  context: TContext[`schema`]
+  context: TContext extends { schema: infer S } ? S : any
 ) => boolean
 
 export type Where<TContext extends Context = Context> = Array<
