@@ -1,8 +1,7 @@
-import { cursorTo } from "node:readline"
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { act, renderHook } from "@testing-library/react"
-import { Collection, collectionsStore, createTransaction } from "@tanstack/db"
+import { Collection, createTransaction } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type {
@@ -117,7 +116,6 @@ describe(`Query Collections`, () => {
         q
           .from({ collection })
           .where(`@age`, `>`, 30)
-          .keyBy(`@id`)
           .select(`@id`, `@name`)
           .orderBy({ "@id": `asc` })
       )
@@ -197,7 +195,7 @@ describe(`Query Collections`, () => {
         {
           type: `update`,
           changes: {
-            id: 4,
+            id: `4`,
             name: `Kyle Doe 2`,
           },
         },
@@ -210,17 +208,17 @@ describe(`Query Collections`, () => {
     expect(
       result.current.state.get(`KEY::${result.current.collection.id}/4`)
     ).toEqual({
-      _key: 4,
+      _key: `4`,
       _orderByIndex: 1,
-      id: 4,
+      id: `4`,
       name: `Kyle Doe 2`,
     })
 
     expect(result.current.data.length).toBe(2)
     expect(result.current.data).toContainEqual({
-      _key: 4,
+      _key: `4`,
       _orderByIndex: 1,
-      id: 4,
+      id: `4`,
       name: `Kyle Doe 2`,
     })
 
@@ -263,7 +261,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -284,7 +281,6 @@ describe(`Query Collections`, () => {
             begin()
             ;(changes as Array<PendingMutation>).forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Issue,
               })
@@ -329,7 +325,6 @@ describe(`Query Collections`, () => {
             on: [`@persons.id`, `=`, `@issues.userId`],
           })
           .select(`@issues.id`, `@issues.title`, `@persons.name`)
-          .keyBy(`@id`)
       )
     })
 
@@ -339,27 +334,27 @@ describe(`Query Collections`, () => {
     expect(result.current.state.size).toBe(3)
 
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/1`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[1,1]`)
     ).toEqual({
-      _key: `1`,
+      _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/2`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[2,2]`)
     ).toEqual({
-      _key: `2`,
+      _key: `[2,2]`,
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/3`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[3,1]`)
     ).toEqual({
-      _key: `3`,
+      _key: `[3,1]`,
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -385,9 +380,9 @@ describe(`Query Collections`, () => {
 
     expect(result.current.state.size).toBe(4)
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/4`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[4,2]`)
     ).toEqual({
-      _key: `4`,
+      _key: `[4,2]`,
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -410,9 +405,9 @@ describe(`Query Collections`, () => {
 
     // The updated title should be reflected in the joined results
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/2`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[2,2]`)
     ).toEqual({
-      _key: 2,
+      _key: `[2,2]`,
       id: 2,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -432,7 +427,7 @@ describe(`Query Collections`, () => {
 
     // After deletion, user 3 should no longer have a joined result
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/3`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[3,1]`)
     ).toBeUndefined()
   })
 
@@ -479,7 +474,6 @@ describe(`Query Collections`, () => {
             q
               .from({ collection })
               .where(`@age`, `>`, minAge)
-              .keyBy(`@id`)
               .select(`@id`, `@name`, `@age`),
           [minAge]
         )
@@ -611,7 +605,6 @@ describe(`Query Collections`, () => {
             q
               .from({ collection })
               .where(`@age`, `>`, minAge)
-              .keyBy(`@id`)
               .select(`@id`, `@name`),
           [minAge]
         )
@@ -687,7 +680,6 @@ describe(`Query Collections`, () => {
         q
           .from({ collection })
           .where(`@age`, `>`, 30)
-          .keyBy(`@id`)
           .select(`@id`, `@name`, `@team`)
           .orderBy({ "@id": `asc` })
       )
@@ -699,7 +691,6 @@ describe(`Query Collections`, () => {
         q
           .from({ queryResult: result.current.collection })
           .groupBy(`@team`)
-          .keyBy(`@team`)
           .select(`@team`, { count: { COUNT: `@id` } })
       )
     })
@@ -708,10 +699,10 @@ describe(`Query Collections`, () => {
     expect(groupedResult.current.state.size).toBe(1)
     expect(
       groupedResult.current.state.get(
-        `KEY::${groupedResult.current.collection.id}/team1`
+        `KEY::${groupedResult.current.collection.id}/{"team":"team1"}`
       )
     ).toEqual({
-      _key: `team1`,
+      _key: `{"team":"team1"}`,
       team: `team1`,
       count: 1,
     })
@@ -752,19 +743,19 @@ describe(`Query Collections`, () => {
     expect(groupedResult.current.state.size).toBe(2)
     expect(
       groupedResult.current.state.get(
-        `KEY::${groupedResult.current.collection.id}/team1`
+        `KEY::${groupedResult.current.collection.id}/{"team":"team1"}`
       )
     ).toEqual({
-      _key: `team1`,
+      _key: `{"team":"team1"}`,
       team: `team1`,
       count: 2,
     })
     expect(
       groupedResult.current.state.get(
-        `KEY::${groupedResult.current.collection.id}/team2`
+        `KEY::${groupedResult.current.collection.id}/{"team":"team2"}`
       )
     ).toEqual({
-      _key: `team2`,
+      _key: `{"team":"team2"}`,
       team: `team2`,
       count: 1,
     })
@@ -791,7 +782,6 @@ describe(`Query Collections`, () => {
             begin()
             changes.forEach((change) => {
               write({
-                key: change.key,
                 type: change.type,
                 value: change.changes as Person,
               })
@@ -856,7 +846,6 @@ describe(`Query Collections`, () => {
             on: [`@persons.id`, `=`, `@issues.userId`],
           })
           .select(`@issues.id`, `@issues.title`, `@persons.name`)
-          .keyBy(`@id`)
       )
 
       // Track each render state
@@ -904,28 +893,28 @@ describe(`Query Collections`, () => {
     // Perform optimistic insert of a new issue
     act(() => {
       tx.mutate(() =>
-        issueCollection.insert(
-          {
-            id: `temp-key`,
-            title: `New Issue`,
-            description: `New Issue Description`,
-            userId: `1`,
-          },
-          { key: `temp-key` }
-        )
+        issueCollection.insert({
+          id: `temp-key`,
+          title: `New Issue`,
+          description: `New Issue Description`,
+          userId: `1`,
+        })
       )
     })
 
     // Verify optimistic state is immediately reflected
     expect(result.current.state.size).toBe(4)
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/temp-key`)
+      result.current.state.get(
+        `KEY::${result.current.collection.id}/[temp-key,1]`
+      )
     ).toEqual({
-      _key: `temp-key`,
+      _key: `[temp-key,1]`,
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
+    expect(result.current.state.get(`[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
@@ -941,12 +930,14 @@ describe(`Query Collections`, () => {
     // Verify the temporary key is replaced by the permanent one
     expect(result.current.state.size).toBe(4)
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/temp-key`)
+      result.current.state.get(
+        `KEY::${result.current.collection.id}/[temp-key,1]`
+      )
     ).toBeUndefined()
     expect(
-      result.current.state.get(`KEY::${result.current.collection.id}/4`)
+      result.current.state.get(`KEY::${result.current.collection.id}/[4,1]`)
     ).toEqual({
-      _key: `4`,
+      _key: `[4,1]`,
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,

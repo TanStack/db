@@ -67,8 +67,8 @@ describe(`Query Wildcard Select`, () => {
   beforeEach(() => {
     // Create a new graph for each test
     graph = new D2({ initialFrontier: v([0]) })
-    usersInput = graph.newInput<User>()
-    ordersInput = graph.newInput<Order>()
+    usersInput = graph.newInput<[number, User]>()
+    ordersInput = graph.newInput<[number, Order]>()
     messages = []
   })
 
@@ -84,7 +84,7 @@ describe(`Query Wildcard Select`, () => {
     for (const message of dataMessages) {
       const items = message.data.collection
         .getInner()
-        .map(([item]: [any, number]) => item)
+        .map(([item]: [any, number]) => item[1])
       allItems.push(...items)
     }
     return allItems
@@ -109,7 +109,7 @@ describe(`Query Wildcard Select`, () => {
 
     // Send the sample data to the input
     for (const user of sampleUsers) {
-      usersInput.sendData(v([1]), new MultiSet([[user, 1]]))
+      usersInput.sendData(v([1]), new MultiSet([[[user.id, user], 1]]))
     }
 
     // Close the input by sending a frontier update
@@ -141,12 +141,12 @@ describe(`Query Wildcard Select`, () => {
 
     // Send the sample data to the inputs
     for (const user of sampleUsers) {
-      usersInput.sendData(v([1]), new MultiSet([[user, 1]]))
+      usersInput.sendData(v([1]), new MultiSet([[[user.id, user], 1]]))
     }
     usersInput.sendFrontier(v([2]))
 
     for (const order of sampleOrders) {
-      ordersInput.sendData(v([1]), new MultiSet([[order, 1]]))
+      ordersInput.sendData(v([1]), new MultiSet([[[order.id, order], 1]]))
     }
     ordersInput.sendFrontier(v([2]))
 

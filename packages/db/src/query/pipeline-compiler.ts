@@ -1,12 +1,16 @@
 import { filter, map } from "@electric-sql/d2ts"
-import { evaluateConditionOnNestedRow } from "./evaluators.js"
+import { evaluateConditionOnNamespacedRow } from "./evaluators.js"
 import { processJoinClause } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
-import { processKeyBy } from "./key-by.js"
 import { processSelect } from "./select.js"
-import type { Condition, Query } from "./schema.js"
+import type { Query } from "./schema.js"
 import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type {
+  InputRow,
+  KeyedStream,
+  NamespacedAndKeyedStream,
+} from "../types.js"
 
 /**
  * Compiles a query into a D2 pipeline
@@ -16,7 +20,7 @@ import type { IStreamBuilder } from "@electric-sql/d2ts"
  */
 export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   query: Query,
-  inputs: Record<string, IStreamBuilder<Record<string, unknown>>>
+  inputs: Record<string, KeyedStream>
 ): T {
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
@@ -28,11 +32,6 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
       // Ensure the WITH query has an alias
       if (!withQuery.as) {
         throw new Error(`WITH query must have an "as" property`)
-      }
-
-      // Ensure the WITH query is not keyed
-      if ((withQuery as Query).keyBy !== undefined) {
-        throw new Error(`WITH query cannot have a "keyBy" property`)
       }
 
       // Check if this CTE name already exists in the inputs
@@ -51,14 +50,12 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
       )
 
       // Add the compiled query to the inputs map using its alias
-      allInputs[withQuery.as] = compiledWithQuery as IStreamBuilder<
-        Record<string, unknown>
-      >
+      allInputs[withQuery.as] = compiledWithQuery as KeyedStream
     }
   }
 
   // Create a map of table aliases to inputs
-  const tables: Record<string, IStreamBuilder<Record<string, unknown>>> = {}
+  const tables: Record<string, KeyedStream> = {}
 
   // The main table is the one in the FROM clause
   const mainTableAlias = query.as || query.from
@@ -72,10 +69,14 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   tables[mainTableAlias] = input
 
   // Prepare the initial pipeline with the main table wrapped in its alias
-  let pipeline = input.pipe(
-    map((row: unknown) => {
+  let pipeline: NamespacedAndKeyedStream = input.pipe(
+    map(([key, row]) => {
       // Initialize the record with a nested structure
-      return { [mainTableAlias]: row } as Record<string, unknown>
+      const ret = [key, { [mainTableAlias]: row }] as [
+        string,
+        Record<string, typeof row>,
+      ]
+      return ret
     })
   )
 
@@ -93,10 +94,10 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   // Process the WHERE clause if it exists
   if (query.where) {
     pipeline = pipeline.pipe(
-      filter((nestedRow) => {
-        const result = evaluateConditionOnNestedRow(
-          nestedRow,
-          query.where as Condition,
+      filter(([_key, row]) => {
+        const result = evaluateConditionOnNamespacedRow(
+          row,
+          query.where!,
           mainTableAlias
         )
         return result
@@ -113,12 +114,12 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   // This works similarly to WHERE but is applied after any aggregations
   if (query.having) {
     pipeline = pipeline.pipe(
-      filter((row) => {
+      filter(([_key, row]) => {
         // For HAVING, we're working with the flattened row that contains both
         // the group by keys and the aggregate results directly
-        const result = evaluateConditionOnNestedRow(
-          { [mainTableAlias]: row, ...row } as Record<string, unknown>,
-          query.having as Condition,
+        const result = evaluateConditionOnNamespacedRow(
+          row,
+          query.having!,
           mainTableAlias
         )
         return result
@@ -126,21 +127,9 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
     )
   }
 
-  // Process the SELECT clause - this is where we flatten the structure
-  pipeline = processSelect(pipeline, query, mainTableAlias, allInputs)
-
-  let resultPipeline: IStreamBuilder<
-    Record<string, unknown> | [string | number, Record<string, unknown>]
-  > = pipeline
-
-  // Process keyBy parameter if it exists
-  if (query.keyBy) {
-    resultPipeline = processKeyBy(resultPipeline, query)
-  }
-
   // Process orderBy parameter if it exists
   if (query.orderBy) {
-    resultPipeline = processOrderBy(resultPipeline, query, mainTableAlias)
+    pipeline = processOrderBy(pipeline, query, mainTableAlias)
   } else if (query.limit !== undefined || query.offset !== undefined) {
     // If there's a limit or offset without orderBy, throw an error
     throw new Error(
@@ -148,5 +137,13 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
     )
   }
 
+  // Process the SELECT clause - this is where we flatten the structure
+  const resultPipeline: KeyedStream | NamespacedAndKeyedStream = query.select
+    ? processSelect(pipeline, query, mainTableAlias, allInputs)
+    : !query.join && !query.groupBy
+      ? pipeline.pipe(
+          map(([key, row]) => [key, row[mainTableAlias]] as InputRow)
+        )
+      : pipeline
   return resultPipeline as T
 }

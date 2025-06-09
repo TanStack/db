@@ -112,18 +112,23 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     return this.resultCollection
   }
 
-  private sendChangesToInput(inputKey: string, changes: Array<ChangeMessage>) {
+  private sendChangesToInput(
+    inputKey: string,
+    changes: Array<ChangeMessage>,
+    getId: (item: ChangeMessage[`value`]) => any
+  ) {
     const input = this.inputs[inputKey]!
     const multiSetArray: MultiSetArray<unknown> = []
     for (const change of changes) {
+      const key = getId(change.value)
       if (change.type === `insert`) {
-        multiSetArray.push([change.value, 1])
+        multiSetArray.push([[key, change.value], 1])
       } else if (change.type === `update`) {
-        multiSetArray.push([change.previousValue, -1])
-        multiSetArray.push([change.value, 1])
+        multiSetArray.push([[key, change.previousValue], -1])
+        multiSetArray.push([[key, change.value], 1])
       } else {
         // change.type === `delete`
-        multiSetArray.push([change.value, -1])
+        multiSetArray.push([[key, change.value], -1])
       }
     }
     input.sendData(this.version, new MultiSet(multiSetArray))
@@ -157,7 +162,11 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     batch(() => {
       Object.entries(this.inputCollections).forEach(([key, collection]) => {
-        this.sendChangesToInput(key, collection.currentStateAsChanges())
+        this.sendChangesToInput(
+          key,
+          collection.currentStateAsChanges(),
+          collection.config.getId
+        )
       })
       this.incrementVersion()
       this.sendFrontierToAllInputs()
@@ -168,7 +177,11 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       fn: () => {
         batch(() => {
           Object.entries(this.inputCollections).forEach(([key, collection]) => {
-            this.sendChangesToInput(key, collection.derivedChanges.state)
+            this.sendChangesToInput(
+              key,
+              collection.derivedChanges.state,
+              collection.config.getId
+            )
           })
           this.incrementVersion()
           this.sendFrontierToAllInputs()

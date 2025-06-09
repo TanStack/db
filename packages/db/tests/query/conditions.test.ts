@@ -90,7 +90,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -104,7 +104,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -120,7 +122,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(3) // Laptop, Smartphone, Headphones
 
       // Check that all results have the correct category
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.id).toBeLessThanOrEqual(3)
       })
     })
@@ -133,7 +135,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -147,7 +149,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -163,7 +167,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(2) // Book and Desk
 
       // Check categories
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.category).not.toBe(`Electronics`)
       })
     })
@@ -176,7 +180,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -190,7 +194,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -206,7 +212,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(2) // Laptop and Smartphone
 
       // Check prices
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.price).toBeGreaterThan(500)
       })
     })
@@ -225,7 +231,7 @@ describe(`Query`, () => {
       expect(filteredProducts).toHaveLength(1)
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -239,7 +245,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -253,7 +261,7 @@ describe(`Query`, () => {
 
       // Should only include products with a discount
       expect(results).toHaveLength(1) // Only Smartphone has a discount
-      expect(results[0].id).toBe(2)
+      expect(results[0][1].id).toBe(2)
     })
 
     test(`complex condition with and/or`, () => {
@@ -266,7 +274,7 @@ describe(`Query`, () => {
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -280,7 +288,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -296,7 +306,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(3) // Headphones, Book, and Desk
 
       // Check prices
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.price).toBeLessThan(500)
       })
     })
@@ -316,7 +326,7 @@ describe(`Query`, () => {
       expect(filteredProducts[0]!.name).toBe(`Headphones`)
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -330,7 +340,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -346,8 +358,8 @@ describe(`Query`, () => {
       expect(results).toHaveLength(1) // Only Headphones
 
       // Check that results match both conditions
-      expect(results[0].category).toBe(`Electronics`)
-      expect(results[0].price).toBeLessThan(500)
+      expect(results[0][1].category).toBe(`Electronics`)
+      expect(results[0][1].price).toBeLessThan(500)
     })
 
     test(`composite condition with OR`, () => {
@@ -365,7 +377,7 @@ describe(`Query`, () => {
       expect(filteredProducts).toHaveLength(4)
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -379,7 +391,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -395,7 +409,7 @@ describe(`Query`, () => {
       expect(results).toHaveLength(4)
 
       // Verify that each result matches at least one of the conditions
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         expect(result.category === `Electronics` || result.price < 100).toBe(
           true
         )
@@ -434,7 +448,7 @@ describe(`Query`, () => {
       expect(filteredProducts).toHaveLength(3)
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
-      const input = graph.newInput<Product>()
+      const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
       const messages: Array<Message<any>> = []
@@ -448,7 +462,9 @@ describe(`Query`, () => {
 
       input.sendData(
         v([1, 0]),
-        new MultiSet(sampleProducts.map((product) => [product, 1]))
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
       )
       input.sendFrontier(new Antichain([v([1, 0])]))
 
@@ -465,11 +481,11 @@ describe(`Query`, () => {
       expect(results).toHaveLength(3)
 
       // Verify that specific IDs are included
-      const resultIds = results.map((r) => r.id).sort()
+      const resultIds = results.map(([_key, r]) => r.id).sort()
       expect(resultIds).toEqual([1, 2, 4]) // Laptop, Smartphone, Book
 
       // Verify that each result matches the complex condition
-      results.forEach((result) => {
+      results.forEach(([_key, result]) => {
         const matches =
           (result.category === `Electronics` && result.price > 200) ||
           result.category === `Books`

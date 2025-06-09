@@ -3,14 +3,14 @@ import type { AllowedFunctionName, ConditionOperand } from "./schema.js"
 
 /**
  * Extracts a value from a nested row structure
- * @param nestedRow The nested row structure
+ * @param namespacedRow The nested row structure
  * @param columnRef The column reference (may include table.column format)
  * @param mainTableAlias The main table alias to check first for columns without table reference
  * @param joinedTableAlias The joined table alias to check second for columns without table reference
  * @returns The extracted value or undefined if not found
  */
-export function extractValueFromNestedRow(
-  nestedRow: Record<string, unknown>,
+export function extractValueFromNamespacedRow(
+  namespacedRow: Record<string, unknown>,
   columnRef: string,
   mainTableAlias?: string,
   joinedTableAlias?: string
@@ -20,7 +20,7 @@ export function extractValueFromNestedRow(
     const [tableAlias, colName] = columnRef.split(`.`) as [string, string]
 
     // Get the table data
-    const tableData = nestedRow[tableAlias] as
+    const tableData = namespacedRow[tableAlias] as
       | Record<string, unknown>
       | null
       | undefined
@@ -34,16 +34,19 @@ export function extractValueFromNestedRow(
     return value
   } else {
     // If no table is specified, first try to find in the main table if provided
-    if (mainTableAlias && nestedRow[mainTableAlias]) {
-      const mainTableData = nestedRow[mainTableAlias] as Record<string, unknown>
+    if (mainTableAlias && namespacedRow[mainTableAlias]) {
+      const mainTableData = namespacedRow[mainTableAlias] as Record<
+        string,
+        unknown
+      >
       if (typeof mainTableData === `object` && columnRef in mainTableData) {
         return mainTableData[columnRef]
       }
     }
 
     // Then try the joined table if provided
-    if (joinedTableAlias && nestedRow[joinedTableAlias]) {
-      const joinedTableData = nestedRow[joinedTableAlias] as Record<
+    if (joinedTableAlias && namespacedRow[joinedTableAlias]) {
+      const joinedTableData = namespacedRow[joinedTableAlias] as Record<
         string,
         unknown
       >
@@ -53,7 +56,7 @@ export function extractValueFromNestedRow(
     }
 
     // If not found in main or joined table, try to find the column in any table
-    for (const [_tableAlias, tableData] of Object.entries(nestedRow)) {
+    for (const [_tableAlias, tableData] of Object.entries(namespacedRow)) {
       if (
         tableData &&
         typeof tableData === `object` &&
@@ -69,8 +72,8 @@ export function extractValueFromNestedRow(
 /**
  * Evaluates an operand against a nested row structure
  */
-export function evaluateOperandOnNestedRow(
-  nestedRow: Record<string, unknown>,
+export function evaluateOperandOnNamespacedRow(
+  namespacedRow: Record<string, unknown>,
   operand: ConditionOperand,
   mainTableAlias?: string,
   joinedTableAlias?: string
@@ -78,8 +81,8 @@ export function evaluateOperandOnNestedRow(
   // Handle column references
   if (typeof operand === `string` && operand.startsWith(`@`)) {
     const columnRef = operand.substring(1)
-    return extractValueFromNestedRow(
-      nestedRow,
+    return extractValueFromNamespacedRow(
+      namespacedRow,
       columnRef,
       mainTableAlias,
       joinedTableAlias
@@ -92,8 +95,8 @@ export function evaluateOperandOnNestedRow(
 
     if (typeof colRef === `string`) {
       // First try to extract from nested row structure
-      const nestedValue = extractValueFromNestedRow(
-        nestedRow,
+      const nestedValue = extractValueFromNamespacedRow(
+        namespacedRow,
         colRef,
         mainTableAlias,
         joinedTableAlias
@@ -101,8 +104,8 @@ export function evaluateOperandOnNestedRow(
 
       // If not found in nested structure, check if it's a direct property of the row
       // This is important for HAVING clauses that reference aggregated values
-      if (nestedValue === undefined && colRef in nestedRow) {
-        return nestedRow[colRef]
+      if (nestedValue === undefined && colRef in namespacedRow) {
+        return namespacedRow[colRef]
       }
 
       return nestedValue
@@ -121,15 +124,15 @@ export function evaluateOperandOnNestedRow(
     // If the arguments are a reference or another expression, evaluate them first
     const evaluatedArgs = Array.isArray(args)
       ? args.map((arg) =>
-          evaluateOperandOnNestedRow(
-            nestedRow,
+          evaluateOperandOnNamespacedRow(
+            namespacedRow,
             arg as ConditionOperand,
             mainTableAlias,
             joinedTableAlias
           )
         )
-      : evaluateOperandOnNestedRow(
-          nestedRow,
+      : evaluateOperandOnNamespacedRow(
+          namespacedRow,
           args as ConditionOperand,
           mainTableAlias,
           joinedTableAlias

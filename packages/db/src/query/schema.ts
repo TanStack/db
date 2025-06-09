@@ -169,7 +169,6 @@ export interface JoinClause<TContext extends Context = Context> {
   from: string
   as?: string
   on: Condition<TContext>
-  where?: Condition<TContext>
 }
 
 // The orderBy clause can be a string, an object mapping a column to "asc" or "desc",
@@ -217,7 +216,7 @@ export interface BaseQuery<TContext extends Context = Context> {
   // to expressions. Plain strings starting with "@" denote column references.
   // Plain string "@*" denotes all columns from all tables.
   // Plain string "@table.*" denotes all columns from a specific table.
-  select: Array<Select<TContext>>
+  select?: Array<Select<TContext>>
   as?: As<TContext>
   from: From<TContext>
   join?: Array<JoinClause<TContext>>
@@ -232,7 +231,6 @@ export interface BaseQuery<TContext extends Context = Context> {
 // The top-level query interface.
 export interface Query<TContext extends Context = Context>
   extends BaseQuery<TContext> {
-  keyBy?: PropertyReference<TContext> | Array<PropertyReference<TContext>>
   with?: Array<WithQuery<TContext>>
   collections?: {
     [K: string]: Collection<any>
@@ -245,11 +243,4 @@ export interface Query<TContext extends Context = Context>
 export interface WithQuery<TContext extends Context = Context>
   extends BaseQuery<TContext> {
   as: string
-}
-
-// A keyed query is a query that has a keyBy clause, and so the result is always
-// a keyed stream.
-export interface KeyedQuery<TContext extends Context = Context>
-  extends Query<TContext> {
-  keyBy: PropertyReference<TContext> | Array<PropertyReference<TContext>>
 }
