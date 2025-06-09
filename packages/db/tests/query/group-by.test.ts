@@ -22,12 +22,15 @@ type Context = {
 }
 
 type Result = [
-  {
-    customer_id: number
-    status: string
-    total_amount: number
-    order_count: number
-  },
+  [
+    string,
+    {
+      customer_id: number
+      status: string
+      total_amount: number
+      order_count: number
+    },
+  ],
   number,
 ]
 
@@ -101,7 +104,7 @@ describe(`D2QL GROUP BY`, () => {
 
     // Send the sample data to the input
     for (const order of orders) {
-      ordersInput.sendData(v([1]), new MultiSet([[order, 1]]))
+      ordersInput.sendData(v([1]), new MultiSet([[[order.order_id, order], 1]]))
     }
 
     // Close the input by sending a frontier update
@@ -140,27 +143,36 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected = [
       [
-        {
-          customer_id: 1,
-          total_amount: 300,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":1}`,
+          {
+            customer_id: 1,
+            total_amount: 300,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          total_amount: 450,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":2}`,
+          {
+            customer_id: 2,
+            total_amount: 450,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 3,
-          total_amount: 250,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":3}`,
+          {
+            customer_id: 3,
+            total_amount: 250,
+            order_count: 1,
+          },
+        ],
         1,
       ],
     ]
@@ -190,46 +202,58 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected: Array<Result> = [
       [
-        {
-          customer_id: 1,
-          status: `completed`,
-          total_amount: 300,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":1,"status":"completed"}`,
+          {
+            customer_id: 1,
+            status: `completed`,
+            total_amount: 300,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          status: `completed`,
-          total_amount: 300,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":2,"status":"completed"}`,
+          {
+            customer_id: 2,
+            status: `completed`,
+            total_amount: 300,
+            order_count: 1,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          status: `pending`,
-          total_amount: 150,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":2,"status":"pending"}`,
+          {
+            customer_id: 2,
+            status: `pending`,
+            total_amount: 150,
+            order_count: 1,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 3,
-          status: `pending`,
-          total_amount: 250,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":3,"status":"pending"}`,
+          {
+            customer_id: 3,
+            status: `pending`,
+            total_amount: 250,
+            order_count: 1,
+          },
+        ],
         1,
       ],
     ]
 
     result
-      .sort((a, b) => a[0].customer_id - b[0].customer_id)
-      .sort((a, b) => a[0].status.localeCompare(b[0].status))
+      .sort((a, b) => a[0][1].customer_id - b[0][1].customer_id)
+      .sort((a, b) => a[0][1].status.localeCompare(b[0][1].status))
 
     expect(result).toEqual(expected)
   })
@@ -266,37 +290,46 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected: Array<Result> = [
       [
-        {
-          customer_id: 1,
-          status: `completed`,
-          total_amount: 300,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":1,"status":"completed"}`,
+          {
+            customer_id: 1,
+            status: `completed`,
+            total_amount: 300,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          status: `completed`,
-          total_amount: 300,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":2,"status":"completed"}`,
+          {
+            customer_id: 2,
+            status: `completed`,
+            total_amount: 300,
+            order_count: 1,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 3,
-          status: `pending`,
-          total_amount: 250,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":3,"status":"pending"}`,
+          {
+            customer_id: 3,
+            status: `pending`,
+            total_amount: 250,
+            order_count: 1,
+          },
+        ],
         1,
       ],
     ]
 
     result
-      .sort((a, b) => a[0].customer_id - b[0].customer_id)
-      .sort((a, b) => a[0].status.localeCompare(b[0].status))
+      .sort((a, b) => a[0][1].customer_id - b[0][1].customer_id)
+      .sort((a, b) => a[0][1].status.localeCompare(b[0][1].status))
 
     expect(result).toEqual(expected)
   })
@@ -325,42 +358,51 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected = [
       [
-        {
-          customer_id: 1,
-          total_amount: 300,
-          avg_amount: 150,
-          min_amount: 100,
-          max_amount: 200,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":1}`,
+          {
+            customer_id: 1,
+            total_amount: 300,
+            avg_amount: 150,
+            min_amount: 100,
+            max_amount: 200,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          total_amount: 450,
-          avg_amount: 225,
-          min_amount: 150,
-          max_amount: 300,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":2}`,
+          {
+            customer_id: 2,
+            total_amount: 450,
+            avg_amount: 225,
+            min_amount: 150,
+            max_amount: 300,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 3,
-          total_amount: 250,
-          avg_amount: 250,
-          min_amount: 250,
-          max_amount: 250,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":3}`,
+          {
+            customer_id: 3,
+            total_amount: 250,
+            avg_amount: 250,
+            min_amount: 250,
+            max_amount: 250,
+            order_count: 1,
+          },
+        ],
         1,
       ],
     ]
 
     // Sort by customer_id for consistent comparison
-    result.sort((a, b) => a[0].customer_id - b[0].customer_id)
+    result.sort((a, b) => a[0][1].customer_id - b[0][1].customer_id)
 
     expect(result).toEqual(expected)
   })
@@ -387,25 +429,31 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected = [
       [
-        {
-          customer_id: 1,
-          total_amount: 300,
-          order_count: 2,
-        },
+        [
+          `{"customer_id":1}`,
+          {
+            customer_id: 1,
+            total_amount: 300,
+            order_count: 2,
+          },
+        ],
         1,
       ],
       [
-        {
-          customer_id: 2,
-          total_amount: 300,
-          order_count: 1,
-        },
+        [
+          `{"customer_id":2}`,
+          {
+            customer_id: 2,
+            total_amount: 300,
+            order_count: 1,
+          },
+        ],
         1,
       ],
     ]
 
     // Sort by customer_id for consistent comparison
-    result.sort((a, b) => a[0].customer_id - b[0].customer_id)
+    result.sort((a, b) => a[0][1].customer_id - b[0][1].customer_id)
 
     expect(result).toEqual(expected)
   })
@@ -431,25 +479,31 @@ describe(`D2QL GROUP BY`, () => {
 
     const expected = [
       [
-        {
-          status: `completed`,
-          total_amount: 600,
-          order_count: 3,
-        },
+        [
+          `{"status":"completed"}`,
+          {
+            status: `completed`,
+            total_amount: 600,
+            order_count: 3,
+          },
+        ],
         1,
       ],
       [
-        {
-          status: `pending`,
-          total_amount: 400,
-          order_count: 2,
-        },
+        [
+          `{"status":"pending"}`,
+          {
+            status: `pending`,
+            total_amount: 400,
+            order_count: 2,
+          },
+        ],
         1,
       ],
     ]
 
     // Sort by status for consistent comparison
-    result.sort((a, b) => a[0].status.localeCompare(b[0].status))
+    result.sort((a, b) => a[0][1].status.localeCompare(b[0][1].status))
 
     expect(result).toEqual(expected)
   })

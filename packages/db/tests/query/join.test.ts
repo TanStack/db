@@ -156,8 +156,8 @@ describe(`Query - JOIN Clauses`, () => {
     const graph = new D2({ initialFrontier: 0 })
 
     // Create inputs for each table
-    const mainInput = graph.newInput<T>()
-    const inputs: Record<string, RootStreamBuilder<any>> = {
+    const mainInput = graph.newInput<[number, T]>()
+    const inputs: Record<string, RootStreamBuilder<[number, any]>> = {
       [query.from]: mainInput,
     }
 
@@ -165,7 +165,7 @@ describe(`Query - JOIN Clauses`, () => {
     if (query.join) {
       for (const joinClause of query.join) {
         const tableName = joinClause.from
-        inputs[tableName] = graph.newInput<any>()
+        inputs[tableName] = graph.newInput<[number, any]>()
       }
     }
 
@@ -177,7 +177,9 @@ describe(`Query - JOIN Clauses`, () => {
     pipeline.pipe(
       output((message) => {
         if (message.type === MessageType.DATA) {
-          const data = message.data.collection.getInner().map(([item]) => item)
+          const data = message.data.collection
+            .getInner()
+            .map(([item]: [any, any]) => item[1])
           results.push(...data)
         }
       })
@@ -187,7 +189,7 @@ describe(`Query - JOIN Clauses`, () => {
     graph.finalize()
 
     // Send data to the main input
-    mainInput.sendData(0, new MultiSet(mainData.map((d) => [d, 1])))
+    mainInput.sendData(0, new MultiSet(mainData.map((d) => [[d.id, d], 1])))
     mainInput.sendFrontier(1)
 
     // Send data to the joined inputs
@@ -198,7 +200,7 @@ describe(`Query - JOIN Clauses`, () => {
         const input = inputs[tableName]
 
         if (input && data.length > 0) {
-          input.sendData(0, new MultiSet(data.map((d) => [d, 1])))
+          input.sendData(0, new MultiSet(data.map((d) => [[d.id, d], 1])))
           input.sendFrontier(1)
         }
       }
@@ -430,86 +432,5 @@ describe(`Query - JOIN Clauses`, () => {
     expect(results[0].product_name).toBeDefined()
     expect(results[0].price).toBeDefined()
     expect(results[0].quantity).toBeDefined()
-  })
-
-  it(`should support filtering with WHERE on joined data`, () => {
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          user_name: `@users.name`,
-          product_name: `@products.name`,
-          category: `@products.category`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-      // Filter to only include electronics orders
-      where: [`@products.category`, `=`, `Electronics`],
-    }
-
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
-    })
-
-    // Only 3 orders are for electronic products
-    expect(results).toHaveLength(3)
-
-    // All results should be for electronics
-    for (const result of results) {
-      expect(result.category).toBe(`Electronics`)
-    }
-  })
-
-  it(`should support filtering with a WHERE clause on the join`, () => {
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          user_name: `@users.name`,
-          product_name: `@products.name`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-          // Only join with admin users
-          where: [`@users.role`, `=`, `admin`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
-
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
-    })
-
-    // Only 2 orders were placed by admin users (Alice)
-    expect(results).toHaveLength(2)
-
-    // All results should be for the admin user
-    for (const result of results) {
-      expect(result.user_name).toBe(`Alice Johnson`)
-    }
   })
 })

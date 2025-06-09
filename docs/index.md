@@ -279,7 +279,6 @@ const Todos = () => {
       .where('@completed', '=', false)
       .orderBy({'@created_at': 'asc'})
       .select('@id', '@text')
-      .keyBy('@id')
   )
 
   return <List items={ todos } />
@@ -302,7 +301,6 @@ const Todos = () => {
       })
       .where('@lists.active', '=', true)
       .select(`@todos.id`, `@todos.title`, `@lists.name`)
-      .keyBy('@id')
   )
 
   return <List items={ todos } />
@@ -534,7 +532,6 @@ const Todos = () => {
       })
       .where('@l.active', '=', true)
       .select('@t.id', '@t.text', '@t.status', '@l.name')
-      .keyBy('@id')
   )
 
   // Handle local writes by sending them to your API.

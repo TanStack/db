@@ -3,19 +3,18 @@ import {
   orderBy,
   orderByWithFractionalIndex,
   orderByWithIndex,
-  topK,
-  topKWithFractionalIndex,
-  topKWithIndex,
 } from "@electric-sql/d2ts"
-import { evaluateOperandOnNestedRow } from "./extractors"
+import { evaluateOperandOnNamespacedRow } from "./extractors"
 import { isOrderIndexFunctionCall } from "./utils"
 import type { ConditionOperand, Query } from "./schema"
-import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type {
+  KeyedNamespacedRow,
+  NamespacedAndKeyedStream,
+  NamespacedRow,
+} from "../types"
 
 export function processOrderBy(
-  resultPipeline: IStreamBuilder<
-    Record<string, unknown> | [string | number, Record<string, unknown>]
-  >,
+  resultPipeline: NamespacedAndKeyedStream,
   query: Query,
   mainTableAlias: string
 ) {
@@ -25,7 +24,9 @@ export function processOrderBy(
   let orderIndexAlias = ``
 
   // Scan the SELECT clause for ORDER_INDEX functions
-  for (const item of query.select) {
+  // TODO: Select is going to be optional in future - we will automatically add an
+  // attribute for the index column
+  for (const item of query.select!) {
     if (typeof item === `object`) {
       for (const [alias, expr] of Object.entries(item)) {
         if (typeof expr === `object` && isOrderIndexFunctionCall(expr)) {
@@ -79,17 +80,13 @@ export function processOrderBy(
   }
 
   // Create a value extractor function for the orderBy operator
-  const valueExtractor = (value: unknown) => {
-    const row = value as Record<string, unknown>
-
-    // Create a nested row structure for evaluateOperandOnNestedRow
-    const nestedRow: Record<string, unknown> = { [mainTableAlias]: row }
-
+  // const valueExtractor = ([key, namespacedRow]: [
+  const valueExtractor = (namespacedRow: NamespacedRow) => {
     // For multiple orderBy columns, create a composite key
     if (orderByItems.length > 1) {
       return orderByItems.map((item) => {
-        const val = evaluateOperandOnNestedRow(
-          nestedRow,
+        const val = evaluateOperandOnNamespacedRow(
+          namespacedRow,
           item.operand,
           mainTableAlias
         )
@@ -106,8 +103,8 @@ export function processOrderBy(
     } else if (orderByItems.length === 1) {
       // For a single orderBy column, use the value directly
       const item = orderByItems[0]
-      const val = evaluateOperandOnNestedRow(
-        nestedRow,
+      const val = evaluateOperandOnNamespacedRow(
+        namespacedRow,
         item!.operand,
         mainTableAlias
       )
@@ -187,109 +184,62 @@ export function processOrderBy(
     return (a as any).toString().localeCompare((b as any).toString())
   }
 
-  let topKComparator: (a: unknown, b: unknown) => number
-  if (!query.keyBy) {
-    topKComparator = (a, b) => {
-      const aValue = valueExtractor(a)
-      const bValue = valueExtractor(b)
-      return comparator(aValue, bValue)
-    }
-  }
-
   // Apply the appropriate orderBy operator based on whether an ORDER_INDEX column is requested
   if (hasOrderIndexColumn) {
     if (orderIndexType === `numeric`) {
-      if (query.keyBy) {
-        // Use orderByWithIndex for numeric indices
-        resultPipeline = resultPipeline.pipe(
-          orderByWithIndex(valueExtractor, {
-            limit: query.limit,
-            offset: query.offset,
-            comparator,
-          }),
-          map(([key, [value, index]]) => {
-            // Add the index to the result
-            const result = {
-              ...(value as Record<string, unknown>),
-              [orderIndexAlias]: index,
-            }
-            return [key, result]
-          })
-        )
-      } else {
-        // Use topKWithIndex for numeric indices
-        resultPipeline = resultPipeline.pipe(
-          map((value) => [null, value]),
-          topKWithIndex(topKComparator!, {
-            limit: query.limit,
-            offset: query.offset,
-          }),
-          map(([_, [value, index]]) => {
-            // Add the index to the result
-            return {
-              ...(value as Record<string, unknown>),
-              [orderIndexAlias]: index,
-            }
-          })
-        )
-      }
-    } else {
-      if (query.keyBy) {
-        // Use orderByWithFractionalIndex for fractional indices
-        resultPipeline = resultPipeline.pipe(
-          orderByWithFractionalIndex(valueExtractor, {
-            limit: query.limit,
-            offset: query.offset,
-            comparator,
-          }),
-          map(([key, [value, index]]) => {
-            // Add the index to the result
-            const result = {
-              ...(value as Record<string, unknown>),
-              [orderIndexAlias]: index,
-            }
-            return [key, result]
-          })
-        )
-      } else {
-        // Use topKWithFractionalIndex for fractional indices
-        resultPipeline = resultPipeline.pipe(
-          map((value) => [null, value]),
-          topKWithFractionalIndex(topKComparator!, {
-            limit: query.limit,
-            offset: query.offset,
-          }),
-          map(([_, [value, index]]) => {
-            // Add the index to the result
-            return {
-              ...(value as Record<string, unknown>),
-              [orderIndexAlias]: index,
-            }
-          })
-        )
-      }
-    }
-  } else {
-    if (query.keyBy) {
-      // Use regular orderBy if no index column is requested and but a keyBy is requested
+      // Use orderByWithIndex for numeric indices
       resultPipeline = resultPipeline.pipe(
-        orderBy(valueExtractor, {
+        orderByWithIndex(valueExtractor, {
           limit: query.limit,
           offset: query.offset,
           comparator,
+        }),
+        map(([key, [value, index]]) => {
+          // Add the index to the result
+          // We add this to the main table alias for now
+          // TODO: re are going to need to refactor the whole order by pipeline
+          const result = {
+            ...(value as Record<string, unknown>),
+            [mainTableAlias]: {
+              ...value[mainTableAlias],
+              [orderIndexAlias]: index,
+            },
+          }
+          return [key, result] as KeyedNamespacedRow
         })
       )
     } else {
-      // Use topK if no index column is requested and no keyBy is requested
+      // Use orderByWithFractionalIndex for fractional indices
       resultPipeline = resultPipeline.pipe(
-        map((value) => [null, value]),
-        topK(topKComparator!, {
+        orderByWithFractionalIndex(valueExtractor, {
           limit: query.limit,
           offset: query.offset,
+          comparator,
         }),
-        map(([_, value]) => value as Record<string, unknown>)
+        map(([key, [value, index]]) => {
+          // Add the index to the result
+          // We add this to the main table alias for now
+          // TODO: re are going to need to refactor the whole order by pipeline
+          const result = {
+            ...(value as Record<string, unknown>),
+            [mainTableAlias]: {
+              ...value[mainTableAlias],
+              [orderIndexAlias]: index,
+            },
+          }
+          return [key, result] as KeyedNamespacedRow
+        })
       )
     }
+  } else {
+    // Use regular orderBy if no index column is requested
+    resultPipeline = resultPipeline.pipe(
+      orderBy(valueExtractor, {
+        limit: query.limit,
+        offset: query.offset,
+        comparator,
+      })
+    )
   }
 
   return resultPipeline
