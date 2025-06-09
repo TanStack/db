@@ -648,5 +648,124 @@ describe(`Query`, () => {
         expect(result.price).toBeLessThan(1000)
       })
     })
+
+    test(`select callback function`, () => {
+      const query: Query<Context> = {
+        select: [
+          ({ products }) => ({
+            displayName: `${products.name} (${products.category})`,
+            priceLevel: products.price > 500 ? `expensive` : `affordable`,
+            availability: products.inStock ? `in-stock` : `out-of-stock`,
+          }),
+        ],
+        from: `products`,
+        where: [[`@id`, `<=`, 3]], // First three products
+      }
+
+      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const input = graph.newInput<[number, Product]>()
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
+
+      const messages: Array<Message<any>> = []
+      pipeline.pipe(
+        output((message) => {
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        v([1, 0]),
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
+      )
+      input.sendFrontier(new Antichain([v([1, 0])]))
+
+      graph.run()
+
+      // Check the transformed results
+      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+      const results = dataMessages[0]!.data.collection
+        .getInner()
+        .map(([data]) => data)
+
+      expect(results).toHaveLength(3) // First three products
+
+      // Verify the callback transformation
+      results.forEach(([_key, result]) => {
+        expect(result).toHaveProperty(`displayName`)
+        expect(result).toHaveProperty(`priceLevel`)
+        expect(result).toHaveProperty(`availability`)
+        expect(typeof result.displayName).toBe(`string`)
+        expect([`expensive`, `affordable`]).toContain(result.priceLevel)
+        expect([`in-stock`, `out-of-stock`]).toContain(result.availability)
+      })
+
+      // Check specific transformations for known products
+      const laptop = results.find(([_key, r]) =>
+        r.displayName.includes(`Laptop`)
+      )
+      expect(laptop).toBeDefined()
+      expect(laptop![1].priceLevel).toBe(`expensive`)
+      expect(laptop![1].availability).toBe(`in-stock`)
+    })
+
+    test(`mixed select: traditional columns and callback`, () => {
+      const query: Query<Context> = {
+        select: [
+          `@id`,
+          `@name`,
+          ({ products }) => ({
+            computedField: `${products.name}_computed`,
+            doublePrice: products.price * 2,
+          }),
+        ],
+        from: `products`,
+        where: [[`@id`, `=`, 1]], // Just the laptop
+      }
+
+      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const input = graph.newInput<[number, Product]>()
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
+
+      const messages: Array<Message<any>> = []
+      pipeline.pipe(
+        output((message) => {
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        v([1, 0]),
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
+      )
+      input.sendFrontier(new Antichain([v([1, 0])]))
+
+      graph.run()
+
+      // Check the mixed results
+      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+      const results = dataMessages[0]!.data.collection
+        .getInner()
+        .map(([data]) => data)
+
+      expect(results).toHaveLength(1)
+
+      const [_key, result] = results[0]!
+
+      // Check traditional columns
+      expect(result.id).toBe(1)
+      expect(result.name).toBe(`Laptop`)
+
+      // Check callback-generated fields
+      expect(result.computedField).toBe(`Laptop_computed`)
+      expect(result.doublePrice).toBe(2400) // 1200 * 2
+    })
   })
 })

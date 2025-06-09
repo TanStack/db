@@ -3,7 +3,7 @@ import {
   evaluateOperandOnNamespacedRow,
   extractValueFromNamespacedRow,
 } from "./extractors"
-import type { ConditionOperand, Query } from "./schema"
+import type { ConditionOperand, Query, SelectCallback } from "./schema"
 import type { KeyedStream, NamespacedAndKeyedStream } from "../types"
 
 export function processSelect(
@@ -31,6 +31,29 @@ export function processSelect(
       }
 
       for (const item of query.select) {
+        // Handle callback functions
+        if (typeof item === `function`) {
+          const callback = item as SelectCallback
+          const callbackResult = callback(namespacedRow)
+
+          // If the callback returns an object, merge its properties into the result
+          if (
+            callbackResult &&
+            typeof callbackResult === `object` &&
+            !Array.isArray(callbackResult)
+          ) {
+            Object.assign(result, callbackResult)
+          } else {
+            // If the callback returns a primitive value, we can't merge it
+            // This would need a specific key, but since we don't have one, we'll skip it
+            // In practice, select callbacks should return objects with keys
+            console.warn(
+              `SelectCallback returned a non-object value. SelectCallbacks should return objects with key-value pairs.`
+            )
+          }
+          continue
+        }
+
         if (typeof item === `string`) {
           // Handle wildcard select - all columns from all tables
           if ((item as string) === `@*`) {

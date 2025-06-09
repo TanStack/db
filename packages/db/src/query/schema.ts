@@ -191,6 +191,11 @@ export type Select<TContext extends Context = Context> =
         | AggregateFunctionCall<TContext>
     }
   | WildcardReferenceString<TContext>
+  | SelectCallback<TContext>
+
+export type SelectCallback<TContext extends Context = Context> = (
+  context: TContext extends { schema: infer S } ? S : any
+) => any
 
 export type As<TContext extends Context = Context> = string
 
