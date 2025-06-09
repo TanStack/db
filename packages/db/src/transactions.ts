@@ -165,7 +165,7 @@ export class Transaction {
     const hasCalled = new Set()
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
-        mutation.collection.transactions.setState((state) => state)
+        mutation.collection.onTransactionStateChange()
         mutation.collection.commitPendingTransactions()
         hasCalled.add(mutation.collection.id)
       }

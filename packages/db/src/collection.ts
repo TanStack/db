@@ -1,4 +1,3 @@
-import { Derived, Store, batch } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
@@ -13,11 +12,10 @@ import type {
   Transaction,
 } from "./types"
 
-// Store collections in memory using Tanstack store
-export const collectionsStore = new Store(new Map<string, Collection<any>>())
+// Store collections in memory
+export const collectionsStore = new Map<string, Collection<any>>()
 
 // Map to track loading collections
-
 const loadingCollections = new Map<
   string,
   Promise<Collection<Record<string, unknown>>>
@@ -27,6 +25,22 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
 }
+
+// Event system for collections
+type CollectionEventType = `insert` | `update` | `delete`
+
+interface CollectionEvent<T> {
+  type: CollectionEventType
+  key: string
+  value: T
+  previousValue?: T
+}
+
+type EventListener<T> = (event: CollectionEvent<T>) => void
+type KeyListener<T> = (
+  value: T | undefined,
+  previousValue: T | undefined
+) => void
 
 /**
  * Creates a new Collection instance with the given configuration
@@ -75,13 +89,8 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   }
 
   // If the collection is already fully loaded, return a resolved promise
-  if (
-    collectionsStore.state.has(config.id) &&
-    !loadingCollections.has(config.id)
-  ) {
-    return Promise.resolve(
-      collectionsStore.state.get(config.id)! as Collection<T>
-    )
+  if (collectionsStore.has(config.id) && !loadingCollections.has(config.id)) {
+    return Promise.resolve(collectionsStore.get(config.id)! as Collection<T>)
   }
 
   // If the collection is in the process of loading, return its promise
@@ -90,26 +99,19 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   }
 
   // Create a new collection instance if it doesn't exist
-  if (!collectionsStore.state.has(config.id)) {
-    collectionsStore.setState((prev) => {
-      const next = new Map(prev)
-      if (!config.id) {
-        throw new Error(`The id property is required for preloadCollection`)
-      }
-      next.set(
-        config.id,
-        new Collection<T>({
-          id: config.id,
-          getId: config.getId,
-          sync: config.sync,
-          schema: config.schema,
-        })
-      )
-      return next
-    })
+  if (!collectionsStore.has(config.id)) {
+    collectionsStore.set(
+      config.id,
+      new Collection<T>({
+        id: config.id,
+        getId: config.getId,
+        sync: config.sync,
+        schema: config.schema,
+      })
+    )
   }
 
-  const collection = collectionsStore.state.get(config.id)! as Collection<T>
+  const collection = collectionsStore.get(config.id)! as Collection<T>
 
   // Create a promise that will resolve after the first commit
   let resolveFirstCommit: () => void
@@ -169,13 +171,20 @@ export class SchemaValidationError extends Error {
 }
 
 export class Collection<T extends object = Record<string, unknown>> {
-  public transactions: Store<SortedMap<string, Transaction>>
-  public optimisticOperations: Derived<Array<OptimisticChangeMessage<T>>>
-  public derivedState: Derived<Map<string, T>>
-  public derivedArray: Derived<Array<T>>
-  public derivedChanges: Derived<Array<ChangeMessage<T>>>
-  public syncedData = new Store<Map<string, T>>(new Map())
-  public syncedMetadata = new Store(new Map<string, unknown>())
+  public transactions: SortedMap<string, Transaction>
+  
+  // Core state - make public for testing
+  public syncedData = new Map<string, T>()
+  public syncedMetadata = new Map<string, unknown>()
+  
+  // Optimistic state tracking - make public for testing  
+  public derivedUpserts = new Map<string, T>()
+  public derivedDeletes = new Set<string>()
+
+  // Event system
+  private eventListeners = new Set<EventListener<T>>()
+  private keyListeners = new Map<string, Set<KeyListener<T>>>()
+
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   private syncedKeys = new Set<string>()
   public config: CollectionConfig<T>
@@ -217,155 +226,11 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactions = new Store(
-      new SortedMap<string, Transaction>(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-      )
+    this.transactions = new SortedMap<string, Transaction>(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
     )
 
-    // Copies of live mutations are stored here and removed once the transaction completes.
-    this.optimisticOperations = new Derived({
-      fn: ({ currDepVals: [transactions] }) => {
-        const result = Array.from(transactions.values())
-          .map((transaction) => {
-            const isActive = ![`completed`, `failed`].includes(
-              transaction.state
-            )
-            return transaction.mutations
-              .filter((mutation) => mutation.collection === this)
-              .map((mutation) => {
-                const message: OptimisticChangeMessage<T> = {
-                  type: mutation.type,
-                  key: mutation.key,
-                  value: mutation.modified as T,
-                  isActive,
-                }
-                if (
-                  mutation.metadata !== undefined &&
-                  mutation.metadata !== null
-                ) {
-                  message.metadata = mutation.metadata as Record<
-                    string,
-                    unknown
-                  >
-                }
-                return message
-              })
-          })
-          .flat()
-
-        return result
-      },
-      deps: [this.transactions],
-    })
-    this.optimisticOperations.mount()
-
-    // Combine together synced data & optimistic operations.
-    this.derivedState = new Derived({
-      fn: ({ currDepVals: [syncedData, operations] }) => {
-        const combined = new Map<string, T>(syncedData)
-
-        // Apply the optimistic operations on top of the synced state.
-        for (const operation of operations) {
-          if (operation.isActive) {
-            switch (operation.type) {
-              case `insert`:
-                combined.set(operation.key, operation.value)
-                break
-              case `update`:
-                combined.set(operation.key, operation.value)
-                break
-              case `delete`:
-                combined.delete(operation.key)
-                break
-            }
-          }
-        }
-
-        return combined
-      },
-      deps: [this.syncedData, this.optimisticOperations],
-    })
-
-    // Create a derived array from the map to avoid recalculating it
-    this.derivedArray = new Derived({
-      fn: ({ currDepVals: [stateMap] }) => {
-        // Collections returned by a query that has an orderBy are annotated
-        // with the _orderByIndex field.
-        // This is used to sort the array when it's derived.
-        const array: Array<T & { _orderByIndex?: number }> = Array.from(
-          stateMap.values()
-        )
-        if (array[0] && `_orderByIndex` in array[0]) {
-          ;(array as Array<T & { _orderByIndex: number }>).sort((a, b) => {
-            if (a._orderByIndex === b._orderByIndex) {
-              return 0
-            }
-            return a._orderByIndex < b._orderByIndex ? -1 : 1
-          })
-        }
-        return array
-      },
-      deps: [this.derivedState],
-    })
-    this.derivedArray.mount()
-
-    this.derivedChanges = new Derived({
-      fn: ({
-        currDepVals: [derivedState, optimisticOperations],
-        prevDepVals,
-      }) => {
-        const prevDerivedState = prevDepVals?.[0] ?? new Map<string, T>()
-        const prevOptimisticOperations = prevDepVals?.[1] ?? []
-        const changedKeys = new Set(this.syncedKeys)
-        optimisticOperations
-          .flat()
-          .filter((op) => op.isActive)
-          .forEach((op) => changedKeys.add(op.key))
-        prevOptimisticOperations.flat().forEach((op) => {
-          changedKeys.add(op.key)
-        })
-
-        if (changedKeys.size === 0) {
-          return []
-        }
-
-        const changes: Array<ChangeMessage<T>> = []
-        for (const key of changedKeys) {
-          if (prevDerivedState.has(key) && !derivedState.has(key)) {
-            changes.push({
-              type: `delete`,
-              key,
-              value: prevDerivedState.get(key)!,
-            })
-          } else if (!prevDerivedState.has(key) && derivedState.has(key)) {
-            changes.push({ type: `insert`, key, value: derivedState.get(key)! })
-          } else if (prevDerivedState.has(key) && derivedState.has(key)) {
-            const value = derivedState.get(key)!
-            const previousValue = prevDerivedState.get(key)
-            if (value !== previousValue) {
-              // Comparing objects by reference as records are not mutated
-              changes.push({
-                type: `update`,
-                key,
-                value,
-                previousValue,
-              })
-            }
-          }
-        }
-
-        this.syncedKeys.clear()
-
-        return changes
-      },
-      deps: [this.derivedState, this.optimisticOperations],
-    })
-    this.derivedChanges.mount()
-
     this.config = config
-
-    this.derivedState.mount()
 
     // Start the sync process
     config.sync.sync({
@@ -397,7 +262,7 @@ export class Collection<T extends object = Record<string, unknown>> {
         // Check if an item with this ID already exists when inserting
         if (messageWithoutKey.type === `insert`) {
           if (
-            this.syncedData.state.has(key) &&
+            this.syncedData.has(key) &&
             !pendingTransaction.operations.some(
               (op) => op.key === key && op.type === `delete`
             )
@@ -430,10 +295,246 @@ export class Collection<T extends object = Record<string, unknown>> {
         }
 
         pendingTransaction.committed = true
-
         this.commitPendingTransactions()
       },
     })
+  }
+
+  /**
+   * Recompute optimistic state from active transactions
+   */
+  private recomputeOptimisticState(): void {
+    const previousState = new Map(this.derivedUpserts)
+    const previousDeletes = new Set(this.derivedDeletes)
+
+    // Clear current optimistic state
+    this.derivedUpserts.clear()
+    this.derivedDeletes.clear()
+
+    // Apply active transactions
+    const activeTransactions = Array.from(this.transactions.values())
+    for (const transaction of activeTransactions) {
+      if (![`completed`, `failed`].includes(transaction.state)) {
+        for (const mutation of transaction.mutations) {
+          if (mutation.collection === this) {
+            switch (mutation.type) {
+              case `insert`:
+              case `update`:
+                this.derivedUpserts.set(mutation.key, mutation.modified as T)
+                this.derivedDeletes.delete(mutation.key)
+                break
+              case `delete`:
+                this.derivedUpserts.delete(mutation.key)
+                this.derivedDeletes.add(mutation.key)
+                break
+            }
+          }
+        }
+      }
+    }
+
+    // Emit events for changes
+    this.emitOptimisticChanges(previousState, previousDeletes)
+  }
+
+  /**
+   * Emit events for optimistic changes
+   */
+  private emitOptimisticChanges(
+    previousUpserts: Map<string, T>,
+    previousDeletes: Set<string>
+  ): void {
+    const allKeys = new Set([
+      ...previousUpserts.keys(),
+      ...this.derivedUpserts.keys(),
+      ...previousDeletes,
+      ...this.derivedDeletes,
+    ])
+
+    for (const key of allKeys) {
+      const currentValue = this.get(key)
+      const previousValue = this.getPreviousValue(
+        key,
+        previousUpserts,
+        previousDeletes
+      )
+
+      if (previousValue !== undefined && currentValue === undefined) {
+        this.emitEvent({ type: `delete`, key, value: previousValue })
+      } else if (previousValue === undefined && currentValue !== undefined) {
+        this.emitEvent({ type: `insert`, key, value: currentValue })
+      } else if (
+        previousValue !== undefined &&
+        currentValue !== undefined &&
+        previousValue !== currentValue
+      ) {
+        this.emitEvent({
+          type: `update`,
+          key,
+          value: currentValue,
+          previousValue,
+        })
+      }
+    }
+  }
+
+  /**
+   * Get the previous value for a key given previous optimistic state
+   */
+  private getPreviousValue(
+    key: string,
+    previousUpserts: Map<string, T>,
+    previousDeletes: Set<string>
+  ): T | undefined {
+    if (previousDeletes.has(key)) {
+      return undefined
+    }
+    if (previousUpserts.has(key)) {
+      return previousUpserts.get(key)
+    }
+    return this.syncedData.get(key)
+  }
+
+  /**
+   * Emit an event to all listeners
+   */
+  private emitEvent(event: CollectionEvent<T>): void {
+    // Emit to general listeners
+    for (const listener of this.eventListeners) {
+      listener(event)
+    }
+
+    // Emit to key-specific listeners
+    const keyListeners = this.keyListeners.get(event.key)
+    if (keyListeners) {
+      for (const listener of keyListeners) {
+        listener(
+          event.type === `delete` ? undefined : event.value,
+          event.previousValue
+        )
+      }
+    }
+  }
+
+  /**
+   * Subscribe to collection events
+   */
+  public subscribe(listener: EventListener<T>): () => void {
+    this.eventListeners.add(listener)
+    return () => {
+      this.eventListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Subscribe to changes for a specific key
+   */
+  public subscribeKey(key: string, listener: KeyListener<T>): () => void {
+    if (!this.keyListeners.has(key)) {
+      this.keyListeners.set(key, new Set())
+    }
+    this.keyListeners.get(key)!.add(listener)
+
+    return () => {
+      const listeners = this.keyListeners.get(key)
+      if (listeners) {
+        listeners.delete(listener)
+        if (listeners.size === 0) {
+          this.keyListeners.delete(key)
+        }
+      }
+    }
+  }
+
+  /**
+   * Get the current value for a key (virtual derived state)
+   */
+  public get(key: string): T | undefined {
+    // Check if optimistically deleted
+    if (this.derivedDeletes.has(key)) {
+      return undefined
+    }
+    
+    // Check optimistic upserts first
+    if (this.derivedUpserts.has(key)) {
+      return this.derivedUpserts.get(key)
+    }
+    
+    // Fall back to synced data
+    return this.syncedData.get(key)
+  }
+
+  /**
+   * Check if a key exists in the collection (virtual derived state)
+   */
+  public has(key: string): boolean {
+    // Check if optimistically deleted
+    if (this.derivedDeletes.has(key)) {
+      return false
+    }
+    
+    // Check optimistic upserts first
+    if (this.derivedUpserts.has(key)) {
+      return true
+    }
+    
+    // Fall back to synced data
+    return this.syncedData.has(key)
+  }
+
+  /**
+   * Get the current size of the collection (virtual)
+   */
+  public get size(): number {
+    const syncedSize = this.syncedData.size
+    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
+      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
+    ).length
+    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
+      (key) => !this.syncedData.has(key)
+    ).length
+
+    return syncedSize - deletesFromSynced + upsertsNotInSynced
+  }
+
+  /**
+   * Get all keys (virtual derived state)
+   */
+  public *keys(): IterableIterator<string> {
+    const allKeys = new Set([
+      ...this.syncedData.keys(),
+      ...this.derivedUpserts.keys(),
+    ])
+
+    for (const key of allKeys) {
+      if (!this.derivedDeletes.has(key)) {
+        yield key
+      }
+    }
+  }
+
+  /**
+   * Get all values (virtual derived state)
+   */
+  public *values(): IterableIterator<T> {
+    for (const key of this.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield value
+      }
+    }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *entries(): IterableIterator<[string, T]> {
+    for (const key of this.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield [key, value]
+      }
+    }
   }
 
   /**
@@ -442,51 +543,92 @@ export class Collection<T extends object = Record<string, unknown>> {
    */
   commitPendingTransactions = () => {
     if (
-      !Array.from(this.transactions.state.values()).some(
+      !Array.from(this.transactions.values()).some(
         ({ state }) => state === `persisting`
       )
     ) {
-      batch(() => {
-        for (const transaction of this.pendingSyncedTransactions) {
-          for (const operation of transaction.operations) {
-            this.syncedKeys.add(operation.key)
-            this.syncedMetadata.setState((prevData) => {
-              switch (operation.type) {
-                case `insert`:
-                  prevData.set(operation.key, operation.metadata)
-                  break
-                case `update`:
-                  prevData.set(operation.key, {
-                    ...prevData.get(operation.key)!,
-                    ...operation.metadata,
-                  })
-                  break
-                case `delete`:
-                  prevData.delete(operation.key)
-                  break
+      const changedKeys = new Set<string>()
+
+      for (const transaction of this.pendingSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          changedKeys.add(operation.key)
+          this.syncedKeys.add(operation.key)
+
+          // Update metadata
+          switch (operation.type) {
+            case `insert`:
+              this.syncedMetadata.set(operation.key, operation.metadata)
+              break
+            case `update`:
+              this.syncedMetadata.set(
+                operation.key,
+                Object.assign(
+                  {},
+                  this.syncedMetadata.get(operation.key),
+                  operation.metadata
+                )
+              )
+              break
+            case `delete`:
+              this.syncedMetadata.delete(operation.key)
+              break
+          }
+
+          // Update synced data and emit events
+          const previousValue = this.syncedData.get(operation.key)
+
+          switch (operation.type) {
+            case `insert`:
+              this.syncedData.set(operation.key, operation.value)
+              if (
+                !this.derivedDeletes.has(operation.key) &&
+                !this.derivedUpserts.has(operation.key)
+              ) {
+                this.emitEvent({
+                  type: `insert`,
+                  key: operation.key,
+                  value: operation.value,
+                })
               }
-              return prevData
-            })
-            this.syncedData.setState((prevData) => {
-              switch (operation.type) {
-                case `insert`:
-                  prevData.set(operation.key, operation.value)
-                  break
-                case `update`:
-                  prevData.set(operation.key, {
-                    ...prevData.get(operation.key)!,
-                    ...operation.value,
-                  })
-                  break
-                case `delete`:
-                  prevData.delete(operation.key)
-                  break
+              break
+            case `update`: {
+              const updatedValue = Object.assign(
+                {},
+                this.syncedData.get(operation.key),
+                operation.value
+              )
+              this.syncedData.set(operation.key, updatedValue)
+              if (
+                !this.derivedDeletes.has(operation.key) &&
+                !this.derivedUpserts.has(operation.key)
+              ) {
+                this.emitEvent({
+                  type: `update`,
+                  key: operation.key,
+                  value: updatedValue,
+                  previousValue,
+                })
               }
-              return prevData
-            })
+              break
+            }
+            case `delete`:
+              this.syncedData.delete(operation.key)
+              if (
+                !this.derivedDeletes.has(operation.key) &&
+                !this.derivedUpserts.has(operation.key)
+              ) {
+                if (previousValue) {
+                  this.emitEvent({
+                    type: `delete`,
+                    key: operation.key,
+                    value: previousValue,
+                  })
+                }
+              }
+              break
           }
         }
-      })
+      }
 
       this.pendingSyncedTransactions = []
 
@@ -546,7 +688,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     // For updates, we need to merge with the existing data before validation
     if (type === `update` && key) {
       // Get the existing data for this key
-      const existingData = this.state.get(key)
+      const existingData = this.get(key)
 
       if (
         existingData &&
@@ -555,7 +697,7 @@ export class Collection<T extends object = Record<string, unknown>> {
         typeof existingData === `object`
       ) {
         // Merge the update with the existing data
-        const mergedData = { ...existingData, ...data }
+        const mergedData = Object.assign({}, existingData, data)
 
         // Validate the merged data
         const result = standardSchema[`~standard`].validate(mergedData)
@@ -641,7 +783,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
       // Check if an item with this ID already exists in the collection
       const id = this.config.getId(item)
-      if (this.state.has(this.getKeyFromId(id))) {
+      if (this.has(this.getKeyFromId(id))) {
         throw `Cannot insert document with ID "${id}" because it already exists in the collection`
       }
 
@@ -664,10 +806,8 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     transaction.applyMutations(mutations)
 
-    this.transactions.setState((sortedMap) => {
-      sortedMap.set(transaction.id, transaction)
-      return sortedMap
-    })
+    this.transactions.set(transaction.id, transaction)
+    this.recomputeOptimisticState()
 
     return transaction
   }
@@ -748,7 +888,7 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = idsArray.map((id) => {
-      const item = this.state.get(id)
+      const item = this.get(id)
       if (!item) {
         throw new Error(
           `The id "${id}" was passed to update but an object for this ID was not found in the collection`
@@ -792,7 +932,11 @@ export class Collection<T extends object = Record<string, unknown>> {
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = { ...originalItem, ...validatedUpdatePayload }
+        const modifiedItem = Object.assign(
+          {},
+          originalItem,
+          validatedUpdatePayload
+        )
 
         // Check if the ID of the item is being changed
         const originalItemId = this.config.getId(originalItem)
@@ -811,7 +955,7 @@ export class Collection<T extends object = Record<string, unknown>> {
           changes: validatedUpdatePayload as Record<string, unknown>,
           key: id,
           metadata: config.metadata as unknown,
-          syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<
+          syncMetadata: (this.syncedMetadata.get(id) || {}) as Record<
             string,
             unknown
           >,
@@ -830,10 +974,8 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     transaction.applyMutations(mutations)
 
-    this.transactions.setState((sortedMap) => {
-      sortedMap.set(transaction.id, transaction)
-      return sortedMap
-    })
+    this.transactions.set(transaction.id, transaction)
+    this.recomputeOptimisticState()
 
     return transaction
   }
@@ -867,12 +1009,12 @@ export class Collection<T extends object = Record<string, unknown>> {
     for (const id of idsArray) {
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: (this.state.get(id) || {}) as Record<string, unknown>,
-        modified: (this.state.get(id) || {}) as Record<string, unknown>,
-        changes: (this.state.get(id) || {}) as Record<string, unknown>,
+        original: (this.get(id) || {}) as Record<string, unknown>,
+        modified: (this.get(id) || {}) as Record<string, unknown>,
+        changes: (this.get(id) || {}) as Record<string, unknown>,
         key: id,
         metadata: config?.metadata as unknown,
-        syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<
+        syncMetadata: (this.syncedMetadata.get(id) || {}) as Record<
           string,
           unknown
         >,
@@ -887,10 +1029,8 @@ export class Collection<T extends object = Record<string, unknown>> {
 
     transaction.applyMutations(mutations)
 
-    this.transactions.setState((sortedMap) => {
-      sortedMap.set(transaction.id, transaction)
-      return sortedMap
-    })
+    this.transactions.set(transaction.id, transaction)
+    this.recomputeOptimisticState()
 
     return transaction
   }
@@ -901,7 +1041,11 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
   get state() {
-    return this.derivedState.state
+    const result = new Map<string, T>()
+    for (const [key, value] of this.entries()) {
+      result.set(key, value)
+    }
+    return result
   }
 
   /**
@@ -912,7 +1056,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    */
   stateWhenReady(): Promise<Map<string, T>> {
     // If we already have data or there are no loading collections, resolve immediately
-    if (this.state.size > 0 || this.hasReceivedFirstCommit === true) {
+    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.state)
     }
 
@@ -930,7 +1074,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    return this.derivedArray.state
+    return Array.from(this.values())
   }
 
   /**
@@ -941,7 +1085,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    */
   toArrayWhenReady(): Promise<Array<T>> {
     // If we already have data or there are no loading collections, resolve immediately
-    if (this.toArray.length > 0 || this.hasReceivedFirstCommit === true) {
+    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.toArray)
     }
 
@@ -958,7 +1102,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns An array of changes
    */
   public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    return [...this.state.entries()].map(([key, value]) => ({
+    return Array.from(this.entries()).map(([key, value]) => ({
       type: `insert`,
       key,
       value,
@@ -976,11 +1120,34 @@ export class Collection<T extends object = Record<string, unknown>> {
     // First send the current state as changes
     callback(this.currentStateAsChanges())
 
-    // Then subscribe to changes, this returns an unsubscribe function
-    return this.derivedChanges.subscribe((changes) => {
-      if (changes.currentVal.length > 0) {
-        callback(changes.currentVal)
+    // Convert collection events to change messages
+    const events: Array<ChangeMessage<T>> = []
+
+    const unsubscribe = this.subscribe((event) => {
+      const changeMessage: ChangeMessage<T> = {
+        type: event.type,
+        key: event.key,
+        value: event.value,
       }
+
+      if (event.previousValue) {
+        ;(changeMessage as any).previousValue = event.previousValue
+      }
+
+      events.push(changeMessage)
+
+      // Emit immediately (synchronous)
+      callback([changeMessage])
     })
+
+    return unsubscribe
+  }
+
+  /**
+   * Trigger a recomputation when transactions change
+   * This method should be called by the Transaction class when state changes
+   */
+  public onTransactionStateChange(): void {
+    this.recomputeOptimisticState()
   }
 }

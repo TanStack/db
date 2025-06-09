@@ -532,6 +532,7 @@ describe(`Collection.subscribeChanges`, () => {
     )
 
     // Verify only the 3 new items were emitted, not the existing ones
+    console.log(JSON.stringify(callback.mock.calls, null, 2))
     expect(callback).toHaveBeenCalledTimes(1)
     const batchChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string

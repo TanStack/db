@@ -6,7 +6,6 @@ import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
   MutationFn,
-  OptimisticChangeMessage,
   PendingMutation,
 } from "../src/types"
 
@@ -216,13 +215,9 @@ describe(`Collection`, () => {
     })
 
     // Check the optimistic operation is there
-    const insertOperation: OptimisticChangeMessage = {
-      key: insertedKey,
-      value: { id: 1, value: `bar` },
-      type: `insert`,
-      isActive: true,
-    }
-    expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
+    const insertKey = `KEY::${collection.id}/1`
+    expect(collection.derivedUpserts.has(insertKey)).toBe(true)
+    expect(collection.derivedUpserts.get(insertKey)).toEqual({ id: 1, value: `bar` })
 
     // Check persist data (moved outside the persist callback)
     // @ts-expect-error possibly undefined is ok in test
@@ -255,19 +250,20 @@ describe(`Collection`, () => {
     // optimistic update is gone & synced data & comibned state are all updated.
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.state.values())[0].state
-    ).toMatchInlineSnapshot(`"completed"`)
+      Array.from(collection.transactions.values())[0].mutations[0].changes
+    ).toEqual({
+      id: 1,
+      value: `bar`,
+    })
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
-    expect(
-      collection.optimisticOperations.state.filter((o) => o.isActive)
-    ).toEqual([])
+    expect(collection.derivedUpserts.size).toEqual(0)
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
     tx2.mutate(() => collection.insert({ id: 2, value: `baz` }))
-    expect(collection.state.get(collection.generateObjectKey(2))).toEqual({
+    expect(collection.state.get(collection.generateObjectKey(2, null))).toEqual({
       id: 2,
       value: `baz`,
     })
@@ -479,20 +475,16 @@ describe(`Collection`, () => {
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.state.values())[0].mutations[0].changes
+      Array.from(collection.transactions.values())[0].mutations[0].changes
     ).toEqual({
       id: 1,
       value: `bar`,
     })
 
     // Check the optimistic operation is there
-    const insertOperation: OptimisticChangeMessage = {
-      key: `KEY::${collection.id}/1`,
-      value: { id: 1, value: `bar` },
-      type: `insert`,
-      isActive: true,
-    }
-    expect(collection.optimisticOperations.state[0]).toEqual(insertOperation)
+    const insertKey = `KEY::${collection.id}/1`
+    expect(collection.derivedUpserts.has(insertKey)).toBe(true)
+    expect(collection.derivedUpserts.get(insertKey)).toEqual({ id: 1, value: `bar` })
 
     await tx1.isPersisted.promise
 
