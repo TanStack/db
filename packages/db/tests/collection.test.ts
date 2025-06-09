@@ -635,7 +635,7 @@ describe(`Collection`, () => {
     expect(typeof collection.config.onDelete).toBe(`function`)
   })
 
-  it.only(`should execute operations outside of explicit transactions using handlers`, async () => {
+  it(`should execute operations outside of explicit transactions using handlers`, async () => {
     // Create handler functions that resolve after a short delay to simulate async operations
     const onInsertMock = vi.fn().mockImplementation(async (tx) => {
       // Wait a bit to simulate an async operation
