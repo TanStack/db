@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createTransaction } from "@tanstack/db"
-import { createElectricCollection } from "../src/electric"
-import type { ElectricCollection } from "../src/electric"
+import { Collection, createTransaction } from "@tanstack/db"
+import { electricCollectionOptions } from "../src/electric"
 import type { PendingMutation, Transaction } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
 
@@ -20,7 +19,8 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric Integration`, () => {
-  let collection: ElectricCollection<Row>
+  let collection: Collection<Row>
+  let awaitTxId: (txId: number, timeout?: number) => Promise<boolean>
   let subscriber: (messages: Array<Message<Row>>) => void
 
   beforeEach(() => {
@@ -33,7 +33,7 @@ describe(`Electric Integration`, () => {
     })
 
     // Create collection with Electric configuration
-    collection = createElectricCollection({
+    const config = {
       id: `test`,
       shapeOptions: {
         url: `http://test-url`,
@@ -41,8 +41,13 @@ describe(`Electric Integration`, () => {
           table: `test_table`,
         },
       },
-      getId: (item) => item.id,
-    })
+      getId: (item: Row) => item.id,
+    }
+
+    const { collectionOptions, awaitTxId: txIdFn } =
+      electricCollectionOptions(config)
+    collection = new Collection(collectionOptions)
+    awaitTxId = txIdFn
   })
 
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
@@ -202,7 +207,7 @@ describe(`Electric Integration`, () => {
       ])
 
       // The txid should be tracked and awaitTxId should resolve immediately
-      await expect(collection.awaitTxId(testTxid)).resolves.toBe(true)
+      await expect(awaitTxId(testTxid)).resolves.toBe(true)
     })
 
     it(`should handle multiple txids in a single message`, async () => {
@@ -225,8 +230,8 @@ describe(`Electric Integration`, () => {
       ])
 
       // Both txids should be tracked
-      await expect(collection.awaitTxId(txid1)).resolves.not.toThrow()
-      await expect(collection.awaitTxId(txid2)).resolves.not.toThrow()
+      await expect(awaitTxId(txid1)).resolves.not.toThrow()
+      await expect(awaitTxId(txid2)).resolves.not.toThrow()
     })
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {
@@ -235,7 +240,7 @@ describe(`Electric Integration`, () => {
       const shortTimeout = 100
 
       // Attempt to await a txid that hasn't been seen with a short timeout
-      const promise = collection.awaitTxId(unknownTxid, shortTimeout)
+      const promise = awaitTxId(unknownTxid, shortTimeout)
 
       // The promise should reject with a timeout error
       await expect(promise).rejects.toThrow(
@@ -247,7 +252,7 @@ describe(`Electric Integration`, () => {
       const laterTxid = 1000
 
       // Start waiting for a txid that hasn't arrived yet
-      const promise = collection.awaitTxId(laterTxid, 1000)
+      const promise = awaitTxId(laterTxid, 1000)
 
       // Send the txid after a short delay
       setTimeout(() => {
@@ -337,7 +342,7 @@ describe(`Electric Integration`, () => {
           }
 
           // Start waiting for the txid
-          const promise = collection.awaitTxId(txid, 1000)
+          const promise = awaitTxId(txid, 1000)
 
           // Simulate the server sending sync messages after a delay
           setTimeout(() => {
@@ -354,7 +359,7 @@ describe(`Electric Integration`, () => {
       const tx1 = createTransaction({ mutationFn: testMutationFn })
 
       let transaction = tx1.mutate(() =>
-        collection.insert({ id: 1, name: `Test item 1` }, { key: `item1` })
+        collection.insert({ id: 1, name: `Test item 1` })
       )
 
       await transaction.isPersisted.promise

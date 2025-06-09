@@ -1,10 +1,5 @@
 export {
-  ElectricCollection,
-  createElectricCollection,
+  electricCollectionOptions,
   type ElectricCollectionConfig,
 } from "./electric"
-export {
-  QueryCollection,
-  createQueryCollection,
-  type QueryCollectionConfig,
-} from "./query"
+export { queryCollectionOptions, type QueryCollectionConfig } from "./query"

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
-import { createQueryCollection } from "../src/query"
+import { Collection } from "@tanstack/db"
+import { queryCollectionOptions } from "../src/query"
 import type { QueryCollectionConfig } from "../src/query"
 
 interface TestItem {
@@ -52,7 +53,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const collection = createQueryCollection(config)
+    const { collectionOptions } = queryCollectionOptions(config)
+    const collection = new Collection(collectionOptions)
 
     // Wait for the query to complete and collection to update
     await vi.waitFor(
@@ -111,7 +113,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const collection = createQueryCollection(config)
+    const { collectionOptions, refetch } = queryCollectionOptions(config)
+    const collection = new Collection(collectionOptions)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -141,7 +144,7 @@ describe(`QueryCollection`, () => {
     ]
 
     // Refetch the query.
-    await collection.refetch()
+    await refetch()
 
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Check for update, addition, and removal
@@ -160,7 +163,7 @@ describe(`QueryCollection`, () => {
     currentItems = [...currentItems, item4]
 
     // Refetch the query to trigger a refetch.
-    await collection.refetch()
+    await refetch()
 
     // Verify expected.
     expect(queryFn).toHaveBeenCalledTimes(3)
@@ -178,13 +181,12 @@ describe(`QueryCollection`, () => {
       .spyOn(console, `error`)
       .mockImplementation(() => {})
 
-    // First call succeeds, second call fails
     const queryFn = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
       .mockRejectedValueOnce(testError)
 
-    const collection = createQueryCollection({
+    const { collectionOptions, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
@@ -192,6 +194,7 @@ describe(`QueryCollection`, () => {
       getId,
       retry: 0, // Disable retries for this test case
     })
+    const collection = new Collection(collectionOptions)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -203,7 +206,7 @@ describe(`QueryCollection`, () => {
     })
 
     // Trigger an error by refetching
-    await collection.refetch()
+    await refetch()
 
     // Wait for the error to be logged
     expect(queryFn).toHaveBeenCalledTimes(2)
@@ -233,13 +236,14 @@ describe(`QueryCollection`, () => {
     // Mock queryFn to return invalid data (not an array of objects)
     const queryFn = vi.fn().mockResolvedValue(`not an array` as any)
 
-    const collection = createQueryCollection({
+    const { collectionOptions } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
+    const collection = new Collection(collectionOptions)
 
     // Wait for the query to execute
     await vi.waitFor(() => {
@@ -280,13 +284,14 @@ describe(`QueryCollection`, () => {
     // Spy on console.log to detect when commits happen
     const consoleSpy = vi.spyOn(console, `log`)
 
-    const collection = createQueryCollection({
+    const { collectionOptions, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
+    const collection = new Collection(collectionOptions)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -302,7 +307,7 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockClear()
 
     // Trigger first refetch - should not cause an update due to shallow equality
-    await collection.refetch()
+    await refetch()
 
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Verify refetch was logged
@@ -325,7 +330,7 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockClear()
 
     // Trigger second refetch - should cause an update due to actual data change
-    await collection.refetch()
+    await refetch()
 
     expect(queryFn).toHaveBeenCalledTimes(3)
     // Verify refetch was logged
@@ -361,13 +366,14 @@ describe(`QueryCollection`, () => {
     // Create a spy for the getId function
     const getIdSpy = vi.fn((item: any) => item.customId)
 
-    const collection = createQueryCollection({
+    const { collectionOptions, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId: getIdSpy,
     })
+    const collection = new Collection(collectionOptions)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -403,7 +409,7 @@ describe(`QueryCollection`, () => {
     queryFn.mockResolvedValueOnce(updatedItems)
 
     // Trigger a refetch
-    await collection.refetch()
+    await refetch()
 
     expect(queryFn).toHaveBeenCalledTimes(2)
     expect(collection.state.size).toBe(updatedItems.length)
