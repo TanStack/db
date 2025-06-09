@@ -195,7 +195,7 @@ describe(`Query Collections`, () => {
         {
           type: `update`,
           changes: {
-            id: 4,
+            id: `4`,
             name: `Kyle Doe 2`,
           },
         },
@@ -210,7 +210,7 @@ describe(`Query Collections`, () => {
     ).toEqual({
       _key: `4`,
       _orderByIndex: 1,
-      id: 4,
+      id: `4`,
       name: `Kyle Doe 2`,
     })
 
@@ -218,7 +218,7 @@ describe(`Query Collections`, () => {
     expect(result.current.data).toContainEqual({
       _key: `4`,
       _orderByIndex: 1,
-      id: 4,
+      id: `4`,
       name: `Kyle Doe 2`,
     })
 

@@ -112,16 +112,15 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     return this.resultCollection
   }
 
-  private sendChangesToInput(inputKey: string, changes: Array<ChangeMessage>) {
+  private sendChangesToInput(
+    inputKey: string,
+    changes: Array<ChangeMessage>,
+    getId: (item: ChangeMessage[`value`]) => any
+  ) {
     const input = this.inputs[inputKey]!
     const multiSetArray: MultiSetArray<unknown> = []
     for (const change of changes) {
-      // We remove the KEY::{UUID} prefix from the key used as the key for the D2
-      // pipeline otherwise it will accumulate on subsequent queries and we end up with
-      // long and complex keys
-      const key = change.key.startsWith(`KEY::`)
-        ? change.key.slice(42)
-        : change.key
+      const key = getId(change.value)
       if (change.type === `insert`) {
         multiSetArray.push([[key, change.value], 1])
       } else if (change.type === `update`) {
@@ -163,7 +162,11 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     batch(() => {
       Object.entries(this.inputCollections).forEach(([key, collection]) => {
-        this.sendChangesToInput(key, collection.currentStateAsChanges())
+        this.sendChangesToInput(
+          key,
+          collection.currentStateAsChanges(),
+          collection.config.getId
+        )
       })
       this.incrementVersion()
       this.sendFrontierToAllInputs()
@@ -174,7 +177,11 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       fn: () => {
         batch(() => {
           Object.entries(this.inputCollections).forEach(([key, collection]) => {
-            this.sendChangesToInput(key, collection.derivedChanges.state)
+            this.sendChangesToInput(
+              key,
+              collection.derivedChanges.state,
+              collection.config.getId
+            )
           })
           this.incrementVersion()
           this.sendFrontierToAllInputs()

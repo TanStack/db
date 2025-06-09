@@ -162,7 +162,7 @@ describe(`Query Collections`, () => {
 
     expect(result.state.size).toBe(2)
     expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
-      _key: `4`,
+      _key: 4,
       id: 4,
       name: `Kyle Doe 2`,
     })
