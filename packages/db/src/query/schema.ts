@@ -199,13 +199,18 @@ export type From<TContext extends Context = Context> = InputReference<{
   schema: TContext[`baseSchema`]
 }>
 
-export type Where<TContext extends Context = Context> = Condition<TContext>
+export type WhereCallback<TContext extends Context = Context> = (
+  context: TContext["schema"]
+) => boolean
+
+export type Where<TContext extends Context = Context> = Array<Condition<TContext> | WhereCallback<TContext>>
+
+// Having is the same implementation as a where clause, its just run after the group by
+export type Having<TContext extends Context = Context> = Where<TContext>
 
 export type GroupBy<TContext extends Context = Context> =
   | PropertyReference<TContext>
   | Array<PropertyReference<TContext>>
-
-export type Having<TContext extends Context = Context> = Condition<TContext>
 
 export type Limit<TContext extends Context = Context> = number
 
@@ -220,9 +225,9 @@ export interface BaseQuery<TContext extends Context = Context> {
   as?: As<TContext>
   from: From<TContext>
   join?: Array<JoinClause<TContext>>
-  where?: Condition<TContext>
+  where?: Where<TContext>
   groupBy?: GroupBy<TContext>
-  having?: Condition<TContext>
+  having?: Having<TContext>
   orderBy?: OrderBy<TContext>
   limit?: Limit<TContext>
   offset?: Offset<TContext>

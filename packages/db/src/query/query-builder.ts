@@ -10,6 +10,7 @@ import type {
   OrderBy,
   Query,
   Select,
+  WhereCallback,
   WithQuery,
 } from "./schema.js"
 import type {
@@ -297,16 +298,22 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   where(condition: Condition<TContext>): QueryBuilder<TContext>
 
   /**
+   * Add a where clause with a callback function.
+   */
+  where(callback: WhereCallback<TContext>): QueryBuilder<TContext>
+
+  /**
    * Add a where clause to filter the results.
    * Can be called multiple times to add AND conditions.
+   * Also supports callback functions that receive the row context.
    *
-   * @param leftOrCondition The left operand or complete condition
+   * @param leftOrConditionOrCallback The left operand, complete condition, or callback function
    * @param operator Optional comparison operator
    * @param right Optional right operand
    * @returns A new QueryBuilder with the where clause added
    */
   where(
-    leftOrCondition: any,
+    leftOrConditionOrCallback: any,
     operator?: any,
     right?: any
   ): QueryBuilder<TContext> {
@@ -317,22 +324,23 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
 
     let condition: any
 
-    // Determine if this is a complete condition or individual parts
-    if (operator !== undefined && right !== undefined) {
+    // Determine if this is a callback, complete condition, or individual parts
+    if (typeof leftOrConditionOrCallback === 'function') {
+      // It's a callback function
+      condition = leftOrConditionOrCallback
+    } else if (operator !== undefined && right !== undefined) {
       // Create a condition from parts
-      condition = [leftOrCondition, operator, right]
+      condition = [leftOrConditionOrCallback, operator, right]
     } else {
       // Use the provided condition directly
-      condition = leftOrCondition
+      condition = leftOrConditionOrCallback
     }
 
+    // Where is always an array, so initialize or append
     if (!newBuilder.query.where) {
-      newBuilder.query.where = condition
+      newBuilder.query.where = [condition]
     } else {
-      // Create a composite condition with AND
-      // Use any to bypass type checking issues
-      const andArray: any = [newBuilder.query.where, `and`, condition]
-      newBuilder.query.where = andArray
+      newBuilder.query.where = [...newBuilder.query.where, condition]
     }
 
     return newBuilder as unknown as QueryBuilder<TContext>
@@ -355,16 +363,23 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   having(condition: Condition<TContext>): QueryBuilder<TContext>
 
   /**
+   * Add a having clause with a callback function.
+   * For filtering results after they have been grouped.
+   */
+  having(callback: WhereCallback<TContext>): QueryBuilder<TContext>
+
+  /**
    * Add a having clause to filter the grouped results.
    * Can be called multiple times to add AND conditions.
+   * Also supports callback functions that receive the row context.
    *
-   * @param leftOrCondition The left operand or complete condition
+   * @param leftOrConditionOrCallback The left operand, complete condition, or callback function
    * @param operator Optional comparison operator
    * @param right Optional right operand
    * @returns A new QueryBuilder with the having clause added
    */
   having(
-    leftOrCondition: any,
+    leftOrConditionOrCallback: any,
     operator?: any,
     right?: any
   ): QueryBuilder<TContext> {
@@ -374,22 +389,23 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
 
     let condition: any
 
-    // Determine if this is a complete condition or individual parts
-    if (operator !== undefined && right !== undefined) {
+    // Determine if this is a callback, complete condition, or individual parts
+    if (typeof leftOrConditionOrCallback === 'function') {
+      // It's a callback function
+      condition = leftOrConditionOrCallback
+    } else if (operator !== undefined && right !== undefined) {
       // Create a condition from parts
-      condition = [leftOrCondition, operator, right]
+      condition = [leftOrConditionOrCallback, operator, right]
     } else {
       // Use the provided condition directly
-      condition = leftOrCondition
+      condition = leftOrConditionOrCallback
     }
 
+    // Having is always an array, so initialize or append
     if (!newBuilder.query.having) {
-      newBuilder.query.having = condition
+      newBuilder.query.having = [condition]
     } else {
-      // Create a composite condition with AND
-      // Use any to bypass type checking issues
-      const andArray: any = [newBuilder.query.having, `and`, condition]
-      newBuilder.query.having = andArray
+      newBuilder.query.having = [...newBuilder.query.having, condition]
     }
 
     return newBuilder as QueryBuilder<TContext>

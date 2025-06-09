@@ -6,8 +6,35 @@ import type {
   ConditionOperand,
   LogicalOperator,
   SimpleCondition,
+  Where,
+  WhereCallback,
 } from "./schema.js"
 import type { NamespacedRow } from "../types.js"
+
+/**
+ * Evaluates a Where clause (which is always an array of conditions and/or callbacks) against a nested row structure
+ */
+export function evaluateWhereOnNamespacedRow(
+  namespacedRow: NamespacedRow,
+  where: Where,
+  mainTableAlias?: string,
+  joinedTableAlias?: string
+): boolean {
+  // Where is always an array of conditions and/or callbacks
+  // Evaluate all items and combine with AND logic
+  return where.every(item => {
+    if (typeof item === 'function') {
+      return (item as WhereCallback)(namespacedRow)
+    } else {
+      return evaluateConditionOnNamespacedRow(
+        namespacedRow,
+        item as Condition,
+        mainTableAlias,
+        joinedTableAlias
+      )
+    }
+  })
+}
 
 /**
  * Evaluates a condition against a nested row structure
