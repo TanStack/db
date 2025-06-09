@@ -58,7 +58,7 @@ describe(`Query`, () => {
           {
             select: [`@id`, `@name`, `@age`],
             from: `users`,
-            where: [`@age`, `>`, 20],
+            where: [[`@age`, `>`, 20]],
             as: `adult_users`,
           },
         ],
@@ -117,13 +117,13 @@ describe(`Query`, () => {
           {
             select: [`@id`, `@name`, `@age`],
             from: `users`,
-            where: [`@active`, `=`, true],
+            where: [[`@active`, `=`, true]],
             as: `active_users`,
           },
           {
             select: [`@id`, `@name`, `@age`],
             from: `active_users`,
-            where: [`@age`, `>`, 20],
+            where: [[`@age`, `>`, 20]],
             as: `active_adult_users`,
           },
         ],
@@ -197,13 +197,13 @@ describe(`Query`, () => {
           {
             select: [`@id`, `@name`],
             from: `users`,
-            where: [`@age`, `>`, 20],
+            where: [[`@age`, `>`, 20]],
             as: `filtered_users`,
           },
           {
             select: [`@id`, `@name`],
             from: `users`,
-            where: [`@active`, `=`, true],
+            where: [[`@active`, `=`, true]],
             as: `filtered_users`, // Duplicate name
           },
         ],
@@ -227,7 +227,7 @@ describe(`Query`, () => {
           {
             select: [`@id`, `@name`],
             from: `users`,
-            where: [`@age`, `>`, 20],
+            where: [[`@age`, `>`, 20]],
             as: `adult_users`,
           },
         ],

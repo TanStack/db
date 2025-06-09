@@ -277,7 +277,7 @@ describe(`D2QL GROUP BY`, () => {
       ],
       from: `orders`,
       groupBy: [`@customer_id`, `@status`],
-      having: [{ col: `total_amount` }, `>`, 200],
+      having: [[{ col: `total_amount` }, `>`, 200]],
     }
 
     const messagesRet = runQuery(query)
@@ -415,7 +415,7 @@ describe(`D2QL GROUP BY`, () => {
         { order_count: { COUNT: `@order_id` } as any },
       ],
       from: `orders`,
-      where: [`@status`, `=`, `completed`],
+      where: [[`@status`, `=`, `completed`]],
       groupBy: [`@customer_id`],
     }
 

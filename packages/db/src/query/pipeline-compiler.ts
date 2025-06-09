@@ -1,5 +1,5 @@
 import { filter, map } from "@electric-sql/d2ts"
-import { evaluateConditionOnNamespacedRow } from "./evaluators.js"
+import { evaluateWhereOnNamespacedRow } from "./evaluators.js"
 import { processJoinClause } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
@@ -95,7 +95,7 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   if (query.where) {
     pipeline = pipeline.pipe(
       filter(([_key, row]) => {
-        const result = evaluateConditionOnNamespacedRow(
+        const result = evaluateWhereOnNamespacedRow(
           row,
           query.where!,
           mainTableAlias
@@ -117,7 +117,7 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
       filter(([_key, row]) => {
         // For HAVING, we're working with the flattened row that contains both
         // the group by keys and the aggregate results directly
-        const result = evaluateConditionOnNamespacedRow(
+        const result = evaluateWhereOnNamespacedRow(
           row,
           query.having!,
           mainTableAlias

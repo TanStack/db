@@ -220,7 +220,7 @@ describe(`Query Function Integration`, () => {
           },
         ],
         from: `users`,
-        where: [`@active`, `=`, false],
+        where: [[`@active`, `=`, false]],
       }
 
       const results = runQuery(query)
@@ -295,7 +295,7 @@ describe(`Query Function Integration`, () => {
           },
         ],
         from: `users`,
-        where: [`@active`, `=`, true],
+        where: [[`@active`, `=`, true]],
       }
 
       const results = runQuery(query)
@@ -321,7 +321,7 @@ describe(`Query Function Integration`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`],
         from: `users`,
-        where: [{ UPPER: `@name` }, `=`, `BOB`],
+        where: [[{ UPPER: `@name` }, `=`, `BOB`]],
       }
 
       const results = runQuery(query)
@@ -335,7 +335,7 @@ describe(`Query Function Integration`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`],
         from: `users`,
-        where: [{ LENGTH: `@name` }, `>`, 5],
+        where: [[{ LENGTH: `@name` }, `>`, 5]],
       }
 
       const results = runQuery(query)
@@ -349,7 +349,7 @@ describe(`Query Function Integration`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`],
         from: `users`,
-        where: [{ JSON_EXTRACT: [`@preferences`, `theme`] }, `=`, `dark`],
+        where: [[{ JSON_EXTRACT: [`@preferences`, `theme`] }, `=`, `dark`]],
       }
 
       const results = runQuery(query)
@@ -363,13 +363,15 @@ describe(`Query Function Integration`, () => {
         select: [`@id`, `@name`, `@email`],
         from: `users`,
         where: [
-          { LENGTH: `@name` },
-          `<`,
-          6,
-          `and`,
-          { JSON_EXTRACT_PATH: [`@preferences`, `notifications`] },
-          `=`,
-          true,
+          [
+            { LENGTH: `@name` },
+            `<`,
+            6,
+            `and`,
+            { JSON_EXTRACT_PATH: [`@preferences`, `notifications`] },
+            `=`,
+            true,
+          ],
         ],
       }
 

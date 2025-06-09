@@ -151,7 +151,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`, `@age`],
         from: `users`,
-        where: [`@age`, `>`, 20],
+        where: [[`@age`, `>`, 20]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -198,7 +198,7 @@ describe(`Query`, () => {
       const query: Query<Context> = {
         select: [`@id`, `@name`],
         from: `users`,
-        where: [`@age`, `>`, 20, `and`, `@active`, `=`, true],
+        where: [[`@age`, `>`, 20, `and`, `@active`, `=`, true]],
       }
 
       const graph = new D2({ initialFrontier: v([0, 0]) })

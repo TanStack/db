@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { queryBuilder } from "../../../src/query/query-builder.js"
+import type { SimpleCondition } from "../../../src/query/schema.js"
 import type { Input, Schema } from "../../../src/query/types.js"
 
 // Test schema
@@ -31,7 +32,7 @@ describe(`QueryBuilder.having`, () => {
       .having(`@salary`, `>`, 50000)
 
     const builtQuery = query._query
-    expect(builtQuery.having).toEqual([`@salary`, `>`, 50000])
+    expect(builtQuery.having).toEqual([[`@salary`, `>`, 50000]])
   })
 
   it(`supports various comparison operators`, () => {
@@ -55,7 +56,7 @@ describe(`QueryBuilder.having`, () => {
 
       const builtQuery = query._query
       expect(builtQuery.having).toBeDefined()
-      const having = builtQuery.having!
+      const having = builtQuery.having![0]! as SimpleCondition
       expect(having[1]).toBe(op)
     }
   })
@@ -72,7 +73,7 @@ describe(`QueryBuilder.having`, () => {
       .having(`@e.salary`, `>`, `@d.budget`)
 
     const builtQuery = query._query
-    expect(builtQuery.having).toEqual([`@e.salary`, `>`, `@d.budget`])
+    expect(builtQuery.having).toEqual([[`@e.salary`, `>`, `@d.budget`]])
   })
 
   it(`allows comparing literals to property references`, () => {
@@ -81,10 +82,10 @@ describe(`QueryBuilder.having`, () => {
       .having(50000, `<`, `@salary`)
 
     const builtQuery = query._query
-    expect(builtQuery.having).toEqual([50000, `<`, `@salary`])
+    expect(builtQuery.having).toEqual([[50000, `<`, `@salary`]])
   })
 
-  it(`combines multiple having calls with AND`, () => {
+  it(`combines multiple having calls`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`)
       .having(`@salary`, `>`, 50000)
@@ -93,7 +94,6 @@ describe(`QueryBuilder.having`, () => {
     const builtQuery = query._query
     expect(builtQuery.having).toEqual([
       [`@salary`, `>`, 50000],
-      `and`,
       [`@active`, `=`, true],
     ])
   })
@@ -104,7 +104,51 @@ describe(`QueryBuilder.having`, () => {
     const query = queryBuilder<TestSchema>().from(`employees`).having(condition)
 
     const builtQuery = query._query
-    expect(builtQuery.having).toEqual(condition)
+    expect(builtQuery.having).toEqual([condition])
+  })
+
+  it(`supports callback functions`, () => {
+    const callback = ({ employees }: any) => {
+      // For HAVING clauses, we might be working with aggregated data
+      return employees.salary > 60000
+    }
+
+    const query = queryBuilder<TestSchema>().from(`employees`).having(callback)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toEqual([callback])
+    expect(typeof builtQuery.having![0]).toBe(`function`)
+  })
+
+  it(`combines callback with traditional conditions`, () => {
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .having(`@salary`, `>`, 50000)
+      .having(({ employees }) => employees.salary > 100000)
+      .having(`@active`, `=`, true)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toHaveLength(3)
+    expect(builtQuery.having![0]).toEqual([`@salary`, `>`, 50000])
+    expect(typeof builtQuery.having![1]).toBe(`function`)
+    expect(builtQuery.having![2]).toEqual([`@active`, `=`, true])
+  })
+
+  it(`supports multiple callback functions`, () => {
+    const callback1 = ({ employees }: any) => employees.salary > 60000
+    const callback2 = ({ employees }: any) => employees.count > 5
+
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .having(callback1)
+      .having(callback2)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toHaveLength(2)
+    expect(typeof builtQuery.having![0]).toBe(`function`)
+    expect(typeof builtQuery.having![1]).toBe(`function`)
+    expect(builtQuery.having![0]).toBe(callback1)
+    expect(builtQuery.having![1]).toBe(callback2)
   })
 
   it(`works in a practical example with groupBy`, () => {
@@ -122,7 +166,7 @@ describe(`QueryBuilder.having`, () => {
 
     const builtQuery = query._query
     expect(builtQuery.groupBy).toBe(`@d.name`)
-    expect(builtQuery.having).toEqual([{ SUM: `@e.salary` }, `>`, 100000])
+    expect(builtQuery.having).toEqual([[{ SUM: `@e.salary` }, `>`, 100000]])
   })
 
   it(`allows combining with other query methods`, () => {

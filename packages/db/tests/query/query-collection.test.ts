@@ -183,7 +183,7 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
   })
 
-  it(`should be able to query a collection without a select`, async () => {
+  it(`should be able to query a collection without a select using a callback for the where clause`, async () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
@@ -216,7 +216,9 @@ describe(`Query Collections`, () => {
       }))
     )
 
-    const query = queryBuilder().from({ collection }).where(`@age`, `>`, 30)
+    const query = queryBuilder()
+      .from({ person: collection })
+      .where(({ person }) => person.age > 30)
 
     const compiledQuery = compileQuery(query)
 

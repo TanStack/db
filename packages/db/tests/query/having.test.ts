@@ -104,7 +104,7 @@ describe(`Query - HAVING Clause`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@price`, `@category`],
       from: `products`,
-      having: [`@price`, `>`, 300] as Condition,
+      having: [[`@price`, `>`, 300] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -147,8 +147,8 @@ describe(`Query - HAVING Clause`, () => {
     const query: Query<Context> = {
       select: [`@id`, `@name`, `@price`, `@category`, `@inStock`],
       from: `products`,
-      where: [`@inStock`, `=`, true] as Condition,
-      having: [`@price`, `>`, 200] as Condition,
+      where: [[`@inStock`, `=`, true] as Condition],
+      having: [[`@price`, `>`, 200] as Condition],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -192,12 +192,14 @@ describe(`Query - HAVING Clause`, () => {
       select: [`@id`, `@name`, `@price`, `@category`, `@rating`],
       from: `products`,
       having: [
-        [`@price`, `>`, 100],
-        `and`,
-        [`@price`, `<`, 600],
-        `and`,
-        [`@rating`, `>=`, 4.0],
-      ] as unknown as Condition,
+        [
+          [`@price`, `>`, 100],
+          `and`,
+          [`@price`, `<`, 600],
+          `and`,
+          [`@rating`, `>=`, 4.0],
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })
@@ -248,10 +250,12 @@ describe(`Query - HAVING Clause`, () => {
       select: [`@id`, `@name`, `@price`, `@category`, `@inStock`],
       from: `products`,
       having: [
-        [[`@category`, `=`, `Electronics`], `and`, [`@price`, `<`, 600]],
-        `or`,
-        [[`@category`, `=`, `Furniture`], `and`, [`@inStock`, `=`, true]],
-      ] as unknown as Condition,
+        [
+          [[`@category`, `=`, `Electronics`], `and`, [`@price`, `<`, 600]],
+          `or`,
+          [[`@category`, `=`, `Furniture`], `and`, [`@inStock`, `=`, true]],
+        ] as unknown as Condition,
+      ],
     }
 
     const graph = new D2({ initialFrontier: v([0, 0]) })

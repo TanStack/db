@@ -55,7 +55,7 @@ const aliasedQuery = {
 const simpleWhereQuery = {
   select: [`@id`, `@name`],
   from: `users`,
-  where: [`@age`, `>`, 18] as SimpleCondition,
+  where: [[`@age`, `>`, 18] as SimpleCondition],
 } satisfies Query<Context>
 
 // Valid query with flat composite WHERE condition
@@ -63,14 +63,16 @@ const compositeWhereQuery = {
   select: [`@id`, `@name`],
   from: `users`,
   where: [
-    `@age`,
-    `>`,
-    18,
-    `and` as LogicalOperator,
-    `@active`,
-    `=`,
-    true,
-  ] as FlatCompositeCondition,
+    [
+      `@age`,
+      `>`,
+      18,
+      `and` as LogicalOperator,
+      `@active`,
+      `=`,
+      true,
+    ] as FlatCompositeCondition,
+  ],
 } satisfies Query<Context>
 
 // Full query with all optional properties
@@ -78,9 +80,9 @@ const fullQuery = {
   select: [`@id`, `@name`, { age_years: `@age` }],
   as: `user_data`,
   from: `users`,
-  where: [`@active`, `=`, true] as SimpleCondition,
+  where: [[`@active`, `=`, true] as SimpleCondition],
   groupBy: [`@department`],
-  having: [`@count`, `>`, 5] as SimpleCondition,
+  having: [[`@count`, `>`, 5] as SimpleCondition],
   orderBy: { "@name": `asc` },
   limit: 10,
   offset: 20,
