@@ -5,7 +5,11 @@ import type {
   QueryKey,
   QueryObserverOptions,
 } from "@tanstack/query-core"
-import type { CollectionConfig, SyncConfig } from "@tanstack/db"
+import type {
+  CollectionConfig,
+  MutationFnParams,
+  SyncConfig,
+} from "@tanstack/db"
 
 export interface QueryCollectionConfig<
   TItem extends object,
@@ -52,6 +56,28 @@ export interface QueryCollectionConfig<
   getId: CollectionConfig<TItem>[`getId`]
   schema?: CollectionConfig<TItem>[`schema`]
   sync?: CollectionConfig<TItem>[`sync`]
+
+  // Direct persistence handlers
+  /**
+   * Optional asynchronous handler function called before an insert operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
+   */
+  onInsert?: CollectionConfig<TItem>[`onInsert`]
+
+  /**
+   * Optional asynchronous handler function called before an update operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
+   */
+  onUpdate?: CollectionConfig<TItem>[`onUpdate`]
+
+  /**
+   * Optional asynchronous handler function called before a delete operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
+   */
+  onDelete?: CollectionConfig<TItem>[`onDelete`]
 }
 
 /**
@@ -80,6 +106,9 @@ export function queryCollectionOptions<
     retryDelay,
     staleTime,
     getId,
+    onInsert,
+    onUpdate,
+    onDelete,
     ...baseCollectionConfig
   } = config
 
@@ -243,11 +272,57 @@ export function queryCollectionOptions<
     }
   }
 
+  // Create wrapper handlers for direct persistence operations that handle refetching
+  const wrappedOnInsert = onInsert
+    ? async (params: MutationFnParams) => {
+        const handlerResult = (await onInsert(params)) ?? {}
+        const shouldRefetch =
+          (handlerResult as { refetch?: boolean }).refetch !== false
+
+        if (shouldRefetch) {
+          await refetch()
+        }
+
+        return handlerResult
+      }
+    : undefined
+
+  const wrappedOnUpdate = onUpdate
+    ? async (params: MutationFnParams) => {
+        const handlerResult = (await onUpdate(params)) ?? {}
+        const shouldRefetch =
+          (handlerResult as { refetch?: boolean }).refetch !== false
+
+        if (shouldRefetch) {
+          await refetch()
+        }
+
+        return handlerResult
+      }
+    : undefined
+
+  const wrappedOnDelete = onDelete
+    ? async (params: MutationFnParams) => {
+        const handlerResult = (await onDelete(params)) ?? {}
+        const shouldRefetch =
+          (handlerResult as { refetch?: boolean }).refetch !== false
+
+        if (shouldRefetch) {
+          await refetch()
+        }
+
+        return handlerResult
+      }
+    : undefined
+
   return {
     collectionOptions: {
       ...baseCollectionConfig,
       getId,
       sync: { sync: internalSync },
+      onInsert: wrappedOnInsert,
+      onUpdate: wrappedOnUpdate,
+      onDelete: wrappedOnDelete,
     },
     refetch,
   }
