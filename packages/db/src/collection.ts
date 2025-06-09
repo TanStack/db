@@ -29,6 +29,19 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 }
 
 /**
+ * Creates a new Collection instance with the given configuration
+ *
+ * @template T - The type of items in the collection
+ * @param config - Configuration for the collection, including id and sync
+ * @returns A new Collection instance
+ */
+export function createCollection<T extends object = Record<string, unknown>>(
+  config: CollectionConfig<T>
+): Collection<T> {
+  return new Collection<T>(config)
+}
+
+/**
  * Preloads a collection with the given configuration
  * Returns a promise that resolves once the sync tool has done its first commit (initial sync is finished)
  * If the collection has already loaded, it resolves immediately
@@ -180,7 +193,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     this.onFirstCommitCallbacks.push(callback)
   }
 
-  public id = crypto.randomUUID()
+  public id = ``
 
   /**
    * Creates a new Collection instance
@@ -188,8 +201,19 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config?: CollectionConfig<T>) {
-    if (!config?.sync) {
+  constructor(config: CollectionConfig<T>) {
+    // eslint-disable-next-line
+    if (!config) {
+      throw new Error(`Collection requires a config`)
+    }
+    if (config.id) {
+      this.id = config.id
+    } else {
+      this.id = crypto.randomUUID()
+    }
+
+    // eslint-disable-next-line
+    if (!config.sync) {
       throw new Error(`Collection requires a sync config`)
     }
 

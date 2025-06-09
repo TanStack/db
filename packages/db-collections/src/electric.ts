@@ -4,7 +4,6 @@ import {
   isControlMessage,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
-import { Collection } from "@tanstack/db"
 import type { CollectionConfig, SyncConfig } from "@tanstack/db"
 import type {
   ControlMessage,
@@ -14,60 +13,21 @@ import type {
 } from "@electric-sql/client"
 
 /**
- * Configuration interface for ElectricCollection
+ * Configuration interface for Electric collection options
  */
-export interface ElectricCollectionConfig<T extends Row<unknown>>
-  extends Omit<CollectionConfig<T>, `sync`> {
+export interface ElectricCollectionConfig<T extends Row<unknown>> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  streamOptions: ShapeStreamOptions
-}
-
-/**
- * Specialized Collection class for ElectricSQL integration
- */
-export class ElectricCollection<
-  T extends Row<unknown> = Record<string, unknown>,
-> extends Collection<T> {
-  private seenTxids: Store<Set<number>>
-
-  constructor(config: ElectricCollectionConfig<T>) {
-    const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
-    const sync = createElectricSync<T>(config.streamOptions, {
-      seenTxids,
-    })
-
-    super({ ...config, sync })
-
-    this.seenTxids = seenTxids
-  }
+  shapeOptions: ShapeStreamOptions
 
   /**
-   * Wait for a specific transaction ID to be synced
-   * @param txId The transaction ID to wait for
-   * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
-   * @returns Promise that resolves when the txId is synced
+   * All standard Collection configuration properties
    */
-  async awaitTxId(txId: number, timeout = 30000): Promise<boolean> {
-    const hasTxid = this.seenTxids.state.has(txId)
-    if (hasTxid) return true
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        unsubscribe()
-        reject(new Error(`Timeout waiting for txId: ${txId}`))
-      }, timeout)
-
-      const unsubscribe = this.seenTxids.subscribe(() => {
-        if (this.seenTxids.state.has(txId)) {
-          clearTimeout(timeoutId)
-          unsubscribe()
-          resolve(true)
-        }
-      })
-    })
-  }
+  id?: string
+  schema?: CollectionConfig<T>[`schema`]
+  getId: CollectionConfig<T>[`getId`]
+  sync?: CollectionConfig<T>[`sync`]
 }
 
 function isUpToDateMessage<T extends Row<unknown> = Row>(
@@ -88,26 +48,65 @@ function hasTxids<T extends Row<unknown> = Row>(
 }
 
 /**
- * Creates an ElectricSQL sync configuration
+ * Creates Electric collection options for use with a standard Collection
  *
- * @param streamOptions - Configuration options for the ShapeStream
- * @param options - Options for the ElectricSync configuration
- * @returns ElectricSync configuration
+ * @param config - Configuration options for the Electric collection
+ * @returns Object containing collection options and utility functions
  */
-/**
- * Create a new ElectricCollection instance
- */
-export function createElectricCollection<T extends Row<unknown>>(
+export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T>
-): ElectricCollection<T> {
-  return new ElectricCollection(config)
+): {
+  collectionOptions: CollectionConfig<T>
+  awaitTxId: (txId: number, timeout?: number) => Promise<boolean>
+} {
+  const seenTxids = new Store<Set<number>>(new Set([Math.random()]))
+  const sync = createElectricSync<T>(config.shapeOptions, {
+    seenTxids,
+  })
+
+  /**
+   * Wait for a specific transaction ID to be synced
+   * @param txId The transaction ID to wait for
+   * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
+   * @returns Promise that resolves when the txId is synced
+   */
+  const awaitTxId = async (txId: number, timeout = 30000): Promise<boolean> => {
+    const hasTxid = seenTxids.state.has(txId)
+    if (hasTxid) return true
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        unsubscribe()
+        reject(new Error(`Timeout waiting for txId: ${txId}`))
+      }, timeout)
+
+      const unsubscribe = seenTxids.subscribe(() => {
+        if (seenTxids.state.has(txId)) {
+          clearTimeout(timeoutId)
+          unsubscribe()
+          resolve(true)
+        }
+      })
+    })
+  }
+
+  // Extract standard Collection config properties
+  const { shapeOptions, ...restConfig } = config
+
+  return {
+    collectionOptions: {
+      ...restConfig,
+      sync,
+    },
+    awaitTxId,
+  }
 }
 
 /**
  * Internal function to create ElectricSQL sync configuration
  */
 function createElectricSync<T extends Row<unknown>>(
-  streamOptions: ShapeStreamOptions,
+  shapeOptions: ShapeStreamOptions,
   options: {
     seenTxids: Store<Set<number>>
   }
@@ -126,8 +125,8 @@ function createElectricSync<T extends Row<unknown>>(
     const schema = relationSchema.state || `public`
 
     return {
-      relation: streamOptions.params?.table
-        ? [schema, streamOptions.params.table]
+      relation: shapeOptions.params?.table
+        ? [schema, shapeOptions.params.table]
         : undefined,
     }
   }
@@ -135,7 +134,7 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(streamOptions)
+      const stream = new ShapeStream(shapeOptions)
       let transactionStarted = false
       let newTxids = new Set<number>()
 

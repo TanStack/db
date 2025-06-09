@@ -1,16 +1,17 @@
 import React, { useState } from "react"
-import { useLiveQuery, useOptimisticMutation } from "@tanstack/react-db"
 import {
-  createElectricCollection,
-  createQueryCollection,
+  collectionsStore,
+  createCollection,
+  useLiveQuery,
+  useOptimisticMutation,
+} from "@tanstack/react-db"
+import {
+  electricCollectionOptions,
+  queryCollectionOptions,
 } from "@tanstack/db-collections"
 // import { DevTools } from "./DevTools"
 import { QueryClient } from "@tanstack/query-core"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
-import type {
-  ElectricCollection,
-  QueryCollection,
-} from "@tanstack/db-collections"
 import type { Collection, PendingMutation } from "@tanstack/react-db"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
@@ -129,7 +130,9 @@ enum CollectionType {
 // Create a query client for query collections
 const queryClient = new QueryClient()
 
+// Cache for collections and their utility functions
 const collectionsCache = new Map()
+const utilityFunctionsCache = new Map()
 // Function to create the appropriate todo collection based on type
 const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
@@ -137,9 +140,9 @@ const createTodoCollection = (type: CollectionType) => {
   } else {
     let newCollection: Collection
     if (type === CollectionType.Electric) {
-      newCollection = createElectricCollection<UpdateTodo>({
+      const { collectionOptions, awaitTxId } = electricCollectionOptions({
         id: `todos`,
-        streamOptions: {
+        shapeOptions: {
           url: `http://localhost:3003/v1/shape`,
           params: {
             table: `todos`,
@@ -152,9 +155,12 @@ const createTodoCollection = (type: CollectionType) => {
         getId: (item) => item.id,
         schema: updateTodoSchema,
       })
+      newCollection = createCollection(collectionOptions)
+      utilityFunctionsCache.set(`${newCollection.id}`, awaitTxId)
     } else {
       // Query collection using our API helper
-      newCollection = createQueryCollection<UpdateTodo>({
+
+      const { collectionOptions, refetch } = queryCollectionOptions({
         id: `todos`,
         queryKey: [`todos`],
         refetchInterval: 3000,
@@ -167,10 +173,12 @@ const createTodoCollection = (type: CollectionType) => {
             updated_at: todo.updated_at ? new Date(todo.updated_at) : undefined,
           }))
         },
-        getId: (item) => String(item.id),
+        getId: (item: UpdateTodo) => String(item.id),
         schema: updateTodoSchema,
         queryClient,
       })
+      newCollection = createCollection(collectionOptions)
+      utilityFunctionsCache.set(`${newCollection.id}`, refetch)
     }
     collectionsCache.set(`todo`, newCollection)
     return newCollection
@@ -184,9 +192,9 @@ const createConfigCollection = (type: CollectionType) => {
   } else {
     let newCollection: Collection
     if (type === CollectionType.Electric) {
-      newCollection = createElectricCollection<UpdateConfig>({
+      const { collectionOptions, awaitTxId } = electricCollectionOptions({
         id: `config`,
-        streamOptions: {
+        shapeOptions: {
           url: `http://localhost:3003/v1/shape`,
           params: {
             table: `config`,
@@ -198,12 +206,14 @@ const createConfigCollection = (type: CollectionType) => {
             },
           },
         },
-        getId: (item) => item.id,
+        getId: (item: UpdateConfig) => item.id,
         schema: updateConfigSchema,
       })
+      newCollection = createCollection(collectionOptions)
+      utilityFunctionsCache.set(`${newCollection.id}`, awaitTxId)
     } else {
       // Query collection using our API helper
-      newCollection = createQueryCollection<UpdateConfig>({
+      const { collectionOptions, refetch } = queryCollectionOptions({
         id: `config`,
         queryKey: [`config`],
         refetchInterval: 3000,
@@ -220,10 +230,12 @@ const createConfigCollection = (type: CollectionType) => {
               : undefined,
           }))
         },
-        getId: (item) => item.id,
+        getId: (item: UpdateConfig) => item.id,
         schema: updateConfigSchema,
         queryClient,
       })
+      newCollection = createCollection(collectionOptions)
+      utilityFunctionsCache.set(`${newCollection.id}`, refetch)
     }
     collectionsCache.set(`config`, newCollection)
     return newCollection
@@ -236,12 +248,21 @@ async function collectionSync(
   mutation: PendingMutation,
   txid: number
 ) {
+  // Get the collection ID from the mutation
+  const collectionId = mutation.collection.id
+
   if (type === CollectionType.Query) {
-    await (mutation.collection as QueryCollection<UpdateTodo>).refetch()
+    // Get the refetch function from the cache
+    const refetch = utilityFunctionsCache.get(`${collectionId}`)
+    if (refetch) {
+      await refetch()
+    }
   } else {
-    await (mutation.collection as ElectricCollection<UpdateTodo>).awaitTxId(
-      txid
-    )
+    // Get the awaitTxId function from the cache
+    const awaitTxId = utilityFunctionsCache.get(`${collectionId}`)
+    if (awaitTxId) {
+      await awaitTxId(txid)
+    }
   }
 }
 
@@ -299,7 +320,7 @@ export default function App() {
       )
       await Promise.all(
         txids.map(async (txid, i) => {
-          const mutation = transaction.mutations[i]
+          const mutation = transaction.mutations[i]!
           return await collectionSync(collectionType, mutation, txid)
         })
       )
