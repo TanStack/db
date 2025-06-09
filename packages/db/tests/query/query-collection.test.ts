@@ -1049,6 +1049,139 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toBeUndefined()
     expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeDefined()
   })
+
+  it(`should transform data using a select callback`, async () => {
+    const emitter = mitt()
+
+    // Create collection with mutation capability
+    const collection = new Collection<Person>({
+      id: `select-callback-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Listen for sync events
+          emitter.on(`sync`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync from initial state
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    const query = queryBuilder()
+      .from({ collection })
+      .select(({ collection }) => ({
+        displayName: `${collection.name} (Age: ${collection.age})`,
+        status: collection.isActive ? `Active` : `Inactive`,
+        ageGroup:
+          collection.age < 30
+            ? `Young`
+            : collection.age < 40
+              ? `Middle`
+              : `Senior`,
+        emailDomain: collection.email.split(`@`)[1],
+      }))
+
+    const compiledQuery = compileQuery(query)
+
+    compiledQuery.start()
+
+    const result = compiledQuery.results
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(3)
+
+    // Verify transformed data for John Doe
+    expect(result.state.get(`KEY::${result.id}/1`)).toEqual({
+      _key: `1`,
+      displayName: `John Doe (Age: 30)`,
+      status: `Active`,
+      ageGroup: `Middle`,
+      emailDomain: `example.com`,
+    })
+
+    // Verify transformed data for Jane Doe
+    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+      _key: `2`,
+      displayName: `Jane Doe (Age: 25)`,
+      status: `Active`,
+      ageGroup: `Young`,
+      emailDomain: `example.com`,
+    })
+
+    // Verify transformed data for John Smith
+    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+      _key: `3`,
+      displayName: `John Smith (Age: 35)`,
+      status: `Inactive`,
+      ageGroup: `Middle`,
+      emailDomain: `example.com`,
+    })
+
+    // Insert a new person and verify transformation
+    emitter.emit(`sync`, [
+      {
+        key: `4`,
+        type: `insert`,
+        changes: {
+          id: `4`,
+          name: `Senior Person`,
+          age: 65,
+          email: `senior@company.org`,
+          isActive: true,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(4)
+    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+      _key: `4`,
+      displayName: `Senior Person (Age: 65)`,
+      status: `Active`,
+      ageGroup: `Senior`,
+      emailDomain: `company.org`,
+    })
+
+    // Update a person and verify transformation updates
+    emitter.emit(`sync`, [
+      {
+        type: `update`,
+        changes: {
+          id: `2`,
+          isActive: false,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify the transformation reflects the update
+    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+      _key: `2`,
+      displayName: `Jane Doe (Age: 25)`,
+      status: `Inactive`, // Should now be inactive
+      ageGroup: `Young`,
+      emailDomain: `example.com`,
+    })
+  })
 })
 
 async function waitForChanges(ms = 0) {

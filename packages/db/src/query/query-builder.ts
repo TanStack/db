@@ -198,8 +198,9 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   /**
    * Specify what columns to select.
    * Overwrites any previous select clause.
+   * Also supports callback functions that receive the row context and return selected data.
    *
-   * @param selects The columns to select
+   * @param selects The columns to select (can include callbacks)
    * @returns A new QueryBuilder with the select clause set
    */
   select<TSelects extends Array<Select<TContext>>>(
