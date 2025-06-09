@@ -67,7 +67,7 @@ export interface SyncConfig<T extends object = Record<string, unknown>> {
 
   /**
    * Get the sync metadata for insert operations
-   * @returns Record containing primaryKey and relation information
+   * @returns Record containing relation information
    */
   getSyncMetadata?: () => Record<string, unknown>
 }

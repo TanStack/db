@@ -45,7 +45,7 @@ const Todos = () => {
     // Invokes the mutationFn to handle the write
     updateTodo.mutate(() =>
       // Instantly applies optimistic state
-      todoCollection.update(todo, (draft) => {
+      todoCollection.update(todo.id, (draft) => {
         draft.completed = true
       })
     )
@@ -96,7 +96,7 @@ const updateTodo = useOptimisticMutation({ mutationFn })
 // Triggers the `mutationFn`
 updateTodo.mutate(() =>
   // Immediately applies optimistic state
-  todoCollection.update(todo, (draft) => {
+  todoCollection.update(todo.id, (draft) => {
     draft.completed = true
   })
 )
@@ -156,15 +156,15 @@ If provided, this should be a [Standard Schema](https://standardschema.dev) comp
 
 #### `QueryCollection`
 
-[TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `createQueryCollection` to fetch data into a collection using TanStack Query:
+[TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `queryCollectionOptions` to fetch data into a collection using TanStack Query:
 
 ```ts
-const todoCollection = createQueryCollection({
+const todoCollection = createCollection(queryCollectionOptions({
   queryKey: ['todoItems'],
   queryFn: async () => fetch('/api/todos'),
   getId: (item) => item.id,
   schema: todoSchema // any standard schema
-})
+}))
 ```
 
 The collection will be populated with the query results.
@@ -173,39 +173,40 @@ The collection will be populated with the query results.
 
 [Electric](https://electric-sql.com) is a read-path sync engine for Postgres. It allows you to sync subsets of data out of a Postgres database, [through your API](https://electric-sql.com/blog/2024/11/21/local-first-with-your-existing-api), into a TanStack DB collection.
 
-Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/guides/shapes). Use `createElectricCollection` to sync a shape into a collection:
+Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/guides/shapes). Use `electricCollectionOptions` to sync a shape into a collection:
 
 ```ts
-import { createElectricCollection } from '@tanstack/db-collections'
+import { createCollection } from '@tanstack/react-db'
+import { electricCollectionOptions } from '@tanstack/db-collections'
 
-export const todoCollection = createElectricCollection<Todo>({
+export const todoCollection = createCollection(electricCollectionOptions<Todo>({
   id: 'todos',
-  streamOptions: {
+  shapeOptions: {
     url: 'https://example.com/v1/shape',
     params: {
       table: 'todos'
     }
   },
-  primaryKey: ['id'],
+  getId: (item) => item.id,
   schema: todoSchema
-})
+}))
 ```
 
 The Electric collection requires two Electric-specific options:
 
-- `streamOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
+- `shapeOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
   - `url` to your sync engine; and
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
-- `primaryKey` &mdash; identifies the primary key for the rows being synced into the collection
+- `getId` &mdash; identifies the id for the rows being synced into the collection
 
 When you create the collection, sync starts automatically.
 
 Electric shapes allow you to filter data using where clauses:
 
 ```ts
-export const myPendingTodos = createElectricCollection<Todo>({
+export const myPendingTodos = createCollection(electricCollectionOptions<Todo>({
   id: 'todos',
-  streamOptions: {
+  shapeOptions: {
     url: 'https://example.com/v1/shape',
     params: {
       table: 'todos',
@@ -216,9 +217,9 @@ export const myPendingTodos = createElectricCollection<Todo>({
       `
     }
   },
-  primaryKey: ['id'],
+  getId: (item) => item.id,
   schema: todoSchema
-})
+}))
 ```
 
 > [!TIP]
@@ -263,9 +264,9 @@ This also works with joins to derive collections from multiple source collection
 
 #### base Collection
 
-There is a base `Collection` class in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
+There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
 
-See the existing implementations in [`../packages/db-collections`](https://github.com/TanStack/db/blob/main/packages/db-collections) for reference.
+See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
 
 ### Live queries
 
@@ -283,7 +284,6 @@ const Todos = () => {
       .where('@completed', '=', false)
       .orderBy({'@created_at': 'asc'})
       .select('@id', '@text')
-      .keyBy('@id')
   )
 
   return <List items={ todos } />
@@ -306,7 +306,6 @@ const Todos = () => {
       })
       .where('@lists.active', '=', true)
       .select(`@todos.id`, `@todos.title`, `@lists.name`)
-      .keyBy('@id')
   )
 
   return <List items={ todos } />
@@ -335,7 +334,7 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [query-builder tests](https://github.com/TanStack/db/blob/main/packages/db/tests/query/query-builder) for many more usage examples.
+See the [query-builder tests](../packages/db/tests/query/query-builder) for many more usage examples.
 
 ### Transactional mutators
 
@@ -429,7 +428,7 @@ Collections support `insert`, `update` and `delete` operations. These operations
 const updateTodo = useOptimisticMutation({ mutationFn })
 updateTodo.mutate(() =>
   // Make write operations here, e.g.:
-  todoCollection.update(todo, (draft) => {
+  todoCollection.update(todo.id, (draft) => {
     draft.completed = true
   })
 )
@@ -457,19 +456,19 @@ We use a proxy to capture updates as immutable draft optimistic updates.
 
 ```typescript
 // Update a single item
-update(todo, (draft) => {
+update(todo.id, (draft) => {
   draft.completed = true
 })
 
 // Update multiple items
-update([todo1, todo2], (drafts) => {
+update([todo1.id, todo2.id], (drafts) => {
   drafts.forEach((draft) => {
     draft.completed = true
   })
 })
 
 // Update with metadata
-update(todo, { metadata: { reason: "user update" } }, (draft) => {
+update(todo.id, { metadata: { reason: "user update" } }, (draft) => {
   draft.text = "Updated text"
 })
 ```
@@ -478,13 +477,13 @@ update(todo, { metadata: { reason: "user update" } }, (draft) => {
 
 ```typescript
 // Delete a single item
-delete todo
+delete(todo.id)
 
 // Delete multiple items
-delete [todo1, todo2]
+delete([todo1.id, todo2.id])
 
 // Delete with metadata
-delete (todo, { metadata: { reason: "completed" } })
+delete(todo.id, { metadata: { reason: "completed" } })
 ```
 
 ## Usage examples
@@ -507,23 +506,23 @@ The steps are to:
 2. implement [`mutationFn`](#mutationfn)s that handle mutations by posting them to your API endpoints
 
 ```tsx
-import { useLiveQuery, useOptimisticMutation } from "@tanstack/react-db"
-import { createQueryCollection } from "@tanstack/db-collections"
+import { useLiveQuery, useOptimisticMutation, createCollection } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/db-collections"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createQueryCollection<Todo>({
+const todoCollection = createCollection(queryCollectionOptions<Todo>({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getId: (item) => item.id,
   schema: todoSchema, // any standard schema
-})
-const listCollection = createQueryCollection<TodoList>({
+}))
+const listCollection = createCollection(queryCollectionOptions<TodoList>({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
   getId: (item) => item.id,
   schema: todoListSchema
-})
+}))
 
 const Todos = () => {
   // Read the data using live queries. Here we show a live
@@ -538,7 +537,6 @@ const Todos = () => {
       })
       .where('@l.active', '=', true)
       .select('@t.id', '@t.text', '@t.status', '@l.name')
-      .keyBy('@id')
   )
 
   // Handle local writes by sending them to your API.
@@ -592,23 +590,23 @@ Here, we illustrate this pattern:
 
 ```tsx
 import type { Collection } from '@tanstack/db'
-import type { MutationFn, PendingMutation } from '@tanstack/react-db'
-import { createElectricCollection } from '@tanstack/db-collections'
+import type { MutationFn, PendingMutation, createCollection } from '@tanstack/react-db'
+import { electricCollectionOptions } from '@tanstack/db-collections'
 
-export const todoCollection = createElectricCollection<Todo>({
+export const todoCollection = createCollection(electricCollectionOptions<Todo>({
   id: 'todos',
   schema: todoSchema,
   // Electric syncs data using "shapes". These are filtered views
   // on database tables that Electric keeps in sync for you.
-  streamOptions: {
+  shapeOptions: {
     url: 'https://api.electric-sql.cloud/v1/shape',
     params: {
       table: 'todos'
     }
   },
-  primaryKey: ['id'],
+  getId: (item) => item.id,
   schema: todoSchema
-})
+}))
 
 // Define a generic `mutationFn` that handles all mutations and
 // POSTs them to a backend ingestion endpoint.
