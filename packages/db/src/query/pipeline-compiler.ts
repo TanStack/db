@@ -6,7 +6,11 @@ import { processOrderBy } from "./order-by.js"
 import { processSelect } from "./select.js"
 import type { Query } from "./schema.js"
 import type { IStreamBuilder } from "@electric-sql/d2ts"
-import type { KeyedStream, NamespacedAndKeyedStream } from "../types.js"
+import type {
+  InputRow,
+  KeyedStream,
+  NamespacedAndKeyedStream,
+} from "../types.js"
 
 /**
  * Compiles a query into a D2 pipeline
@@ -136,7 +140,10 @@ export function compileQueryPipeline<T extends IStreamBuilder<unknown>>(
   // Process the SELECT clause - this is where we flatten the structure
   const resultPipeline: KeyedStream | NamespacedAndKeyedStream = query.select
     ? processSelect(pipeline, query, mainTableAlias, allInputs)
-    : pipeline
-
+    : !query.join && !query.groupBy
+      ? pipeline.pipe(
+          map(([key, row]) => [key, row[mainTableAlias]] as InputRow)
+        )
+      : pipeline
   return resultPipeline as T
 }

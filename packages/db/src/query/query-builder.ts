@@ -438,6 +438,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
               Input
           >
         }
+        hasJoin: true
       }
     >
   >
@@ -474,6 +475,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
         schema: TContext[`schema`] & {
           [K in T]: RemoveIndexSignature<TContext[`baseSchema`][T]>
         }
+        hasJoin: true
       }
     >
   >
@@ -513,6 +515,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
         schema: TContext[`schema`] & {
           [K in TAs]: RemoveIndexSignature<TContext[`baseSchema`][TFrom]>
         }
+        hasJoin: true
       }
     >
   >
@@ -864,10 +867,12 @@ export function queryBuilder<TBaseSchema extends Schema = {}>() {
 
 export type ResultsFromContext<TContext extends Context<Schema>> = Flatten<
   TContext[`result`] extends object
-    ? TContext[`result`]
-    : TContext[`result`] extends undefined
-      ? TContext[`schema`]
-      : object
+    ? TContext[`result`] // If there is a select we will have a result type
+    : TContext[`hasJoin`] extends true
+      ? TContext[`schema`] // If there is a join, the query returns the namespaced schema
+      : TContext[`default`] extends keyof TContext[`schema`]
+        ? TContext[`schema`][TContext[`default`]] // If there is no join we return the flat default schema
+        : never // Should never happen
 >
 
 export type ResultFromQueryBuilder<TQueryBuilder> = Flatten<

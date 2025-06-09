@@ -20,6 +20,7 @@ export type Context<
   schema: TSchema
   default?: keyof TSchema
   result?: Record<string, unknown>
+  hasJoin?: boolean
 }
 
 // Helper types
