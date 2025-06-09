@@ -152,7 +152,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 4,
+          id: `4`,
           name: `Kyle Doe 2`,
         },
       },
@@ -162,8 +162,8 @@ describe(`Query Collections`, () => {
 
     expect(result.state.size).toBe(2)
     expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
-      _key: 4,
-      id: 4,
+      _key: `4`,
+      id: `4`,
       name: `Kyle Doe 2`,
     })
 
@@ -172,7 +172,7 @@ describe(`Query Collections`, () => {
       {
         type: `delete`,
         changes: {
-          id: 4,
+          id: `4`,
         },
       },
     ])
@@ -274,7 +274,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 4,
+          id: `4`,
           name: `Kyle Doe 2`,
         },
       },
@@ -287,7 +287,7 @@ describe(`Query Collections`, () => {
       _key: `4`,
       age: 40,
       email: `kyle.doe@example.com`,
-      id: 4,
+      id: `4`,
       isActive: true,
       name: `Kyle Doe 2`,
     })
