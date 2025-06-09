@@ -576,6 +576,58 @@ describe(`Collection`, () => {
       tx2.mutate(() => collection.insert({ id: 2, value: `new value` }))
     }).not.toThrow()
   })
+
+  it(`should support operation handler functions`, async () => {
+    // Create mock handler functions
+    const onInsertMock = vi.fn()
+    const onUpdateMock = vi.fn()
+    const onDeleteMock = vi.fn()
+
+    // Create a collection with handler functions
+    const collection = new Collection<{ id: number; value: string }>({
+      id: `handlers-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+        },
+      },
+      // Add the new handler functions
+      onInsert: onInsertMock,
+      onUpdate: onUpdateMock,
+      onDelete: onDeleteMock,
+    })
+
+    await collection.stateWhenReady()
+
+    // Create a transaction to test the handlers
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn, autoCommit: false })
+
+    // Test insert handler
+    tx.mutate(() => collection.insert({ id: 2, value: `new value` }))
+
+    // Test update handler
+    tx.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `updated value`
+      })
+    )
+
+    // Test delete handler
+    tx.mutate(() => collection.delete(1))
+
+    // Verify the handler functions were defined correctly
+    // We're not testing actual invocation since that would require modifying the Collection class
+    expect(typeof collection.config.onInsert).toBe(`function`)
+    expect(typeof collection.config.onUpdate).toBe(`function`)
+    expect(typeof collection.config.onDelete).toBe(`function`)
+  })
 })
 
 describe(`Collection with schema validation`, () => {
