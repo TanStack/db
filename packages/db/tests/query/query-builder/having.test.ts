@@ -107,6 +107,50 @@ describe(`QueryBuilder.having`, () => {
     expect(builtQuery.having).toEqual([condition])
   })
 
+  it(`supports callback functions`, () => {
+    const callback = ({ employees }: any) => {
+      // For HAVING clauses, we might be working with aggregated data
+      return employees.salary > 60000
+    }
+
+    const query = queryBuilder<TestSchema>().from(`employees`).having(callback)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toEqual([callback])
+    expect(typeof builtQuery.having![0]).toBe(`function`)
+  })
+
+  it(`combines callback with traditional conditions`, () => {
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .having(`@salary`, `>`, 50000)
+      .having(({ employees }) => employees.salary > 100000)
+      .having(`@active`, `=`, true)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toHaveLength(3)
+    expect(builtQuery.having![0]).toEqual([`@salary`, `>`, 50000])
+    expect(typeof builtQuery.having![1]).toBe(`function`)
+    expect(builtQuery.having![2]).toEqual([`@active`, `=`, true])
+  })
+
+  it(`supports multiple callback functions`, () => {
+    const callback1 = ({ employees }: any) => employees.salary > 60000
+    const callback2 = ({ employees }: any) => employees.count > 5
+
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .having(callback1)
+      .having(callback2)
+
+    const builtQuery = query._query
+    expect(builtQuery.having).toHaveLength(2)
+    expect(typeof builtQuery.having![0]).toBe(`function`)
+    expect(typeof builtQuery.having![1]).toBe(`function`)
+    expect(builtQuery.having![0]).toBe(callback1)
+    expect(builtQuery.having![1]).toBe(callback2)
+  })
+
   it(`works in a practical example with groupBy`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`, `e`)

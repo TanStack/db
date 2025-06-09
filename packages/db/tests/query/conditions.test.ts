@@ -494,5 +494,159 @@ describe(`Query`, () => {
         expect(matches).toBe(true)
       })
     })
+
+    test(`callback function in where clause`, () => {
+      const callback = (context: any) => {
+        const product = context.products
+        return product.price > 500 && product.inStock
+      }
+
+      const query: Query<Context> = {
+        select: [`@id`, `@name`, `@price`, `@inStock`],
+        from: `products`,
+        where: [callback],
+      }
+
+      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const input = graph.newInput<[number, Product]>()
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
+
+      const messages: Array<Message<any>> = []
+      pipeline.pipe(
+        output((message) => {
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        v([1, 0]),
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
+      )
+      input.sendFrontier(new Antichain([v([1, 0])]))
+
+      graph.run()
+
+      // Check the filtered results
+      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+      const results = dataMessages[0]!.data.collection
+        .getInner()
+        .map(([data]) => data)
+
+      // Should only include expensive products that are in stock
+      // From our sample data: Laptop (1200, true) and Smartphone (800, true)
+      expect(results).toHaveLength(2)
+
+      // Verify the callback logic
+      results.forEach(([_key, result]) => {
+        expect(result.price).toBeGreaterThan(500)
+        expect(result.inStock).toBe(true)
+      })
+    })
+
+    test(`mixed conditions and callbacks`, () => {
+      const callback = (context: any) => {
+        return context.products.tags.includes(`tech`)
+      }
+
+      const query: Query<Context> = {
+        select: [`@id`, `@name`, `@category`, `@tags`, `@inStock`],
+        from: `products`,
+        where: [[`@inStock`, `=`, true], callback],
+      }
+
+      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const input = graph.newInput<[number, Product]>()
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
+
+      const messages: Array<Message<any>> = []
+      pipeline.pipe(
+        output((message) => {
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        v([1, 0]),
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
+      )
+      input.sendFrontier(new Antichain([v([1, 0])]))
+
+      graph.run()
+
+      // Check the filtered results
+      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+      const results = dataMessages[0]!.data.collection
+        .getInner()
+        .map(([data]) => data)
+
+      // Should include products that are in stock AND have "tech" tag
+      // From our sample data: Laptop (1) and Smartphone (2) - Headphones is not in stock
+      expect(results).toHaveLength(2)
+
+      // Verify both conditions are met
+      results.forEach(([_key, result]) => {
+        expect(result.inStock).toBe(true)
+        expect(result.tags).toContain(`tech`)
+      })
+    })
+
+    test(`multiple callback functions`, () => {
+      const callback1 = (context: any) =>
+        context.products.category === `Electronics`
+      const callback2 = (context: any) => context.products.price < 1000
+
+      const query: Query<Context> = {
+        select: [`@id`, `@name`, `@price`, `@category`],
+        from: `products`,
+        where: [callback1, callback2],
+      }
+
+      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const input = graph.newInput<[number, Product]>()
+      const pipeline = compileQueryPipeline(query, { [query.from]: input })
+
+      const messages: Array<Message<any>> = []
+      pipeline.pipe(
+        output((message) => {
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        v([1, 0]),
+        new MultiSet(
+          sampleProducts.map((product) => [[product.id, product], 1])
+        )
+      )
+      input.sendFrontier(new Antichain([v([1, 0])]))
+
+      graph.run()
+
+      // Check the filtered results
+      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+      const results = dataMessages[0]!.data.collection
+        .getInner()
+        .map(([data]) => data)
+
+      // Should include Electronics products under $1000
+      // From our sample data: Smartphone (800) and Headphones (150)
+      expect(results).toHaveLength(2)
+
+      // Verify both callbacks are satisfied (AND logic)
+      results.forEach(([_key, result]) => {
+        expect(result.category).toBe(`Electronics`)
+        expect(result.price).toBeLessThan(1000)
+      })
+    })
   })
 })

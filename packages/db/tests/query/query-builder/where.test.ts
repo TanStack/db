@@ -127,6 +127,46 @@ describe(`QueryBuilder.where`, () => {
     expect(builtQuery.where).toEqual([condition])
   })
 
+  it(`supports callback functions`, () => {
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .where(({ employees }) => employees.salary > 50000)
+
+    const builtQuery = query._query
+    expect(typeof builtQuery.where![0]).toBe(`function`)
+  })
+
+  it(`combines callback with traditional conditions`, () => {
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .where(`@active`, `=`, true)
+      .where(({ employees }) => employees.salary > 50000)
+      .where(`@department_id`, `!=`, null)
+
+    const builtQuery = query._query
+    expect(builtQuery.where).toHaveLength(3)
+    expect(builtQuery.where![0]).toEqual([`@active`, `=`, true])
+    expect(typeof builtQuery.where![1]).toBe(`function`)
+    expect(builtQuery.where![2]).toEqual([`@department_id`, `!=`, null])
+  })
+
+  it(`supports multiple callback functions`, () => {
+    const callback1 = ({ employees }: any) => employees.salary > 50000
+    const callback2 = ({ employees }: any) => employees.name.startsWith(`J`)
+
+    const query = queryBuilder<TestSchema>()
+      .from(`employees`)
+      .where(callback1)
+      .where(callback2)
+
+    const builtQuery = query._query
+    expect(builtQuery.where).toHaveLength(2)
+    expect(typeof builtQuery.where![0]).toBe(`function`)
+    expect(typeof builtQuery.where![1]).toBe(`function`)
+    expect(builtQuery.where![0]).toBe(callback1)
+    expect(builtQuery.where![1]).toBe(callback2)
+  })
+
   it(`allows combining with other methods`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`)
