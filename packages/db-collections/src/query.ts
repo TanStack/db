@@ -174,7 +174,7 @@ export function queryCollectionOptions<
           return
         }
 
-        const currentSyncedItems = new Map(collection.syncedData.state)
+        const currentSyncedItems = new Map(collection.syncedData)
         const newItemsMap = new Map<string, TItem>()
         newItemsArray.forEach((item) => {
           try {
