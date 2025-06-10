@@ -433,17 +433,7 @@ Transactions progress through the following states:
 
 #### Write operations
 
-Collections support `insert`, `update` and `delete` operations. These operations must be made within the context of a transactional mutator:
-
-```ts
-const updateTodo = useOptimisticMutation({ mutationFn })
-updateTodo.mutate(() =>
-  // Make write operations here, e.g.:
-  todoCollection.update(todo.id, (draft) => {
-    draft.completed = true
-  })
-)
-```
+Collections support `insert`, `update` and `delete` operations.
 
 ##### `insert`
 
@@ -517,22 +507,36 @@ The steps are to:
 2. implement [`mutationFn`](#mutationfn)s that handle mutations by posting them to your API endpoints
 
 ```tsx
-import { useLiveQuery, useOptimisticMutation, createCollection } from "@tanstack/react-db"
+import { useLiveQuery, createCollection } from "@tanstack/react-db"
 import { queryCollectionOptions } from "@tanstack/db-collections"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createCollection(queryCollectionOptions<Todo>({
+const todoCollection = createCollection<Todo>(queryCollectionOptions({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getId: (item) => item.id,
   schema: todoSchema, // any standard schema
+  onInsert: ({ transaction }) => {
+    const { changes: newTodo } = transaction.mutations[0]
+
+    // Handle the local write by sending it to your API.
+    await api.todos.create(newTodo)
+  }
+  // also add onUpdate, onDelete as needed.
 }).options)
-const listCollection = createCollection(queryCollectionOptions<TodoList>({
+const listCollection = createCollection<TodoList>(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
   getId: (item) => item.id,
   schema: todoListSchema
+  onInsert: ({ transaction }) => {
+    const { changes: newTodo } = transaction.mutations[0]
+
+    // Handle the local write by sending it to your API.
+    await api.todoLists.create(newTodo)
+  }
+  // also add onUpdate, onDelete as needed.
 }).options)
 
 const Todos = () => {
@@ -550,39 +554,6 @@ const Todos = () => {
       .select('@t.id', '@t.text', '@t.status', '@l.name')
   )
 
-  // Handle local writes by sending them to your API.
-  // Note that the mutator is defined with a mutationFn that's
-  // specific to the collection type and the write operation.
-  //
-  // Having a `mutationFn` per type+operation provides a natural
-  // extension point to add things like side-effects and
-  // instrumentation later on when your app grows.
-  const addTodo = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const { changes: newTodo } = transaction.mutations[0]
-
-      // Handle the local write by sending it to your API.
-      await api.todos.create(newTodo)
-
-      // Tell TanStack Query to re-fetch the collection data.
-      // This blocks until the collection is up-to-date.
-      // The local app avoids flickering and always converges
-      // on the server state as the source of truth.
-      await todoCollection.refetch()
-    },
-  })
-
-  // Here we define another mutator with its own specific mutationFn.
-  // This knows the api call to make and the collection to refetch.
-  const addList = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const { changes: newList } = transaction.mutations[0]
-
-      await api.todoLists.create(newList)
-      await todoListCollection.refetch()
-    },
-  })
-
   // ...
 
 }
@@ -597,7 +568,7 @@ One of the most powerful ways of using TanStack DB is with a sync engine, for a 
 Here, we illustrate this pattern:
 
 - using [ElectricSQL](https://electric-sql.com) as the sync engine; and
-- POSTing mutations to a generic `/ingest/mutations` endpoint
+- Instead of sending mutations to unique endpoints, we show an example here of how to POST mutations to a generic `/ingest/mutations` endpoint
 
 ```tsx
 import type { Collection } from '@tanstack/db'
