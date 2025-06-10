@@ -48,9 +48,8 @@ describe(`Electric Integration`, () => {
       getId: (item: Row) => item.id,
     }
 
-    const { collectionOptions, awaitTxId: txIdFn } =
-      electricCollectionOptions(config)
-    collection = new Collection(collectionOptions)
+    const { options, awaitTxId: txIdFn } = electricCollectionOptions(config)
+    collection = new Collection(options)
     awaitTxId = txIdFn
   })
 
@@ -403,12 +402,12 @@ describe(`Electric Integration`, () => {
         onDelete,
       }
 
-      const { collectionOptions } = electricCollectionOptions(config)
+      const { options } = electricCollectionOptions(config)
 
       // Verify that the handlers were passed to the collection options
-      expect(collectionOptions.onInsert).toBeDefined()
-      expect(collectionOptions.onUpdate).toBeDefined()
-      expect(collectionOptions.onDelete).toBeDefined()
+      expect(options.onInsert).toBeDefined()
+      expect(options.onUpdate).toBeDefined()
+      expect(options.onDelete).toBeDefined()
     })
 
     it(`should throw an error if handler doesn't return a txid`, async () => {
@@ -431,10 +430,10 @@ describe(`Electric Integration`, () => {
         onInsert,
       }
 
-      const { collectionOptions } = electricCollectionOptions(config)
+      const { options } = electricCollectionOptions(config)
 
       // Call the wrapped handler and expect it to throw
-      await expect(collectionOptions.onInsert!(mockParams)).rejects.toThrow(
+      await expect(options.onInsert!(mockParams)).rejects.toThrow(
         `Electric collection onInsert handler must return a txid`
       )
     })
@@ -515,8 +514,8 @@ describe(`Electric Integration`, () => {
         onInsert,
       }
 
-      const { collectionOptions } = electricCollectionOptions(config)
-      const testCollection = new Collection(collectionOptions)
+      const { options } = electricCollectionOptions(config)
+      const testCollection = new Collection(options)
 
       // Insert data using the transaction
       const tx = testCollection.insert({

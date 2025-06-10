@@ -27,10 +27,10 @@ export interface PendingMutation<T extends object = Record<string, unknown>> {
  * Configuration options for creating a new transaction
  */
 export type MutationFnParams = {
-  transaction: Transaction & {
-    mutations: [PendingMutation<any>, ...Array<PendingMutation<any>>] // Ensure at least one mutation
-  }
+  transaction: Transaction
 }
+
+export type MutationFn = (params: MutationFnParams) => Promise<any>
 
 /**
  * Utility type for a Transaction with at least one mutation
@@ -41,8 +41,6 @@ export type TransactionWithMutations<
 > = Transaction & {
   mutations: [PendingMutation<T>, ...Array<PendingMutation<T>>]
 }
-
-export type MutationFn = (params: MutationFnParams) => Promise<any>
 
 export interface TransactionConfig {
   /** Unique identifier for the transaction */

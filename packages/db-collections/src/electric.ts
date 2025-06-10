@@ -84,7 +84,7 @@ function hasTxids<T extends Row<unknown> = Row>(
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T>
 ): {
-  collectionOptions: CollectionConfig<T>
+  options: CollectionConfig<T>
   awaitTxId: (txId: string, timeout?: number) => Promise<boolean>
 } {
   const seenTxids = new Store<Set<string>>(new Set([`${Math.random()}`]))
@@ -171,7 +171,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   const { shapeOptions, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   return {
-    collectionOptions: {
+    options: {
       ...restConfig,
       sync,
       onInsert: wrappedOnInsert,

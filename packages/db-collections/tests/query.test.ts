@@ -54,8 +54,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const { collectionOptions } = queryCollectionOptions(config)
-    const collection = new Collection(collectionOptions)
+    const { options } = queryCollectionOptions(config)
+    const collection = new Collection(options)
 
     // Wait for the query to complete and collection to update
     await vi.waitFor(
@@ -114,8 +114,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const { collectionOptions, refetch } = queryCollectionOptions(config)
-    const collection = new Collection(collectionOptions)
+    const { options, refetch } = queryCollectionOptions(config)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -187,7 +187,7 @@ describe(`QueryCollection`, () => {
       .mockResolvedValueOnce([initialItem])
       .mockRejectedValueOnce(testError)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
@@ -195,7 +195,7 @@ describe(`QueryCollection`, () => {
       getId,
       retry: 0, // Disable retries for this test case
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -237,14 +237,14 @@ describe(`QueryCollection`, () => {
     // Mock queryFn to return invalid data (not an array of objects)
     const queryFn = vi.fn().mockResolvedValue(`not an array` as any)
 
-    const { collectionOptions } = queryCollectionOptions({
+    const { options } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for the query to execute
     await vi.waitFor(() => {
@@ -285,14 +285,14 @@ describe(`QueryCollection`, () => {
     // Spy on console.log to detect when commits happen
     const consoleSpy = vi.spyOn(console, `log`)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -367,14 +367,14 @@ describe(`QueryCollection`, () => {
     // Create a spy for the getId function
     const getIdSpy = vi.fn((item: any) => item.customId)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId: getIdSpy,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -456,12 +456,12 @@ describe(`QueryCollection`, () => {
         onDelete,
       }
 
-      const { collectionOptions } = queryCollectionOptions(config)
+      const { options } = queryCollectionOptions(config)
 
       // Verify that the handlers were passed to the collection options
-      expect(collectionOptions.onInsert).toBeDefined()
-      expect(collectionOptions.onUpdate).toBeDefined()
-      expect(collectionOptions.onDelete).toBeDefined()
+      expect(options.onInsert).toBeDefined()
+      expect(options.onUpdate).toBeDefined()
+      expect(options.onDelete).toBeDefined()
     })
 
     it(`should wrap handlers and call the original handler`, async () => {
@@ -489,12 +489,12 @@ describe(`QueryCollection`, () => {
         onDelete,
       }
 
-      const { collectionOptions } = queryCollectionOptions(config)
+      const { options } = queryCollectionOptions(config)
 
       // Call the wrapped handlers
-      await collectionOptions.onInsert!(mockParams)
-      await collectionOptions.onUpdate!(mockParams)
-      await collectionOptions.onDelete!(mockParams)
+      await options.onInsert!(mockParams)
+      await options.onUpdate!(mockParams)
+      await options.onDelete!(mockParams)
 
       // Verify the original handlers were called
       expect(onInsert).toHaveBeenCalledWith(mockParams)
@@ -537,8 +537,7 @@ describe(`QueryCollection`, () => {
       vi.spyOn(queryClient, `refetchQueries`).mockImplementation(refetchSpy)
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
-      const { collectionOptions: optionsDefault } =
-        queryCollectionOptions(configDefault)
+      const { options: optionsDefault } = queryCollectionOptions(configDefault)
       await optionsDefault.onInsert!(mockParams)
 
       // Verify handler was called and refetch was triggered
@@ -549,8 +548,7 @@ describe(`QueryCollection`, () => {
       refetchSpy.mockClear()
 
       // Test case 2: Explicit { refetch: false } should not trigger refetch
-      const { collectionOptions: optionsFalse } =
-        queryCollectionOptions(configFalse)
+      const { options: optionsFalse } = queryCollectionOptions(configFalse)
       await optionsFalse.onInsert!(mockParams)
 
       // Verify handler was called but refetch was NOT triggered

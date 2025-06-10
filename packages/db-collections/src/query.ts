@@ -93,7 +93,7 @@ export function queryCollectionOptions<
 >(
   config: QueryCollectionConfig<TItem, TError, TQueryKey>
 ): {
-  collectionOptions: CollectionConfig<TItem>
+  options: CollectionConfig<TItem>
   refetch: () => Promise<void>
 } {
   const {
@@ -316,7 +316,7 @@ export function queryCollectionOptions<
     : undefined
 
   return {
-    collectionOptions: {
+    options: {
       ...baseCollectionConfig,
       getId,
       sync: { sync: internalSync },

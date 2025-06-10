@@ -134,7 +134,7 @@ const createTodoCollection = (type: CollectionType) => {
   } else {
     let newCollection: Collection
     if (type === CollectionType.Electric) {
-      newCollection = createCollection(
+      newCollection = createCollection<UpdateTodo>(
         electricCollectionOptions({
           id: `todos`,
           shapeOptions: {
@@ -176,7 +176,7 @@ const createTodoCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).collectionOptions
+        }).options
       )
     } else {
       // Query collection using our API helper
@@ -228,7 +228,7 @@ const createTodoCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).collectionOptions
+        }).options
       )
     }
     collectionsCache.set(`todo`, newCollection)
@@ -279,7 +279,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).collectionOptions
+        }).options
       )
     } else {
       // Query collection using our API helper
@@ -323,7 +323,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).collectionOptions
+        }).options
       )
     }
     collectionsCache.set(`config`, newCollection)
