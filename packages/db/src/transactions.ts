@@ -4,6 +4,7 @@ import type {
   PendingMutation,
   TransactionConfig,
   TransactionState,
+  TransactionWithMutations,
 } from "./types"
 
 function generateUUID() {
@@ -181,11 +182,17 @@ export class Transaction {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
+
+      return this
     }
 
     // Run mutationFn
     try {
-      await this.mutationFn({ transaction: this })
+      // At this point we know there's at least one mutation
+      // Use type assertion to tell TypeScript about this guarantee
+      const transactionWithMutations =
+        this as unknown as TransactionWithMutations
+      await this.mutationFn({ transaction: transactionWithMutations })
 
       this.setState(`completed`)
       this.touchCollection()

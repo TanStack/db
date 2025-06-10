@@ -72,31 +72,29 @@ const Todos = () => {
 }
 ```
 
-Apply transactional writes with local optimistic state:
+Apply mutations with local optimistic state:
 
 ```tsx
-import { useOptimisticMutation } from "@tanstack/react-db"
+// Define collection with persistence handlers
+const todoCollection = createCollection({
+  id: "todos",
+  // ... other config
+  onInsert: async ({ transaction }) => {
+    const modified = transaction.mutations[0].modified
+    await api.todos.create(modified)
+  },
+})
 
+// Then use collection operators in your components
 const AddTodo = () => {
-  const addTodo = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const { collection, modified: newTodo } = transaction.mutations[0]!
-
-      await api.todos.create(newTodo)
-      await collection.refetch()
-    },
-  })
-
   return (
     <Button
       onClick={() =>
-        addTodo.mutate(() =>
-          todoCollection.insert({
-            id: uuid(),
-            text: "🔥 Make app faster",
-            completed: false,
-          })
-        )
+        todoCollection.insert({
+          id: uuid(),
+          text: "🔥 Make app faster",
+          completed: false,
+        })
       }
     />
   )
