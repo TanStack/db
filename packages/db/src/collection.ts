@@ -181,6 +181,9 @@ export class Collection<T extends object = Record<string, unknown>> {
   public derivedUpserts = new Map<string, T>()
   public derivedDeletes = new Set<string>()
 
+  // Cached size for performance
+  private _size = 0
+
   // Event system
   private eventListeners = new Set<EventListener<T>>()
   private keyListeners = new Map<string, Set<KeyListener<T>>>()
@@ -338,12 +341,30 @@ export class Collection<T extends object = Record<string, unknown>> {
       }
     }
 
+    // Update cached size
+    this._size = this.calculateSize()
+
     // Collect events for changes
     const events: Array<CollectionEvent<T>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
     // Emit all events at once
     this.emitEvents(events)
+  }
+
+  /**
+   * Calculate the current size based on synced data and optimistic changes
+   */
+  private calculateSize(): number {
+    const syncedSize = this.syncedData.size
+    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
+      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
+    ).length
+    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
+      (key) => !this.syncedData.has(key)
+    ).length
+
+    return syncedSize - deletesFromSynced + upsertsNotInSynced
   }
 
   /**
@@ -431,7 +452,7 @@ export class Collection<T extends object = Record<string, unknown>> {
       })
 
       for (const listener of this.changesBatchListeners) {
-        listener([...changeMessages])
+        listener(changeMessages)
       }
     }
   }
@@ -524,31 +545,27 @@ export class Collection<T extends object = Record<string, unknown>> {
   }
 
   /**
-   * Get the current size of the collection (virtual)
+   * Get the current size of the collection (cached)
    */
   public get size(): number {
-    const syncedSize = this.syncedData.size
-    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
-    ).length
-    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
-      (key) => !this.syncedData.has(key)
-    ).length
-
-    return syncedSize - deletesFromSynced + upsertsNotInSynced
+    return this._size
   }
 
   /**
    * Get all keys (virtual derived state)
    */
   public *keys(): IterableIterator<string> {
-    const allKeys = new Set([
-      ...this.syncedData.keys(),
-      ...this.derivedUpserts.keys(),
-    ])
-
-    for (const key of allKeys) {
+    // Yield keys from synced data, skipping any that are deleted.
+    for (const key of this.syncedData.keys()) {
       if (!this.derivedDeletes.has(key)) {
+        yield key
+      }
+    }
+    // Yield keys from upserts that were not already in synced data.
+    for (const key of this.derivedUpserts.keys()) {
+      if (!this.syncedData.has(key) && !this.derivedDeletes.has(key)) {
+         // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
+         // but it's safer to keep it.
         yield key
       }
     }
@@ -671,6 +688,9 @@ export class Collection<T extends object = Record<string, unknown>> {
           }
         }
       }
+
+      // Update cached size after synced data changes
+      this._size = this.calculateSize()
 
       // Emit all events at once
       this.emitEvents(events)
