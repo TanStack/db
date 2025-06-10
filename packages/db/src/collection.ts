@@ -1,5 +1,5 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { getActiveTransaction } from "./transactions"
+import { Transaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
 import type {
   ChangeMessage,
@@ -9,7 +9,7 @@ import type {
   OptimisticChangeMessage,
   PendingMutation,
   StandardSchema,
-  Transaction,
+  Transaction as TransactionType,
 } from "./types"
 
 // Store collections in memory
@@ -564,8 +564,8 @@ export class Collection<T extends object = Record<string, unknown>> {
     // Yield keys from upserts that were not already in synced data.
     for (const key of this.derivedUpserts.keys()) {
       if (!this.syncedData.has(key) && !this.derivedDeletes.has(key)) {
-         // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
-         // but it's safer to keep it.
+        // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
+        // but it's safer to keep it.
         yield key
       }
     }
@@ -811,7 +811,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * Inserts one or more items into the collection
    * @param items - Single item or array of items to insert
    * @param config - Optional configuration including metadata and custom keys
-   * @returns A Transaction object representing the insert operation(s)
+   * @returns A TransactionType object representing the insert operation(s)
    * @throws {SchemaValidationError} If the data fails schema validation
    * @example
    * // Insert a single item
@@ -827,9 +827,13 @@ export class Collection<T extends object = Record<string, unknown>> {
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
   insert = (data: T | Array<T>, config?: InsertConfig) => {
-    const transaction = getActiveTransaction()
-    if (typeof transaction === `undefined`) {
-      throw `no transaction found when calling collection.insert`
+    const ambientTransaction = getActiveTransaction()
+
+    // If no ambient transaction exists, check for an onInsert handler early
+    if (!ambientTransaction && !this.config.onInsert) {
+      throw new Error(
+        `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
+      )
     }
 
     const items = Array.isArray(data) ? data : [data]
@@ -869,12 +873,33 @@ export class Collection<T extends object = Record<string, unknown>> {
       mutations.push(mutation)
     })
 
-    transaction.applyMutations(mutations)
+    // If an ambient transaction exists, use it
+    if (ambientTransaction) {
+      ambientTransaction.applyMutations(mutations)
 
-    this.transactions.set(transaction.id, transaction)
-    this.recomputeOptimisticState()
+      this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.recomputeOptimisticState()
 
-    return transaction
+      return ambientTransaction
+    } else {
+      // Create a new transaction with a mutation function that calls the onInsert handler
+      const directOpTransaction = new Transaction({
+        mutationFn: async (params) => {
+          // Call the onInsert handler with the transaction
+          return this.config.onInsert!(params)
+        },
+      })
+
+      // Apply mutations to the new transaction
+      directOpTransaction.applyMutations(mutations)
+      directOpTransaction.commit()
+
+      // Add the transaction to the collection's transactions store
+      this.transactions.set(directOpTransaction.id, directOpTransaction)
+      this.recomputeOptimisticState()
+
+      return directOpTransaction
+    }
   }
 
   /**
@@ -920,13 +945,13 @@ export class Collection<T extends object = Record<string, unknown>> {
     id: unknown,
     configOrCallback: ((draft: TItem) => void) | OperationConfig,
     maybeCallback?: (draft: TItem) => void
-  ): Transaction
+  ): TransactionType
 
   update<TItem extends object = T>(
     ids: Array<unknown>,
     configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: Array<TItem>) => void
-  ): Transaction
+  ): TransactionType
 
   update<TItem extends object = T>(
     ids: unknown | Array<unknown>,
@@ -937,9 +962,13 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw new Error(`The first argument to update is missing`)
     }
 
-    const transaction = getActiveTransaction()
-    if (typeof transaction === `undefined`) {
-      throw `no transaction found when calling collection.update`
+    const ambientTransaction = getActiveTransaction()
+
+    // If no ambient transaction exists, check for an onUpdate handler early
+    if (!ambientTransaction && !this.config.onUpdate) {
+      throw new Error(
+        `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
+      )
     }
 
     const isArray = Array.isArray(ids)
@@ -1037,19 +1066,43 @@ export class Collection<T extends object = Record<string, unknown>> {
       throw new Error(`No changes were made to any of the objects`)
     }
 
-    transaction.applyMutations(mutations)
+    // If an ambient transaction exists, use it
+    if (ambientTransaction) {
+      ambientTransaction.applyMutations(mutations)
 
-    this.transactions.set(transaction.id, transaction)
+      this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.recomputeOptimisticState()
+
+      return ambientTransaction
+    }
+
+    // No need to check for onUpdate handler here as we've already checked at the beginning
+
+    // Create a new transaction with a mutation function that calls the onUpdate handler
+    const directOpTransaction = new Transaction({
+      mutationFn: async (transaction) => {
+        // Call the onUpdate handler with the transaction
+        return this.config.onUpdate!(transaction)
+      },
+    })
+
+    // Apply mutations to the new transaction
+    directOpTransaction.applyMutations(mutations)
+    directOpTransaction.commit()
+
+    // Add the transaction to the collection's transactions store
+
+    this.transactions.set(directOpTransaction.id, directOpTransaction)
     this.recomputeOptimisticState()
 
-    return transaction
+    return directOpTransaction
   }
 
   /**
    * Deletes one or more items from the collection
    * @param ids - Single ID or array of IDs to delete
    * @param config - Optional configuration including metadata
-   * @returns A Transaction object representing the delete operation(s)
+   * @returns A TransactionType object representing the delete operation(s)
    * @example
    * // Delete a single item
    * delete("todo-1")
@@ -1060,10 +1113,17 @@ export class Collection<T extends object = Record<string, unknown>> {
    * // Delete with metadata
    * delete("todo-1", { metadata: { reason: "completed" } })
    */
-  delete = (ids: Array<string> | string, config?: OperationConfig) => {
-    const transaction = getActiveTransaction()
-    if (typeof transaction === `undefined`) {
-      throw `no transaction found when calling collection.delete`
+  delete = (
+    ids: Array<string> | string,
+    config?: OperationConfig
+  ): TransactionType => {
+    const ambientTransaction = getActiveTransaction()
+
+    // If no ambient transaction exists, check for an onDelete handler early
+    if (!ambientTransaction && !this.config.onDelete) {
+      throw new Error(
+        `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
+      )
     }
 
     const idsArray = (Array.isArray(ids) ? ids : [ids]).map((id) =>
@@ -1092,12 +1152,33 @@ export class Collection<T extends object = Record<string, unknown>> {
       mutations.push(mutation)
     }
 
-    transaction.applyMutations(mutations)
+    // If an ambient transaction exists, use it
+    if (ambientTransaction) {
+      ambientTransaction.applyMutations(mutations)
 
-    this.transactions.set(transaction.id, transaction)
+      this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.recomputeOptimisticState()
+
+      return ambientTransaction
+    }
+
+    // Create a new transaction with a mutation function that calls the onDelete handler
+    const directOpTransaction = new Transaction({
+      autoCommit: true,
+      mutationFn: async (transaction) => {
+        // Call the onDelete handler with the transaction
+        return this.config.onDelete!(transaction)
+      },
+    })
+
+    // Apply mutations to the new transaction
+    directOpTransaction.applyMutations(mutations)
+    directOpTransaction.commit()
+
+    this.transactions.set(directOpTransaction.id, directOpTransaction)
     this.recomputeOptimisticState()
 
-    return transaction
+    return directOpTransaction
   }
 
   /**

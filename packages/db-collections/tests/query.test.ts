@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
 import { Collection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
+import type { MutationFnParams, Transaction } from "@tanstack/db"
 import type { QueryCollectionConfig } from "../src/query"
 
 interface TestItem {
@@ -53,8 +54,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const { collectionOptions } = queryCollectionOptions(config)
-    const collection = new Collection(collectionOptions)
+    const { options } = queryCollectionOptions(config)
+    const collection = new Collection(options)
 
     // Wait for the query to complete and collection to update
     await vi.waitFor(
@@ -113,8 +114,8 @@ describe(`QueryCollection`, () => {
       getId,
     }
 
-    const { collectionOptions, refetch } = queryCollectionOptions(config)
-    const collection = new Collection(collectionOptions)
+    const { options, refetch } = queryCollectionOptions(config)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -186,7 +187,7 @@ describe(`QueryCollection`, () => {
       .mockResolvedValueOnce([initialItem])
       .mockRejectedValueOnce(testError)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
@@ -194,7 +195,7 @@ describe(`QueryCollection`, () => {
       getId,
       retry: 0, // Disable retries for this test case
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -236,14 +237,14 @@ describe(`QueryCollection`, () => {
     // Mock queryFn to return invalid data (not an array of objects)
     const queryFn = vi.fn().mockResolvedValue(`not an array` as any)
 
-    const { collectionOptions } = queryCollectionOptions({
+    const { options } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for the query to execute
     await vi.waitFor(() => {
@@ -284,14 +285,14 @@ describe(`QueryCollection`, () => {
     // Spy on console.log to detect when commits happen
     const consoleSpy = vi.spyOn(console, `log`)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -366,14 +367,14 @@ describe(`QueryCollection`, () => {
     // Create a spy for the getId function
     const getIdSpy = vi.fn((item: any) => item.customId)
 
-    const { collectionOptions, refetch } = queryCollectionOptions({
+    const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
       getId: getIdSpy,
     })
-    const collection = new Collection(collectionOptions)
+    const collection = new Collection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -431,5 +432,131 @@ describe(`QueryCollection`, () => {
     expect(collection.state.get(`KEY::${collection.id}/item3`)).toEqual(
       updatedItems[1]
     )
+  })
+
+  describe(`Direct persistence handlers`, () => {
+    it(`should pass through direct persistence handlers to collection options`, async () => {
+      const queryKey = [`directPersistenceTest`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create mock handlers
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const onUpdate = vi.fn().mockResolvedValue(undefined)
+      const onDelete = vi.fn().mockResolvedValue(undefined)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getId,
+        onInsert,
+        onUpdate,
+        onDelete,
+      }
+
+      const { options } = queryCollectionOptions(config)
+
+      // Verify that the handlers were passed to the collection options
+      expect(options.onInsert).toBeDefined()
+      expect(options.onUpdate).toBeDefined()
+      expect(options.onDelete).toBeDefined()
+    })
+
+    it(`should wrap handlers and call the original handler`, async () => {
+      const queryKey = [`handlerTest`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a mock transaction for testing
+      const mockTransaction = { id: `test-transaction` } as Transaction
+      const mockParams: MutationFnParams = { transaction: mockTransaction }
+
+      // Create handlers
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const onUpdate = vi.fn().mockResolvedValue(undefined)
+      const onDelete = vi.fn().mockResolvedValue(undefined)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getId,
+        onInsert,
+        onUpdate,
+        onDelete,
+      }
+
+      const { options } = queryCollectionOptions(config)
+
+      // Call the wrapped handlers
+      await options.onInsert!(mockParams)
+      await options.onUpdate!(mockParams)
+      await options.onDelete!(mockParams)
+
+      // Verify the original handlers were called
+      expect(onInsert).toHaveBeenCalledWith(mockParams)
+      expect(onUpdate).toHaveBeenCalledWith(mockParams)
+      expect(onDelete).toHaveBeenCalledWith(mockParams)
+    })
+
+    it(`should call refetch based on handler return value`, async () => {
+      // Create a mock transaction for testing
+      const mockTransaction = { id: `test-transaction` } as Transaction
+      const mockParams: MutationFnParams = { transaction: mockTransaction }
+
+      // Create handlers with different return values
+      const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
+      const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
+
+      // Create a spy on the refetch function itself
+      const refetchSpy = vi.fn().mockResolvedValue(undefined)
+
+      // Create configs with the handlers
+      const configDefault: QueryCollectionConfig<TestItem> = {
+        id: `test-default`,
+        queryClient,
+        queryKey: [`refetchTest`, `default`],
+        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        getId,
+        onInsert: onInsertDefault,
+      }
+
+      const configFalse: QueryCollectionConfig<TestItem> = {
+        id: `test-false`,
+        queryClient,
+        queryKey: [`refetchTest`, `false`],
+        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        getId,
+        onInsert: onInsertFalse,
+      }
+
+      // Mock the queryClient.refetchQueries method which is called by refetch()
+      vi.spyOn(queryClient, `refetchQueries`).mockImplementation(refetchSpy)
+
+      // Test case 1: Default behavior (undefined return) should trigger refetch
+      const { options: optionsDefault } = queryCollectionOptions(configDefault)
+      await optionsDefault.onInsert!(mockParams)
+
+      // Verify handler was called and refetch was triggered
+      expect(onInsertDefault).toHaveBeenCalledWith(mockParams)
+      expect(refetchSpy).toHaveBeenCalledTimes(1)
+
+      // Reset mocks
+      refetchSpy.mockClear()
+
+      // Test case 2: Explicit { refetch: false } should not trigger refetch
+      const { options: optionsFalse } = queryCollectionOptions(configFalse)
+      await optionsFalse.onInsert!(mockParams)
+
+      // Verify handler was called but refetch was NOT triggered
+      expect(onInsertFalse).toHaveBeenCalledWith(mockParams)
+      expect(refetchSpy).not.toHaveBeenCalled()
+
+      // Restore original function
+      vi.restoreAllMocks()
+    })
   })
 })

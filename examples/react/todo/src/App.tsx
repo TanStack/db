@@ -1,10 +1,5 @@
 import React, { useState } from "react"
-import {
-  collectionsStore,
-  createCollection,
-  useLiveQuery,
-  useOptimisticMutation,
-} from "@tanstack/react-db"
+import { createCollection, useLiveQuery } from "@tanstack/react-db"
 import {
   electricCollectionOptions,
   queryCollectionOptions,
@@ -12,7 +7,7 @@ import {
 // import { DevTools } from "./DevTools"
 import { QueryClient } from "@tanstack/query-core"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
-import type { Collection, PendingMutation } from "@tanstack/react-db"
+import type { Collection } from "@tanstack/react-db"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
@@ -132,7 +127,6 @@ const queryClient = new QueryClient()
 
 // Cache for collections and their utility functions
 const collectionsCache = new Map()
-const utilityFunctionsCache = new Map()
 // Function to create the appropriate todo collection based on type
 const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
@@ -140,45 +134,98 @@ const createTodoCollection = (type: CollectionType) => {
   } else {
     let newCollection: Collection
     if (type === CollectionType.Electric) {
-      const { collectionOptions, awaitTxId } = electricCollectionOptions({
-        id: `todos`,
-        shapeOptions: {
-          url: `http://localhost:3003/v1/shape`,
-          params: {
-            table: `todos`,
+      newCollection = createCollection<UpdateTodo>(
+        electricCollectionOptions({
+          id: `todos`,
+          shapeOptions: {
+            url: `http://localhost:3003/v1/shape`,
+            params: {
+              table: `todos`,
+            },
+            parser: {
+              // Parse timestamp columns into JavaScript Date objects
+              timestamptz: (date: string) => new Date(date),
+            },
           },
-          parser: {
-            // Parse timestamp columns into JavaScript Date objects
-            timestamptz: (date: string) => new Date(date),
+          getId: (item) => item.id,
+          schema: updateTodoSchema,
+          onInsert: async ({ transaction }) => {
+            const modified = transaction.mutations[0].modified
+            const response = await api.todos.create(modified)
+
+            return { txid: String(response.txid) }
           },
-        },
-        getId: (item) => item.id,
-        schema: updateTodoSchema,
-      })
-      newCollection = createCollection(collectionOptions)
-      utilityFunctionsCache.set(`${newCollection.id}`, awaitTxId)
+          onUpdate: async ({ transaction }) => {
+            const txids = await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original, changes } = mutation
+                const response = await api.todos.update(original.id, changes)
+
+                return { txid: String(response.txid) }
+              })
+            )
+
+            return { txid: String(txids[0].txid) }
+          },
+          onDelete: async ({ transaction }) => {
+            const txids = await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original } = mutation
+                const response = await api.todos.delete(original.id)
+
+                return { txid: String(response.txid) }
+              })
+            )
+
+            return { txid: String(txids[0].txid) }
+          },
+        }).options
+      )
     } else {
       // Query collection using our API helper
-
-      const { collectionOptions, refetch } = queryCollectionOptions({
-        id: `todos`,
-        queryKey: [`todos`],
-        refetchInterval: 3000,
-        queryFn: async () => {
-          const todos = await api.todos.getAll()
-          // Turn date strings into Dates if needed
-          return todos.map((todo) => ({
-            ...todo,
-            created_at: todo.created_at ? new Date(todo.created_at) : undefined,
-            updated_at: todo.updated_at ? new Date(todo.updated_at) : undefined,
-          }))
-        },
-        getId: (item: UpdateTodo) => String(item.id),
-        schema: updateTodoSchema,
-        queryClient,
-      })
-      newCollection = createCollection(collectionOptions)
-      utilityFunctionsCache.set(`${newCollection.id}`, refetch)
+      newCollection = createCollection(
+        queryCollectionOptions({
+          id: `todos`,
+          queryKey: [`todos`],
+          refetchInterval: 3000,
+          queryFn: async () => {
+            const todos = await api.todos.getAll()
+            // Turn date strings into Dates if needed
+            return todos.map((todo) => ({
+              ...todo,
+              created_at: todo.created_at
+                ? new Date(todo.created_at)
+                : undefined,
+              updated_at: todo.updated_at
+                ? new Date(todo.updated_at)
+                : undefined,
+            }))
+          },
+          getId: (item: UpdateTodo) => String(item.id),
+          schema: updateTodoSchema,
+          queryClient,
+          onInsert: async ({ transaction }) => {
+            const modified = transaction.mutations[0].modified
+            return await api.todos.create(modified)
+          },
+          onUpdate: async ({ transaction }) => {
+            return await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original, changes } = mutation
+                return await api.todos.update(original.id, changes)
+              })
+            )
+          },
+          onDelete: async ({ transaction }) => {
+            return await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original } = mutation
+                const response = await api.todos.delete(original.id)
+              })
+            )
+          },
+        }).options
+      )
     }
     collectionsCache.set(`todo`, newCollection)
     return newCollection
@@ -192,77 +239,91 @@ const createConfigCollection = (type: CollectionType) => {
   } else {
     let newCollection: Collection
     if (type === CollectionType.Electric) {
-      const { collectionOptions, awaitTxId } = electricCollectionOptions({
-        id: `config`,
-        shapeOptions: {
-          url: `http://localhost:3003/v1/shape`,
-          params: {
-            table: `config`,
-          },
-          parser: {
-            // Parse timestamp columns into JavaScript Date objects
-            timestamptz: (date: string) => {
-              return new Date(date)
+      newCollection = createCollection(
+        electricCollectionOptions({
+          id: `config`,
+          shapeOptions: {
+            url: `http://localhost:3003/v1/shape`,
+            params: {
+              table: `config`,
+            },
+            parser: {
+              // Parse timestamp columns into JavaScript Date objects
+              timestamptz: (date: string) => {
+                return new Date(date)
+              },
             },
           },
-        },
-        getId: (item: UpdateConfig) => item.id,
-        schema: updateConfigSchema,
-      })
-      newCollection = createCollection(collectionOptions)
-      utilityFunctionsCache.set(`${newCollection.id}`, awaitTxId)
+          getId: (item: UpdateConfig) => item.id,
+          schema: updateConfigSchema,
+          onInsert: async ({ transaction }) => {
+            const modified = transaction.mutations[0].modified
+            const response = await api.config.create(modified)
+            return { txid: String(response.txid) }
+          },
+          onUpdate: async ({ transaction }) => {
+            const txids = await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original, changes } = mutation
+                const response = await api.config.update(
+                  original.id as number,
+                  changes
+                )
+                return { txid: String(response.txid) }
+              })
+            )
+
+            return { txid: String(txids[0]) }
+          },
+        }).options
+      )
     } else {
       // Query collection using our API helper
-      const { collectionOptions, refetch } = queryCollectionOptions({
-        id: `config`,
-        queryKey: [`config`],
-        refetchInterval: 3000,
-        queryFn: async () => {
-          const configs = await api.config.getAll()
-          // Turn date strings into Dates if needed
-          return configs.map((config) => ({
-            ...config,
-            created_at: config.created_at
-              ? new Date(config.created_at)
-              : undefined,
-            updated_at: config.updated_at
-              ? new Date(config.updated_at)
-              : undefined,
-          }))
-        },
-        getId: (item: UpdateConfig) => item.id,
-        schema: updateConfigSchema,
-        queryClient,
-      })
-      newCollection = createCollection(collectionOptions)
-      utilityFunctionsCache.set(`${newCollection.id}`, refetch)
+      newCollection = createCollection(
+        queryCollectionOptions({
+          id: `config`,
+          queryKey: [`config`],
+          refetchInterval: 3000,
+          queryFn: async () => {
+            const configs = await api.config.getAll()
+            // Turn date strings into Dates if needed
+            return configs.map((config) => ({
+              ...config,
+              created_at: config.created_at
+                ? new Date(config.created_at)
+                : undefined,
+              updated_at: config.updated_at
+                ? new Date(config.updated_at)
+                : undefined,
+            }))
+          },
+          getId: (item: UpdateConfig) => item.id,
+          schema: updateConfigSchema,
+          queryClient,
+          onInsert: async ({ transaction }) => {
+            const modified = transaction.mutations[0].modified
+            const response = await api.config.create(modified)
+            return { txid: String(response.txid) }
+          },
+          onUpdate: async ({ transaction }) => {
+            const txids = await Promise.all(
+              transaction.mutations.map(async (mutation) => {
+                const { original, changes } = mutation
+                const response = await api.config.update(
+                  original.id as number,
+                  changes
+                )
+                return { txid: String(response.txid) }
+              })
+            )
+
+            return { txid: String(txids[0]) }
+          },
+        }).options
+      )
     }
     collectionsCache.set(`config`, newCollection)
     return newCollection
-  }
-}
-
-// A bit of indirection to handle awaiting each collection type syncing in new changes.
-async function collectionSync(
-  type: CollectionType,
-  mutation: PendingMutation,
-  txid: number
-) {
-  // Get the collection ID from the mutation
-  const collectionId = mutation.collection.id
-
-  if (type === CollectionType.Query) {
-    // Get the refetch function from the cache
-    const refetch = utilityFunctionsCache.get(`${collectionId}`)
-    if (refetch) {
-      await refetch()
-    }
-  } else {
-    // Get the awaitTxId function from the cache
-    const awaitTxId = utilityFunctionsCache.get(`${collectionId}`)
-    if (awaitTxId) {
-      await awaitTxId(txid)
-    }
   }
 }
 
@@ -296,62 +357,6 @@ export default function App() {
       .select(`@id`, `@key`, `@value`)
   )
 
-  // Define mutations
-  const addTodo = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
-
-      const { modified } = mutation
-      const response = await api.todos.create(modified)
-      await collectionSync(collectionType, mutation, response.txid)
-    },
-  })
-
-  const updateTodo = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const txids = await Promise.all(
-        transaction.mutations.map(async (mutation) => {
-          const { original, changes } = mutation
-          const response = await api.todos.update(original.id, changes)
-          return response.txid
-        })
-      )
-      await Promise.all(
-        txids.map(async (txid, i) => {
-          const mutation = transaction.mutations[i]!
-          return await collectionSync(collectionType, mutation, txid)
-        })
-      )
-    },
-  })
-
-  const deleteTodo = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const mutation = transaction.mutations[0] as PendingMutation<UpdateTodo>
-      const { original } = mutation
-      const response = await api.todos.delete(original.id)
-      await collectionSync(collectionType, mutation, response.txid)
-    },
-  })
-
-  const createConfig = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const mutation = transaction.mutations[0] as PendingMutation<UpdateConfig>
-      const { modified } = mutation
-      const response = await api.config.create(modified)
-      await collectionSync(collectionType, mutation, response.txid)
-    },
-  })
-
-  const updateConfig = useOptimisticMutation({
-    mutationFn: async ({ transaction }) => {
-      const mutation = transaction.mutations[0] as PendingMutation<UpdateConfig>
-      const { original, changes } = mutation
-      const response = await api.config.update(original.id as number, changes)
-      await collectionSync(collectionType, mutation, response.txid)
-    },
-  })
-
   // Handle collection type change directly
   const handleCollectionTypeChange = (type: CollectionType) => {
     if (type !== collectionType) {
@@ -376,23 +381,19 @@ export default function App() {
   const setConfigValue = (key: string, value: string): void => {
     for (const config of configData) {
       if (config.key === key) {
-        updateConfig.mutate(() =>
-          configCollection.update(config.id, (draft) => {
-            draft.value = value
-          })
-        )
+        configCollection.update(config.id, (draft) => {
+          draft.value = value
+        })
 
         return
       }
     }
 
     // If the config doesn't exist yet, create it
-    createConfig.mutate(() =>
-      configCollection.insert({
-        key,
-        value,
-      })
-    )
+    configCollection.insert({
+      key,
+      value,
+    })
   }
 
   const backgroundColor = getConfigValue(`backgroundColor`)
@@ -452,22 +453,18 @@ export default function App() {
     e.preventDefault()
     if (!newTodo.trim()) return
 
-    addTodo.mutate(() =>
-      todoCollection.insert({
-        text: newTodo,
-        completed: false,
-        id: Math.round(Math.random() * 1000000),
-      })
-    )
+    todoCollection.insert({
+      text: newTodo,
+      completed: false,
+      id: Math.round(Math.random() * 1000000),
+    })
     setNewTodo(``)
   }
 
   const toggleTodo = (todo: UpdateTodo) => {
-    updateTodo.mutate(() =>
-      todoCollection.update(todo.id, (draft) => {
-        draft.completed = !draft.completed
-      })
-    )
+    todoCollection.update(todo.id, (draft) => {
+      draft.completed = !draft.completed
+    })
   }
 
   const activeTodos = todos.filter((todo) => !todo.completed)
@@ -562,15 +559,13 @@ export default function App() {
                       : activeTodos
                     const togglingIds = new Set()
                     todosToToggle.forEach((t) => togglingIds.add(t.id))
-                    updateTodo.mutate(() =>
-                      todoCollection.update(
-                        todosToToggle.map((todo) => todo.id),
-                        (drafts) => {
-                          drafts.forEach(
-                            (draft) => (draft.completed = !allCompleted)
-                          )
-                        }
-                      )
+                    todoCollection.update(
+                      todosToToggle.map((todo) => todo.id),
+                      (drafts) => {
+                        drafts.forEach(
+                          (draft) => (draft.completed = !allCompleted)
+                        )
+                      }
                     )
                   }}
                 >
@@ -613,9 +608,7 @@ export default function App() {
                         </label>
                         <button
                           onClick={() => {
-                            deleteTodo.mutate(() =>
-                              todoCollection.delete(todo.id)
-                            )
+                            todoCollection.delete(todo.id)
                           }}
                           className="hidden group-hover:block absolute right-[10px] w-[40px] h-[40px] my-auto top-0 bottom-0 text-[30px] text-[#cc9a9a] hover:text-[#af5b5e] transition-colors"
                         >
@@ -635,10 +628,8 @@ export default function App() {
                   {completedTodos.length > 0 && (
                     <button
                       onClick={() => {
-                        deleteTodo.mutate(() =>
-                          todoCollection.delete(
-                            completedTodos.map((todo) => todo.id)
-                          )
+                        todoCollection.delete(
+                          completedTodos.map((todo) => todo.id)
                         )
                       }}
                       className="text-inherit hover:underline"

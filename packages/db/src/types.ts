@@ -32,6 +32,16 @@ export type MutationFnParams = {
 
 export type MutationFn = (params: MutationFnParams) => Promise<any>
 
+/**
+ * Utility type for a Transaction with at least one mutation
+ * This is used internally by the Transaction.commit method
+ */
+export type TransactionWithMutations<
+  T extends object = Record<string, unknown>,
+> = Transaction & {
+  mutations: [PendingMutation<T>, ...Array<PendingMutation<T>>]
+}
+
 export interface TransactionConfig {
   /** Unique identifier for the transaction */
   id?: string
@@ -130,6 +140,24 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
    * getId: (item) => item.uuid
    */
   getId: (item: T) => any
+  /**
+   * Optional asynchronous handler function called before an insert operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to any value
+   */
+  onInsert?: MutationFn
+  /**
+   * Optional asynchronous handler function called before an update operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to any value
+   */
+  onUpdate?: MutationFn
+  /**
+   * Optional asynchronous handler function called before a delete operation
+   * @param params Object containing transaction and mutation information
+   * @returns Promise resolving to any value
+   */
+  onDelete?: MutationFn
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

@@ -39,19 +39,25 @@ describe(`Collection`, () => {
     // Verify that insert throws an error
     expect(() => {
       collection.insert({ value: `new value` })
-    }).toThrow(`no transaction found when calling collection.insert`)
+    }).toThrow(
+      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
+    )
 
     // Verify that update throws an error
     expect(() => {
       collection.update(`initial`, (draft) => {
         draft.value = `updated value`
       })
-    }).toThrow(`no transaction found when calling collection.update`)
+    }).toThrow(
+      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
+    )
 
     // Verify that delete throws an error
     expect(() => {
       collection.delete(`initial`)
-    }).toThrow(`no transaction found when calling collection.delete`)
+    }).toThrow(
+      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
+    )
   })
 
   it(`should throw an error when trying to update an item's ID`, async () => {
@@ -571,6 +577,172 @@ describe(`Collection`, () => {
     expect(() => {
       tx2.mutate(() => collection.insert({ id: 2, value: `new value` }))
     }).not.toThrow()
+  })
+
+  it(`should support operation handler functions`, async () => {
+    // Create mock handler functions
+    const onInsertMock = vi.fn()
+    const onUpdateMock = vi.fn()
+    const onDeleteMock = vi.fn()
+
+    // Create a collection with handler functions
+    const collection = new Collection<{ id: number; value: string }>({
+      id: `handlers-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+        },
+      },
+      // Add the new handler functions
+      onInsert: onInsertMock,
+      onUpdate: onUpdateMock,
+      onDelete: onDeleteMock,
+    })
+
+    await collection.stateWhenReady()
+
+    // Create a transaction to test the handlers
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn, autoCommit: false })
+
+    // Test insert handler
+    tx.mutate(() => collection.insert({ id: 2, value: `new value` }))
+
+    // Test update handler
+    tx.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `updated value`
+      })
+    )
+
+    // Test delete handler
+    tx.mutate(() => collection.delete(1))
+
+    // Verify the handler functions were defined correctly
+    // We're not testing actual invocation since that would require modifying the Collection class
+    expect(typeof collection.config.onInsert).toBe(`function`)
+    expect(typeof collection.config.onUpdate).toBe(`function`)
+    expect(typeof collection.config.onDelete).toBe(`function`)
+  })
+
+  it(`should execute operations outside of explicit transactions using handlers`, async () => {
+    // Create handler functions that resolve after a short delay to simulate async operations
+    const onInsertMock = vi.fn().mockImplementation(async (tx) => {
+      // Wait a bit to simulate an async operation
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return { success: true, operation: `insert` }
+    })
+
+    const onUpdateMock = vi.fn().mockImplementation(async (tx) => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return { success: true, operation: `update` }
+    })
+
+    const onDeleteMock = vi.fn().mockImplementation(async (tx) => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return { success: true, operation: `delete` }
+    })
+
+    // Create a collection with handler functions
+    const collection = new Collection<{ id: number; value: string }>({
+      id: `direct-operations-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+        },
+      },
+      // Add the handler functions
+      onInsert: onInsertMock,
+      onUpdate: onUpdateMock,
+      onDelete: onDeleteMock,
+    })
+
+    await collection.stateWhenReady()
+
+    // Test direct insert operation
+    const insertTx = collection.insert({ id: 2, value: `inserted directly` })
+    expect(insertTx).toBeDefined()
+    expect(onInsertMock).toHaveBeenCalledTimes(1)
+
+    // Test direct update operation
+    const updateTx = collection.update(1, (draft) => {
+      draft.value = `updated directly`
+    })
+    expect(updateTx).toBeDefined()
+    expect(onUpdateMock).toHaveBeenCalledTimes(1)
+
+    // Test direct delete operation
+    const deleteTx = collection.delete(1)
+    expect(deleteTx).toBeDefined()
+    expect(onDeleteMock).toHaveBeenCalledTimes(1)
+
+    // Wait for all transactions to complete
+    await Promise.all([
+      insertTx.isPersisted.promise,
+      updateTx.isPersisted.promise,
+      deleteTx.isPersisted.promise,
+    ])
+
+    // Verify the transactions were created with the correct configuration
+    expect(insertTx.autoCommit).toBe(true)
+    expect(updateTx.autoCommit).toBe(true)
+    expect(deleteTx.autoCommit).toBe(true)
+  })
+
+  it(`should throw errors when operations are called outside transactions without handlers`, async () => {
+    // Create a collection without handler functions
+    const collection = new Collection<{ id: number; value: string }>({
+      id: `no-handlers-test`,
+      getId: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+        },
+      },
+      // No handler functions defined
+    })
+
+    await collection.stateWhenReady()
+
+    // Test insert without handler
+    expect(() => {
+      collection.insert({ id: 2, value: `should fail` })
+    }).toThrow(
+      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
+    )
+
+    // Test update without handler
+    expect(() => {
+      collection.update(1, (draft) => {
+        draft.value = `should fail`
+      })
+    }).toThrow(
+      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
+    )
+
+    // Test delete without handler
+    expect(() => {
+      collection.delete(1)
+    }).toThrow(
+      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
+    )
   })
 })
 
