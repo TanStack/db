@@ -7,7 +7,7 @@ import {
 // import { DevTools } from "./DevTools"
 import { QueryClient } from "@tanstack/query-core"
 import { updateConfigSchema, updateTodoSchema } from "./db/validation"
-import type { Collection, PendingMutation } from "@tanstack/react-db"
+import type { Collection } from "@tanstack/react-db"
 import type { UpdateConfig, UpdateTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
@@ -127,7 +127,6 @@ const queryClient = new QueryClient()
 
 // Cache for collections and their utility functions
 const collectionsCache = new Map()
-const utilityFunctionsCache = new Map()
 // Function to create the appropriate todo collection based on type
 const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
@@ -151,7 +150,7 @@ const createTodoCollection = (type: CollectionType) => {
           getId: (item) => item.id,
           schema: updateTodoSchema,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0]!.modified
+            const modified = transaction.mutations[0].modified
             const response = await api.todos.create(modified)
             return { txid: String(response.txid) }
           },
@@ -203,7 +202,7 @@ const createTodoCollection = (type: CollectionType) => {
           schema: updateTodoSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0]!.modified
+            const modified = transaction.mutations[0].modified
             const response = await api.todos.create(modified)
             return { txid: String(response.txid) }
           },
@@ -262,7 +261,7 @@ const createConfigCollection = (type: CollectionType) => {
           getId: (item: UpdateConfig) => item.id,
           schema: updateConfigSchema,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0]!.modified
+            const modified = transaction.mutations[0].modified
             const response = await api.config.create(modified)
             return { txid: String(response.txid) }
           },
@@ -306,7 +305,7 @@ const createConfigCollection = (type: CollectionType) => {
           schema: updateConfigSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0]!.modified
+            const modified = transaction.mutations[0].modified
             const response = await api.config.create(modified)
             return { txid: String(response.txid) }
           },

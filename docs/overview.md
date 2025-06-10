@@ -27,7 +27,8 @@ TanStack DB works by:
 ```tsx
 // Define collections to load data into
 const todoCollection = createCollection({
-  // your config
+  // ...your config
+  onUpdate: updateMutationFn
 })
 
 const Todos = () => {
@@ -38,17 +39,12 @@ const Todos = () => {
       .where('@completed', '=', false)
   )
 
-  // Make local writes using optimistic mutations
-  const updateTodo = useOptimisticMutation({ mutationFn })
-
-  const complete = (todo) =>
-    // Invokes the mutationFn to handle the write
-    updateTodo.mutate(() =>
-      // Instantly applies optimistic state
-      todoCollection.update(todo.id, (draft) => {
-        draft.completed = true
-      })
-    )
+  const complete = (todo) => {
+    // Instantly applies optimistic state
+    todoCollection.update(todo.id, (draft) => {
+      draft.completed = true
+    })
+  }
 
   return (
     <ul>
@@ -88,18 +84,23 @@ Live queries support joins across collections. This allows you to:
 
 ### Making optimistic mutations
 
-Collections support `insert`, `update` and `delete` operations. These operations must be made within the context of a transactional mutator:
+Collections support `insert`, `update` and `delete` operations. When called, they trigger the corresponding `onInsert`, `onUpdate`, `onDelete` persistance handlers in the collection config.
 
 ```ts
-const updateTodo = useOptimisticMutation({ mutationFn })
+// Define collection with persistence handlers
+const todoCollection = createCollection({
+  id: "todos",
+  // ... other config
+  onUpdate: async ({ transaction }) => {
+    const {original, changes} = transaction.mutations[0]
+    await api.todos.update(original.id, changes)
+  },
+})
 
-// Triggers the `mutationFn`
-updateTodo.mutate(() =>
-  // Immediately applies optimistic state
-  todoCollection.update(todo.id, (draft) => {
-    draft.completed = true
-  })
-)
+// Immediately applies optimistic state
+todoCollection.update(todo.id, (draft) => {
+  draft.completed = true
+})
 ```
 
 Rather than mutating the collection data directly, the collection internally treats its synced/loaded data as immutable and maintains a separate set of local mutations as optimistic state. When live queries read from the collection, they see a local view that overlays the local optimistic mutations on-top-of the immutable synced data.
@@ -111,7 +112,7 @@ For example, in the following code, the mutationFn first sends the write to the 
 ```ts
 const updateTodo = useOptimisticMutation({
   mutationFn: async ({ transaction }) => {
-    const { collection, modified: updatedTodo } = transaction.mutations[0]!
+    const { collection, modified: updatedTodo } = transaction.mutations[0]
 
     await api.todos.update(updatedTodo)
     await collection.refetch()
@@ -364,7 +365,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 
   // Wait for the transaction to be synced back from the server
   // before discarding the optimistic state.
-  const collection: Collection = transaction.mutations[0]!.collection
+  const collection: Collection = transaction.mutations[0].collection
   await collection.refetch()
 }
 ```
@@ -548,7 +549,7 @@ const Todos = () => {
   // instrumentation later on when your app grows.
   const addTodo = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
-      const { changes: newTodo } = transaction.mutations[0]!
+      const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
@@ -565,7 +566,7 @@ const Todos = () => {
   // This knows the api call to make and the collection to refetch.
   const addList = useOptimisticMutation({
     mutationFn: async ({ transaction }) => {
-      const { changes: newList } = transaction.mutations[0]!
+      const { changes: newList } = transaction.mutations[0]
 
       await api.todoLists.create(newList)
       await todoListCollection.refetch()
@@ -634,7 +635,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 
   // Wait for the transaction to be synced back from the server
   // before discarding the optimistic state.
-  const collection: Collection = transaction.mutations[0]!.collection
+  const collection: Collection = transaction.mutations[0].collection
 
   // Here we use an ElectricSQL feature to monitor the incoming sync
   // stream for the database transaction ID that the writes we made
