@@ -105,7 +105,7 @@ const AddTodo = () => {
 
 ## 📚 Docs
 
-See the [Usage guide](./docs/index.md) for more details, including how to do:
+See the [Usage guide](./docs/overview.md) for more details, including how to do:
 
 - real-time sync
 - cross-collection queries
