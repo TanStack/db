@@ -152,6 +152,7 @@ const createTodoCollection = (type: CollectionType) => {
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
             const response = await api.todos.create(modified)
+
             return { txid: String(response.txid) }
           },
           onUpdate: async ({ transaction }) => {
@@ -159,22 +160,24 @@ const createTodoCollection = (type: CollectionType) => {
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
                 const response = await api.todos.update(original.id, changes)
+
                 return { txid: String(response.txid) }
               })
             )
 
-            return { txid: String(txids[0]) }
+            return { txid: String(txids[0].txid) }
           },
           onDelete: async ({ transaction }) => {
             const txids = await Promise.all(
               transaction.mutations.map(async (mutation) => {
-                const { original, changes } = mutation
+                const { original } = mutation
                 const response = await api.todos.delete(original.id)
+
                 return { txid: String(response.txid) }
               })
             )
 
-            return { txid: String(txids[0]) }
+            return { txid: String(txids[0].txid) }
           },
         }).options
       )
@@ -203,30 +206,23 @@ const createTodoCollection = (type: CollectionType) => {
           queryClient,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
-            const response = await api.todos.create(modified)
-            return { txid: String(response.txid) }
+            return await api.todos.create(modified)
           },
           onUpdate: async ({ transaction }) => {
-            const txids = await Promise.all(
+            return await Promise.all(
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
-                const response = await api.todos.update(original.id, changes)
-                return { txid: String(response.txid) }
+                return await api.todos.update(original.id, changes)
               })
             )
-
-            return { txid: txids[0] }
           },
           onDelete: async ({ transaction }) => {
-            const txids = await Promise.all(
+            return await Promise.all(
               transaction.mutations.map(async (mutation) => {
-                const { original, changes } = mutation
+                const { original } = mutation
                 const response = await api.todos.delete(original.id)
-                return { txid: String(response.txid) }
               })
             )
-
-            return { txid: String(txids[0]) }
           },
         }).options
       )
