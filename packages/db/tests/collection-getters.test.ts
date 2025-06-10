@@ -131,51 +131,53 @@ describe(`Collection getters`, () => {
 
     it(`updates size correctly with optimistic inserts`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       expect(collection.size).toBe(2)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       expect(collection.size).toBe(3)
     })
 
     it(`updates size correctly with optimistic updates (should not change size)`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       expect(collection.size).toBe(2)
-      
+
       const tx = createTransaction({ mutationFn })
-      tx.mutate(() => collection.update(`item1`, (draft) => {
-        draft.name = `Updated Item 1`
-      }))
-      
+      tx.mutate(() =>
+        collection.update(`item1`, (draft) => {
+          draft.name = `Updated Item 1`
+        })
+      )
+
       expect(collection.size).toBe(2) // Size should remain the same for updates
     })
 
     it(`updates size correctly with optimistic deletes`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       expect(collection.size).toBe(2)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       expect(collection.size).toBe(1)
     })
 
     it(`updates size correctly with multiple optimistic operations`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       expect(collection.size).toBe(2)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => {
         collection.insert({ id: `item3`, name: `Item 3` })
         collection.insert({ id: `item4`, name: `Item 4` })
         collection.delete(`item1`)
       })
-      
+
       expect(collection.size).toBe(3) // 2 original - 1 deleted + 2 inserted = 3
     })
   })
@@ -193,32 +195,34 @@ describe(`Collection getters`, () => {
 
     it(`returns true for optimistically inserted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       const key = `KEY::${collection.id}/item3`
       expect(collection.has(key)).toBe(true)
     })
 
     it(`returns false for optimistically deleted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       const key = `KEY::${collection.id}/item1`
       expect(collection.has(key)).toBe(false)
     })
 
     it(`returns true for optimistically updated items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
-      tx.mutate(() => collection.update(`item1`, (draft) => {
-        draft.name = `Updated Item 1`
-      }))
-      
+      tx.mutate(() =>
+        collection.update(`item1`, (draft) => {
+          draft.name = `Updated Item 1`
+        })
+      )
+
       const key = `KEY::${collection.id}/item1`
       expect(collection.has(key)).toBe(true)
     })
@@ -234,10 +238,10 @@ describe(`Collection getters`, () => {
 
     it(`excludes optimistically deleted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       const keys = Array.from(collection.keys())
       expect(keys).toHaveLength(1)
       expect(keys).toContain(`KEY::${collection.id}/item2`)
@@ -246,10 +250,10 @@ describe(`Collection getters`, () => {
 
     it(`includes optimistically inserted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       const keys = Array.from(collection.keys())
       expect(keys).toHaveLength(3)
       expect(keys).toContain(`KEY::${collection.id}/item1`)
@@ -268,10 +272,10 @@ describe(`Collection getters`, () => {
 
     it(`excludes optimistically deleted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       const values = Array.from(collection.values())
       expect(values).toHaveLength(1)
       expect(values).toContainEqual({ id: `item2`, name: `Item 2` })
@@ -280,10 +284,10 @@ describe(`Collection getters`, () => {
 
     it(`includes optimistically inserted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       const values = Array.from(collection.values())
       expect(values).toHaveLength(3)
       expect(values).toContainEqual({ id: `item1`, name: `Item 1` })
@@ -293,12 +297,14 @@ describe(`Collection getters`, () => {
 
     it(`reflects optimistic updates`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
-      tx.mutate(() => collection.update(`item1`, (draft) => {
-        draft.name = `Updated Item 1`
-      }))
-      
+      tx.mutate(() =>
+        collection.update(`item1`, (draft) => {
+          draft.name = `Updated Item 1`
+        })
+      )
+
       const values = Array.from(collection.values())
       expect(values).toHaveLength(2)
       expect(values).toContainEqual({ id: `item1`, name: `Updated Item 1` })
@@ -322,10 +328,10 @@ describe(`Collection getters`, () => {
 
     it(`excludes optimistically deleted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(1)
       expect(entries).toContainEqual([
@@ -336,10 +342,10 @@ describe(`Collection getters`, () => {
 
     it(`includes optimistically inserted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(3)
       expect(entries).toContainEqual([
@@ -358,12 +364,14 @@ describe(`Collection getters`, () => {
 
     it(`reflects optimistic updates`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
-      tx.mutate(() => collection.update(`item1`, (draft) => {
-        draft.name = `Updated Item 1`
-      }))
-      
+      tx.mutate(() =>
+        collection.update(`item1`, (draft) => {
+          draft.name = `Updated Item 1`
+        })
+      )
+
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(2)
       expect(entries).toContainEqual([
@@ -392,10 +400,10 @@ describe(`Collection getters`, () => {
 
     it(`returns optimistically inserted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
-      
+
       const key = `KEY::${collection.id}/item3`
       const value = collection.get(key)
       expect(value).toEqual({ id: `item3`, name: `Item 3` })
@@ -403,10 +411,10 @@ describe(`Collection getters`, () => {
 
     it(`returns undefined for optimistically deleted items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
-      
+
       const key = `KEY::${collection.id}/item1`
       const value = collection.get(key)
       expect(value).toBeUndefined()
@@ -414,12 +422,14 @@ describe(`Collection getters`, () => {
 
     it(`returns updated values for optimistically updated items`, () => {
       const mutationFn = vi.fn().mockResolvedValue(undefined)
-      
+
       const tx = createTransaction({ mutationFn })
-      tx.mutate(() => collection.update(`item1`, (draft) => {
-        draft.name = `Updated Item 1`
-      }))
-      
+      tx.mutate(() =>
+        collection.update(`item1`, (draft) => {
+          draft.name = `Updated Item 1`
+        })
+      )
+
       const key = `KEY::${collection.id}/item1`
       const value = collection.get(key)
       expect(value).toEqual({ id: `item1`, name: `Updated Item 1` })

@@ -1085,16 +1085,12 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ collection })
-      .select(({ collection }) => ({
-        displayName: `${collection.name} (Age: ${collection.age})`,
-        status: collection.isActive ? `Active` : `Inactive`,
+      .select(({ collection: result }) => ({
+        displayName: `${result.name} (Age: ${result.age})`,
+        status: result.isActive ? `Active` : `Inactive`,
         ageGroup:
-          collection.age < 30
-            ? `Young`
-            : collection.age < 40
-              ? `Middle`
-              : `Senior`,
-        emailDomain: collection.email.split(`@`)[1],
+          result.age < 30 ? `Young` : result.age < 40 ? `Middle` : `Senior`,
+        emailDomain: result.email.split(`@`)[1],
       }))
 
     const compiledQuery = compileQuery(query)

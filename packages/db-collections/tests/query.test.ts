@@ -435,7 +435,7 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Direct persistence handlers`, () => {
-    it(`should pass through direct persistence handlers to collection options`, async () => {
+    it(`should pass through direct persistence handlers to collection options`, () => {
       const queryKey = [`directPersistenceTest`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
