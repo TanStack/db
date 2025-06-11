@@ -5,22 +5,26 @@ import { SortedMap } from "./SortedMap"
 import type {
   ChangeMessage,
   CollectionConfig,
+  Fn,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
   StandardSchema,
   Transaction as TransactionType,
+  UtilsRecord,
 } from "./types"
 
 // Store collections in memory using Tanstack store
-export const collectionsStore = new Store(new Map<string, Collection<any>>())
+export const collectionsStore = new Store(
+  new Map<string, CollectionImpl<any>>()
+)
 
 // Map to track loading collections
 
 const loadingCollections = new Map<
   string,
-  Promise<Collection<Record<string, unknown>>>
+  Promise<CollectionImpl<Record<string, unknown>>>
 >()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
@@ -29,16 +33,37 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 }
 
 /**
+ * Enhanced Collection type that includes both data type T and utilities U
+ * @template T - The type of items in the collection
+ * @template TUtils - The utilities record type
+ */
+export type Collection<
+  T extends object = Record<string, unknown>,
+  TUtils extends UtilsRecord = {},
+> = CollectionImpl<T> & { readonly utils: TUtils }
+
+/**
  * Creates a new Collection instance with the given configuration
  *
  * @template T - The type of items in the collection
- * @param config - Configuration for the collection, including id and sync
- * @returns A new Collection instance
+ * @template TUtils - The utilities record type
+ * @param options - Collection options with optional utilities
+ * @returns A new Collection with utilities exposed both at top level and under .utils
  */
-export function createCollection<T extends object = Record<string, unknown>>(
-  config: CollectionConfig<T>
-): Collection<T> {
-  return new Collection<T>(config)
+export function createCollection<
+  T extends object = Record<string, unknown>,
+  TUtils extends UtilsRecord = {},
+>(options: CollectionConfig<T> & { utils?: TUtils }): Collection<T, TUtils> {
+  const collection = new CollectionImpl<T>(options)
+
+  // Copy utils to both top level and .utils namespace
+  if (options.utils) {
+    collection.utils = { ...options.utils }
+  } else {
+    collection.utils = {} as TUtils
+  }
+
+  return collection as Collection<T, TUtils>
 }
 
 /**
@@ -69,7 +94,7 @@ export function createCollection<T extends object = Record<string, unknown>>(
  */
 export function preloadCollection<T extends object = Record<string, unknown>>(
   config: CollectionConfig<T>
-): Promise<Collection<T>> {
+): Promise<CollectionImpl<T>> {
   if (!config.id) {
     throw new Error(`The id property is required for preloadCollection`)
   }
@@ -86,7 +111,7 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
 
   // If the collection is in the process of loading, return its promise
   if (loadingCollections.has(config.id)) {
-    return loadingCollections.get(config.id)! as Promise<Collection<T>>
+    return loadingCollections.get(config.id)! as Promise<CollectionImpl<T>>
   }
 
   // Create a new collection instance if it doesn't exist
@@ -98,7 +123,7 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
       }
       next.set(
         config.id,
-        new Collection<T>({
+        createCollection<T>({
           id: config.id,
           getId: config.getId,
           sync: config.sync,
@@ -113,9 +138,9 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
 
   // Create a promise that will resolve after the first commit
   let resolveFirstCommit: () => void
-  const firstCommitPromise = new Promise<Collection<T>>((resolve) => {
+  const firstCommitPromise = new Promise<CollectionImpl<T>>((resolve) => {
     resolveFirstCommit = () => {
-      resolve(collection)
+      resolve(collection as CollectionImpl<T>)
     }
   })
 
@@ -133,7 +158,7 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   // Store the loading promise
   loadingCollections.set(
     config.id,
-    firstCommitPromise as Promise<Collection<Record<string, unknown>>>
+    firstCommitPromise as Promise<CollectionImpl<Record<string, unknown>>>
   )
 
   return firstCommitPromise
@@ -168,7 +193,12 @@ export class SchemaValidationError extends Error {
   }
 }
 
-export class Collection<T extends object = Record<string, unknown>> {
+export class CollectionImpl<T extends object = Record<string, unknown>> {
+  /**
+   * Utilities namespace
+   * This is populated by createCollection
+   */
+  public utils: Record<string, Fn> = {}
   public transactions: Store<SortedMap<string, TransactionType>>
   public optimisticOperations: Derived<Array<OptimisticChangeMessage<T>>>
   public derivedState: Derived<Map<string, T>>

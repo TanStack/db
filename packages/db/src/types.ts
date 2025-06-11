@@ -6,6 +6,16 @@ import type { Transaction } from "./transactions"
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
+ * Represents a utility function that can be attached to a collection
+ */
+export type Fn = (...args: Array<any>) => any
+
+/**
+ * A record of utility functions that can be attached to a collection
+ */
+export type UtilsRecord = Record<string, Fn>
+
+/**
  * Represents a pending mutation within a transaction
  * Contains information about the original and modified data, as well as metadata
  */

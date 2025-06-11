@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import mitt from "mitt"
-import { Collection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection.js"
 import { queryBuilder } from "../../src/query/query-builder.js"
 import { compileQuery } from "../../src/query/compiled-query.js"
 import { createTransaction } from "../../src/transactions.js"
@@ -71,7 +71,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getId: (item) => item.id,
       sync: {
@@ -187,7 +187,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getId: (item) => item.id,
       sync: {
@@ -314,7 +314,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getId: (item) => item.id,
       sync: {
@@ -334,7 +334,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getId: (item) => item.id,
       sync: {
@@ -475,7 +475,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getId: (item) => item.id,
       sync: {
@@ -495,7 +495,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getId: (item) => item.id,
       sync: {
@@ -685,7 +685,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `order-by-test`,
       getId: (item) => item.id,
       sync: {
@@ -802,7 +802,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `order-update-test`,
       getId: (val) => val.id,
       sync: {
@@ -919,7 +919,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
       getId: (val) => val.id,
       sync: {
@@ -940,7 +940,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
       getId: (val) => val.id,
       sync: {
@@ -1054,7 +1054,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `select-callback-test`,
       getId: (item) => item.id,
       sync: {
@@ -1085,16 +1085,12 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ collection })
-      .select(({ collection }) => ({
-        displayName: `${collection.name} (Age: ${collection.age})`,
-        status: collection.isActive ? `Active` : `Inactive`,
+      .select(({ collection: result }) => ({
+        displayName: `${result.name} (Age: ${result.age})`,
+        status: result.isActive ? `Active` : `Inactive`,
         ageGroup:
-          collection.age < 30
-            ? `Young`
-            : collection.age < 40
-              ? `Middle`
-              : `Senior`,
-        emailDomain: collection.email.split(`@`)[1],
+          result.age < 30 ? `Young` : result.age < 40 ? `Middle` : `Senior`,
+        emailDomain: result.email.split(`@`)[1],
       }))
 
     const compiledQuery = compileQuery(query)

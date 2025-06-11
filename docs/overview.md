@@ -200,7 +200,7 @@ export const todoCollection = createCollection<Todo>(electricCollectionOptions({
   },
   getId: (item) => item.id,
   schema: todoSchema
-}).options)
+}))
 ```
 
 The Electric collection requires two Electric-specific options:
@@ -230,7 +230,7 @@ export const myPendingTodos = createCollection<Todo>(electricCollectionOptions({
   },
   getId: (item) => item.id,
   schema: todoSchema
-}).options)
+}))
 ```
 
 > [!TIP]
@@ -524,7 +524,7 @@ const todoCollection = createCollection<Todo>(queryCollectionOptions({
     await api.todos.create(newTodo)
   }
   // also add onUpdate, onDelete as needed.
-}).options)
+}))
 const listCollection = createCollection<TodoList>(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
@@ -537,7 +537,7 @@ const listCollection = createCollection<TodoList>(queryCollectionOptions({
     await api.todoLists.create(newTodo)
   }
   // also add onUpdate, onDelete as needed.
-}).options)
+}))
 
 const Todos = () => {
   // Read the data using live queries. Here we show a live

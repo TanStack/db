@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { Collection } from "../src/collection"
+import { createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
@@ -18,7 +18,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection with pre-populated data
-    const collection = new Collection<{ value: string }>({
+    const collection = createCollection<{ value: string }>({
       id: `initial-state-test`,
       getId: (item) => item.value,
       sync: {
@@ -67,7 +67,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection with sync capability using the mitt pattern from collection.test.ts
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `sync-changes-test-with-mitt`,
       getId: (item) => item.id,
       sync: {
@@ -181,7 +181,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection with mutation capability
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       updated?: boolean
@@ -312,7 +312,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection with both sync and mutation capabilities
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `mixed-changes-test`,
       getId: (item) => item.id,
       sync: {
@@ -470,7 +470,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection with initial data
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `diff-changes-test`,
       getId: (item) => item.id,
       sync: {
@@ -586,7 +586,7 @@ describe(`Collection.subscribeChanges`, () => {
     const callback = vi.fn()
 
     // Create collection
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `unsubscribe-test`,
       getId: (item) => item.id,
       sync: {

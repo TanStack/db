@@ -8,6 +8,7 @@ import type {
   CollectionConfig,
   MutationFnParams,
   SyncConfig,
+  UtilsRecord,
 } from "@tanstack/db"
 import type {
   ControlMessage,
@@ -76,17 +77,26 @@ function hasTxids<T extends Row<unknown> = Row>(
 }
 
 /**
+ * Type for the awaitTxId utility function
+ */
+export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
+
+/**
+ * Electric collection utilities type
+ */
+export interface ElectricCollectionUtils extends UtilsRecord {
+  awaitTxId: AwaitTxIdFn
+}
+
+/**
  * Creates Electric collection options for use with a standard Collection
  *
  * @param config - Configuration options for the Electric collection
- * @returns Object containing collection options and utility functions
+ * @returns Collection options with utilities
  */
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T>
-): {
-  options: CollectionConfig<T>
-  awaitTxId: (txId: string, timeout?: number) => Promise<boolean>
-} {
+) {
   const seenTxids = new Store<Set<string>>(new Set([`${Math.random()}`]))
   const sync = createElectricSync<T>(config.shapeOptions, {
     seenTxids,
@@ -98,7 +108,10 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
    * @returns Promise that resolves when the txId is synced
    */
-  const awaitTxId = async (txId: string, timeout = 30000): Promise<boolean> => {
+  const awaitTxId: AwaitTxIdFn = async (
+    txId: string,
+    timeout = 30000
+  ): Promise<boolean> => {
     const hasTxid = seenTxids.state.has(txId)
     if (hasTxid) return true
 
@@ -171,14 +184,14 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   const { shapeOptions, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   return {
-    options: {
-      ...restConfig,
-      sync,
-      onInsert: wrappedOnInsert,
-      onUpdate: wrappedOnUpdate,
-      onDelete: wrappedOnDelete,
+    ...restConfig,
+    sync,
+    onInsert: wrappedOnInsert,
+    onUpdate: wrappedOnUpdate,
+    onDelete: wrappedOnDelete,
+    utils: {
+      awaitTxId,
     },
-    awaitTxId,
   }
 }
 
