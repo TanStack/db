@@ -36,20 +36,11 @@ describe(`Utility exposure pattern`, () => {
     // Create collection with utilities
     const collection = createCollection(options)
 
-    // Verify utilities are exposed at top level
-    expect(collection.testFn).toBeDefined()
-    expect(collection.testFn(`test`)).toBe(`processed: test`)
-    expect(collection.asyncFn).toBeDefined()
-
     // Verify utilities are also exposed under .utils namespace
     expect(collection.utils).toBeDefined()
     expect(collection.utils.testFn).toBeDefined()
     expect(collection.utils.testFn(`test`)).toBe(`processed: test`)
     expect(collection.utils.asyncFn).toBeDefined()
-
-    // Verify both references point to the same function
-    expect(collection.testFn).toBe(collection.utils.testFn)
-    expect(collection.asyncFn).toBe(collection.utils.asyncFn)
   })
 
   test(`supports collections without utilities`, () => {
@@ -111,8 +102,8 @@ describe(`Utility exposure pattern`, () => {
     const testItem: TestItem = { id: `1`, name: `Test`, value: 42 }
 
     // Let's verify utilities work with the collection
-    expect(collection.testFn(`test`)).toBe(`processed: test`)
-    const asyncResult = await collection.asyncFn(21)
+    expect(collection.utils.testFn(`test`)).toBe(`processed: test`)
+    const asyncResult = await collection.utils.asyncFn(21)
     expect(asyncResult).toBe(42)
 
     // TypeScript knows the collection is for TestItem type
