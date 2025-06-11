@@ -132,10 +132,10 @@ const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
     return collectionsCache.get(`todo`)
   } else {
-    let newCollection: Collection
+    let newCollection: Collection<UpdateTodo>
     if (type === CollectionType.Electric) {
-      newCollection = createCollection<UpdateTodo>(
-        electricCollectionOptions({
+      newCollection = createCollection(
+        electricCollectionOptions<UpdateTodo>({
           id: `todos`,
           shapeOptions: {
             url: `http://localhost:3003/v1/shape`,
@@ -237,7 +237,7 @@ const createConfigCollection = (type: CollectionType) => {
   if (collectionsCache.has(`config`)) {
     return collectionsCache.get(`config`)
   } else {
-    let newCollection: Collection
+    let newCollection: Collection<UpdateConfig>
     if (type === CollectionType.Electric) {
       newCollection = createCollection(
         electricCollectionOptions({

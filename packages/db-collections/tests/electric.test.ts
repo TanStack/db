@@ -7,6 +7,7 @@ import type {
   MutationFnParams,
   PendingMutation,
   Transaction,
+  TransactionWithMutations,
 } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
 
@@ -415,8 +416,11 @@ describe(`Electric Integration`, () => {
 
     it(`should throw an error if handler doesn't return a txid`, async () => {
       // Create a mock transaction for testing
-      const mockTransaction = { id: `test-transaction` } as Transaction
-      const mockParams: MutationFnParams = { transaction: mockTransaction }
+      const mockTransaction = {
+        id: `test-transaction`,
+        mutations: [],
+      } as unknown as TransactionWithMutations<Row>
+      const mockParams: MutationFnParams<Row> = { transaction: mockTransaction }
 
       // Create a handler that doesn't return a txid
       const onInsert = vi.fn().mockResolvedValue({})
@@ -488,7 +492,7 @@ describe(`Electric Integration`, () => {
       }
 
       // Create a mutation function for the transaction
-      const mutationFn = vi.fn(async (params: MutationFnParams) => {
+      const mutationFn = vi.fn(async (params: MutationFnParams<Row>) => {
         const txid = await fakeBackend.persist(params.transaction.mutations)
 
         // Simulate server sending sync message after a delay
@@ -500,7 +504,7 @@ describe(`Electric Integration`, () => {
       })
 
       // Create direct persistence handler that returns the txid
-      const onInsert = vi.fn(async (params: MutationFnParams) => {
+      const onInsert = vi.fn(async (params: MutationFnParams<Row>) => {
         return { txid: await mutationFn(params) }
       })
 

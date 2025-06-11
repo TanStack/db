@@ -21,9 +21,9 @@ export type UtilsRecord = Record<string, Fn>
  */
 export interface PendingMutation<T extends object = Record<string, unknown>> {
   mutationId: string
-  original: Record<string, unknown>
-  modified: Record<string, unknown>
-  changes: Record<string, unknown>
+  original: Partial<T>
+  modified: T
+  changes: Partial<T>
   key: any
   type: OperationType
   metadata: unknown
@@ -36,11 +36,13 @@ export interface PendingMutation<T extends object = Record<string, unknown>> {
 /**
  * Configuration options for creating a new transaction
  */
-export type MutationFnParams = {
-  transaction: TransactionWithMutations
+export type MutationFnParams<T extends object = Record<string, unknown>> = {
+  transaction: TransactionWithMutations<T>
 }
 
-export type MutationFn = (params: MutationFnParams) => Promise<any>
+export type MutationFn<T extends object = Record<string, unknown>> = (
+  params: MutationFnParams<T>
+) => Promise<any>
 
 /**
  * Represents a non-empty array (at least one element)
@@ -53,16 +55,16 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
  */
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
-> = Transaction & {
+> = Transaction<T> & {
   mutations: NonEmptyArray<PendingMutation<T>>
 }
 
-export interface TransactionConfig {
+export interface TransactionConfig<T extends object = Record<string, unknown>> {
   /** Unique identifier for the transaction */
   id?: string
   /* If the transaction should autocommit after a mutate call or should commit be called explicitly */
   autoCommit?: boolean
-  mutationFn: MutationFn
+  mutationFn: MutationFn<T>
   /** Custom metadata to associate with the transaction */
   metadata?: Record<string, unknown>
 }
@@ -160,19 +162,19 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onInsert?: MutationFn
+  onInsert?: MutationFn<T>
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onUpdate?: MutationFn
+  onUpdate?: MutationFn<T>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onDelete?: MutationFn
+  onDelete?: MutationFn<T>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

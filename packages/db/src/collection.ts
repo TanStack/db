@@ -201,7 +201,7 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
    * This is populated by createCollection
    */
   public utils: Record<string, Fn> = {}
-  public transactions: Store<SortedMap<string, TransactionType>>
+  public transactions: Store<SortedMap<string, TransactionType<any>>>
   public optimisticOperations: Derived<Array<OptimisticChangeMessage<T>>>
   public derivedState: Derived<Map<string, T>>
   public derivedArray: Derived<Array<T>>
@@ -250,7 +250,7 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
     }
 
     this.transactions = new Store(
-      new SortedMap<string, TransactionType>(
+      new SortedMap<string, TransactionType<any>>(
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
       )
     )
@@ -269,7 +269,7 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
                 const message: OptimisticChangeMessage<T> = {
                   type: mutation.type,
                   key: mutation.key,
-                  value: mutation.modified as T,
+                  value: mutation.modified,
                   isActive,
                 }
                 if (
@@ -684,8 +684,8 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
         original: {},
-        modified: validatedData as Record<string, unknown>,
-        changes: validatedData as Record<string, unknown>,
+        modified: validatedData,
+        changes: validatedData,
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
@@ -710,7 +710,7 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = new Transaction({
+      const directOpTransaction = new Transaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(params)
@@ -906,10 +906,10 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = new Transaction({
-      mutationFn: async (transaction) => {
+    const directOpTransaction = new Transaction<T>({
+      mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction
-        return this.config.onUpdate!(transaction)
+        return this.config.onUpdate!(params)
       },
     })
 
@@ -944,7 +944,7 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
   delete = (
     ids: Array<string> | string,
     config?: OperationConfig
-  ): TransactionType => {
+  ): TransactionType<any> => {
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
@@ -962,9 +962,9 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
     for (const id of idsArray) {
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: (this.state.get(id) || {}) as Record<string, unknown>,
-        modified: (this.state.get(id) || {}) as Record<string, unknown>,
-        changes: (this.state.get(id) || {}) as Record<string, unknown>,
+        original: this.state.get(id) || {},
+        modified: this.state.get(id)!,
+        changes: this.state.get(id) || {},
         key: id,
         metadata: config?.metadata as unknown,
         syncMetadata: (this.syncedMetadata.state.get(id) || {}) as Record<
@@ -993,11 +993,11 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = new Transaction({
+    const directOpTransaction = new Transaction<T>({
       autoCommit: true,
-      mutationFn: async (transaction) => {
+      mutationFn: async (params) => {
         // Call the onDelete handler with the transaction
-        return this.config.onDelete!(transaction)
+        return this.config.onDelete!(params)
       },
     })
 
