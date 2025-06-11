@@ -103,13 +103,13 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/db-collections':
-        specifier: ^0.0.8
+        specifier: ^0.0.9
         version: link:../../../packages/db-collections
       '@tanstack/query-core':
         specifier: ^5.75.7
         version: 5.75.7
       '@tanstack/react-db':
-        specifier: ^0.0.6
+        specifier: ^0.0.7
         version: link:../../../packages/react-db
       cors:
         specifier: ^2.8.5
