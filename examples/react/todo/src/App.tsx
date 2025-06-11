@@ -179,7 +179,7 @@ const createTodoCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0].txid) }
           },
-        }).options
+        })
       )
     } else {
       // Query collection using our API helper
@@ -224,7 +224,7 @@ const createTodoCollection = (type: CollectionType) => {
               })
             )
           },
-        }).options
+        })
       )
     }
     collectionsCache.set(`todo`, newCollection)
@@ -275,7 +275,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).options
+        })
       )
     } else {
       // Query collection using our API helper
@@ -319,7 +319,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).options
+        })
       )
     }
     collectionsCache.set(`config`, newCollection)

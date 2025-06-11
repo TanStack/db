@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
-import { Collection } from "../src/collection"
+import { Collection, createCollection } from "../src/collection"
 
 describe(`Transactions`, () => {
   it(`calling createTransaction creates a transaction`, () => {
@@ -48,7 +48,7 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -84,7 +84,7 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
-    const collection1 = new Collection<{
+    const collection1 = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -95,7 +95,7 @@ describe(`Transactions`, () => {
         sync: () => {},
       },
     })
-    const collection2 = new Collection<{
+    const collection2 = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -129,7 +129,7 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -162,7 +162,7 @@ describe(`Transactions`, () => {
       },
       autoCommit: false,
     })
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -198,7 +198,7 @@ describe(`Transactions`, () => {
       },
       autoCommit: false,
     })
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       newProp?: string
@@ -239,7 +239,7 @@ describe(`Transactions`, () => {
       mutationFn: async () => Promise.resolve(),
       autoCommit: false,
     })
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       newProp?: string

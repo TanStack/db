@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Collection } from "../src/collection"
+import { createCollection } from "../src/collection"
+import type { Collection } from "../src/collection"
 import type { ChangeMessage, CollectionConfig } from "../src/types"
 
 describe(`Collection getters`, () => {
@@ -42,7 +43,7 @@ describe(`Collection getters`, () => {
       sync: mockSync,
     }
 
-    collection = new Collection(config)
+    collection = createCollection(config)
   })
 
   describe(`state getter`, () => {
@@ -86,7 +87,7 @@ describe(`Collection getters`, () => {
         }),
       }
 
-      const delayedCollection = new Collection({
+      const delayedCollection = createCollection({
         id: `delayed-collection`,
         getId: (val) => val.id,
         sync: delayedSyncMock,
@@ -146,7 +147,7 @@ describe(`Collection getters`, () => {
         }),
       }
 
-      const delayedCollection = new Collection({
+      const delayedCollection = createCollection({
         id: `delayed-collection`,
         getId: (val) => val.id,
         sync: delayedSyncMock,

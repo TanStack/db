@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Collection, createTransaction } from "@tanstack/db"
+import { createCollection, createTransaction } from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
+import type { ElectricCollectionUtils } from "../src/electric"
 import type {
+  Collection,
   MutationFnParams,
   PendingMutation,
   Transaction,
@@ -23,8 +25,7 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric Integration`, () => {
-  let collection: Collection<Row>
-  let awaitTxId: (txId: string, timeout?: number) => Promise<boolean>
+  let collection: Collection<Row, ElectricCollectionUtils>
   let subscriber: (messages: Array<Message<Row>>) => void
 
   beforeEach(() => {
@@ -48,9 +49,11 @@ describe(`Electric Integration`, () => {
       getId: (item: Row) => item.id,
     }
 
-    const { options, awaitTxId: txIdFn } = electricCollectionOptions(config)
-    collection = new Collection(options)
-    awaitTxId = txIdFn
+    // Get the options with utilities
+    const options = electricCollectionOptions(config)
+
+    // Create collection with Electric configuration using the new utility exposure pattern
+    collection = createCollection<Row, ElectricCollectionUtils>(options)
   })
 
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
@@ -210,7 +213,7 @@ describe(`Electric Integration`, () => {
       ])
 
       // The txid should be tracked and awaitTxId should resolve immediately
-      await expect(awaitTxId(testTxid)).resolves.toBe(true)
+      await expect(collection.utils.awaitTxId(testTxid)).resolves.toBe(true)
     })
 
     it(`should track multiple txids`, async () => {
@@ -233,8 +236,8 @@ describe(`Electric Integration`, () => {
       ])
 
       // Both txids should be tracked
-      await expect(awaitTxId(txid1)).resolves.not.toThrow()
-      await expect(awaitTxId(txid2)).resolves.not.toThrow()
+      await expect(collection.utils.awaitTxId(txid1)).resolves.not.toThrow()
+      await expect(collection.utils.awaitTxId(txid2)).resolves.not.toThrow()
     })
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {
@@ -243,7 +246,7 @@ describe(`Electric Integration`, () => {
       const shortTimeout = 100
 
       // Attempt to await a txid that hasn't been seen with a short timeout
-      const promise = awaitTxId(unknownTxid, shortTimeout)
+      const promise = collection.utils.awaitTxId(unknownTxid, shortTimeout)
 
       // The promise should reject with a timeout error
       await expect(promise).rejects.toThrow(
@@ -255,7 +258,7 @@ describe(`Electric Integration`, () => {
       const laterTxid = `1000`
 
       // Start waiting for a txid that hasn't arrived yet
-      const promise = awaitTxId(laterTxid, 1000)
+      const promise = collection.utils.awaitTxId(laterTxid, 1000)
 
       // Send the txid after a short delay
       setTimeout(() => {
@@ -345,7 +348,7 @@ describe(`Electric Integration`, () => {
           }
 
           // Start waiting for the txid
-          const promise = awaitTxId(txid, 1000)
+          const promise = collection.utils.awaitTxId(txid, 1000)
 
           // Simulate the server sending sync messages after a delay
           setTimeout(() => {
@@ -402,7 +405,7 @@ describe(`Electric Integration`, () => {
         onDelete,
       }
 
-      const { options } = electricCollectionOptions(config)
+      const options = electricCollectionOptions(config)
 
       // Verify that the handlers were passed to the collection options
       expect(options.onInsert).toBeDefined()
@@ -430,7 +433,7 @@ describe(`Electric Integration`, () => {
         onInsert,
       }
 
-      const { options } = electricCollectionOptions(config)
+      const options = electricCollectionOptions(config)
 
       // Call the wrapped handler and expect it to throw
       await expect(options.onInsert!(mockParams)).rejects.toThrow(
@@ -514,8 +517,7 @@ describe(`Electric Integration`, () => {
         onInsert,
       }
 
-      const { options } = electricCollectionOptions(config)
-      const testCollection = new Collection(options)
+      const testCollection = createCollection(electricCollectionOptions(config))
 
       // Insert data using the transaction
       const tx = testCollection.insert({
