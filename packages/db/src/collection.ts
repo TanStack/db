@@ -33,14 +33,16 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 }
 
 /**
- * Enhanced Collection type that includes both data type T and utilities U
+ * Enhanced Collection interface that includes both data type T and utilities TUtils
  * @template T - The type of items in the collection
  * @template TUtils - The utilities record type
  */
-export type Collection<
+export interface Collection<
   T extends object = Record<string, unknown>,
   TUtils extends UtilsRecord = {},
-> = CollectionImpl<T> & { readonly utils: TUtils }
+> extends CollectionImpl<T> {
+  readonly utils: TUtils
+}
 
 /**
  * Creates a new Collection instance with the given configuration
