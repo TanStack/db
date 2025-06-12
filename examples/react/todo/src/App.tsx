@@ -130,7 +130,7 @@ const collectionsCache = new Map()
 // Function to create the appropriate todo collection based on type
 const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
-    return collectionsCache.get(`todo`)
+    return collectionsCache.get(`todo`) as Collection<UpdateTodo>
   } else {
     let newCollection: Collection<UpdateTodo>
     if (type === CollectionType.Electric) {
@@ -147,7 +147,7 @@ const createTodoCollection = (type: CollectionType) => {
               timestamptz: (date: string) => new Date(date),
             },
           },
-          getKey: (item) => item.id,
+          getKey: (item) => item.id!,
           schema: updateTodoSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -201,7 +201,7 @@ const createTodoCollection = (type: CollectionType) => {
                 : undefined,
             }))
           },
-          getKey: (item: UpdateTodo) => String(item.id),
+          getKey: (item: UpdateTodo) => item.id!,
           schema: updateTodoSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
@@ -254,7 +254,7 @@ const createConfigCollection = (type: CollectionType) => {
               },
             },
           },
-          getKey: (item: UpdateConfig) => item.id,
+          getKey: (item: UpdateConfig) => item.id!,
           schema: updateConfigSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -346,7 +346,7 @@ export default function App() {
   // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
     q
-      .from({ todoCollection: todoCollection as Collection<UpdateTodo> })
+      .from({ todoCollection: todoCollection })
       .orderBy(`@created_at`)
       .select(`@id`, `@created_at`, `@text`, `@completed`)
   )
@@ -462,6 +462,7 @@ export default function App() {
   }
 
   const toggleTodo = (todo: UpdateTodo) => {
+    console.log(todoCollection)
     todoCollection.update(todo.id, (draft) => {
       draft.completed = !draft.completed
     })
