@@ -40,7 +40,9 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to an object with txid
    */
-  onInsert?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
+  onInsert?: (
+    params: MutationFnParams<T>
+  ) => Promise<{ txid: string } | undefined>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -48,7 +50,9 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to an object with txid
    */
-  onUpdate?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
+  onUpdate?: (
+    params: MutationFnParams<T>
+  ) => Promise<{ txid: string } | undefined>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -56,10 +60,12 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to an object with txid
    */
-  onDelete?: (params: MutationFnParams) => Promise<{ txid: string } | undefined>
+  onDelete?: (
+    params: MutationFnParams<T>
+  ) => Promise<{ txid: string } | undefined>
 }
 
-function isUpToDateMessage<T extends Row<unknown> = Row>(
+function isUpToDateMessage<T extends Row<unknown>>(
   message: Message<T>
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
@@ -133,7 +139,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<T>) => {
         const handlerResult = (await config.onInsert!(params)) ?? {}
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -149,7 +155,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<T>) => {
         const handlerResult = await config.onUpdate!(params)
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -165,7 +171,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<T>) => {
         const handlerResult = await config.onDelete!(params)
         const txid = (handlerResult as { txid?: string }).txid
 

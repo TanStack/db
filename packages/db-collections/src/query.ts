@@ -284,7 +284,7 @@ export function queryCollectionOptions<
 
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<TItem>) => {
         const handlerResult = (await onInsert(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -298,7 +298,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<TItem>) => {
         const handlerResult = (await onUpdate(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -312,7 +312,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: MutationFnParams) => {
+    ? async (params: MutationFnParams<TItem>) => {
         const handlerResult = (await onDelete(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
