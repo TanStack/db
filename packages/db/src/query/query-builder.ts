@@ -1,6 +1,7 @@
 import type { Collection } from "../collection"
 import type {
   Comparator,
+  ComparatorValue,
   Condition,
   From,
   JoinClause,
@@ -287,10 +288,10 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   /**
    * Add a where clause comparing two values.
    */
-  where(
+  where<T extends Comparator>(
     left: PropertyReferenceString<TContext> | LiteralValue,
-    operator: Comparator,
-    right: PropertyReferenceString<TContext> | LiteralValue
+    operator: T,
+    right: ComparatorValue<T, TContext>
   ): QueryBuilder<TContext>
 
   /**

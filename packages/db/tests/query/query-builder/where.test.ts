@@ -61,6 +61,18 @@ describe(`QueryBuilder.where`, () => {
     }
   })
 
+  it(`supports passing arrays to set membership operators`, () => {
+    const operators = [`in`, `not in`] as const
+    for (const op of operators) {
+      const query = queryBuilder<TestSchema>()
+        .from(`employees`)
+        .where(`@id`, op, [1, 2, 3])
+
+      const builtQuery = query._query
+      expect(builtQuery.where).toEqual([[`@id`, op, [1, 2, 3]]])
+    }
+  })
+
   it(`allows comparing property references to property references`, () => {
     const query = queryBuilder<TestSchema>()
       .from(`employees`, `e`)
