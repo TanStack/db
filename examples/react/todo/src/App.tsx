@@ -147,7 +147,7 @@ const createTodoCollection = (type: CollectionType) => {
               timestamptz: (date: string) => new Date(date),
             },
           },
-          getId: (item) => item.id,
+          getKey: (item) => item.id,
           schema: updateTodoSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -201,7 +201,7 @@ const createTodoCollection = (type: CollectionType) => {
                 : undefined,
             }))
           },
-          getId: (item: UpdateTodo) => String(item.id),
+          getKey: (item: UpdateTodo) => String(item.id),
           schema: updateTodoSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
@@ -220,7 +220,7 @@ const createTodoCollection = (type: CollectionType) => {
             return await Promise.all(
               transaction.mutations.map(async (mutation) => {
                 const { original } = mutation
-                const response = await api.todos.delete(original.id)
+                await api.todos.delete(original.id)
               })
             )
           },
@@ -254,7 +254,7 @@ const createConfigCollection = (type: CollectionType) => {
               },
             },
           },
-          getId: (item: UpdateConfig) => item.id,
+          getKey: (item: UpdateConfig) => item.id,
           schema: updateConfigSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -297,7 +297,7 @@ const createConfigCollection = (type: CollectionType) => {
                 : undefined,
             }))
           },
-          getId: (item: UpdateConfig) => item.id,
+          getKey: (item: UpdateConfig) => item.id,
           schema: updateConfigSchema,
           queryClient,
           onInsert: async ({ transaction }) => {

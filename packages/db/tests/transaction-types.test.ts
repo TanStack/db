@@ -19,6 +19,7 @@ describe(`Transaction Types`, () => {
       modified: { id: 1, name: `Modified` },
       changes: { name: `Modified` },
       key: `1`,
+      globalKey: `1`,
       type: `update`,
       metadata: null,
       syncMetadata: {},

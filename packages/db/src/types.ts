@@ -24,13 +24,14 @@ export interface PendingMutation<T extends object = Record<string, unknown>> {
   original: Partial<T>
   modified: T
   changes: Partial<T>
+  globalKey: string
   key: any
   type: OperationType
   metadata: unknown
   syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T>
+  collection: Collection<T, any>
 }
 
 /**
@@ -85,9 +86,12 @@ export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 export type OperationType = `insert` | `update` | `delete`
 
-export interface SyncConfig<T extends object = Record<string, unknown>> {
+export interface SyncConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
   sync: (params: {
-    collection: Collection<T>
+    collection: Collection<T, TKey>
     begin: () => void
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
@@ -100,8 +104,11 @@ export interface SyncConfig<T extends object = Record<string, unknown>> {
   getSyncMetadata?: () => Record<string, unknown>
 }
 
-export interface ChangeMessage<T extends object = Record<string, unknown>> {
-  key: any
+export interface ChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
+  key: TKey
   value: T
   previousValue?: T
   type: OperationType
@@ -141,11 +148,14 @@ export interface InsertConfig {
   metadata?: Record<string, unknown>
 }
 
-export interface CollectionConfig<T extends object = Record<string, unknown>> {
+export interface CollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
   // If an id isn't passed in, a UUID will be
   // generated for it.
   id?: string
-  sync: SyncConfig<T>
+  sync: SyncConfig<T, TKey>
   schema?: StandardSchema<T>
   /**
    * Function to extract the ID from an object
@@ -154,9 +164,9 @@ export interface CollectionConfig<T extends object = Record<string, unknown>> {
    * @returns The ID string for the item
    * @example
    * // For a collection with a 'uuid' field as the primary key
-   * getId: (item) => item.uuid
+   * getKey: (item) => item.uuid
    */
-  getId: (item: T) => any
+  getKey: (item: T) => TKey
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and mutation information
@@ -209,3 +219,8 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
  * a `select` clause.
  */
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
+
+export type ChangeListener<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = (changes: Array<ChangeMessage<T, TKey>>) => void

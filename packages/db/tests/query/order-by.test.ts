@@ -6,12 +6,12 @@ import type { Query } from "../../src/query/index.js"
 type User = {
   id: number
   name: string
-  age: number
+  age: number | null
 }
 
 type Input = {
-  id: number
-  value: string
+  id: number | null
+  value: string | undefined
 }
 
 type Context = {
@@ -89,15 +89,7 @@ describe(`Query`, () => {
         }
 
         const graph = new D2({ initialFrontier: 0 })
-        const input = graph.newInput<
-          [
-            number,
-            {
-              id: number
-              value: string
-            },
-          ]
-        >()
+        const input = graph.newInput<[number, Input]>()
         let latestMessage: any = null
 
         const pipeline = compileQueryPipeline(query, { input })
@@ -114,7 +106,7 @@ describe(`Query`, () => {
         input.sendData(
           0,
           new MultiSet([
-            [[1, { id: 1, value: `a` }], 1],
+            [[1, { id: 1, value: undefined }], 1],
             [[2, { id: 2, value: `z` }], 1],
             [[3, { id: 3, value: `b` }], 1],
             [[4, { id: 4, value: `y` }], 1],
@@ -132,11 +124,63 @@ describe(`Query`, () => {
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
-          [[1, { id: 1, value: `a` }], 1],
           [[3, { id: 3, value: `b` }], 1],
           [[5, { id: 5, value: `c` }], 1],
+          // JS operators < and > always return false if LHS or RHS is undefined.
+          // Hence, our comparator deems undefined equal to all values
+          // and the ordering is arbitrary (but deterministic based on the comparisons it performs)
+          [[1, { id: 1, value: undefined }], 1],
           [[4, { id: 4, value: `y` }], 1],
           [[2, { id: 2, value: `z` }], 1],
+        ])
+      })
+
+      test(`initial results with null value`, () => {
+        const query: Query<Context> = {
+          select: [`@id`, `@age`, `@name`],
+          from: `users`,
+          orderBy: `@age`,
+        }
+
+        const graph = new D2({ initialFrontier: 0 })
+        const input = graph.newInput<[number, User]>()
+        let latestMessage: any = null
+
+        const pipeline = compileQueryPipeline(query, { users: input })
+        pipeline.pipe(
+          output((message) => {
+            if (message.type === MessageType.DATA) {
+              latestMessage = message.data
+            }
+          })
+        )
+
+        graph.finalize()
+
+        input.sendData(
+          0,
+          new MultiSet([
+            [[1, { id: 1, age: 25, name: `Alice` }], 1],
+            [[2, { id: 2, age: 20, name: `Bob` }], 1],
+            [[3, { id: 3, age: 30, name: `Charlie` }], 1],
+            [[4, { id: 4, age: null, name: `Dean` }], 1],
+            [[5, { id: 5, age: 42, name: `Eva` }], 1],
+          ])
+        )
+        input.sendFrontier(1)
+
+        graph.run()
+
+        expect(latestMessage).not.toBeNull()
+
+        const result = latestMessage.collection.getInner()
+
+        expect(sortResults(result, (a, b) => a[1].age - b[1].age)).toEqual([
+          [[4, { id: 4, age: null, name: `Dean` }], 1],
+          [[2, { id: 2, age: 20, name: `Bob` }], 1],
+          [[1, { id: 1, age: 25, name: `Alice` }], 1],
+          [[3, { id: 3, age: 30, name: `Charlie` }], 1],
+          [[5, { id: 5, age: 42, name: `Eva` }], 1],
         ])
       })
 

@@ -47,7 +47,7 @@ describe(`Electric Integration`, () => {
           table: `test_table`,
         },
       },
-      getId: (item: Row) => item.id,
+      getKey: (item: Row) => item.id as number,
     }
 
     // Get the options with utilities
@@ -75,7 +75,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[`KEY::${collection.id}/1`, { id: 1, name: `Test User` }]])
+      new Map([[1, { id: 1, name: `Test User` }]])
     )
   })
 
@@ -107,8 +107,8 @@ describe(`Electric Integration`, () => {
 
     expect(collection.state).toEqual(
       new Map([
-        [`KEY::${collection.id}/1`, { id: 1, name: `Test User` }],
-        [`KEY::${collection.id}/2`, { id: 2, name: `Another User` }],
+        [1, { id: 1, name: `Test User` }],
+        [2, { id: 2, name: `Another User` }],
       ])
     )
   })
@@ -140,7 +140,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[`KEY::${collection.id}/1`, { id: 1, name: `Updated User` }]])
+      new Map([[1, { id: 1, name: `Updated User` }]])
     )
   })
 
@@ -161,7 +161,7 @@ describe(`Electric Integration`, () => {
     subscriber([
       {
         key: `1`,
-        value: { id: `1` },
+        value: { id: 1 },
         headers: { operation: `delete` },
       },
       {
@@ -293,7 +293,7 @@ describe(`Electric Integration`, () => {
     it(`should simulate the complete flow`, async () => {
       // Create a fake backend store to simulate server-side storage
       const fakeBackend = {
-        data: new Map<string, { txid: string; value: unknown }>(),
+        data: new Map<number, { txid: string; value: unknown }>(),
         // Simulates persisting data to a backend and returning a txid
         persist: (mutations: Array<PendingMutation>): Promise<string> => {
           const txid = String(Date.now())
@@ -316,7 +316,7 @@ describe(`Electric Integration`, () => {
           fakeBackend.data.forEach((value, key) => {
             if (value.txid === txid) {
               messages.push({
-                key,
+                key: key.toString(),
                 value: value.value as Row,
                 headers: {
                   operation: `insert`,
@@ -371,7 +371,7 @@ describe(`Electric Integration`, () => {
 
       await transaction.isPersisted.promise
 
-      transaction = collection.transactions.state.get(transaction.id)!
+      transaction = collection.transactions.get(transaction.id)!
 
       // Verify the mutation function was called correctly
       expect(testMutationFn).toHaveBeenCalledTimes(1)
@@ -379,8 +379,8 @@ describe(`Electric Integration`, () => {
       // Check that the data was added to the collection
       // Note: In a real implementation, the collection would be updated by the sync process
       // This is just verifying our test setup worked correctly
-      expect(fakeBackend.data.has(`KEY::${collection.id}/1`)).toBe(true)
-      expect(collection.state.has(`KEY::${collection.id}/1`)).toBe(true)
+      expect(fakeBackend.data.has(1)).toBe(true)
+      expect(collection.has(1)).toBe(true)
     })
   })
 
@@ -400,7 +400,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id as number,
         onInsert,
         onUpdate,
         onDelete,
@@ -433,7 +433,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id as number,
         onInsert,
       }
 
@@ -517,7 +517,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id as number,
         onInsert,
       }
 
@@ -530,11 +530,7 @@ describe(`Electric Integration`, () => {
       })
 
       // If awaitTxId wasn't called automatically, this wouldn't be true.
-      expect(testCollection.syncedData.state.size).toEqual(0)
-      expect(
-        testCollection.optimisticOperations.state.filter((o) => o.isActive)
-          .length
-      ).toEqual(1)
+      expect(testCollection.syncedData.size).toEqual(0)
 
       // Verify that our onInsert handler was called
       expect(onInsert).toHaveBeenCalled()
@@ -542,16 +538,12 @@ describe(`Electric Integration`, () => {
       await tx.isPersisted.promise
 
       // Verify that the data was added to the collection via the sync process
-      expect(testCollection.state.has(`KEY::${testCollection.id}/1`)).toBe(true)
-      expect(testCollection.state.get(`KEY::${testCollection.id}/1`)).toEqual({
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({
         id: 1,
         name: `Direct Persistence User`,
       })
-      expect(testCollection.syncedData.state.size).toEqual(1)
-      expect(
-        testCollection.optimisticOperations.state.filter((o) => o.isActive)
-          .length
-      ).toEqual(0)
+      expect(testCollection.syncedData.size).toEqual(1)
     })
   })
 })

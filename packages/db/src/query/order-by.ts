@@ -13,6 +13,13 @@ import type {
   NamespacedRow,
 } from "../types"
 
+type OrderByItem = {
+  operand: ConditionOperand
+  direction: `asc` | `desc`
+}
+
+type OrderByItems = Array<OrderByItem>
+
 export function processOrderBy(
   resultPipeline: NamespacedAndKeyedStream,
   query: Query,
@@ -41,10 +48,7 @@ export function processOrderBy(
   }
 
   // Normalize orderBy to an array of objects
-  const orderByItems: Array<{
-    operand: ConditionOperand
-    direction: `asc` | `desc`
-  }> = []
+  const orderByItems: OrderByItems = []
 
   if (typeof query.orderBy === `string`) {
     // Handle string format: '@column'
@@ -84,22 +88,13 @@ export function processOrderBy(
   const valueExtractor = (namespacedRow: NamespacedRow) => {
     // For multiple orderBy columns, create a composite key
     if (orderByItems.length > 1) {
-      return orderByItems.map((item) => {
-        const val = evaluateOperandOnNamespacedRow(
+      return orderByItems.map((item) =>
+        evaluateOperandOnNamespacedRow(
           namespacedRow,
           item.operand,
           mainTableAlias
         )
-
-        // Reverse the value for 'desc' ordering
-        return item.direction === `desc` && typeof val === `number`
-          ? -val
-          : item.direction === `desc` && typeof val === `string`
-            ? String.fromCharCode(
-                ...[...val].map((c) => 0xffff - c.charCodeAt(0))
-              )
-            : val
-      })
+      )
     } else if (orderByItems.length === 1) {
       // For a single orderBy column, use the value directly
       const item = orderByItems[0]
@@ -108,66 +103,24 @@ export function processOrderBy(
         item!.operand,
         mainTableAlias
       )
-
-      // Reverse the value for 'desc' ordering
-      return item!.direction === `desc` && typeof val === `number`
-        ? -val
-        : item!.direction === `desc` && typeof val === `string`
-          ? String.fromCharCode(
-              ...[...val].map((c) => 0xffff - c.charCodeAt(0))
-            )
-          : val
+      return val
     }
 
     // Default case - no ordering
     return null
   }
 
-  const comparator = (a: unknown, b: unknown): number => {
-    // if a and b are both numbers compare them directly
-    if (typeof a === `number` && typeof b === `number`) {
-      return a - b
-    }
-    // if a and b are both strings, compare them lexicographically
+  const ascComparator = (a: any, b: any): number => {
+    // if a and b are both strings, compare them based on locale
     if (typeof a === `string` && typeof b === `string`) {
       return a.localeCompare(b)
-    }
-    // if a and b are both booleans, compare them
-    if (typeof a === `boolean` && typeof b === `boolean`) {
-      return a === b ? 0 : a ? 1 : -1
-    }
-    // if a and b are both dates, compare them
-    if (a instanceof Date && b instanceof Date) {
-      return a.getTime() - b.getTime()
-    }
-    // if a and b are both null, return 0
-    if (a === null || b === null) {
-      return 0
     }
 
     // if a and b are both arrays, compare them element by element
     if (Array.isArray(a) && Array.isArray(b)) {
       for (let i = 0; i < Math.min(a.length, b.length); i++) {
-        // Get the values from the array
-        const aVal = a[i]
-        const bVal = b[i]
-
         // Compare the values
-        let result: number
-
-        if (typeof aVal === `boolean` && typeof bVal === `boolean`) {
-          // Special handling for booleans - false comes before true
-          result = aVal === bVal ? 0 : aVal ? 1 : -1
-        } else if (typeof aVal === `number` && typeof bVal === `number`) {
-          // Numeric comparison
-          result = aVal - bVal
-        } else if (typeof aVal === `string` && typeof bVal === `string`) {
-          // String comparison
-          result = aVal.localeCompare(bVal)
-        } else {
-          // Default comparison using the general comparator
-          result = comparator(aVal, bVal)
-        }
+        const result = ascComparator(a[i], b[i])
 
         if (result !== 0) {
           return result
@@ -176,13 +129,62 @@ export function processOrderBy(
       // All elements are equal up to the minimum length
       return a.length - b.length
     }
-    // if a and b are both null/undefined, return 0
-    if (a == null && b == null) {
-      return 0
+
+    // If at least one of the values is an object then we don't really know how to meaningfully compare them
+    // therefore we turn them into strings and compare those
+    // There are 2 exceptions:
+    // 1) if both objects are dates then we can compare them
+    // 2) if either object is nullish then we can't call toString on it
+    const bothObjects = typeof a === `object` && typeof b === `object`
+    const bothDates = a instanceof Date && b instanceof Date
+    const notNull = a !== null && b !== null
+    if (bothObjects && !bothDates && notNull) {
+      // Every object should support `toString`
+      return a.toString().localeCompare(b.toString())
     }
-    // Fallback to string comparison for all other cases
-    return (a as any).toString().localeCompare((b as any).toString())
+
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
   }
+
+  const descComparator = (a: unknown, b: unknown): number => {
+    return ascComparator(b, a)
+  }
+
+  // Create a multi-property comparator that respects the order and direction of each property
+  const makeComparator = (orderByProps: OrderByItems) => {
+    return (a: unknown, b: unknown) => {
+      // If we're comparing arrays (multiple properties), compare each property in order
+      if (orderByProps.length > 1) {
+        // `a` and `b` must be arrays since `orderByItems.length > 1`
+        // hence the extracted values must be arrays
+        const arrayA = a as Array<unknown>
+        const arrayB = b as Array<unknown>
+        for (let i = 0; i < orderByProps.length; i++) {
+          const direction = orderByProps[i]!.direction
+          const compareFn =
+            direction === `desc` ? descComparator : ascComparator
+          const result = compareFn(arrayA[i], arrayB[i])
+          if (result !== 0) {
+            return result
+          }
+        }
+        // should normally always be 0 because
+        // both values are extracted based on orderByItems
+        return arrayA.length - arrayB.length
+      }
+
+      // Single property comparison
+      if (orderByProps.length === 1) {
+        const direction = orderByProps[0]!.direction
+        return direction === `desc` ? descComparator(a, b) : ascComparator(a, b)
+      }
+
+      return ascComparator(a, b)
+    }
+  }
+  const comparator = makeComparator(orderByItems)
 
   // Apply the appropriate orderBy operator based on whether an ORDER_INDEX column is requested
   if (hasOrderIndexColumn) {

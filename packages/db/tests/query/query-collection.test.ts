@@ -9,7 +9,7 @@ import type { PendingMutation } from "../../src/types.js"
 type Person = {
   id: string
   name: string
-  age: number
+  age: number | null
   email: string
   isActive: boolean
 }
@@ -73,7 +73,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -112,7 +112,7 @@ describe(`Query Collections`, () => {
     const result = compiledQuery.results
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       id: `3`,
       name: `John Smith`,
@@ -136,12 +136,12 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       id: `3`,
       name: `John Smith`,
     })
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       id: `4`,
       name: `Kyle Doe`,
@@ -161,7 +161,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       id: `4`,
       name: `Kyle Doe 2`,
@@ -180,7 +180,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
+    expect(result.state.get(`4`)).toBeUndefined()
   })
 
   it(`should be able to query a collection without a select using a callback for the where clause`, async () => {
@@ -189,7 +189,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -218,7 +218,7 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ person: collection })
-      .where(({ person }) => person.age > 30)
+      .where(({ person }) => (person.age ?? 0) > 30)
 
     const compiledQuery = compileQuery(query)
 
@@ -227,7 +227,7 @@ describe(`Query Collections`, () => {
     const result = compiledQuery.results
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       age: 35,
       email: `john.smith@example.com`,
@@ -254,7 +254,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       age: 35,
       email: `john.smith@example.com`,
@@ -262,7 +262,7 @@ describe(`Query Collections`, () => {
       isActive: false,
       name: `John Smith`,
     })
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       age: 40,
       email: `kyle.doe@example.com`,
@@ -285,7 +285,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       age: 40,
       email: `kyle.doe@example.com`,
@@ -299,7 +299,7 @@ describe(`Query Collections`, () => {
       {
         type: `delete`,
         changes: {
-          id: 4,
+          id: `4`,
         },
       },
     ])
@@ -307,7 +307,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
+    expect(result.state.get(`4`)).toBeUndefined()
   })
 
   it(`should join collections and return combined results`, async () => {
@@ -316,7 +316,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -336,7 +336,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -391,21 +391,21 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+    expect(result.state.get(`[1,1]`)).toEqual({
       _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+    expect(result.state.get(`[3,1]`)).toEqual({
       _key: `[3,1]`,
       id: `3`,
       name: `John Doe`,
@@ -429,7 +429,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+    expect(result.state.get(`[4,2]`)).toEqual({
       _key: `[4,2]`,
       id: `4`,
       name: `Jane Doe`,
@@ -441,7 +441,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 2,
+          id: `2`,
           title: `Updated Issue 2`,
         },
       },
@@ -450,9 +450,9 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
-      id: 2,
+      id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
     })
@@ -468,7 +468,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
+    expect(result.state.get(`[3,1]`)).toBeUndefined()
   })
 
   it(`should join collections and return combined results with no select`, async () => {
@@ -477,7 +477,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -497,7 +497,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -551,7 +551,7 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+    expect(result.state.get(`[1,1]`)).toEqual({
       _key: `[1,1]`,
       issues: {
         description: `Issue 1 description`,
@@ -568,7 +568,7 @@ describe(`Query Collections`, () => {
       },
     })
 
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       issues: {
         description: `Issue 2 description`,
@@ -585,7 +585,7 @@ describe(`Query Collections`, () => {
       },
     })
 
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+    expect(result.state.get(`[3,1]`)).toEqual({
       _key: `[3,1]`,
       issues: {
         description: `Issue 3 description`,
@@ -619,7 +619,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+    expect(result.state.get(`[4,2]`)).toEqual({
       _key: `[4,2]`,
       issues: {
         description: `Issue 4 description`,
@@ -641,7 +641,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 2,
+          id: `2`,
           title: `Updated Issue 2`,
         },
       },
@@ -650,11 +650,11 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       issues: {
         description: `Issue 2 description`,
-        id: 2,
+        id: `2`,
         title: `Updated Issue 2`,
         userId: `2`,
       },
@@ -678,125 +678,150 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
+    expect(result.state.get(`[3,1]`)).toBeUndefined()
   })
 
-  it(`should order results by specified fields`, async () => {
-    const emitter = mitt()
+  it(
+    `should order results by specified fields`,
+    async () => {
+      const emitter = mitt()
 
-    // Create collection with mutation capability
-    const collection = createCollection<Person>({
-      id: `order-by-test`,
-      getId: (item) => item.id,
-      sync: {
-        sync: ({ begin, write, commit }) => {
-          emitter.on(`sync`, (changes) => {
-            begin()
-            ;(changes as Array<PendingMutation>).forEach((change) => {
-              write({
-                type: change.type,
-                value: change.changes as Person,
+      // Create collection with mutation capability
+      const collection = createCollection<Person>({
+        id: `order-by-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            emitter.on(`sync`, (changes) => {
+              begin()
+              ;(changes as Array<PendingMutation>).forEach((change) => {
+                write({
+                  type: change.type,
+                  value: change.changes as Person,
+                })
               })
+              commit()
             })
-            commit()
-          })
+          },
         },
-      },
-    })
+      })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
+      // Sync from initial state
+      emitter.emit(
+        `sync`,
+        initialPersons.map((person) => ({
+          type: `insert`,
+          changes: person,
+        }))
+      )
 
-    // Test ascending order by age
-    const ascendingQuery = queryBuilder()
-      .from({ collection })
-      .orderBy(`@age`)
-      .select(`@id`, `@name`, `@age`)
+      // Test ascending order by age
+      const ascendingQuery = queryBuilder()
+        .from({ collection })
+        .orderBy(`@age`)
+        .select(`@id`, `@name`, `@age`)
 
-    const compiledAscendingQuery = compileQuery(ascendingQuery)
-    compiledAscendingQuery.start()
+      const compiledAscendingQuery = compileQuery(ascendingQuery)
+      compiledAscendingQuery.start()
 
-    const ascendingResult = compiledAscendingQuery.results
+      const ascendingResult = compiledAscendingQuery.results
 
-    await waitForChanges()
+      await waitForChanges()
 
-    // Verify ascending order
-    const ascendingArray = Array.from(ascendingResult.toArray)
-    expect(ascendingArray).toEqual([
-      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
-      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
-      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
-    ])
+      // Verify ascending order
+      const ascendingArray = Array.from(ascendingResult.toArray)
+      expect(ascendingArray).toEqual([
+        { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 0 },
+        { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+        { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 2 },
+      ])
 
-    // Test descending order by age
-    const descendingQuery = queryBuilder()
-      .from({ collection })
-      .orderBy({ "@age": `desc` })
-      .select(`@id`, `@name`, `@age`)
+      // Test descending order by age
+      const descendingQuery = queryBuilder()
+        .from({ collection })
+        .orderBy({ "@age": `desc` })
+        .select(`@id`, `@name`, `@age`)
 
-    const compiledDescendingQuery = compileQuery(descendingQuery)
-    compiledDescendingQuery.start()
+      const compiledDescendingQuery = compileQuery(descendingQuery)
+      compiledDescendingQuery.start()
 
-    const descendingResult = compiledDescendingQuery.results
+      const descendingResult = compiledDescendingQuery.results
 
-    await waitForChanges()
+      await waitForChanges()
 
-    // Verify descending order
-    const descendingArray = Array.from(descendingResult.toArray)
-    expect(descendingArray).toEqual([
-      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
-      { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
-      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
-    ])
+      // Verify descending order
+      const descendingArray = Array.from(descendingResult.toArray)
+      expect(descendingArray).toEqual([
+        { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
+        { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+        { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      ])
 
-    // Test multiple order by fields
-    const multiOrderQuery = queryBuilder()
-      .from({ collection })
-      .orderBy([`@isActive`, { "@age": `asc` }])
-      .select(`@id`, `@name`, `@age`, `@isActive`)
+      // Test descending order by name
+      const descendingNameQuery = queryBuilder()
+        .from({ collection })
+        .orderBy({ "@name": `desc` })
+        .select(`@id`, `@name`, `@age`)
 
-    const compiledMultiOrderQuery = compileQuery(multiOrderQuery)
-    compiledMultiOrderQuery.start()
+      const compiledDescendingNameQuery = compileQuery(descendingNameQuery)
+      compiledDescendingNameQuery.start()
 
-    const multiOrderResult = compiledMultiOrderQuery.results
+      const descendingNameResult = compiledDescendingNameQuery.results
 
-    await waitForChanges()
+      await waitForChanges()
 
-    // Verify multiple field ordering
-    const multiOrderArray = Array.from(multiOrderResult.toArray)
-    expect(multiOrderArray).toEqual([
-      {
-        _key: `3`,
-        id: `3`,
-        name: `John Smith`,
-        age: 35,
-        isActive: false,
-        _orderByIndex: 0,
-      },
-      {
-        _key: `2`,
-        id: `2`,
-        name: `Jane Doe`,
-        age: 25,
-        isActive: true,
-        _orderByIndex: 1,
-      },
-      {
-        _key: `1`,
-        id: `1`,
-        name: `John Doe`,
-        age: 30,
-        isActive: true,
-        _orderByIndex: 2,
-      },
-    ])
-  })
+      // Verify descending order by name
+      const descendingNameArray = Array.from(descendingNameResult.toArray)
+      expect(descendingNameArray).toEqual([
+        { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 0 },
+        { _key: `1`, id: `1`, name: `John Doe`, age: 30, _orderByIndex: 1 },
+        { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      ])
+
+      // Test multiple order by fields
+      const multiOrderQuery = queryBuilder()
+        .from({ collection })
+        .orderBy([`@isActive`, { "@name": `desc` }])
+        .select(`@id`, `@name`, `@age`, `@isActive`)
+
+      const compiledMultiOrderQuery = compileQuery(multiOrderQuery)
+      compiledMultiOrderQuery.start()
+
+      const multiOrderResult = compiledMultiOrderQuery.results
+
+      await waitForChanges()
+
+      // Verify multiple field ordering
+      const multiOrderArray = Array.from(multiOrderResult.toArray)
+      expect(multiOrderArray).toEqual([
+        {
+          _key: `3`,
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+          isActive: false,
+          _orderByIndex: 0,
+        },
+        {
+          _key: `1`,
+          id: `1`,
+          name: `John Doe`,
+          age: 30,
+          isActive: true,
+          _orderByIndex: 1,
+        },
+        {
+          _key: `2`,
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+          isActive: true,
+          _orderByIndex: 2,
+        },
+      ])
+    },
+    { timeout: 250_000 }
+  )
 
   it(`should maintain correct ordering when items are added, updated, or deleted`, async () => {
     const emitter = mitt()
@@ -804,7 +829,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = createCollection<Person>({
       id: `order-update-test`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -896,6 +921,32 @@ describe(`Query Collections`, () => {
       { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
     ])
 
+    // Add a new person with age null
+    emitter.emit(`sync`, [
+      {
+        type: `insert`,
+        changes: {
+          id: `5`,
+          name: `Bob Null`,
+          age: null,
+          email: `bob.null@example.com`,
+          isActive: true,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify order is updated with Bob Null at the end
+    currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { _key: `5`, id: `5`, name: `Bob Null`, age: null, _orderByIndex: 0 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 1 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 3 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 4 },
+    ])
+
     // Delete a person in the middle of the ordering
     emitter.emit(`sync`, [
       {
@@ -909,9 +960,10 @@ describe(`Query Collections`, () => {
     // Verify order is updated with John Smith removed
     currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
-      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
-      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
+      { _key: `5`, id: `5`, name: `Bob Null`, age: null, _orderByIndex: 0 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 1 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
     ])
   })
 
@@ -921,7 +973,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -942,7 +994,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1031,7 +1083,7 @@ describe(`Query Collections`, () => {
 
     // `[temp-key,1]` is the optimistic state for the new issue, its a composite key
     // from the join in the query
-    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toEqual({
+    expect(result.state.get(`[temp-key,1]`)).toEqual({
       id: `temp-key`,
       _key: `[temp-key,1]`,
       name: `John Doe`,
@@ -1040,14 +1092,14 @@ describe(`Query Collections`, () => {
 
     // `[4,1]` would be the synced state for the new issue, but it's not in the
     // optimistic state because the transaction synced back yet
-    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeUndefined()
+    expect(result.state.get(`[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toBeUndefined()
-    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeDefined()
+    expect(result.state.get(`[temp-key,1]`)).toBeUndefined()
+    expect(result.state.get(`[4,1]`)).toBeDefined()
   })
 
   it(`should transform data using a select callback`, async () => {
@@ -1056,7 +1108,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = createCollection<Person>({
       id: `select-callback-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -1085,13 +1137,20 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ collection })
-      .select(({ collection: result }) => ({
-        displayName: `${result.name} (Age: ${result.age})`,
-        status: result.isActive ? `Active` : `Inactive`,
-        ageGroup:
-          result.age < 30 ? `Young` : result.age < 40 ? `Middle` : `Senior`,
-        emailDomain: result.email.split(`@`)[1],
-      }))
+      .select(({ collection: result }) => {
+        return {
+          displayName: `${result.name} (Age: ${result.age})`,
+          status: result.isActive ? `Active` : `Inactive`,
+          ageGroup: result.age
+            ? result.age < 30
+              ? `Young`
+              : result.age < 40
+                ? `Middle`
+                : `Senior`
+            : `missing age`,
+          emailDomain: result.email.split(`@`)[1],
+        }
+      })
 
     const compiledQuery = compileQuery(query)
 
@@ -1104,7 +1163,7 @@ describe(`Query Collections`, () => {
     expect(result.state.size).toBe(3)
 
     // Verify transformed data for John Doe
-    expect(result.state.get(`KEY::${result.id}/1`)).toEqual({
+    expect(result.state.get(`1`)).toEqual({
       _key: `1`,
       displayName: `John Doe (Age: 30)`,
       status: `Active`,
@@ -1113,7 +1172,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify transformed data for Jane Doe
-    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+    expect(result.state.get(`2`)).toEqual({
       _key: `2`,
       displayName: `Jane Doe (Age: 25)`,
       status: `Active`,
@@ -1122,7 +1181,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify transformed data for John Smith
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       displayName: `John Smith (Age: 35)`,
       status: `Inactive`,
@@ -1148,7 +1207,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       displayName: `Senior Person (Age: 65)`,
       status: `Active`,
@@ -1170,7 +1229,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify the transformation reflects the update
-    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+    expect(result.state.get(`2`)).toEqual({
       _key: `2`,
       displayName: `Jane Doe (Age: 25)`,
       status: `Inactive`, // Should now be inactive

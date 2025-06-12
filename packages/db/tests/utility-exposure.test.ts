@@ -25,7 +25,7 @@ describe(`Utility exposure pattern`, () => {
 
     // Create collection options with utilities
     const options: CollectionConfig<{ id: string }> & { utils: TestUtils } = {
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: mockSync,
       utils: {
         testFn,
@@ -55,7 +55,7 @@ describe(`Utility exposure pattern`, () => {
 
     // Create collection without utilities
     const collection = createCollection({
-      getId: (item: { id: string }) => item.id,
+      getKey: (item: { id: string }) => item.id,
       sync: mockSync,
     })
 
@@ -79,7 +79,7 @@ describe(`Utility exposure pattern`, () => {
 
     // Create collection options with utilities
     const options: CollectionConfig<TestItem> & { utils: TestUtils } = {
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -90,7 +90,9 @@ describe(`Utility exposure pattern`, () => {
     }
 
     // Create collection with utilities
-    const collection = createCollection<TestItem, TestUtils>(options)
+    const collection = createCollection<TestItem, string | number, TestUtils>(
+      options
+    )
 
     // Let's verify utilities work with the collection
     expect(collection.utils.testFn(`test`)).toBe(`processed: test`)

@@ -206,8 +206,8 @@ importers:
   packages/db:
     dependencies:
       '@electric-sql/d2ts':
-        specifier: ^0.1.6
-        version: 0.1.6(@electric-sql/client@1.0.0)
+        specifier: ^0.1.7
+        version: 0.1.7(@electric-sql/client@1.0.0)
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -511,8 +511,8 @@ packages:
   '@electric-sql/client@1.0.0':
     resolution: {integrity: sha512-kGiVbBIlMqc/CeJpWZuLjxNkm0836NWxeMtIWH2w5IUK8pUL13hyxg3ZkR7+FlTGhpKuZRiCP5nPOH9D6wbhPw==}
 
-  '@electric-sql/d2ts@0.1.6':
-    resolution: {integrity: sha512-N2smnYMHGYplWx7WQkWoMYLHSQeGCJp990lYYgLVDBJ8hfBOC4KYYhj5L9FoWd8pH9y4OLnWehhzBtn58mflJg==}
+  '@electric-sql/d2ts@0.1.7':
+    resolution: {integrity: sha512-i1IQGl0FDrEKrd24avOLqkpCu+f4hSu39aL0Jump2ZExo5cHQ4GaUs1mnSZfHSgrFVjnChSmUB1GCbuTmoJetg==}
     peerDependencies:
       '@electric-sql/client': '>=1.0.0-beta.4'
       better-sqlite3: ^11.7.0
@@ -5216,7 +5216,7 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.36.0
 
-  '@electric-sql/d2ts@0.1.6(@electric-sql/client@1.0.0)':
+  '@electric-sql/d2ts@0.1.7(@electric-sql/client@1.0.0)':
     dependencies:
       '@types/murmurhash-js': 1.0.6
       fractional-indexing: 3.2.0

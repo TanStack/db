@@ -19,7 +19,57 @@ describe(`Collection.subscribeChanges`, () => {
     // Create collection with pre-populated data
     const collection = createCollection<{ value: string }>({
       id: `initial-state-test`,
-      getId: (item) => item.value,
+      getKey: (item) => item.value,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { value: `value1` },
+          })
+          write({
+            type: `insert`,
+            value: { value: `value2` },
+          })
+          commit()
+        },
+      },
+    })
+
+    // Wait for initial sync to complete
+    // await waitForChanges()
+
+    // Subscribe to changes
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    // Verify that callback was called with initial state
+    expect(callback).toHaveBeenCalledTimes(1)
+    const changes = callback.mock.calls[0]![0] as ChangesPayload<{
+      value: string
+    }>
+    expect(changes).toHaveLength(2)
+
+    const insertedKeys = changes.map((change) => change.key)
+    expect(insertedKeys).toContain(`value1`)
+    expect(insertedKeys).toContain(`value2`)
+
+    // Ensure all changes are insert type
+    expect(changes.every((change) => change.type === `insert`)).toBe(true)
+
+    // Clean up
+    unsubscribe()
+  })
+
+  it(`should not emit initial collection state as insert changes by default`, () => {
+    const callback = vi.fn()
+
+    // Create collection with pre-populated data
+    const collection = createCollection<{ value: string }>({
+      id: `initial-state-test`,
+      getKey: (item) => item.value,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately populate with initial data
@@ -44,18 +94,7 @@ describe(`Collection.subscribeChanges`, () => {
     const unsubscribe = collection.subscribeChanges(callback)
 
     // Verify that callback was called with initial state
-    expect(callback).toHaveBeenCalledTimes(1)
-    const changes = callback.mock.calls[0]![0] as ChangesPayload<{
-      value: string
-    }>
-    expect(changes).toHaveLength(2)
-
-    const insertedKeys = changes.map((change) => change.key)
-    expect(insertedKeys).toContain(`KEY::${collection.id}/value1`)
-    expect(insertedKeys).toContain(`KEY::${collection.id}/value2`)
-
-    // Ensure all changes are insert type
-    expect(changes.every((change) => change.type === `insert`)).toBe(true)
+    expect(callback).toHaveBeenCalledTimes(0)
 
     // Clean up
     unsubscribe()
@@ -68,7 +107,7 @@ describe(`Collection.subscribeChanges`, () => {
     // Create collection with sync capability using the mitt pattern from collection.test.ts
     const collection = createCollection<{ id: number; value: string }>({
       id: `sync-changes-test-with-mitt`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Setup a listener for our test events
@@ -186,7 +225,9 @@ describe(`Collection.subscribeChanges`, () => {
       updated?: boolean
     }>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => {
+        return item.id
+      },
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -234,7 +275,7 @@ describe(`Collection.subscribeChanges`, () => {
       }>
       expect(insertChange).toBeDefined()
       expect(insertChange).toEqual({
-        key: `KEY::${collection.id}/1`,
+        key: 1,
         type: `insert`,
         value: { id: 1, value: `optimistic value` },
       })
@@ -244,7 +285,7 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Perform optimistic update
-    const item = collection.state.get(`KEY::${collection.id}/1`)
+    const item = collection.state.get(1)
     if (!item) {
       throw new Error(`Item not found`)
     }
@@ -281,7 +322,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Perform optimistic delete
     const deleteTx = createTransaction({ mutationFn })
-    deleteTx.mutate(() => collection.delete(String(item.id)))
+    deleteTx.mutate(() => collection.delete(item.id))
 
     // Verify that delete was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -295,7 +336,7 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(deleteChange).toBeDefined()
     expect(deleteChange.type).toBe(`delete`)
-    expect(deleteChange.key).toBe(`KEY::${collection.id}/1`)
+    expect(deleteChange.key).toBe(1)
 
     // Clean up
     unsubscribe()
@@ -308,7 +349,7 @@ describe(`Collection.subscribeChanges`, () => {
     // Create collection with both sync and mutation capabilities
     const collection = createCollection<{ id: number; value: string }>({
       id: `mixed-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Setup a listener for our test events
@@ -358,7 +399,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).toHaveBeenCalledTimes(1)
     expect(callback.mock.calls[0]![0]).toEqual([
       {
-        key: `KEY::${collection.id}/1`,
+        key: 1,
         type: `insert`,
         value: { id: 1, value: `synced value` },
       },
@@ -374,7 +415,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).toHaveBeenCalledTimes(1)
     expect(callback.mock.calls[0]![0]).toEqual([
       {
-        key: `KEY::${collection.id}/2`,
+        key: 2,
         type: `insert`,
         value: { id: 2, value: `optimistic value` },
       },
@@ -391,7 +432,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Update both items in optimistic and synced ways
     // First update the optimistic item optimistically
-    const optItem = collection.state.get(`KEY::${collection.id}/2`)
+    const optItem = collection.state.get(2)
     let updateTx
     if (optItem) {
       updateTx = createTransaction({ mutationFn })
@@ -409,7 +450,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback.mock.calls[0]![0]).toEqual([
       {
         type: `update`,
-        key: `KEY::${collection.id}/2`,
+        key: 2,
         value: {
           id: 2,
           value: `updated optimistic value`,
@@ -466,7 +507,7 @@ describe(`Collection.subscribeChanges`, () => {
     // Create collection with initial data
     const collection = createCollection<{ id: number; value: string }>({
       id: `diff-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately populate with initial data
@@ -503,7 +544,9 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
 
     // First call should have initial state (2 items)
     expect(callback).toHaveBeenCalledTimes(1)
@@ -547,7 +590,7 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Update one item only
-    const itemToUpdate = collection.state.get(`KEY::${collection.id}/1`)
+    const itemToUpdate = collection.state.get(1)
     if (!itemToUpdate) {
       throw new Error(`Item not found`)
     }
@@ -570,7 +613,7 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(updateChange).toBeDefined()
     expect(updateChange.type).toBe(`update`)
-    expect(updateChange.key).toBe(`KEY::${collection.id}/1`)
+    expect(updateChange.key).toBe(1)
 
     // Clean up
     unsubscribe()
@@ -582,7 +625,7 @@ describe(`Collection.subscribeChanges`, () => {
     // Create collection
     const collection = createCollection<{ id: number; value: string }>({
       id: `unsubscribe-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -593,7 +636,9 @@ describe(`Collection.subscribeChanges`, () => {
     const mutationFn = async () => {}
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
 
     // Initial state emission
     expect(callback).toHaveBeenCalledTimes(1)
