@@ -197,7 +197,7 @@ export type SelectCallback<TContext extends Context = Context> = (
   context: TContext extends { schema: infer S } ? S : any
 ) => any
 
-export type As<TContext extends Context = Context> = string
+export type As<_TContext extends Context = Context> = string
 
 export type From<TContext extends Context = Context> = InputReference<{
   baseSchema: TContext[`baseSchema`]
@@ -219,9 +219,9 @@ export type GroupBy<TContext extends Context = Context> =
   | PropertyReference<TContext>
   | Array<PropertyReference<TContext>>
 
-export type Limit<TContext extends Context = Context> = number
+export type Limit<_TContext extends Context = Context> = number
 
-export type Offset<TContext extends Context = Context> = number
+export type Offset<_TContext extends Context = Context> = number
 
 export interface BaseQuery<TContext extends Context = Context> {
   // The select clause is an array of either plain strings or objects mapping alias names

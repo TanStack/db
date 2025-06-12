@@ -15,7 +15,7 @@ describe(`Collection.update type tests`, () => {
     })
   })
 
-  it.only(`should correctly type drafts for multi-item update with config and callback (Overload 2)`, () => {
+  it(`should correctly type drafts for multi-item update with config and callback (Overload 2)`, () => {
     const config: OperationConfig = { metadata: { test: true } }
     updateMethod([`id1`, `id2`], config, (drafts) => {
       expectTypeOf(drafts).toEqualTypeOf<Array<TypeTestItem>>()

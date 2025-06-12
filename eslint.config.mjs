@@ -15,6 +15,18 @@ export default [
       "prettier/prettier": `error`,
       "stylistic/quotes": [`error`, `backtick`],
       ...prettierConfig.rules,
+      "@typescript-eslint/no-unused-vars": [
+        `error`,
+        { argsIgnorePattern: `^_`, varsIgnorePattern: `^_` },
+      ],
+      "@typescript-eslint/naming-convention": [
+        "error",
+        {
+          selector: "typeParameter",
+          format: ["PascalCase"],
+          leadingUnderscore: `allow`
+        },
+      ],
     },
   },
 ]
