@@ -770,16 +770,30 @@ export class CollectionImpl<T extends object = Record<string, unknown>> {
    * // Update with metadata
    * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
-  update<TItem extends object = T>(
-    id: unknown,
-    configOrCallback: ((draft: TItem) => void) | OperationConfig,
-    maybeCallback?: (draft: TItem) => void
-  ): TransactionType
-
+  // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
     ids: Array<unknown>,
-    configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
-    maybeCallback?: (draft: Array<TItem>) => void
+    callback: (drafts: Array<TItem>) => void
+  ): TransactionType
+
+  // Overload 2: Update multiple items with config and a callback
+  update<TItem extends object = T>(
+    ids: Array<unknown>,
+    config: OperationConfig,
+    callback: (drafts: Array<TItem>) => void
+  ): TransactionType
+
+  // Overload 3: Update a single item with a callback
+  update<TItem extends object = T>(
+    id: unknown,
+    callback: (draft: TItem) => void
+  ): TransactionType
+
+  // Overload 4: Update a single item with config and a callback
+  update<TItem extends object = T>(
+    id: unknown,
+    config: OperationConfig,
+    callback: (draft: TItem) => void
   ): TransactionType
 
   update<TItem extends object = T>(
