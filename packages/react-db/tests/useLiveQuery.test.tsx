@@ -82,7 +82,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -254,7 +254,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -274,7 +274,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -437,7 +437,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `params-change-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -543,7 +543,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `stop-query-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -645,7 +645,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -774,7 +774,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test-bug`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -795,7 +795,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test-bug`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage

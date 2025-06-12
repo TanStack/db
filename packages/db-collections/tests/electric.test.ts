@@ -45,7 +45,7 @@ describe(`Electric Integration`, () => {
           table: `test_table`,
         },
       },
-      getId: (item: Row) => item.id,
+      getKey: (item: Row) => item.id,
     }
 
     const { options, awaitTxId: txIdFn } = electricCollectionOptions(config)
@@ -396,7 +396,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id,
         onInsert,
         onUpdate,
         onDelete,
@@ -426,7 +426,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id,
         onInsert,
       }
 
@@ -510,7 +510,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
-        getId: (item: Row) => item.id,
+        getKey: (item: Row) => item.id,
         onInsert,
       }
 

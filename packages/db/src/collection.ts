@@ -29,14 +29,16 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 // Event system for collections
 type CollectionEventType = `insert` | `update` | `delete`
 
-interface CollectionEvent<T> {
+interface CollectionEvent<T, TKey extends string | number> {
   type: CollectionEventType
-  key: string
+  key: TKey
   value: T
   previousValue?: T
 }
 
-type EventListener<T> = (event: CollectionEvent<T>) => void
+type EventListener<T, TKey extends string | number> = (
+  event: CollectionEvent<T, TKey>
+) => void
 type KeyListener<T> = (
   value: T | undefined,
   previousValue: T | undefined
@@ -49,10 +51,11 @@ type KeyListener<T> = (
  * @param config - Configuration for the collection, including id and sync
  * @returns A new Collection instance
  */
-export function createCollection<T extends object = Record<string, unknown>>(
-  config: CollectionConfig<T>
-): Collection<T> {
-  return new Collection<T>(config)
+export function createCollection<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(config: CollectionConfig<T, TKey>): Collection<T, TKey> {
+  return new Collection<T, TKey>(config)
 }
 
 /**
@@ -81,41 +84,49 @@ export function createCollection<T extends object = Record<string, unknown>>(
  * @param config - Configuration for the collection, including id and sync
  * @returns Promise that resolves when the initial sync is finished
  */
-export function preloadCollection<T extends object = Record<string, unknown>>(
-  config: CollectionConfig<T>
-): Promise<Collection<T>> {
+export function preloadCollection<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(config: CollectionConfig<T, TKey>): Promise<Collection<T, TKey>> {
   if (!config.id) {
     throw new Error(`The id property is required for preloadCollection`)
   }
 
   // If the collection is already fully loaded, return a resolved promise
   if (collectionsStore.has(config.id) && !loadingCollections.has(config.id)) {
-    return Promise.resolve(collectionsStore.get(config.id)! as Collection<T>)
+    return Promise.resolve(
+      collectionsStore.get(config.id)! as unknown as Collection<T, TKey>
+    )
   }
 
   // If the collection is in the process of loading, return its promise
   if (loadingCollections.has(config.id)) {
-    return loadingCollections.get(config.id)! as Promise<Collection<T>>
+    return loadingCollections.get(config.id)! as unknown as Promise<
+      Collection<T, TKey>
+    >
   }
 
   // Create a new collection instance if it doesn't exist
   if (!collectionsStore.has(config.id)) {
     collectionsStore.set(
       config.id,
-      new Collection<T>({
+      new Collection<T, TKey>({
         id: config.id,
-        getId: config.getId,
+        getKey: config.getKey,
         sync: config.sync,
         schema: config.schema,
-      })
+      }) as unknown as Collection<any>
     )
   }
 
-  const collection = collectionsStore.get(config.id)! as Collection<T>
+  const collection = collectionsStore.get(config.id)! as unknown as Collection<
+    T,
+    TKey
+  >
 
   // Create a promise that will resolve after the first commit
   let resolveFirstCommit: () => void
-  const firstCommitPromise = new Promise<Collection<T>>((resolve) => {
+  const firstCommitPromise = new Promise<Collection<T, TKey>>((resolve) => {
     resolveFirstCommit = () => {
       resolve(collection)
     }
@@ -135,7 +146,9 @@ export function preloadCollection<T extends object = Record<string, unknown>>(
   // Store the loading promise
   loadingCollections.set(
     config.id,
-    firstCommitPromise as Promise<Collection<Record<string, unknown>>>
+    firstCommitPromise as unknown as Promise<
+      Collection<Record<string, unknown>>
+    >
   )
 
   return firstCommitPromise
@@ -170,23 +183,26 @@ export class SchemaValidationError extends Error {
   }
 }
 
-export class Collection<T extends object = Record<string, unknown>> {
+export class Collection<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
   public transactions: SortedMap<string, Transaction>
 
   // Core state - make public for testing
-  public syncedData = new Map<string, T>()
-  public syncedMetadata = new Map<string, unknown>()
+  public syncedData = new Map<TKey, T>()
+  public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
-  public derivedUpserts = new Map<string, T>()
-  public derivedDeletes = new Set<string>()
+  public derivedUpserts = new Map<TKey, T>()
+  public derivedDeletes = new Set<TKey>()
 
   // Cached size for performance
   private _size = 0
 
   // Event system
-  private eventListeners = new Set<EventListener<T>>()
-  private keyListeners = new Map<string, Set<KeyListener<T>>>()
+  private eventListeners = new Set<EventListener<T, TKey>>()
+  private keyListeners = new Map<TKey, Set<KeyListener<T>>>()
 
   // Batching for subscribeChanges
   private changesBatchListeners = new Set<
@@ -194,8 +210,8 @@ export class Collection<T extends object = Record<string, unknown>> {
   >()
 
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
-  private syncedKeys = new Set<string>()
-  public config: CollectionConfig<T>
+  private syncedKeys = new Set<TKey>()
+  public config: CollectionConfig<T, TKey>
   private hasReceivedFirstCommit = false
 
   // Array to store one-time commit listeners
@@ -218,7 +234,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T>) {
+  constructor(config: CollectionConfig<T, TKey>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)
@@ -262,12 +278,9 @@ export class Collection<T extends object = Record<string, unknown>> {
             `The pending sync transaction is already committed, you can't still write to it.`
           )
         }
-        const key = this.generateObjectKey(
-          this.config.getId(messageWithoutKey.value),
-          messageWithoutKey.value
-        )
+        const key = this.getKeyFromItem(messageWithoutKey.value)
 
-        // Check if an item with this ID already exists when inserting
+        // Check if an item with this key already exists when inserting
         if (messageWithoutKey.type === `insert`) {
           if (
             this.syncedData.has(key) &&
@@ -275,9 +288,8 @@ export class Collection<T extends object = Record<string, unknown>> {
               (op) => op.key === key && op.type === `delete`
             )
           ) {
-            const id = this.config.getId(messageWithoutKey.value)
             throw new Error(
-              `Cannot insert document with ID "${id}" from sync because it already exists in the collection "${this.id}"`
+              `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
             )
           }
         }
@@ -345,7 +357,7 @@ export class Collection<T extends object = Record<string, unknown>> {
     this._size = this.calculateSize()
 
     // Collect events for changes
-    const events: Array<CollectionEvent<T>> = []
+    const events: Array<CollectionEvent<T, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
     // Emit all events at once
@@ -371,9 +383,9 @@ export class Collection<T extends object = Record<string, unknown>> {
    * Collect events for optimistic changes
    */
   private collectOptimisticChanges(
-    previousUpserts: Map<string, T>,
-    previousDeletes: Set<string>,
-    events: Array<CollectionEvent<T>>
+    previousUpserts: Map<TKey, T>,
+    previousDeletes: Set<TKey>,
+    events: Array<CollectionEvent<T, TKey>>
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -413,9 +425,9 @@ export class Collection<T extends object = Record<string, unknown>> {
    * Get the previous value for a key given previous optimistic state
    */
   private getPreviousValue(
-    key: string,
-    previousUpserts: Map<string, T>,
-    previousDeletes: Set<string>
+    key: TKey,
+    previousUpserts: Map<TKey, T>,
+    previousDeletes: Set<TKey>
   ): T | undefined {
     if (previousDeletes.has(key)) {
       return undefined
@@ -429,7 +441,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Emit multiple events at once to all listeners
    */
-  private emitEvents(events: Array<CollectionEvent<T>>): void {
+  private emitEvents(events: Array<CollectionEvent<T, TKey>>): void {
     // Emit to individual event listeners
     for (const event of events) {
       this.emitEvent(event)
@@ -460,7 +472,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Emit an event to individual listeners (not batched)
    */
-  private emitEvent(event: CollectionEvent<T>): void {
+  private emitEvent(event: CollectionEvent<T, TKey>): void {
     // Emit to general listeners
     for (const listener of this.eventListeners) {
       listener(event)
@@ -481,7 +493,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Subscribe to collection events
    */
-  public subscribe(listener: EventListener<T>): () => void {
+  public subscribe(listener: EventListener<T, TKey>): () => void {
     this.eventListeners.add(listener)
     return () => {
       this.eventListeners.delete(listener)
@@ -491,7 +503,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Subscribe to changes for a specific key
    */
-  public subscribeKey(key: string, listener: KeyListener<T>): () => void {
+  public subscribeKey(key: TKey, listener: KeyListener<T>): () => void {
     if (!this.keyListeners.has(key)) {
       this.keyListeners.set(key, new Set())
     }
@@ -511,7 +523,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Get the current value for a key (virtual derived state)
    */
-  public get(key: string): T | undefined {
+  public get(key: TKey): T | undefined {
     // Check if optimistically deleted
     if (this.derivedDeletes.has(key)) {
       return undefined
@@ -529,7 +541,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Check if a key exists in the collection (virtual derived state)
    */
-  public has(key: string): boolean {
+  public has(key: TKey): boolean {
     // Check if optimistically deleted
     if (this.derivedDeletes.has(key)) {
       return false
@@ -554,7 +566,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Get all keys (virtual derived state)
    */
-  public *keys(): IterableIterator<string> {
+  public *keys(): IterableIterator<TKey> {
     // Yield keys from synced data, skipping any that are deleted.
     for (const key of this.syncedData.keys()) {
       if (!this.derivedDeletes.has(key)) {
@@ -586,7 +598,7 @@ export class Collection<T extends object = Record<string, unknown>> {
   /**
    * Get all entries (virtual derived state)
    */
-  public *entries(): IterableIterator<[string, T]> {
+  public *entries(): IterableIterator<[TKey, T]> {
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
@@ -605,47 +617,48 @@ export class Collection<T extends object = Record<string, unknown>> {
         ({ state }) => state === `persisting`
       )
     ) {
-      const changedKeys = new Set<string>()
-      const events: Array<CollectionEvent<T>> = []
+      const changedKeys = new Set<TKey>()
+      const events: Array<CollectionEvent<T, TKey>> = []
 
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key)
-          this.syncedKeys.add(operation.key)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          this.syncedKeys.add(key)
 
           // Update metadata
           switch (operation.type) {
             case `insert`:
-              this.syncedMetadata.set(operation.key, operation.metadata)
+              this.syncedMetadata.set(key, operation.metadata)
               break
             case `update`:
               this.syncedMetadata.set(
-                operation.key,
+                key,
                 Object.assign(
                   {},
-                  this.syncedMetadata.get(operation.key),
+                  this.syncedMetadata.get(key),
                   operation.metadata
                 )
               )
               break
             case `delete`:
-              this.syncedMetadata.delete(operation.key)
+              this.syncedMetadata.delete(key)
               break
           }
 
           // Update synced data and collect events
-          const previousValue = this.syncedData.get(operation.key)
+          const previousValue = this.syncedData.get(key)
 
           switch (operation.type) {
             case `insert`:
-              this.syncedData.set(operation.key, operation.value)
+              this.syncedData.set(key, operation.value)
               if (
-                !this.derivedDeletes.has(operation.key) &&
-                !this.derivedUpserts.has(operation.key)
+                !this.derivedDeletes.has(key) &&
+                !this.derivedUpserts.has(key)
               ) {
                 events.push({
                   type: `insert`,
-                  key: operation.key,
+                  key,
                   value: operation.value,
                 })
               }
@@ -653,17 +666,17 @@ export class Collection<T extends object = Record<string, unknown>> {
             case `update`: {
               const updatedValue = Object.assign(
                 {},
-                this.syncedData.get(operation.key),
+                this.syncedData.get(key),
                 operation.value
               )
-              this.syncedData.set(operation.key, updatedValue)
+              this.syncedData.set(key, updatedValue)
               if (
-                !this.derivedDeletes.has(operation.key) &&
-                !this.derivedUpserts.has(operation.key)
+                !this.derivedDeletes.has(key) &&
+                !this.derivedUpserts.has(key)
               ) {
                 events.push({
                   type: `update`,
-                  key: operation.key,
+                  key,
                   value: updatedValue,
                   previousValue,
                 })
@@ -671,15 +684,15 @@ export class Collection<T extends object = Record<string, unknown>> {
               break
             }
             case `delete`:
-              this.syncedData.delete(operation.key)
+              this.syncedData.delete(key)
               if (
-                !this.derivedDeletes.has(operation.key) &&
-                !this.derivedUpserts.has(operation.key)
+                !this.derivedDeletes.has(key) &&
+                !this.derivedUpserts.has(key)
               ) {
                 if (previousValue) {
                   events.push({
                     type: `delete`,
-                    key: operation.key,
+                    key,
                     value: previousValue,
                   })
                 }
@@ -718,33 +731,24 @@ export class Collection<T extends object = Record<string, unknown>> {
     )
   }
 
-  private getKeyFromId(id: unknown): string {
-    if (typeof id === `undefined`) {
-      throw new Error(`id is undefined`)
-    }
-    if (typeof id === `string` && id.startsWith(`KEY::`)) {
-      return id
-    } else {
-      // if it's not a string, then it's some other
-      // primitive type and needs turned into a key.
-      return this.generateObjectKey(id, null)
-    }
+  public getKeyFromItem(item: T): TKey {
+    return this.config.getKey(item)
   }
 
-  public generateObjectKey(id: any, item: any): string {
-    if (typeof id === `undefined`) {
+  public generateGlobalKey(key: any, item: any): string {
+    if (typeof key === `undefined`) {
       throw new Error(
-        `An object was created without a defined id: ${JSON.stringify(item)}`
+        `An object was created without a defined key: ${JSON.stringify(item)}`
       )
     }
 
-    return `KEY::${this.id}/${id}`
+    return `KEY::${this.id}/${key}`
   }
 
   private validateData(
     data: unknown,
     type: `insert` | `update`,
-    key?: string
+    key?: TKey
   ): T | never {
     if (!this.config.schema) return data as T
 
@@ -839,28 +843,24 @@ export class Collection<T extends object = Record<string, unknown>> {
     const items = Array.isArray(data) ? data : [data]
     const mutations: Array<PendingMutation<T>> = []
 
-    // Handle keys - convert to array if string, or generate if not provided
-    const keys: Array<unknown> = items.map((item) =>
-      this.generateObjectKey(this.config.getId(item), item)
-    )
-
     // Create mutations for each item
     items.forEach((item, index) => {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
-      const key = keys[index]!
 
       // Check if an item with this ID already exists in the collection
-      const id = this.config.getId(item)
-      if (this.has(this.getKeyFromId(id))) {
-        throw `Cannot insert document with ID "${id}" because it already exists in the collection`
+      const key = this.getKeyFromItem(item)
+      if (this.has(key)) {
+        throw `Cannot insert document with ID "${key}" because it already exists in the collection`
       }
+      const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData as Record<string, unknown>,
         changes: validatedData as Record<string, unknown>,
+        globalKey,
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
@@ -942,23 +942,23 @@ export class Collection<T extends object = Record<string, unknown>> {
    * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
   update<TItem extends object = T>(
-    id: unknown,
+    key: TKey,
     configOrCallback: ((draft: TItem) => void) | OperationConfig,
     maybeCallback?: (draft: TItem) => void
   ): TransactionType
 
   update<TItem extends object = T>(
-    ids: Array<unknown>,
+    keys: Array<TKey>,
     configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: Array<TItem>) => void
   ): TransactionType
 
   update<TItem extends object = T>(
-    ids: unknown | Array<unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
-    if (typeof ids === `undefined`) {
+    if (typeof keys === `undefined`) {
       throw new Error(`The first argument to update is missing`)
     }
 
@@ -971,21 +971,24 @@ export class Collection<T extends object = Record<string, unknown>> {
       )
     }
 
-    const isArray = Array.isArray(ids)
-    const idsArray = (Array.isArray(ids) ? ids : [ids]).map((id) =>
-      this.getKeyFromId(id)
-    )
+    const isArray = Array.isArray(keys)
+    const keysArray = isArray ? keys : [keys]
+
+    if (isArray && keysArray.length === 0) {
+      throw new Error(`No keys were passed to update`)
+    }
+
     const callback =
       typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
 
     // Get the current objects or empty objects if they don't exist
-    const currentObjects = idsArray.map((id) => {
-      const item = this.get(id)
+    const currentObjects = keysArray.map((key) => {
+      const item = this.get(key)
       if (!item) {
         throw new Error(
-          `The id "${id}" was passed to update but an object for this ID was not found in the collection`
+          `The key "${key}" was passed to update but an object for this key was not found in the collection`
         )
       }
 
@@ -1001,15 +1004,15 @@ export class Collection<T extends object = Record<string, unknown>> {
       )
     } else {
       const result = withChangeTracking(
-        currentObjects[0] as TItem,
+        currentObjects[0]!,
         callback as (draft: TItem) => void
       )
       changesArray = [result]
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T>> = idsArray
-      .map((id, index) => {
+    const mutations: Array<PendingMutation<T>> = keysArray
+      .map((key, index) => {
         const itemChanges = changesArray[index] // User-provided changes for this specific item
 
         // Skip items with no changes
@@ -1022,7 +1025,7 @@ export class Collection<T extends object = Record<string, unknown>> {
         const validatedUpdatePayload = this.validateData(
           itemChanges,
           `update`,
-          id
+          key
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
@@ -1033,23 +1036,26 @@ export class Collection<T extends object = Record<string, unknown>> {
         )
 
         // Check if the ID of the item is being changed
-        const originalItemId = this.config.getId(originalItem)
-        const modifiedItemId = this.config.getId(modifiedItem)
+        const originalItemId = this.getKeyFromItem(originalItem)
+        const modifiedItemId = this.getKeyFromItem(modifiedItem)
 
         if (originalItemId !== modifiedItemId) {
           throw new Error(
-            `Updating the ID of an item is not allowed. Original ID: "${originalItemId}", Attempted new ID: "${modifiedItemId}". Please delete the old item and create a new one if an ID change is necessary.`
+            `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
           )
         }
+
+        const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
           mutationId: crypto.randomUUID(),
           original: originalItem as Record<string, unknown>,
           modified: modifiedItem as Record<string, unknown>,
           changes: validatedUpdatePayload as Record<string, unknown>,
-          key: id,
+          globalKey,
+          key,
           metadata: config.metadata as unknown,
-          syncMetadata: (this.syncedMetadata.get(id) || {}) as Record<
+          syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
             string,
             unknown
           >,
@@ -1114,7 +1120,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * delete("todo-1", { metadata: { reason: "completed" } })
    */
   delete = (
-    ids: Array<string> | string,
+    keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType => {
     const ambientTransaction = getActiveTransaction()
@@ -1126,20 +1132,24 @@ export class Collection<T extends object = Record<string, unknown>> {
       )
     }
 
-    const idsArray = (Array.isArray(ids) ? ids : [ids]).map((id) =>
-      this.getKeyFromId(id)
-    )
+    if (Array.isArray(keys) && keys.length === 0) {
+      throw new Error(`No keys were passed to delete`)
+    }
+
+    const keysArray = Array.isArray(keys) ? keys : [keys]
     const mutations: Array<PendingMutation<T>> = []
 
-    for (const id of idsArray) {
+    for (const key of keysArray) {
+      const globalKey = this.generateGlobalKey(key, this.get(key)!)
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: (this.get(id) || {}) as Record<string, unknown>,
-        modified: (this.get(id) || {}) as Record<string, unknown>,
-        changes: (this.get(id) || {}) as Record<string, unknown>,
-        key: id,
+        original: (this.get(key) || {}) as Record<string, unknown>,
+        modified: (this.get(key) || {}) as Record<string, unknown>,
+        changes: (this.get(key) || {}) as Record<string, unknown>,
+        globalKey,
+        key,
         metadata: config?.metadata as unknown,
-        syncMetadata: (this.syncedMetadata.get(id) || {}) as Record<
+        syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
           string,
           unknown
         >,
@@ -1187,7 +1197,7 @@ export class Collection<T extends object = Record<string, unknown>> {
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
   get state() {
-    const result = new Map<string, T>()
+    const result = new Map<TKey, T>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
     }
@@ -1200,14 +1210,14 @@ export class Collection<T extends object = Record<string, unknown>> {
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
-  stateWhenReady(): Promise<Map<string, T>> {
+  stateWhenReady(): Promise<Map<TKey, T>> {
     // If we already have data or there are no loading collections, resolve immediately
     if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.state)
     }
 
     // Otherwise, wait for the first commit
-    return new Promise<Map<string, T>>((resolve) => {
+    return new Promise<Map<TKey, T>>((resolve) => {
       this.onFirstCommit(() => {
         resolve(this.state)
       })

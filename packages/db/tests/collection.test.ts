@@ -14,7 +14,7 @@ describe(`Collection`, () => {
     // Create a collection with sync but no mutationFn
     const collection = new Collection<{ value: string }>({
       id: `foo`,
-      getId: (item) => item.value,
+      getKey: (item) => item.value,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately execute the sync cycle
@@ -63,7 +63,7 @@ describe(`Collection`, () => {
   it(`should throw an error when trying to update an item's ID`, async () => {
     const collection = new Collection<{ id: string; value: string }>({
       id: `id-update-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -92,7 +92,7 @@ describe(`Collection`, () => {
         })
       })
     }).toThrow(
-      `Updating the ID of an item is not allowed. Original ID: "item-1", Attempted new ID: "item-2". Please delete the old item and create a new one if an ID change is necessary.`
+      `Updating the key of an item is not allowed. Original key: "item-1", Attempted new key: "item-2". Please delete the old item and create a new one if a key change is necessary.`
     )
   })
 
@@ -100,7 +100,7 @@ describe(`Collection`, () => {
     // Create a collection with a mock sync plugin
     new Collection<{ name: string }>({
       id: `foo`,
-      getId: (item) => item.name,
+      getKey: (item) => item.name,
       sync: {
         sync: ({ collection, begin, write, commit }) => {
           // Initial state should be empty
@@ -148,7 +148,7 @@ describe(`Collection`, () => {
       newProp?: string
     }>({
       id: `mock`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust mitt's typing
@@ -217,7 +217,7 @@ describe(`Collection`, () => {
     })
 
     // Check the optimistic operation is there
-    const insertKey = `KEY::${collection.id}/1`
+    const insertKey = 1
     expect(collection.derivedUpserts.has(insertKey)).toBe(true)
     expect(collection.derivedUpserts.get(insertKey)).toEqual({
       id: 1,
@@ -268,12 +268,10 @@ describe(`Collection`, () => {
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
     tx2.mutate(() => collection.insert({ id: 2, value: `baz` }))
-    expect(collection.state.get(collection.generateObjectKey(2, null))).toEqual(
-      {
-        id: 2,
-        value: `baz`,
-      }
-    )
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `baz`,
+    })
     await tx2.isPersisted.promise
 
     // Test bulk insert
@@ -426,7 +424,7 @@ describe(`Collection`, () => {
     // new collection w/ mock sync/mutation
     const collection = new Collection<{ id: number; value: string }>({
       id: `mock`,
-      getId: (item) => {
+      getKey: (item) => {
         return item.id
       },
       sync: {
@@ -454,9 +452,7 @@ describe(`Collection`, () => {
         // This update is ignored because the optimistic update overrides it.
         { type: `insert`, changes: { id: 2, bar: `value2` } },
       ])
-      expect(collection.state).toEqual(
-        new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
-      )
+      expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
       // Remove it so we don't have to assert against it below
       emitter.emit(`update`, [{ changes: { id: 2 }, type: `delete` }])
 
@@ -475,9 +471,7 @@ describe(`Collection`, () => {
     )
 
     // The merged value should immediately contain the new insert
-    expect(collection.state).toEqual(
-      new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
-    )
+    expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
 
     // check there's a transaction in peristing state
     expect(
@@ -489,7 +483,7 @@ describe(`Collection`, () => {
     })
 
     // Check the optimistic operation is there
-    const insertKey = `KEY::${collection.id}/1`
+    const insertKey = 1
     expect(collection.derivedUpserts.has(insertKey)).toBe(true)
     expect(collection.derivedUpserts.get(insertKey)).toEqual({
       id: 1,
@@ -498,15 +492,13 @@ describe(`Collection`, () => {
 
     await tx1.isPersisted.promise
 
-    expect(collection.state).toEqual(
-      new Map([[`KEY::${collection.id}/1`, { id: 1, value: `bar` }]])
-    )
+    expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
   })
 
   it(`should throw errors when deleting items not in the collection`, () => {
     const collection = new Collection<{ name: string }>({
       id: `delete-errors`,
-      getId: (val) => val.name,
+      getKey: (val) => val.name,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -547,7 +539,7 @@ describe(`Collection`, () => {
   it(`should not allow inserting documents with IDs that already exist`, async () => {
     const collection = new Collection<{ id: number; value: string }>({
       id: `duplicate-id-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -588,7 +580,7 @@ describe(`Collection`, () => {
     // Create a collection with handler functions
     const collection = new Collection<{ id: number; value: string }>({
       id: `handlers-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -652,7 +644,7 @@ describe(`Collection`, () => {
     // Create a collection with handler functions
     const collection = new Collection<{ id: number; value: string }>({
       id: `direct-operations-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -705,7 +697,7 @@ describe(`Collection`, () => {
     // Create a collection without handler functions
     const collection = new Collection<{ id: number; value: string }>({
       id: `no-handlers-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -758,7 +750,7 @@ describe(`Collection with schema validation`, () => {
     // Create a collection with the schema
     const collection = new Collection<z.infer<typeof userSchema>>({
       id: `test`,
-      getId: (item) => item.name,
+      getKey: (item) => item.name,
       sync: {
         sync: ({ begin, commit }) => {
           begin()

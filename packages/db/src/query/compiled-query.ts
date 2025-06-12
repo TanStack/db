@@ -98,7 +98,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     this.inputs = inputs
     this.resultCollection = new Collection<TResults>({
       id: crypto.randomUUID(), // TODO: remove when we don't require any more
-      getId: (val) => {
+      getKey: (val) => {
         return (val as any)._key
       },
       sync: {
@@ -114,12 +114,12 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   private sendChangesToInput(
     inputKey: string,
     changes: Array<ChangeMessage>,
-    getId: (item: ChangeMessage[`value`]) => any
+    getKey: (item: ChangeMessage[`value`]) => any
   ) {
     const input = this.inputs[inputKey]!
     const multiSetArray: MultiSetArray<unknown> = []
     for (const change of changes) {
-      const key = getId(change.value)
+      const key = getKey(change.value)
       if (change.type === `insert`) {
         multiSetArray.push([[key, change.value], 1])
       } else if (change.type === `update`) {
@@ -164,7 +164,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       this.sendChangesToInput(
         key,
         collection.currentStateAsChanges(),
-        collection.config.getId
+        collection.config.getKey
       )
     })
     this.incrementVersion()
@@ -184,7 +184,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
           ;(change as any).previousValue = event.previousValue
         }
 
-        this.sendChangesToInput(key, [change], collection.config.getId)
+        this.sendChangesToInput(key, [change], collection.config.getKey)
         this.incrementVersion()
         this.sendFrontierToAllInputs()
         this.runGraph()

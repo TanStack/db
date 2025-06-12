@@ -121,7 +121,7 @@ export class Transaction {
   applyMutations(mutations: Array<PendingMutation<any>>): void {
     for (const newMutation of mutations) {
       const existingIndex = this.mutations.findIndex(
-        (m) => m.key === newMutation.key
+        (m) => m.globalKey === newMutation.globalKey
       )
 
       if (existingIndex >= 0) {
@@ -146,10 +146,10 @@ export class Transaction {
     // and roll them back as well.
     if (!isSecondaryRollback) {
       const mutationIds = new Set()
-      this.mutations.forEach((m) => mutationIds.add(m.key))
+      this.mutations.forEach((m) => mutationIds.add(m.globalKey))
       for (const t of transactions) {
         t.state === `pending` &&
-          t.mutations.some((m) => mutationIds.has(m.key)) &&
+          t.mutations.some((m) => mutationIds.has(m.globalKey)) &&
           t.rollback({ isSecondaryRollback: true })
       }
     }

@@ -11,7 +11,7 @@ interface TestItem {
   value?: number
 }
 
-const getId = (item: TestItem) => item.id
+const getKey = (item: TestItem) => item.id
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -51,7 +51,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     }
 
     const { options } = queryCollectionOptions(config)
@@ -111,7 +111,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     }
 
     const { options, refetch } = queryCollectionOptions(config)
@@ -192,7 +192,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
       retry: 0, // Disable retries for this test case
     })
     const collection = new Collection(options)
@@ -242,7 +242,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     })
     const collection = new Collection(options)
 
@@ -290,7 +290,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     })
     const collection = new Collection(options)
 
@@ -353,7 +353,7 @@ describe(`QueryCollection`, () => {
     consoleSpy.mockRestore()
   })
 
-  it(`should use the provided getId function to identify items`, async () => {
+  it(`should use the provided getKey function to identify items`, async () => {
     const queryKey = [`customKeyTest`]
 
     // Items with a non-standard ID field
@@ -364,15 +364,15 @@ describe(`QueryCollection`, () => {
 
     const queryFn = vi.fn().mockResolvedValue(items)
 
-    // Create a spy for the getId function
-    const getIdSpy = vi.fn((item: any) => item.customId)
+    // Create a spy for the getKey function
+    const getKeySpy = vi.fn((item: any) => item.customId)
 
     const { options, refetch } = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
-      getId: getIdSpy,
+      getKey: getKeySpy,
     })
     const collection = new Collection(options)
 
@@ -382,10 +382,10 @@ describe(`QueryCollection`, () => {
       expect(collection.state.size).toBe(items.length)
     })
 
-    // Verify getId was called for each item
-    expect(getIdSpy).toHaveBeenCalledTimes(items.length * 2)
+    // Verify getKey was called for each item
+    expect(getKeySpy).toHaveBeenCalledTimes(items.length * 2)
     items.forEach((item) => {
-      expect(getIdSpy).toHaveBeenCalledWith(item)
+      expect(getKeySpy).toHaveBeenCalledWith(item)
     })
 
     // Verify items are stored with the custom keys
@@ -406,7 +406,7 @@ describe(`QueryCollection`, () => {
     ]
 
     // Reset the spy to track new calls
-    getIdSpy.mockClear()
+    getKeySpy.mockClear()
     queryFn.mockResolvedValueOnce(updatedItems)
 
     // Trigger a refetch
@@ -415,11 +415,11 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
     expect(collection.state.size).toBe(updatedItems.length)
 
-    // Verify getId was called at least once for each item
+    // Verify getKey was called at least once for each item
     // It may be called multiple times per item during the diffing process
-    expect(getIdSpy).toHaveBeenCalled()
+    expect(getKeySpy).toHaveBeenCalled()
     updatedItems.forEach((item) => {
-      expect(getIdSpy).toHaveBeenCalledWith(item)
+      expect(getKeySpy).toHaveBeenCalledWith(item)
     })
 
     // Verify the state reflects the changes
@@ -450,7 +450,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey,
         queryFn,
-        getId,
+        getKey,
         onInsert,
         onUpdate,
         onDelete,
@@ -483,7 +483,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey,
         queryFn,
-        getId,
+        getKey,
         onInsert,
         onUpdate,
         onDelete,
@@ -520,7 +520,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey: [`refetchTest`, `default`],
         queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
-        getId,
+        getKey,
         onInsert: onInsertDefault,
       }
 
@@ -529,7 +529,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey: [`refetchTest`, `false`],
         queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
-        getId,
+        getKey,
         onInsert: onInsertFalse,
       }
 

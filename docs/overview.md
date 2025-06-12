@@ -173,7 +173,7 @@ If provided, this should be a [Standard Schema](https://standardschema.dev) comp
 const todoCollection = createCollection<Todo>(queryCollectionOptions({
   queryKey: ['todoItems'],
   queryFn: async () => fetch('/api/todos'),
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoSchema // any standard schema
 }))
 ```
@@ -198,7 +198,7 @@ export const todoCollection = createCollection<Todo>(electricCollectionOptions({
       table: 'todos'
     }
   },
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoSchema
 }).options)
 ```
@@ -208,7 +208,7 @@ The Electric collection requires two Electric-specific options:
 - `shapeOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
   - `url` to your sync engine; and
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
-- `getId` &mdash; identifies the id for the rows being synced into the collection
+- `getKey` &mdash; identifies the id for the rows being synced into the collection
 
 When you create the collection, sync starts automatically.
 
@@ -228,7 +228,7 @@ export const myPendingTodos = createCollection<Todo>(electricCollectionOptions({
       `
     }
   },
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoSchema
 }).options)
 ```
@@ -515,7 +515,7 @@ import { queryCollectionOptions } from "@tanstack/db-collections"
 const todoCollection = createCollection<Todo>(queryCollectionOptions({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoSchema, // any standard schema
   onInsert: ({ transaction }) => {
     const { changes: newTodo } = transaction.mutations[0]
@@ -528,7 +528,7 @@ const todoCollection = createCollection<Todo>(queryCollectionOptions({
 const listCollection = createCollection<TodoList>(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoListSchema
   onInsert: ({ transaction }) => {
     const { changes: newTodo } = transaction.mutations[0]
@@ -586,7 +586,7 @@ export const todoCollection = createCollection(electricCollectionOptions<Todo>({
       table: 'todos'
     }
   },
-  getId: (item) => item.id,
+  getKey: (item) => item.id,
   schema: todoSchema
 }))
 

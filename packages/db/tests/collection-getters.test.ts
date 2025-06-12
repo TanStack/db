@@ -39,7 +39,7 @@ describe(`Collection getters`, () => {
 
     config = {
       id: `test-collection`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: mockSync,
     }
 
@@ -51,11 +51,11 @@ describe(`Collection getters`, () => {
       const state = collection.state
       expect(state).toBeInstanceOf(Map)
       expect(state.size).toBe(2)
-      expect(state.get(`KEY::${collection.id}/item1`)).toEqual({
+      expect(state.get(`item1`)).toEqual({
         id: `item1`,
         name: `Item 1`,
       })
-      expect(state.get(`KEY::${collection.id}/item2`)).toEqual({
+      expect(state.get(`item2`)).toEqual({
         id: `item2`,
         name: `Item 2`,
       })
@@ -71,7 +71,7 @@ describe(`Collection getters`, () => {
       // Create a new collection with no initial data
       const emptyCollection = new Collection({
         id: `empty-collection`,
-        getId: (val) => val.id,
+        getKey: (val) => val.id,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -88,7 +88,7 @@ describe(`Collection getters`, () => {
       // Create a collection with controllable sync
       const syncCollection = new Collection<{ id: string; name: string }>({
         id: `sync-size-test`,
-        getId: (val) => val.id,
+        getKey: (val) => val.id,
         sync: {
           sync: (callbacks) => {
             syncCallbacks = callbacks
@@ -184,12 +184,12 @@ describe(`Collection getters`, () => {
 
   describe(`has method`, () => {
     it(`returns true for existing items`, () => {
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       expect(collection.has(key)).toBe(true)
     })
 
     it(`returns false for non-existing items`, () => {
-      const key = `KEY::${collection.id}/nonexistent`
+      const key = `nonexistent`
       expect(collection.has(key)).toBe(false)
     })
 
@@ -199,7 +199,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
 
-      const key = `KEY::${collection.id}/item3`
+      const key = `item3`
       expect(collection.has(key)).toBe(true)
     })
 
@@ -209,7 +209,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
 
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       expect(collection.has(key)).toBe(false)
     })
 
@@ -223,7 +223,7 @@ describe(`Collection getters`, () => {
         })
       )
 
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       expect(collection.has(key)).toBe(true)
     })
   })
@@ -232,8 +232,8 @@ describe(`Collection getters`, () => {
     it(`returns all keys as an iterator`, () => {
       const keys = Array.from(collection.keys())
       expect(keys).toHaveLength(2)
-      expect(keys).toContain(`KEY::${collection.id}/item1`)
-      expect(keys).toContain(`KEY::${collection.id}/item2`)
+      expect(keys).toContain(`item1`)
+      expect(keys).toContain(`item2`)
     })
 
     it(`excludes optimistically deleted items`, () => {
@@ -244,8 +244,8 @@ describe(`Collection getters`, () => {
 
       const keys = Array.from(collection.keys())
       expect(keys).toHaveLength(1)
-      expect(keys).toContain(`KEY::${collection.id}/item2`)
-      expect(keys).not.toContain(`KEY::${collection.id}/item1`)
+      expect(keys).toContain(`item2`)
+      expect(keys).not.toContain(`item1`)
     })
 
     it(`includes optimistically inserted items`, () => {
@@ -256,9 +256,9 @@ describe(`Collection getters`, () => {
 
       const keys = Array.from(collection.keys())
       expect(keys).toHaveLength(3)
-      expect(keys).toContain(`KEY::${collection.id}/item1`)
-      expect(keys).toContain(`KEY::${collection.id}/item2`)
-      expect(keys).toContain(`KEY::${collection.id}/item3`)
+      expect(keys).toContain(`item1`)
+      expect(keys).toContain(`item2`)
+      expect(keys).toContain(`item3`)
     })
   })
 
@@ -316,14 +316,8 @@ describe(`Collection getters`, () => {
     it(`returns all entries as an iterator`, () => {
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(2)
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item1`,
-        { id: `item1`, name: `Item 1` },
-      ])
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item2`,
-        { id: `item2`, name: `Item 2` },
-      ])
+      expect(entries).toContainEqual([`item1`, { id: `item1`, name: `Item 1` }])
+      expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
     })
 
     it(`excludes optimistically deleted items`, () => {
@@ -334,10 +328,7 @@ describe(`Collection getters`, () => {
 
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(1)
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item2`,
-        { id: `item2`, name: `Item 2` },
-      ])
+      expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
     })
 
     it(`includes optimistically inserted items`, () => {
@@ -348,18 +339,9 @@ describe(`Collection getters`, () => {
 
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(3)
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item1`,
-        { id: `item1`, name: `Item 1` },
-      ])
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item2`,
-        { id: `item2`, name: `Item 2` },
-      ])
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item3`,
-        { id: `item3`, name: `Item 3` },
-      ])
+      expect(entries).toContainEqual([`item1`, { id: `item1`, name: `Item 1` }])
+      expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
+      expect(entries).toContainEqual([`item3`, { id: `item3`, name: `Item 3` }])
     })
 
     it(`reflects optimistic updates`, () => {
@@ -375,25 +357,22 @@ describe(`Collection getters`, () => {
       const entries = Array.from(collection.entries())
       expect(entries).toHaveLength(2)
       expect(entries).toContainEqual([
-        `KEY::${collection.id}/item1`,
+        `item1`,
         { id: `item1`, name: `Updated Item 1` },
       ])
-      expect(entries).toContainEqual([
-        `KEY::${collection.id}/item2`,
-        { id: `item2`, name: `Item 2` },
-      ])
+      expect(entries).toContainEqual([`item2`, { id: `item2`, name: `Item 2` }])
     })
   })
 
   describe(`get method`, () => {
     it(`returns the correct value for existing items`, () => {
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       const value = collection.get(key)
       expect(value).toEqual({ id: `item1`, name: `Item 1` })
     })
 
     it(`returns undefined for non-existing items`, () => {
-      const key = `KEY::${collection.id}/nonexistent`
+      const key = `nonexistent`
       const value = collection.get(key)
       expect(value).toBeUndefined()
     })
@@ -404,7 +383,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.insert({ id: `item3`, name: `Item 3` }))
 
-      const key = `KEY::${collection.id}/item3`
+      const key = `item3`
       const value = collection.get(key)
       expect(value).toEqual({ id: `item3`, name: `Item 3` })
     })
@@ -415,7 +394,7 @@ describe(`Collection getters`, () => {
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`item1`))
 
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       const value = collection.get(key)
       expect(value).toBeUndefined()
     })
@@ -430,7 +409,7 @@ describe(`Collection getters`, () => {
         })
       )
 
-      const key = `KEY::${collection.id}/item1`
+      const key = `item1`
       const value = collection.get(key)
       expect(value).toEqual({ id: `item1`, name: `Updated Item 1` })
     })
@@ -463,7 +442,7 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = new Collection({
         id: `delayed-collection`,
-        getId: (val) => val.id,
+        getKey: (val) => val.id,
         sync: delayedSyncMock,
       })
 
@@ -478,7 +457,7 @@ describe(`Collection getters`, () => {
       // Now the promise should resolve
       const state = await statePromise
       expect(state).toBeInstanceOf(Map)
-      expect(state.get(`KEY::${delayedCollection.id}/delayed-item`)).toEqual({
+      expect(state.get(`delayed-item`)).toEqual({
         id: `delayed-item`,
         name: `Delayed Item`,
       })
@@ -523,7 +502,7 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = new Collection({
         id: `delayed-collection`,
-        getId: (val) => val.id,
+        getKey: (val) => val.id,
         sync: delayedSyncMock,
       })
 

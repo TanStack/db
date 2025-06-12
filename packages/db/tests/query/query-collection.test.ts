@@ -73,7 +73,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -112,7 +112,7 @@ describe(`Query Collections`, () => {
     const result = compiledQuery.results
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       id: `3`,
       name: `John Smith`,
@@ -136,12 +136,12 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       id: `3`,
       name: `John Smith`,
     })
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       id: `4`,
       name: `Kyle Doe`,
@@ -161,7 +161,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       id: `4`,
       name: `Kyle Doe 2`,
@@ -180,7 +180,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
+    expect(result.state.get(`4`)).toBeUndefined()
   })
 
   it(`should be able to query a collection without a select using a callback for the where clause`, async () => {
@@ -189,7 +189,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `optimistic-changes-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -227,7 +227,7 @@ describe(`Query Collections`, () => {
     const result = compiledQuery.results
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       age: 35,
       email: `john.smith@example.com`,
@@ -254,7 +254,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       age: 35,
       email: `john.smith@example.com`,
@@ -262,7 +262,7 @@ describe(`Query Collections`, () => {
       isActive: false,
       name: `John Smith`,
     })
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       age: 40,
       email: `kyle.doe@example.com`,
@@ -285,7 +285,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(2)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       age: 40,
       email: `kyle.doe@example.com`,
@@ -299,7 +299,7 @@ describe(`Query Collections`, () => {
       {
         type: `delete`,
         changes: {
-          id: 4,
+          id: `4`,
         },
       },
     ])
@@ -307,7 +307,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
-    expect(result.state.get(`KEY::${result.id}/4`)).toBeUndefined()
+    expect(result.state.get(`4`)).toBeUndefined()
   })
 
   it(`should join collections and return combined results`, async () => {
@@ -316,7 +316,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -336,7 +336,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -391,21 +391,21 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+    expect(result.state.get(`[1,1]`)).toEqual({
       _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+    expect(result.state.get(`[3,1]`)).toEqual({
       _key: `[3,1]`,
       id: `3`,
       name: `John Doe`,
@@ -429,7 +429,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+    expect(result.state.get(`[4,2]`)).toEqual({
       _key: `[4,2]`,
       id: `4`,
       name: `Jane Doe`,
@@ -441,7 +441,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 2,
+          id: `2`,
           title: `Updated Issue 2`,
         },
       },
@@ -450,9 +450,9 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
-      id: 2,
+      id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
     })
@@ -468,7 +468,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
+    expect(result.state.get(`[3,1]`)).toBeUndefined()
   })
 
   it(`should join collections and return combined results with no select`, async () => {
@@ -477,7 +477,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -497,7 +497,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -551,7 +551,7 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(result.state.size).toBe(3)
 
-    expect(result.state.get(`KEY::${result.id}/[1,1]`)).toEqual({
+    expect(result.state.get(`[1,1]`)).toEqual({
       _key: `[1,1]`,
       issues: {
         description: `Issue 1 description`,
@@ -568,7 +568,7 @@ describe(`Query Collections`, () => {
       },
     })
 
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       issues: {
         description: `Issue 2 description`,
@@ -585,7 +585,7 @@ describe(`Query Collections`, () => {
       },
     })
 
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toEqual({
+    expect(result.state.get(`[3,1]`)).toEqual({
       _key: `[3,1]`,
       issues: {
         description: `Issue 3 description`,
@@ -619,7 +619,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[4,2]`)).toEqual({
+    expect(result.state.get(`[4,2]`)).toEqual({
       _key: `[4,2]`,
       issues: {
         description: `Issue 4 description`,
@@ -641,7 +641,7 @@ describe(`Query Collections`, () => {
       {
         type: `update`,
         changes: {
-          id: 2,
+          id: `2`,
           title: `Updated Issue 2`,
         },
       },
@@ -650,11 +650,11 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(result.state.get(`KEY::${result.id}/[2,2]`)).toEqual({
+    expect(result.state.get(`[2,2]`)).toEqual({
       _key: `[2,2]`,
       issues: {
         description: `Issue 2 description`,
-        id: 2,
+        id: `2`,
         title: `Updated Issue 2`,
         userId: `2`,
       },
@@ -678,7 +678,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(result.state.get(`KEY::${result.id}/[3,1]`)).toBeUndefined()
+    expect(result.state.get(`[3,1]`)).toBeUndefined()
   })
 
   it(`should order results by specified fields`, async () => {
@@ -687,7 +687,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `order-by-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -804,7 +804,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `order-update-test`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -921,7 +921,7 @@ describe(`Query Collections`, () => {
     // Create person collection
     const personCollection = new Collection<Person>({
       id: `person-collection-test-bug`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -942,7 +942,7 @@ describe(`Query Collections`, () => {
     // Create issue collection
     const issueCollection = new Collection<Issue>({
       id: `issue-collection-test-bug`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1031,7 +1031,7 @@ describe(`Query Collections`, () => {
 
     // `[temp-key,1]` is the optimistic state for the new issue, its a composite key
     // from the join in the query
-    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toEqual({
+    expect(result.state.get(`[temp-key,1]`)).toEqual({
       id: `temp-key`,
       _key: `[temp-key,1]`,
       name: `John Doe`,
@@ -1040,14 +1040,14 @@ describe(`Query Collections`, () => {
 
     // `[4,1]` would be the synced state for the new issue, but it's not in the
     // optimistic state because the transaction synced back yet
-    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeUndefined()
+    expect(result.state.get(`[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await tx.isPersisted.promise
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/[temp-key,1]`)).toBeUndefined()
-    expect(result.state.get(`KEY::${result.id}/[4,1]`)).toBeDefined()
+    expect(result.state.get(`[temp-key,1]`)).toBeUndefined()
+    expect(result.state.get(`[4,1]`)).toBeDefined()
   })
 
   it(`should transform data using a select callback`, async () => {
@@ -1056,7 +1056,7 @@ describe(`Query Collections`, () => {
     // Create collection with mutation capability
     const collection = new Collection<Person>({
       id: `select-callback-test`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -1104,7 +1104,7 @@ describe(`Query Collections`, () => {
     expect(result.state.size).toBe(3)
 
     // Verify transformed data for John Doe
-    expect(result.state.get(`KEY::${result.id}/1`)).toEqual({
+    expect(result.state.get(`1`)).toEqual({
       _key: `1`,
       displayName: `John Doe (Age: 30)`,
       status: `Active`,
@@ -1113,7 +1113,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify transformed data for Jane Doe
-    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+    expect(result.state.get(`2`)).toEqual({
       _key: `2`,
       displayName: `Jane Doe (Age: 25)`,
       status: `Active`,
@@ -1122,7 +1122,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify transformed data for John Smith
-    expect(result.state.get(`KEY::${result.id}/3`)).toEqual({
+    expect(result.state.get(`3`)).toEqual({
       _key: `3`,
       displayName: `John Smith (Age: 35)`,
       status: `Inactive`,
@@ -1148,7 +1148,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`KEY::${result.id}/4`)).toEqual({
+    expect(result.state.get(`4`)).toEqual({
       _key: `4`,
       displayName: `Senior Person (Age: 65)`,
       status: `Active`,
@@ -1170,7 +1170,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // Verify the transformation reflects the update
-    expect(result.state.get(`KEY::${result.id}/2`)).toEqual({
+    expect(result.state.get(`2`)).toEqual({
       _key: `2`,
       displayName: `Jane Doe (Age: 25)`,
       status: `Inactive`, // Should now be inactive
