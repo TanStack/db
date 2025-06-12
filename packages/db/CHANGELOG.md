@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.9
+
+### Patch Changes
+
+- Allow arrays in type of RHS in where clause when using set membership operators ([#149](https://github.com/TanStack/db/pull/149))
+
 ## 0.0.8
 
 ### Patch Changes
