@@ -14,7 +14,6 @@ describe(`Collection getters`, () => {
       commit: () => void
     }) => void
   }
-  let mockMutationFn: { persist: () => Promise<void> }
   let config: CollectionConfig
 
   beforeEach(() => {
@@ -32,10 +31,6 @@ describe(`Collection getters`, () => {
         })
         commit()
       }),
-    }
-
-    mockMutationFn = {
-      persist: vi.fn().mockResolvedValue(undefined),
     }
 
     config = {

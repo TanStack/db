@@ -40,26 +40,30 @@ describe(`Query Type System`, () => {
 // These won't run at runtime but will cause TypeScript errors if the types don't match
 
 // Valid basic query
-const basicQuery = {
+// @ts-expect-error - Unused variable for type checking
+const _basicQuery = {
   select: [`@id`, `@name`],
   from: `users`,
 } satisfies Query<Context>
 
 // Valid query with aliased columns
-const aliasedQuery = {
+// @ts-expect-error - Unused variable for type checking
+const _aliasedQuery = {
   select: [`@id`, { full_name: `@name` }],
   from: `users`,
 } satisfies Query<Context>
 
 // Valid query with simple WHERE condition
-const simpleWhereQuery = {
+// @ts-expect-error - Unused variable for type checking
+const _simpleWhereQuery = {
   select: [`@id`, `@name`],
   from: `users`,
   where: [[`@age`, `>`, 18] as SimpleCondition],
 } satisfies Query<Context>
 
 // Valid query with flat composite WHERE condition
-const compositeWhereQuery = {
+// @ts-expect-error - Unused variable for type checking
+const _compositeWhereQuery = {
   select: [`@id`, `@name`],
   from: `users`,
   where: [
@@ -76,7 +80,8 @@ const compositeWhereQuery = {
 } satisfies Query<Context>
 
 // Full query with all optional properties
-const fullQuery = {
+// @ts-expect-error - Unused variable for type checking
+const _fullQuery = {
   select: [`@id`, `@name`, { age_years: `@age` }],
   as: `user_data`,
   from: `users`,
@@ -90,7 +95,8 @@ const fullQuery = {
 
 // Condition type checking
 const simpleCondition: SimpleCondition = [`@age`, `>`, 18]
-const simpleCond: Condition = simpleCondition
+// @ts-expect-error - Unused variable for type checking
+const _simpleCond: Condition = simpleCondition
 
 // Flat composite condition
 const flatCompositeCondition: FlatCompositeCondition = [
@@ -102,7 +108,8 @@ const flatCompositeCondition: FlatCompositeCondition = [
   `=`,
   true,
 ]
-const flatCompCond: Condition = flatCompositeCondition
+// @ts-expect-error - Unused variable for type checking
+const _flatCompCond: Condition = flatCompositeCondition
 
 // Nested composite condition
 const nestedCompositeCondition = [
@@ -110,33 +117,56 @@ const nestedCompositeCondition = [
   `and` as LogicalOperator,
   [`@active`, `=`, true] as SimpleCondition,
 ] as [SimpleCondition, LogicalOperator, SimpleCondition]
-const nestedCompCond: Condition = nestedCompositeCondition
+// @ts-expect-error - Unused variable for type checking
+const _nestedCompCond: Condition = nestedCompositeCondition
 
 // The code below demonstrates type compatibility for ConditionOperand
 // If TypeScript compiles this file, then these assignments work
-const operand1: ConditionOperand<Context> = `string literal`
-const operand2: ConditionOperand<Context> = 42
-const operand3: ConditionOperand<Context> = true
-const operand4: ConditionOperand<Context> = null
-const operand5: ConditionOperand<Context> = undefined
-const operand6: ConditionOperand<Context> = `@department`
-const operand7: ConditionOperand<Context> = { col: `department` }
-const operand8: ConditionOperand<Context> = { value: { nested: `object` } }
+// These variables are intentionally unused as they're just for type checking
+// @ts-expect-error - Unused variable for type checking
+const _operand1: ConditionOperand<Context> = `string literal`
+// @ts-expect-error - Unused variable for type checking
+const _operand2: ConditionOperand<Context> = 42
+// @ts-expect-error - Unused variable for type checking
+const _operand3: ConditionOperand<Context> = true
+// @ts-expect-error - Unused variable for type checking
+const _operand4: ConditionOperand<Context> = null
+// @ts-expect-error - Unused variable for type checking
+const _operand5: ConditionOperand<Context> = undefined
+// @ts-expect-error - Unused variable for type checking
+const _operand6: ConditionOperand<Context> = `@department`
+// @ts-expect-error - Unused variable for type checking
+const _operand7: ConditionOperand<Context> = { col: `department` }
+// @ts-expect-error - Unused variable for type checking
+const _operand8: ConditionOperand<Context> = { value: { nested: `object` } }
 
 // The code below demonstrates type compatibility for Comparator
 // If TypeScript compiles this file, then these assignments work
-const comp1: Comparator = `=`
-const comp2: Comparator = `!=`
-const comp3: Comparator = `<`
-const comp4: Comparator = `<=`
-const comp5: Comparator = `>`
-const comp6: Comparator = `>=`
-const comp7: Comparator = `like`
-const comp8: Comparator = `not like`
-const comp9: Comparator = `in`
-const comp10: Comparator = `not in`
-const comp11: Comparator = `is`
-const comp12: Comparator = `is not`
+// These variables are intentionally unused as they're just for type checking
+// @ts-expect-error - Unused variable for type checking
+const _comp1: Comparator = `=`
+// @ts-expect-error - Unused variable for type checking
+const _comp2: Comparator = `!=`
+// @ts-expect-error - Unused variable for type checking
+const _comp3: Comparator = `<`
+// @ts-expect-error - Unused variable for type checking
+const _comp4: Comparator = `<=`
+// @ts-expect-error - Unused variable for type checking
+const _comp5: Comparator = `>`
+// @ts-expect-error - Unused variable for type checking
+const _comp6: Comparator = `>=`
+// @ts-expect-error - Unused variable for type checking
+const _comp7: Comparator = `like`
+// @ts-expect-error - Unused variable for type checking
+const _comp8: Comparator = `not like`
+// @ts-expect-error - Unused variable for type checking
+const _comp9: Comparator = `in`
+// @ts-expect-error - Unused variable for type checking
+const _comp10: Comparator = `not in`
+// @ts-expect-error - Unused variable for type checking
+const _comp11: Comparator = `is`
+// @ts-expect-error - Unused variable for type checking
+const _comp12: Comparator = `is not`
 
 // The following lines would fail type checking if uncommented:
 

@@ -903,20 +903,34 @@ export class CollectionImpl<
    * // Update with metadata
    * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
    */
+  // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
-    key: TKey,
-    configOrCallback: ((draft: TItem) => void) | OperationConfig,
-    maybeCallback?: (draft: TItem) => void
+    key: Array<TKey | unknown>,
+    callback: (drafts: Array<TItem>) => void
+  ): TransactionType
+
+  // Overload 2: Update multiple items with config and a callback
+  update<TItem extends object = T>(
+    keys: Array<TKey | unknown>,
+    config: OperationConfig,
+    callback: (drafts: Array<TItem>) => void
+  ): TransactionType
+
+  // Overload 3: Update a single item with a callback
+  update<TItem extends object = T>(
+    id: TKey | unknown,
+    callback: (draft: TItem) => void
+  ): TransactionType
+
+  // Overload 4: Update a single item with config and a callback
+  update<TItem extends object = T>(
+    id: TKey | unknown,
+    config: OperationConfig,
+    callback: (draft: TItem) => void
   ): TransactionType
 
   update<TItem extends object = T>(
-    keys: Array<TKey>,
-    configOrCallback: ((draft: Array<TItem>) => void) | OperationConfig,
-    maybeCallback?: (draft: Array<TItem>) => void
-  ): TransactionType
-
-  update<TItem extends object = T>(
-    keys: TKey | Array<TKey>,
+    keys: (TKey | unknown) | Array<TKey | unknown>,
     configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {

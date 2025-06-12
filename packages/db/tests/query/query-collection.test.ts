@@ -218,7 +218,7 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ person: collection })
-      .where(({ person }) => person.age > 30)
+      .where(({ person }) => (person.age ?? 0) > 30)
 
     const compiledQuery = compileQuery(query)
 
@@ -1137,13 +1137,20 @@ describe(`Query Collections`, () => {
 
     const query = queryBuilder()
       .from({ collection })
-      .select(({ collection: result }) => ({
-        displayName: `${result.name} (Age: ${result.age})`,
-        status: result.isActive ? `Active` : `Inactive`,
-        ageGroup:
-          result.age < 30 ? `Young` : result.age < 40 ? `Middle` : `Senior`,
-        emailDomain: result.email.split(`@`)[1],
-      }))
+      .select(({ collection: result }) => {
+        return {
+          displayName: `${result.name} (Age: ${result.age})`,
+          status: result.isActive ? `Active` : `Inactive`,
+          ageGroup: result.age
+            ? result.age < 30
+              ? `Young`
+              : result.age < 40
+                ? `Middle`
+                : `Senior`
+            : `missing age`,
+          emailDomain: result.email.split(`@`)[1],
+        }
+      })
 
     const compiledQuery = compileQuery(query)
 

@@ -5,9 +5,8 @@ import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
   ChangesPayload,
+  MutationFn,
   PendingMutation,
-  Transaction,
-  TransactionConfig,
 } from "../src/types"
 
 // Helper function to wait for changes to be processed
@@ -226,7 +225,9 @@ describe(`Collection.subscribeChanges`, () => {
       updated?: boolean
     }>({
       id: `optimistic-changes-test`,
-      getKey: (item) => item.id,
+      getKey: (item) => {
+        return item.id
+      },
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -246,11 +247,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({
-      transaction,
-    }: {
-      transaction: Transaction
-    }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -376,11 +373,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({
-      transaction,
-    }: {
-      transaction: Transaction
-    }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -545,11 +538,7 @@ describe(`Collection.subscribeChanges`, () => {
         },
       },
     })
-    const mutationFn = async ({
-      transaction,
-    }: {
-      transaction: Transaction
-    }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }

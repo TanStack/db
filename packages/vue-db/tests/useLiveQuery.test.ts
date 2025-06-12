@@ -110,11 +110,7 @@ describe(`Query Collections`, () => {
       }))
     )
 
-    const {
-      state,
-      data,
-      collection: qColl,
-    } = useLiveQuery((q) =>
+    const { state, data } = useLiveQuery((q) =>
       q
         .from({ collection })
         .where(`@age`, `>`, 30)
@@ -298,7 +294,7 @@ describe(`Query Collections`, () => {
       }))
     )
 
-    const { state, collection: qColl } = useLiveQuery((q) =>
+    const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({
@@ -429,7 +425,7 @@ describe(`Query Collections`, () => {
 
     const minAge = ref(30)
 
-    const { state, collection: qColl } = useLiveQuery((q) => {
+    const { state } = useLiveQuery((q) => {
       return q
         .from({ collection })
         .where(`@age`, `>`, minAge.value)
@@ -751,7 +747,7 @@ describe(`Query Collections`, () => {
     )
 
     // Render the hook with a query that joins persons and issues
-    const { state, collection: qColl } = useLiveQuery((q) =>
+    const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({

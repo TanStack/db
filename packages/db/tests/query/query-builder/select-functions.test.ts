@@ -80,7 +80,8 @@ describe(`QueryBuilder.select with function calls`, () => {
 
     const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(2)
-    expect(builtQuery.select[1]).toHaveProperty(`json_value`)
+    // Non-null assertion since we've already checked the length
+    expect(builtQuery.select![1]).toHaveProperty(`json_value`)
   })
 
   it(`validates and filters out invalid function calls`, () => {
@@ -123,11 +124,12 @@ describe(`QueryBuilder.select with function calls`, () => {
 
     const builtQuery = query._query
     expect(builtQuery.select).toHaveLength(4)
-    expect(builtQuery.select[0]).toBe(`@e.id`)
-    expect(builtQuery.select[1]).toBe(`@e.name`)
-    expect(builtQuery.select[2]).toBe(`@d.name`)
-    expect(builtQuery.select[3]).toHaveProperty(`dept_budget`)
-    expect(builtQuery.select[3]).toHaveProperty(`sum_salary`)
-    expect(builtQuery.select[3]).toHaveProperty(`upper_name`)
+    // Non-null assertions since we've already checked the length
+    expect(builtQuery.select![0]).toBe(`@e.id`)
+    expect(builtQuery.select![1]).toBe(`@e.name`)
+    expect(builtQuery.select![2]).toBe(`@d.name`)
+    expect(builtQuery.select![3]).toHaveProperty(`dept_budget`)
+    expect(builtQuery.select![3]).toHaveProperty(`sum_salary`)
+    expect(builtQuery.select![3]).toHaveProperty(`upper_name`)
   })
 })

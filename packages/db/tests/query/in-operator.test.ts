@@ -265,9 +265,9 @@ describe(`Query - IN Operator`, () => {
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    // const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    // const results =
+    //   dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
 
     // TODO: Finish this test!
   })
@@ -352,9 +352,9 @@ describe(`Query - IN Operator`, () => {
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    // const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
+    // const results =
+    //   dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
 
     // TODO: Finish this test!
   })
