@@ -9,7 +9,7 @@ import type { PendingMutation } from "../../src/types.js"
 type Person = {
   id: string
   name: string
-  age: number
+  age: number | null
   email: string
   isActive: boolean
 }
@@ -921,6 +921,32 @@ describe(`Query Collections`, () => {
       { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
     ])
 
+    // Add a new person with age null
+    emitter.emit(`sync`, [
+      {
+        type: `insert`,
+        changes: {
+          id: `5`,
+          name: `Bob Null`,
+          age: null,
+          email: `bob.null@example.com`,
+          isActive: true,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    // Verify order is updated with Bob Null at the end
+    currentOrder = Array.from(compiledQuery.results.toArray)
+    expect(currentOrder).toEqual([
+      { _key: `5`, id: `5`, name: `Bob Null`, age: null, _orderByIndex: 0 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 1 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      { _key: `3`, id: `3`, name: `John Smith`, age: 35, _orderByIndex: 3 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 4 },
+    ])
+
     // Delete a person in the middle of the ordering
     emitter.emit(`sync`, [
       {
@@ -934,9 +960,10 @@ describe(`Query Collections`, () => {
     // Verify order is updated with John Smith removed
     currentOrder = Array.from(compiledQuery.results.toArray)
     expect(currentOrder).toEqual([
-      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 0 },
-      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 1 },
-      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 2 },
+      { _key: `5`, id: `5`, name: `Bob Null`, age: null, _orderByIndex: 0 },
+      { _key: `4`, id: `4`, name: `Alice Young`, age: 22, _orderByIndex: 1 },
+      { _key: `2`, id: `2`, name: `Jane Doe`, age: 25, _orderByIndex: 2 },
+      { _key: `1`, id: `1`, name: `John Doe`, age: 40, _orderByIndex: 3 },
     ])
   })
 

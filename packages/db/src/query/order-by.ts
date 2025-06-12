@@ -110,51 +110,17 @@ export function processOrderBy(
     return null
   }
 
-  const ascComparator = (a: unknown, b: unknown): number => {
-    // if a and b are both numbers compare them directly
-    if (typeof a === `number` && typeof b === `number`) {
-      return a - b
-    }
-    // if a and b are both strings, compare them lexicographically
+  const ascComparator = (a: any, b: any): number => {
+    // if a and b are both strings, compare them based on locale
     if (typeof a === `string` && typeof b === `string`) {
       return a.localeCompare(b)
-    }
-    // if a and b are both booleans, compare them
-    if (typeof a === `boolean` && typeof b === `boolean`) {
-      return a === b ? 0 : a ? 1 : -1
-    }
-    // if a and b are both dates, compare them
-    if (a instanceof Date && b instanceof Date) {
-      return a.getTime() - b.getTime()
-    }
-    // if a and b are both null, return 0
-    if (a === null || b === null) {
-      return 0
     }
 
     // if a and b are both arrays, compare them element by element
     if (Array.isArray(a) && Array.isArray(b)) {
       for (let i = 0; i < Math.min(a.length, b.length); i++) {
-        // Get the values from the array
-        const aVal = a[i]
-        const bVal = b[i]
-
         // Compare the values
-        let result: number
-
-        if (typeof aVal === `boolean` && typeof bVal === `boolean`) {
-          // Special handling for booleans - false comes before true
-          result = aVal === bVal ? 0 : aVal ? 1 : -1
-        } else if (typeof aVal === `number` && typeof bVal === `number`) {
-          // Numeric comparison
-          result = aVal - bVal
-        } else if (typeof aVal === `string` && typeof bVal === `string`) {
-          // String comparison
-          result = aVal.localeCompare(bVal)
-        } else {
-          // Default comparison using the general comparator
-          result = comparator(aVal, bVal)
-        }
+        const result = ascComparator(a[i], b[i])
 
         if (result !== 0) {
           return result
@@ -163,12 +129,23 @@ export function processOrderBy(
       // All elements are equal up to the minimum length
       return a.length - b.length
     }
-    // if a and b are both null/undefined, return 0
-    if (a == null && b == null) {
-      return 0
+
+    // If at least one of the values is an object then we don't really know how to meaningfully compare them
+    // therefore we turn them into strings and compare those
+    // There are 2 exceptions:
+    // 1) if both objects are dates then we can compare them
+    // 2) if either object is nullish then we can't call toString on it
+    const bothObjects = typeof a === `object` && typeof b === `object`
+    const bothDates = a instanceof Date && b instanceof Date
+    const notNull = a !== null && b !== null
+    if (bothObjects && !bothDates && notNull) {
+      // Every object should support `toString`
+      return a.toString().localeCompare(b.toString())
     }
-    // Fallback to string comparison for all other cases
-    return (a as any).toString().localeCompare((b as any).toString())
+
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
   }
 
   const descComparator = (a: unknown, b: unknown): number => {
