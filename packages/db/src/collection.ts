@@ -3,6 +3,7 @@ import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { Transaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
 import type {
+  ChangeListener,
   ChangeMessage,
   CollectionConfig,
   Fn,
@@ -31,24 +32,6 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
 }
-
-// Event system for collections
-type CollectionEventType = `insert` | `update` | `delete`
-
-interface CollectionEvent<T, TKey extends string | number> {
-  type: CollectionEventType
-  key: TKey
-  value: T
-  previousValue?: T
-}
-
-type EventListener<T, TKey extends string | number> = (
-  event: CollectionEvent<T, TKey>
-) => void
-type KeyListener<T> = (
-  value: T | undefined,
-  previousValue: T | undefined
-) => void
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -229,13 +212,8 @@ export class CollectionImpl<
   private _size = 0
 
   // Event system
-  private eventListeners = new Set<EventListener<T, TKey>>()
-  private keyListeners = new Map<TKey, Set<KeyListener<T>>>()
-
-  // Batching for subscribeChanges
-  private changesBatchListeners = new Set<
-    (changes: Array<ChangeMessage<T>>) => void
-  >()
+  private changeListeners = new Set<ChangeListener<T, TKey>>()
+  private changeKeyListeners = new Map<TKey, Set<ChangeListener<T, TKey>>>()
 
   // Utilities namespace
   // This is populated by createCollection
@@ -389,7 +367,7 @@ export class CollectionImpl<
     this._size = this.calculateSize()
 
     // Collect events for changes
-    const events: Array<CollectionEvent<T, TKey>> = []
+    const events: Array<ChangeMessage<T, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
     // Emit all events at once
@@ -417,7 +395,7 @@ export class CollectionImpl<
   private collectOptimisticChanges(
     previousUpserts: Map<TKey, T>,
     previousDeletes: Set<TKey>,
-    events: Array<CollectionEvent<T, TKey>>
+    events: Array<ChangeMessage<T, TKey>>
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -473,80 +451,32 @@ export class CollectionImpl<
   /**
    * Emit multiple events at once to all listeners
    */
-  private emitEvents(events: Array<CollectionEvent<T, TKey>>): void {
-    // Emit to individual event listeners
-    for (const event of events) {
-      this.emitEvent(event)
-    }
+  private emitEvents(changes: Array<ChangeMessage<T, TKey>>): void {
+    if (changes.length > 0) {
+      // Emit to general listeners
+      for (const listener of this.changeListeners) {
+        listener(changes)
+      }
 
-    // Convert to ChangeMessage format and emit to subscribeChanges listeners
-    if (events.length > 0) {
-      const changeMessages: Array<ChangeMessage<T>> = events.map((event) => {
-        const changeMessage: ChangeMessage<T> = {
-          type: event.type,
-          key: event.key,
-          value: event.value,
+      // Emit to key-specific listeners
+      if (this.changeKeyListeners.size > 0) {
+        // Group changes by key, but only for keys that have listeners
+        const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+        for (const change of changes) {
+          if (this.changeKeyListeners.has(change.key)) {
+            if (!changesByKey.has(change.key)) {
+              changesByKey.set(change.key, [])
+            }
+            changesByKey.get(change.key)!.push(change)
+          }
         }
 
-        if (event.previousValue) {
-          ;(changeMessage as any).previousValue = event.previousValue
-        }
-
-        return changeMessage
-      })
-
-      for (const listener of this.changesBatchListeners) {
-        listener(changeMessages)
-      }
-    }
-  }
-
-  /**
-   * Emit an event to individual listeners (not batched)
-   */
-  private emitEvent(event: CollectionEvent<T, TKey>): void {
-    // Emit to general listeners
-    for (const listener of this.eventListeners) {
-      listener(event)
-    }
-
-    // Emit to key-specific listeners
-    const keyListeners = this.keyListeners.get(event.key)
-    if (keyListeners) {
-      for (const listener of keyListeners) {
-        listener(
-          event.type === `delete` ? undefined : event.value,
-          event.previousValue
-        )
-      }
-    }
-  }
-
-  /**
-   * Subscribe to collection events
-   */
-  public subscribe(listener: EventListener<T, TKey>): () => void {
-    this.eventListeners.add(listener)
-    return () => {
-      this.eventListeners.delete(listener)
-    }
-  }
-
-  /**
-   * Subscribe to changes for a specific key
-   */
-  public subscribeKey(key: TKey, listener: KeyListener<T>): () => void {
-    if (!this.keyListeners.has(key)) {
-      this.keyListeners.set(key, new Set())
-    }
-    this.keyListeners.get(key)!.add(listener)
-
-    return () => {
-      const listeners = this.keyListeners.get(key)
-      if (listeners) {
-        listeners.delete(listener)
-        if (listeners.size === 0) {
-          this.keyListeners.delete(key)
+        // Emit batched changes to each key's listeners
+        for (const [key, keyChanges] of changesByKey) {
+          const keyListeners = this.changeKeyListeners.get(key)!
+          for (const listener of keyListeners) {
+            listener(keyChanges)
+          }
         }
       }
     }
@@ -650,7 +580,7 @@ export class CollectionImpl<
       )
     ) {
       const changedKeys = new Set<TKey>()
-      const events: Array<CollectionEvent<T, TKey>> = []
+      const events: Array<ChangeMessage<T, TKey>> = []
 
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
@@ -1315,16 +1245,55 @@ export class CollectionImpl<
    * @returns A function that can be called to unsubscribe from the changes
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<T>>) => void
+    callback: (changes: Array<ChangeMessage<T>>) => void,
+    { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
-    // First send the current state as changes
-    callback(this.currentStateAsChanges())
+    if (includeInitialState) {
+      // First send the current state as changes
+      callback(this.currentStateAsChanges())
+    }
 
     // Add to batched listeners
-    this.changesBatchListeners.add(callback)
+    this.changeListeners.add(callback)
 
     return () => {
-      this.changesBatchListeners.delete(callback)
+      this.changeListeners.delete(callback)
+    }
+  }
+
+  /**
+   * Subscribe to changes for a specific key
+   */
+  public subscribeChangesKey(
+    key: TKey,
+    listener: ChangeListener<T, TKey>,
+    { includeInitialState = false }: { includeInitialState?: boolean } = {}
+  ): () => void {
+    if (!this.changeKeyListeners.has(key)) {
+      this.changeKeyListeners.set(key, new Set())
+    }
+
+    if (includeInitialState) {
+      // First send the current state as changes
+      listener([
+        {
+          type: `insert`,
+          key,
+          value: this.get(key)!,
+        },
+      ])
+    }
+
+    this.changeKeyListeners.get(key)!.add(listener)
+
+    return () => {
+      const listeners = this.changeKeyListeners.get(key)
+      if (listeners) {
+        listeners.delete(listener)
+        if (listeners.size === 0) {
+          this.changeKeyListeners.delete(key)
+        }
+      }
     }
   }
 

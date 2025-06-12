@@ -174,18 +174,8 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     // Subscribe to changes
     Object.entries(this.inputCollections).forEach(([key, collection]) => {
-      const unsubscribe = collection.subscribe((event) => {
-        const change: ChangeMessage = {
-          type: event.type,
-          key: event.key,
-          value: event.value,
-        }
-
-        if (event.previousValue) {
-          ;(change as any).previousValue = event.previousValue
-        }
-
-        this.sendChangesToInput(key, [change], collection.config.getKey)
+      const unsubscribe = collection.subscribeChanges((changes) => {
+        this.sendChangesToInput(key, changes, collection.config.getKey)
         this.incrementVersion()
         this.sendFrontierToAllInputs()
         this.runGraph()

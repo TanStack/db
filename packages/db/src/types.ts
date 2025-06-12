@@ -104,8 +104,11 @@ export interface SyncConfig<
   getSyncMetadata?: () => Record<string, unknown>
 }
 
-export interface ChangeMessage<T extends object = Record<string, unknown>> {
-  key: string | number
+export interface ChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> {
+  key: TKey
   value: T
   previousValue?: T
   type: OperationType
@@ -216,3 +219,8 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
  * a `select` clause.
  */
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
+
+export type ChangeListener<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = (changes: Array<ChangeMessage<T, TKey>>) => void

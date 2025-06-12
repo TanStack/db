@@ -42,7 +42,9 @@ describe(`Collection.subscribeChanges`, () => {
     // await waitForChanges()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
 
     // Verify that callback was called with initial state
     expect(callback).toHaveBeenCalledTimes(1)
@@ -57,6 +59,43 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Ensure all changes are insert type
     expect(changes.every((change) => change.type === `insert`)).toBe(true)
+
+    // Clean up
+    unsubscribe()
+  })
+
+  it(`should not emit initial collection state as insert changes by default`, () => {
+    const callback = vi.fn()
+
+    // Create collection with pre-populated data
+    const collection = createCollection<{ value: string }>({
+      id: `initial-state-test`,
+      getKey: (item) => item.value,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { value: `value1` },
+          })
+          write({
+            type: `insert`,
+            value: { value: `value2` },
+          })
+          commit()
+        },
+      },
+    })
+
+    // Wait for initial sync to complete
+    // await waitForChanges()
+
+    // Subscribe to changes
+    const unsubscribe = collection.subscribeChanges(callback)
+
+    // Verify that callback was called with initial state
+    expect(callback).toHaveBeenCalledTimes(0)
 
     // Clean up
     unsubscribe()
@@ -516,7 +555,9 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
 
     // First call should have initial state (2 items)
     expect(callback).toHaveBeenCalledTimes(1)
@@ -606,7 +647,9 @@ describe(`Collection.subscribeChanges`, () => {
     const mutationFn = async () => {}
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
 
     // Initial state emission
     expect(callback).toHaveBeenCalledTimes(1)
