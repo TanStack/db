@@ -123,7 +123,7 @@ describe(`Query Collections`, () => {
     )
 
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
+    expect(state.value.get(`3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
       _key: `3`,
@@ -155,13 +155,13 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(2)
-    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
+    expect(state.value.get(`3`)).toEqual({
       _orderByIndex: 0,
       id: `3`,
       _key: `3`,
       name: `John Smith`,
     })
-    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toEqual({
+    expect(state.value.get(`4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
       _key: `4`,
@@ -196,7 +196,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(2)
-    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toEqual({
+    expect(state.value.get(`4`)).toEqual({
       _orderByIndex: 1,
       id: `4`,
       _key: `4`,
@@ -224,7 +224,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`KEY::${qColl.value.id}/4`)).toBeUndefined()
+    expect(state.value.get(`4`)).toBeUndefined()
 
     expect(data.value.length).toBe(1)
     expect(data.value).toContainEqual({
@@ -314,21 +314,21 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(state.value.size).toBe(3)
 
-    expect(state.value.get(`KEY::${qColl.value.id}/[1,1]`)).toEqual({
+    expect(state.value.get(`[1,1]`)).toEqual({
       _key: `[1,1]`,
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`KEY::${qColl.value.id}/[2,2]`)).toEqual({
+    expect(state.value.get(`[2,2]`)).toEqual({
       id: `2`,
       _key: `[2,2]`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`KEY::${qColl.value.id}/[3,1]`)).toEqual({
+    expect(state.value.get(`[3,1]`)).toEqual({
       id: `3`,
       _key: `[3,1]`,
       name: `John Doe`,
@@ -351,7 +351,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`KEY::${qColl.value.id}/[4,2]`)).toEqual({
+    expect(state.value.get(`[4,2]`)).toEqual({
       id: `4`,
       _key: `[4,2]`,
       name: `Jane Doe`,
@@ -372,7 +372,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`KEY::${qColl.value.id}/[2,2]`)).toEqual({
+    expect(state.value.get(`[2,2]`)).toEqual({
       id: `2`,
       _key: `[2,2]`,
       name: `Jane Doe`,
@@ -390,7 +390,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     // After deletion, user 3 should no longer have a joined result
-    expect(state.value.get(`KEY::${qColl.value.id}/[3,1]`)).toBeUndefined()
+    expect(state.value.get(`[3,1]`)).toBeUndefined()
   })
 
   it(`should recompile query when parameters change and change results`, async () => {
@@ -438,7 +438,7 @@ describe(`Query Collections`, () => {
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
-    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
+    expect(state.value.get(`3`)).toEqual({
       id: `3`,
       _key: `3`,
       name: `John Smith`,
@@ -452,19 +452,19 @@ describe(`Query Collections`, () => {
 
     // Now should return all people as they're all older than 20
     expect(state.value.size).toBe(3)
-    expect(state.value.get(`KEY::${qColl.value.id}/1`)).toEqual({
+    expect(state.value.get(`1`)).toEqual({
       id: `1`,
       _key: `1`,
       name: `John Doe`,
       age: 30,
     })
-    expect(state.value.get(`KEY::${qColl.value.id}/2`)).toEqual({
+    expect(state.value.get(`2`)).toEqual({
       id: `2`,
       _key: `2`,
       name: `Jane Doe`,
       age: 25,
     })
-    expect(state.value.get(`KEY::${qColl.value.id}/3`)).toEqual({
+    expect(state.value.get(`3`)).toEqual({
       id: `3`,
       _key: `3`,
       name: `John Smith`,
@@ -628,11 +628,7 @@ describe(`Query Collections`, () => {
 
     // Verify initial grouped results
     expect(groupedResult.state.value.size).toBe(1)
-    expect(
-      groupedResult.state.value.get(
-        `KEY::${groupedResult.collection.value.id}/{"team":"team1"}`
-      )
-    ).toEqual({
+    expect(groupedResult.state.value.get(`{"team":"team1"}`)).toEqual({
       _key: `{"team":"team1"}`,
       team: `team1`,
       count: 1,
@@ -670,20 +666,12 @@ describe(`Query Collections`, () => {
 
     // Verify the grouped results include the new team members
     expect(groupedResult.state.value.size).toBe(2)
-    expect(
-      groupedResult.state.value.get(
-        `KEY::${groupedResult.collection.value.id}/{"team":"team1"}`
-      )
-    ).toEqual({
+    expect(groupedResult.state.value.get(`{"team":"team1"}`)).toEqual({
       team: `team1`,
       _key: `{"team":"team1"}`,
       count: 2,
     })
-    expect(
-      groupedResult.state.value.get(
-        `KEY::${groupedResult.collection.value.id}/{"team":"team2"}`
-      )
-    ).toEqual({
+    expect(groupedResult.state.value.get(`{"team":"team2"}`)).toEqual({
       team: `team2`,
       _key: `{"team":"team2"}`,
       count: 1,
@@ -823,7 +811,7 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`KEY::${qColl.value.id}/[temp-key,1]`)).toEqual({
+    expect(state.value.get(`[temp-key,1]`)).toEqual({
       id: `temp-key`,
       _key: `[temp-key,1]`,
       name: `John Doe`,
@@ -845,10 +833,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(state.value.size).toBe(4)
-    expect(
-      state.value.get(`KEY::${qColl.value.id}/[temp-key,1]`)
-    ).toBeUndefined()
-    expect(state.value.get(`KEY::${qColl.value.id}/[4,1]`)).toEqual({
+    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
+    expect(state.value.get(`[4,1]`)).toEqual({
       id: `4`,
       _key: `[4,1]`,
       name: `John Doe`,

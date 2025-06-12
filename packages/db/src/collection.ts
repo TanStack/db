@@ -1,3 +1,4 @@
+import { Store } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { Transaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
@@ -1302,5 +1303,41 @@ export class Collection<
    */
   public onTransactionStateChange(): void {
     this.recomputeOptimisticState()
+  }
+
+  private _storeMap: Store<Map<TKey, T>> | undefined
+
+  /**
+   * Returns a Tanstack Store Map that is updated when the collection changes
+   * This is a temporary solution to enable the existing framework hooks to work
+   * with the new internals of Collection until they are rewritten.
+   * TODO: Remove this once the framework hooks are rewritten.
+   */
+  public asStoreMap(): Store<Map<TKey, T>> {
+    if (!this._storeMap) {
+      this._storeMap = new Store(new Map(this.entries()))
+      this.subscribeChanges(() => {
+        this._storeMap!.setState(() => new Map(this.entries()))
+      })
+    }
+    return this._storeMap
+  }
+
+  private _storeArray: Store<Array<T>> | undefined
+
+  /**
+   * Returns a Tanstack Store Array that is updated when the collection changes
+   * This is a temporary solution to enable the existing framework hooks to work
+   * with the new internals of Collection until they are rewritten.
+   * TODO: Remove this once the framework hooks are rewritten.
+   */
+  public asStoreArray(): Store<Array<T>> {
+    if (!this._storeArray) {
+      this._storeArray = new Store(this.toArray)
+      this.subscribeChanges(() => {
+        this._storeArray!.setState(() => this.toArray)
+      })
+    }
+    return this._storeArray
   }
 }

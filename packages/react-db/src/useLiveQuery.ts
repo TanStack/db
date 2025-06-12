@@ -11,7 +11,7 @@ import type {
 } from "@tanstack/db"
 
 export interface UseLiveQueryReturn<T extends object> {
-  state: Map<string, T>
+  state: Map<string | number, T>
   data: Array<T>
   collection: Collection<T>
 }
@@ -33,8 +33,8 @@ export function useLiveQuery<
     return compiled
   }, [...deps, restart])
 
-  const state = useStore(compiledQuery.results.derivedState)
-  const data = useStore(compiledQuery.results.derivedArray)
+  const state = useStore(compiledQuery.results.asStoreMap())
+  const data = useStore(compiledQuery.results.asStoreArray())
 
   // Clean up on unmount
   useEffect(() => {
