@@ -54,7 +54,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -90,7 +90,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -101,7 +101,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo2`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -110,12 +110,12 @@ describe(`Transactions`, () => {
     transaction.mutate(() => {
       collection1.insert({
         id: 1,
-        value: `foo-me`,
+        value: `foo-me1`,
         newProp: `something something`,
       })
       collection2.insert({
         id: 1,
-        value: `foo-me`,
+        value: `foo-me2`,
         newProp: `something something`,
       })
     })
@@ -135,7 +135,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -168,7 +168,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -204,7 +204,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (item) => item.id,
+      getKey: (item) => item.id,
       sync: {
         sync: () => {},
       },
@@ -245,7 +245,7 @@ describe(`Transactions`, () => {
       newProp?: string
     }>({
       id: `foo`,
-      getId: (val) => val.id,
+      getKey: (val) => val.id,
       sync: {
         sync: () => {},
       },

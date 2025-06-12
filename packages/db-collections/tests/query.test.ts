@@ -11,7 +11,7 @@ interface TestItem {
   value?: number
 }
 
-const getId = (item: TestItem) => item.id
+const getKey = (item: TestItem) => item.id
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -51,7 +51,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     }
 
     const options = queryCollectionOptions(config)
@@ -61,8 +61,7 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(
       () => {
         expect(queryFn).toHaveBeenCalledTimes(1)
-        // Collection.state is a Map<string, T> (via the derivedState.state getter)
-        expect(collection.state.size).toBeGreaterThan(0)
+        expect(collection.size).toBeGreaterThan(0)
       },
       {
         timeout: 1000, // Give it a reasonable timeout
@@ -74,22 +73,14 @@ describe(`QueryCollection`, () => {
     await flushPromises()
 
     // Verify the collection state contains our items
-    expect(collection.state.size).toBe(initialItems.length)
-    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
-      initialItems[0]
-    )
-    expect(collection.state.get(`KEY::${collection.id}/2`)).toEqual(
-      initialItems[1]
-    )
+    expect(collection.size).toBe(initialItems.length)
+    expect(collection.get(`1`)).toEqual(initialItems[0])
+    expect(collection.get(`2`)).toEqual(initialItems[1])
 
     // Verify the synced data
-    expect(collection.syncedData.state.size).toBe(initialItems.length)
-    expect(collection.syncedData.state.get(`KEY::${collection.id}/1`)).toEqual(
-      initialItems[0]
-    )
-    expect(collection.syncedData.state.get(`KEY::${collection.id}/2`)).toEqual(
-      initialItems[1]
-    )
+    expect(collection.syncedData.size).toBe(initialItems.length)
+    expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
+    expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
   })
 
   it(`should update collection when query data changes`, async () => {
@@ -111,7 +102,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     }
 
     const options = queryCollectionOptions(config)
@@ -120,17 +111,13 @@ describe(`QueryCollection`, () => {
     // Wait for initial data to load
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.state.size).toBeGreaterThan(0)
+      expect(collection.size).toBeGreaterThan(0)
     })
 
     // Verify initial state
-    expect(collection.state.size).toBe(initialItems.length)
-    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
-      initialItems[0]
-    )
-    expect(collection.state.get(`KEY::${collection.id}/2`)).toEqual(
-      initialItems[1]
-    )
+    expect(collection.size).toBe(initialItems.length)
+    expect(collection.get(`1`)).toEqual(initialItems[0])
+    expect(collection.get(`2`)).toEqual(initialItems[1])
 
     // Now update the data that will be returned by queryFn
     // 1. Modify an existing item
@@ -149,15 +136,15 @@ describe(`QueryCollection`, () => {
 
     expect(queryFn).toHaveBeenCalledTimes(2)
     // Check for update, addition, and removal
-    expect(collection.state.size).toBe(2)
-    expect(collection.state.has(`KEY::${collection.id}/1`)).toBe(true)
-    expect(collection.state.has(`KEY::${collection.id}/3`)).toBe(true)
-    expect(collection.state.has(`KEY::${collection.id}/2`)).toBe(false)
+    expect(collection.size).toBe(2)
+    expect(collection.has(`1`)).toBe(true)
+    expect(collection.has(`3`)).toBe(true)
+    expect(collection.has(`2`)).toBe(false)
 
     // Verify the final state more thoroughly
-    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(updatedItem)
-    expect(collection.state.get(`KEY::${collection.id}/3`)).toEqual(newItem)
-    expect(collection.state.get(`KEY::${collection.id}/2`)).toBeUndefined()
+    expect(collection.get(`1`)).toEqual(updatedItem)
+    expect(collection.get(`3`)).toEqual(newItem)
+    expect(collection.get(`2`)).toBeUndefined()
 
     // Now update the data again.
     const item4 = { id: `4`, name: `Item 4` }
@@ -168,8 +155,8 @@ describe(`QueryCollection`, () => {
 
     // Verify expected.
     expect(queryFn).toHaveBeenCalledTimes(3)
-    expect(collection.state.size).toBe(3)
-    expect(collection.state.get(`KEY::${collection.id}/4`)).toEqual(item4)
+    expect(collection.size).toBe(3)
+    expect(collection.get(`4`)).toEqual(item4)
   })
 
   it(`should handle query errors gracefully`, async () => {
@@ -192,7 +179,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
       retry: 0, // Disable retries for this test case
     })
     const collection = createCollection(options)
@@ -200,10 +187,8 @@ describe(`QueryCollection`, () => {
     // Wait for initial data to load
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.state.size).toBe(1)
-      expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
-        initialItem
-      )
+      expect(collection.size).toBe(1)
+      expect(collection.get(`1`)).toEqual(initialItem)
     })
 
     // Trigger an error by refetching
@@ -221,8 +206,8 @@ describe(`QueryCollection`, () => {
     expect(errorCallArgs?.[1]).toBe(testError)
 
     // The collection should maintain its previous state
-    expect(collection.state.size).toBe(1)
-    expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(initialItem)
+    expect(collection.size).toBe(1)
+    expect(collection.get(`1`)).toEqual(initialItem)
 
     // Clean up the spy
     consoleErrorSpy.mockRestore()
@@ -242,7 +227,7 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     })
     const collection = createCollection(options)
 
@@ -263,7 +248,7 @@ describe(`QueryCollection`, () => {
 
     // The collection state should remain empty or unchanged
     // Since we're not setting any initial data, we expect the state to be empty
-    expect(collection.state.size).toBe(0)
+    expect(collection.size).toBe(0)
 
     // Clean up the spy
     consoleErrorSpy.mockRestore()
@@ -290,21 +275,19 @@ describe(`QueryCollection`, () => {
       queryClient,
       queryKey,
       queryFn,
-      getId,
+      getKey,
     })
     const collection = createCollection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.state.size).toBe(1)
-      expect(collection.state.get(`KEY::${collection.id}/1`)).toEqual(
-        initialItem
-      )
+      expect(collection.size).toBe(1)
+      expect(collection.get(`1`)).toEqual(initialItem)
     })
 
     // Store the initial state object reference to check if it changes
-    const initialStateRef = collection.state.get(`KEY::${collection.id}/1`)
+    const initialStateRef = collection.get(`1`)
     consoleSpy.mockClear()
 
     // Trigger first refetch - should not cause an update due to shallow equality
@@ -324,9 +307,7 @@ describe(`QueryCollection`, () => {
 
     // Since the data is identical (though a different object reference),
     // the state object reference should remain the same due to shallow equality
-    expect(collection.state.get(`KEY::${collection.id}/1`)).toBe(
-      initialStateRef
-    ) // Same reference
+    expect(collection.get(`1`)).toBe(initialStateRef) // Same reference
 
     consoleSpy.mockClear()
 
@@ -346,14 +327,14 @@ describe(`QueryCollection`, () => {
     ).toBe(true)
 
     // Now the state should be updated with the new value
-    const updatedItem = collection.state.get(`KEY::${collection.id}/1`)
+    const updatedItem = collection.get(`1`)
     expect(updatedItem).not.toBe(initialStateRef) // Different reference
     expect(updatedItem).toEqual({ id: `1`, name: `Test Item`, count: 43 }) // Updated value
 
     consoleSpy.mockRestore()
   })
 
-  it(`should use the provided getId function to identify items`, async () => {
+  it(`should use the provided getKey function to identify items`, async () => {
     const queryKey = [`customKeyTest`]
 
     // Items with a non-standard ID field
@@ -364,39 +345,35 @@ describe(`QueryCollection`, () => {
 
     const queryFn = vi.fn().mockResolvedValue(items)
 
-    // Create a spy for the getId function
-    const getIdSpy = vi.fn((item: any) => item.customId)
+    // Create a spy for the getKey function
+    const getKeySpy = vi.fn((item: any) => item.customId)
 
     const options = queryCollectionOptions({
       id: `test`,
       queryClient,
       queryKey,
       queryFn,
-      getId: getIdSpy,
+      getKey: getKeySpy,
     })
     const collection = createCollection(options)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.state.size).toBe(items.length)
+      expect(collection.size).toBe(items.length)
     })
 
-    // Verify getId was called for each item
-    expect(getIdSpy).toHaveBeenCalledTimes(items.length * 2)
+    // Verify getKey was called for each item
+    expect(getKeySpy).toHaveBeenCalledTimes(items.length * 2)
     items.forEach((item) => {
-      expect(getIdSpy).toHaveBeenCalledWith(item)
+      expect(getKeySpy).toHaveBeenCalledWith(item)
     })
 
     // Verify items are stored with the custom keys
-    expect(collection.state.has(`KEY::${collection.id}/item1`)).toBe(true)
-    expect(collection.state.has(`KEY::${collection.id}/item2`)).toBe(true)
-    expect(collection.state.get(`KEY::${collection.id}/item1`)).toEqual(
-      items[0]
-    )
-    expect(collection.state.get(`KEY::${collection.id}/item2`)).toEqual(
-      items[1]
-    )
+    expect(collection.has(`item1`)).toBe(true)
+    expect(collection.has(`item2`)).toBe(true)
+    expect(collection.get(`item1`)).toEqual(items[0])
+    expect(collection.get(`item2`)).toEqual(items[1])
 
     // Now update an item and add a new one
     const updatedItems = [
@@ -406,32 +383,28 @@ describe(`QueryCollection`, () => {
     ]
 
     // Reset the spy to track new calls
-    getIdSpy.mockClear()
+    getKeySpy.mockClear()
     queryFn.mockResolvedValueOnce(updatedItems)
 
     // Trigger a refetch
     await collection.utils.refetch()
 
     expect(queryFn).toHaveBeenCalledTimes(2)
-    expect(collection.state.size).toBe(updatedItems.length)
+    expect(collection.size).toBe(updatedItems.length)
 
-    // Verify getId was called at least once for each item
+    // Verify getKey was called at least once for each item
     // It may be called multiple times per item during the diffing process
-    expect(getIdSpy).toHaveBeenCalled()
+    expect(getKeySpy).toHaveBeenCalled()
     updatedItems.forEach((item) => {
-      expect(getIdSpy).toHaveBeenCalledWith(item)
+      expect(getKeySpy).toHaveBeenCalledWith(item)
     })
 
     // Verify the state reflects the changes
-    expect(collection.state.has(`KEY::${collection.id}/item1`)).toBe(true)
-    expect(collection.state.has(`KEY::${collection.id}/item2`)).toBe(false) // Removed
-    expect(collection.state.has(`KEY::${collection.id}/item3`)).toBe(true) // Added
-    expect(collection.state.get(`KEY::${collection.id}/item1`)).toEqual(
-      updatedItems[0]
-    )
-    expect(collection.state.get(`KEY::${collection.id}/item3`)).toEqual(
-      updatedItems[1]
-    )
+    expect(collection.has(`item1`)).toBe(true)
+    expect(collection.has(`item2`)).toBe(false) // Removed
+    expect(collection.has(`item3`)).toBe(true) // Added
+    expect(collection.get(`item1`)).toEqual(updatedItems[0])
+    expect(collection.get(`item3`)).toEqual(updatedItems[1])
   })
 
   describe(`Direct persistence handlers`, () => {
@@ -450,7 +423,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey,
         queryFn,
-        getId,
+        getKey,
         onInsert,
         onUpdate,
         onDelete,
@@ -483,7 +456,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey,
         queryFn,
-        getId,
+        getKey,
         onInsert,
         onUpdate,
         onDelete,
@@ -520,7 +493,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey: [`refetchTest`, `default`],
         queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
-        getId,
+        getKey,
         onInsert: onInsertDefault,
       }
 
@@ -529,7 +502,7 @@ describe(`QueryCollection`, () => {
         queryClient,
         queryKey: [`refetchTest`, `false`],
         queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
-        getId,
+        getKey,
         onInsert: onInsertFalse,
       }
 

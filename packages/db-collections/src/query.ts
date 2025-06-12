@@ -54,7 +54,7 @@ export interface QueryCollectionConfig<
 
   // Standard Collection configuration properties
   id?: string
-  getId: CollectionConfig<TItem>[`getId`]
+  getKey: CollectionConfig<TItem>[`getKey`]
   schema?: CollectionConfig<TItem>[`schema`]
   sync?: CollectionConfig<TItem>[`sync`]
 
@@ -115,7 +115,7 @@ export function queryCollectionOptions<
     retry,
     retryDelay,
     staleTime,
-    getId,
+    getKey,
     onInsert,
     onUpdate,
     onDelete,
@@ -136,8 +136,8 @@ export function queryCollectionOptions<
     throw new Error(`[QueryCollection] queryClient must be provided.`)
   }
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (!getId) {
-    throw new Error(`[QueryCollection] getId must be provided.`)
+  if (!getKey) {
+    throw new Error(`[QueryCollection] getKey must be provided.`)
   }
 
   const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
@@ -184,11 +184,11 @@ export function queryCollectionOptions<
           return
         }
 
-        const currentSyncedItems = new Map(collection.syncedData.state)
-        const newItemsMap = new Map<string, TItem>()
+        const currentSyncedItems = new Map(collection.syncedData)
+        const newItemsMap = new Map<string | number, TItem>()
         newItemsArray.forEach((item) => {
           try {
-            const key = getId(item)
+            const key = getKey(item)
             newItemsMap.set(key, item)
           } catch (e) {
             console.error(
@@ -327,7 +327,7 @@ export function queryCollectionOptions<
 
   return {
     ...baseCollectionConfig,
-    getId,
+    getKey,
     sync: { sync: internalSync },
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

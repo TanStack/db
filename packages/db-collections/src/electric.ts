@@ -31,7 +31,7 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    */
   id?: string
   schema?: CollectionConfig<T>[`schema`]
-  getId: CollectionConfig<T>[`getId`]
+  getKey: CollectionConfig<T>[`getKey`]
   sync?: CollectionConfig<T>[`sync`]
 
   /**

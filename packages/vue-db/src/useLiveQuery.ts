@@ -12,7 +12,7 @@ import type {
 import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
-  state: ComputedRef<Map<string, T>>
+  state: ComputedRef<Map<string | number, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T>>
 }
@@ -36,10 +36,10 @@ export function useLiveQuery<
   })
 
   const state = computed(() => {
-    return useStore(compiledQuery.value.results.derivedState).value
+    return useStore(compiledQuery.value.results.asStoreMap()).value
   })
   const data = computed(() => {
-    return useStore(compiledQuery.value.results.derivedArray).value
+    return useStore(compiledQuery.value.results.asStoreArray()).value
   })
 
   watch(compiledQuery, (newQuery, oldQuery, onInvalidate) => {
