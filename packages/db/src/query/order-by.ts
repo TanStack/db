@@ -13,6 +13,13 @@ import type {
   NamespacedRow,
 } from "../types"
 
+type OrderByItem = {
+  operand: ConditionOperand
+  direction: `asc` | `desc`
+}
+
+type OrderByItems = Array<OrderByItem>
+
 export function processOrderBy(
   resultPipeline: NamespacedAndKeyedStream,
   query: Query,
@@ -41,10 +48,7 @@ export function processOrderBy(
   }
 
   // Normalize orderBy to an array of objects
-  const orderByItems: Array<{
-    operand: ConditionOperand
-    direction: `asc` | `desc`
-  }> = []
+  const orderByItems: OrderByItems = []
 
   if (typeof query.orderBy === `string`) {
     // Handle string format: '@column'
@@ -84,22 +88,13 @@ export function processOrderBy(
   const valueExtractor = (namespacedRow: NamespacedRow) => {
     // For multiple orderBy columns, create a composite key
     if (orderByItems.length > 1) {
-      return orderByItems.map((item) => {
-        const val = evaluateOperandOnNamespacedRow(
+      return orderByItems.map((item) =>
+        evaluateOperandOnNamespacedRow(
           namespacedRow,
           item.operand,
           mainTableAlias
         )
-
-        // Reverse the value for 'desc' ordering
-        return item.direction === `desc` && typeof val === `number`
-          ? -val
-          : item.direction === `desc` && typeof val === `string`
-            ? String.fromCharCode(
-                ...[...val].map((c) => 0xffff - c.charCodeAt(0))
-              )
-            : val
-      })
+      )
     } else if (orderByItems.length === 1) {
       // For a single orderBy column, use the value directly
       const item = orderByItems[0]
@@ -108,22 +103,14 @@ export function processOrderBy(
         item!.operand,
         mainTableAlias
       )
-
-      // Reverse the value for 'desc' ordering
-      return item!.direction === `desc` && typeof val === `number`
-        ? -val
-        : item!.direction === `desc` && typeof val === `string`
-          ? String.fromCharCode(
-              ...[...val].map((c) => 0xffff - c.charCodeAt(0))
-            )
-          : val
+      return val
     }
 
     // Default case - no ordering
     return null
   }
 
-  const comparator = (a: unknown, b: unknown): number => {
+  const ascComparator = (a: unknown, b: unknown): number => {
     // if a and b are both numbers compare them directly
     if (typeof a === `number` && typeof b === `number`) {
       return a - b
@@ -183,6 +170,44 @@ export function processOrderBy(
     // Fallback to string comparison for all other cases
     return (a as any).toString().localeCompare((b as any).toString())
   }
+
+  const descComparator = (a: unknown, b: unknown): number => {
+    return ascComparator(b, a)
+  }
+
+  // Create a multi-property comparator that respects the order and direction of each property
+  const makeComparator = (orderByProps: OrderByItems) => {
+    return (a: unknown, b: unknown) => {
+      // If we're comparing arrays (multiple properties), compare each property in order
+      if (orderByProps.length > 1) {
+        // `a` and `b` must be arrays since `orderByItems.length > 1`
+        // hence the extracted values must be arrays
+        const arrayA = a as Array<unknown>
+        const arrayB = b as Array<unknown>
+        for (let i = 0; i < orderByProps.length; i++) {
+          const direction = orderByProps[i]!.direction
+          const compareFn =
+            direction === `desc` ? descComparator : ascComparator
+          const result = compareFn(arrayA[i], arrayB[i])
+          if (result !== 0) {
+            return result
+          }
+        }
+        // should normally always be 0 because
+        // both values are extracted based on orderByItems
+        return arrayA.length - arrayB.length
+      }
+
+      // Single property comparison
+      if (orderByProps.length === 1) {
+        const direction = orderByProps[0]!.direction
+        return direction === `desc` ? descComparator(a, b) : ascComparator(a, b)
+      }
+
+      return ascComparator(a, b)
+    }
+  }
+  const comparator = makeComparator(orderByItems)
 
   // Apply the appropriate orderBy operator based on whether an ORDER_INDEX column is requested
   if (hasOrderIndexColumn) {
