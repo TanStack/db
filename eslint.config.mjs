@@ -24,7 +24,7 @@ export default [
         {
           selector: "typeParameter",
           format: ["PascalCase"],
-          leadingUnderscore: `allow`
+          leadingUnderscore: `allow`,
         },
       ],
     },

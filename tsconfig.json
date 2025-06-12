@@ -16,7 +16,7 @@
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": false,  // Let ESLint handle this
+    "noUnusedParameters": false, // Let ESLint handle this
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
