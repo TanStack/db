@@ -533,10 +533,6 @@ describe(`Collection`, () => {
       tx2.mutate(() => collection.delete(`non-existent-id`))
     ).not.toThrow()
 
-    // Should throw when trying to delete an invalid type
-    // @ts-expect-error - Unused variable for test setup
-    const tx3 = createTransaction({ mutationFn })
-
     // Should not throw when deleting by string key (even if key doesn't exist)
     const tx4 = createTransaction({ mutationFn })
     expect(() =>
