@@ -187,7 +187,13 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     : undefined
 
   // Extract standard Collection config properties
-  const { shapeOptions, onInsert, onUpdate, onDelete, ...restConfig } = config
+  const {
+    shapeOptions: _shapeOptions,
+    onInsert: _onInsert,
+    onUpdate: _onUpdate,
+    onDelete: _onDelete,
+    ...restConfig
+  } = config
 
   return {
     ...restConfig,
