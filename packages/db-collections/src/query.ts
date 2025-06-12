@@ -125,7 +125,7 @@ export function queryCollectionOptions<
   if (!queryClient) {
     throw new Error(`[QueryCollection] queryClient must be provided.`)
   }
-
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
     throw new Error(`[QueryCollection] getKey must be provided.`)
   }
@@ -175,7 +175,7 @@ export function queryCollectionOptions<
         }
 
         const currentSyncedItems = new Map(collection.syncedData)
-        const newItemsMap = new Map<string, TItem>()
+        const newItemsMap = new Map<string | number, TItem>()
         newItemsArray.forEach((item) => {
           try {
             const key = getKey(item)
