@@ -1,5 +1,25 @@
 # @tanstack/db
 
+## 0.0.8
+
+### Patch Changes
+
+- Type PendingMutation whenever possible ([#163](https://github.com/TanStack/db/pull/163))
+
+- refactor the live query comparator and fix an issue with sorting with a null/undefined value in a column of non-null values ([#167](https://github.com/TanStack/db/pull/167))
+
+- A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
+
+  - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
+  - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
+  - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
+
+- Fix ordering of ts update overloads & fix a lot of type errors in tests ([#166](https://github.com/TanStack/db/pull/166))
+
+- fix string comparison when sorting in descending order ([#165](https://github.com/TanStack/db/pull/165))
+
+- update to the latest d2ts, this brings improvements to the hashing of changes in the d2 pipeline ([#168](https://github.com/TanStack/db/pull/168))
+
 ## 0.0.7
 
 ### Patch Changes

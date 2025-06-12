@@ -1,5 +1,18 @@
 # @tanstack/react-db
 
+## 0.0.8
+
+### Patch Changes
+
+- A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
+
+  - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
+  - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
+  - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
+
+- Updated dependencies [[`5c538cf`](https://github.com/TanStack/db/commit/5c538cf03573512a8d1bbde96962a9f7ca014708), [`9553366`](https://github.com/TanStack/db/commit/955336604a286d7992f9506cb1c76ecf150d0432), [`b4602a0`](https://github.com/TanStack/db/commit/b4602a071cb6866bb1338e30d5802220b0d1fc49), [`02adc81`](https://github.com/TanStack/db/commit/02adc813177cbb44ab6245cc9821142e9cf97876), [`06d8ecc`](https://github.com/TanStack/db/commit/06d8eccc5aaabc194c31ea89c9b4191e2aa68180), [`c50cd51`](https://github.com/TanStack/db/commit/c50cd51ac8030b391cd9d84e8cd8b8fb57cb8ca5)]:
+  - @tanstack/db@0.0.8
+
 ## 0.0.7
 
 ### Patch Changes

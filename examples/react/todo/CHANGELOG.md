@@ -1,5 +1,15 @@
 # examples/react/todo
 
+## 0.0.12
+
+### Patch Changes
+
+- Type PendingMutation whenever possible ([#163](https://github.com/TanStack/db/pull/163))
+
+- Updated dependencies [[`5c538cf`](https://github.com/TanStack/db/commit/5c538cf03573512a8d1bbde96962a9f7ca014708), [`b4602a0`](https://github.com/TanStack/db/commit/b4602a071cb6866bb1338e30d5802220b0d1fc49)]:
+  - @tanstack/db-collections@0.0.10
+  - @tanstack/react-db@0.0.8
+
 ## 0.0.11
 
 ### Patch Changes
