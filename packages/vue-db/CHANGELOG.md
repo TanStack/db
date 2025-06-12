@@ -1,5 +1,33 @@
 # @tanstack/vue-db
 
+## 0.0.6
+
+### Patch Changes
+
+- Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
+
+  Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
+
+  - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
+  - Added `utils` property to CollectionImpl
+  - Added TypeScript types for utility functions and utility records
+  - Changed Collection from a class to a type, updating all usages to use createCollection() instead
+  - Updated Electric/Query implementations
+  - Utilities are now ergonomically accessible under `.utils`
+  - Full TypeScript typing is preserved for both collection data and utilities
+  - API is clean and straightforward - users can call `createCollection(optionsCreator(config))` directly
+  - Zero-boilerplate TypeScript pattern that infers utility types automatically
+
+- Updated dependencies [[`8b43ad3`](https://github.com/TanStack/db/commit/8b43ad305b277560aed660c31cf1409d22ed1e47)]:
+  - @tanstack/db@0.0.7
+
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [[`856be72`](https://github.com/TanStack/db/commit/856be725a6299374a3a97c88b50bd5d7bb94b783), [`0455e27`](https://github.com/TanStack/db/commit/0455e27f50d69b1e1887b841dc2f262f4de4c55d), [`80fdac7`](https://github.com/TanStack/db/commit/80fdac76389ea741f5743bc788df375f63fb767b)]:
+  - @tanstack/db@0.0.6
+
 ## 0.0.4
 
 ### Patch Changes

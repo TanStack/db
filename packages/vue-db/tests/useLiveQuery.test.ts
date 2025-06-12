@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { Collection, createTransaction } from "@tanstack/db"
+import { createCollection, createTransaction } from "@tanstack/db"
 import { ref, watch, watchEffect } from "vue"
 import { useLiveQuery } from "../src/useLiveQuery"
 import type { Ref } from "vue"
@@ -80,7 +80,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
       sync: {
@@ -239,7 +239,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -259,7 +259,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -397,7 +397,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `params-change-test`,
       getKey: (item) => item.id,
       sync: {
@@ -484,7 +484,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `stop-query-test`,
       getKey: (item) => item.id,
       sync: {
@@ -579,7 +579,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
       sync: {
@@ -689,7 +689,7 @@ describe(`Query Collections`, () => {
     }> = []
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
       getKey: (item) => item.id,
       sync: {
@@ -710,7 +710,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
       getKey: (item) => item.id,
       sync: {

@@ -5,21 +5,26 @@ import { SortedMap } from "./SortedMap"
 import type {
   ChangeMessage,
   CollectionConfig,
+  Fn,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
   StandardSchema,
   Transaction as TransactionType,
+  UtilsRecord,
 } from "./types"
 
 // Store collections in memory
-export const collectionsStore = new Map<string, Collection<any>>()
+export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 
 // Map to track loading collections
-const loadingCollections = new Map<
+const loadingCollectionResolvers = new Map<
   string,
-  Promise<Collection<Record<string, unknown>>>
+  {
+    promise: Promise<CollectionImpl<any, any>>
+    resolve: (value: CollectionImpl<any, any>) => void
+  }
 >()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
@@ -46,17 +51,44 @@ type KeyListener<T> = (
 ) => void
 
 /**
+ * Enhanced Collection interface that includes both data type T and utilities TUtils
+ * @template T - The type of items in the collection
+ * @template TUtils - The utilities record type
+ */
+export interface Collection<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+> extends CollectionImpl<T, TKey> {
+  readonly utils: TUtils
+}
+
+/**
  * Creates a new Collection instance with the given configuration
  *
  * @template T - The type of items in the collection
- * @param config - Configuration for the collection, including id and sync
- * @returns A new Collection instance
+ * @template TKey - The type of the key for the collection
+ * @template TUtils - The utilities record type
+ * @param options - Collection options with optional utilities
+ * @returns A new Collection with utilities exposed both at top level and under .utils
  */
 export function createCollection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
->(config: CollectionConfig<T, TKey>): Collection<T, TKey> {
-  return new Collection<T, TKey>(config)
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<T, TKey> & { utils?: TUtils }
+): Collection<T, TKey, TUtils> {
+  const collection = new CollectionImpl<T, TKey>(options)
+
+  // Copy utils to both top level and .utils namespace
+  if (options.utils) {
+    collection.utils = { ...options.utils }
+  } else {
+    collection.utils = {} as TUtils
+  }
+
+  return collection as Collection<T, TKey, TUtils>
 }
 
 /**
@@ -88,49 +120,51 @@ export function createCollection<
 export function preloadCollection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
->(config: CollectionConfig<T, TKey>): Promise<Collection<T, TKey>> {
+>(config: CollectionConfig<T, TKey>): Promise<CollectionImpl<T, TKey>> {
   if (!config.id) {
     throw new Error(`The id property is required for preloadCollection`)
   }
 
   // If the collection is already fully loaded, return a resolved promise
-  if (collectionsStore.has(config.id) && !loadingCollections.has(config.id)) {
+  if (
+    collectionsStore.has(config.id) &&
+    !loadingCollectionResolvers.has(config.id)
+  ) {
     return Promise.resolve(
-      collectionsStore.get(config.id)! as unknown as Collection<T, TKey>
+      collectionsStore.get(config.id)! as CollectionImpl<T, TKey>
     )
   }
 
   // If the collection is in the process of loading, return its promise
-  if (loadingCollections.has(config.id)) {
-    return loadingCollections.get(config.id)! as unknown as Promise<
-      Collection<T, TKey>
-    >
+  if (loadingCollectionResolvers.has(config.id)) {
+    return loadingCollectionResolvers.get(config.id)!.promise
   }
 
   // Create a new collection instance if it doesn't exist
   if (!collectionsStore.has(config.id)) {
     collectionsStore.set(
       config.id,
-      new Collection<T, TKey>({
+      createCollection<T, TKey>({
         id: config.id,
         getKey: config.getKey,
         sync: config.sync,
         schema: config.schema,
-      }) as unknown as Collection<any>
+      })
     )
   }
 
-  const collection = collectionsStore.get(config.id)! as unknown as Collection<
-    T,
-    TKey
-  >
+  const collection = collectionsStore.get(config.id)! as CollectionImpl<T, TKey>
 
   // Create a promise that will resolve after the first commit
-  let resolveFirstCommit: () => void
-  const firstCommitPromise = new Promise<Collection<T, TKey>>((resolve) => {
-    resolveFirstCommit = () => {
-      resolve(collection)
-    }
+  let resolveFirstCommit: (value: CollectionImpl<T, TKey>) => void
+  const firstCommitPromise = new Promise<CollectionImpl<T, TKey>>((resolve) => {
+    resolveFirstCommit = resolve
+  })
+
+  // Store the loading promise first
+  loadingCollectionResolvers.set(config.id, {
+    promise: firstCommitPromise,
+    resolve: resolveFirstCommit!,
   })
 
   // Register a one-time listener for the first commit
@@ -138,19 +172,12 @@ export function preloadCollection<
     if (!config.id) {
       throw new Error(`The id property is required for preloadCollection`)
     }
-    if (loadingCollections.has(config.id)) {
-      loadingCollections.delete(config.id)
-      resolveFirstCommit()
+    if (loadingCollectionResolvers.has(config.id)) {
+      const resolver = loadingCollectionResolvers.get(config.id)!
+      loadingCollectionResolvers.delete(config.id)
+      resolver.resolve(collection)
     }
   })
-
-  // Store the loading promise
-  loadingCollections.set(
-    config.id,
-    firstCommitPromise as unknown as Promise<
-      Collection<Record<string, unknown>>
-    >
-  )
 
   return firstCommitPromise
 }
@@ -184,11 +211,11 @@ export class SchemaValidationError extends Error {
   }
 }
 
-export class Collection<
+export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > {
-  public transactions: SortedMap<string, Transaction>
+  public transactions: SortedMap<string, Transaction<any>>
 
   // Core state - make public for testing
   public syncedData = new Map<TKey, T>()
@@ -209,6 +236,10 @@ export class Collection<
   private changesBatchListeners = new Set<
     (changes: Array<ChangeMessage<T>>) => void
   >()
+
+  // Utilities namespace
+  // This is populated by createCollection
+  public utils: Record<string, Fn> = {}
 
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   private syncedKeys = new Set<TKey>()
@@ -251,7 +282,7 @@ export class Collection<
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactions = new SortedMap<string, Transaction>(
+    this.transactions = new SortedMap<string, Transaction<any>>(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
     )
 
@@ -845,7 +876,7 @@ export class Collection<
     const mutations: Array<PendingMutation<T>> = []
 
     // Create mutations for each item
-    items.forEach((item, index) => {
+    items.forEach((item) => {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
@@ -859,8 +890,8 @@ export class Collection<
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
         original: {},
-        modified: validatedData as Record<string, unknown>,
-        changes: validatedData as Record<string, unknown>,
+        modified: validatedData,
+        changes: validatedData,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
@@ -884,7 +915,7 @@ export class Collection<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = new Transaction({
+      const directOpTransaction = new Transaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(params)
@@ -1086,10 +1117,10 @@ export class Collection<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = new Transaction({
-      mutationFn: async (transaction) => {
+    const directOpTransaction = new Transaction<T>({
+      mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction
-        return this.config.onUpdate!(transaction)
+        return this.config.onUpdate!(params)
       },
     })
 
@@ -1123,7 +1154,7 @@ export class Collection<
   delete = (
     keys: Array<TKey> | TKey,
     config?: OperationConfig
-  ): TransactionType => {
+  ): TransactionType<any> => {
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
@@ -1144,9 +1175,9 @@ export class Collection<
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: (this.get(key) || {}) as Record<string, unknown>,
-        modified: (this.get(key) || {}) as Record<string, unknown>,
-        changes: (this.get(key) || {}) as Record<string, unknown>,
+        original: this.get(key) || {},
+        modified: this.get(key)!,
+        changes: this.get(key) || {},
         globalKey,
         key,
         metadata: config?.metadata as unknown,
@@ -1174,11 +1205,11 @@ export class Collection<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = new Transaction({
+    const directOpTransaction = new Transaction<T>({
       autoCommit: true,
-      mutationFn: async (transaction) => {
+      mutationFn: async (params) => {
         // Call the onDelete handler with the transaction
-        return this.config.onDelete!(transaction)
+        return this.config.onDelete!(params)
       },
     })
 

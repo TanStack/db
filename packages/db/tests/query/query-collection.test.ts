@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import mitt from "mitt"
-import { Collection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection.js"
 import { queryBuilder } from "../../src/query/query-builder.js"
 import { compileQuery } from "../../src/query/compiled-query.js"
 import { createTransaction } from "../../src/transactions.js"
@@ -71,7 +71,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
       sync: {
@@ -187,7 +187,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
       sync: {
@@ -314,7 +314,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -334,7 +334,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -475,7 +475,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -495,7 +495,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
       sync: {
@@ -685,7 +685,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `order-by-test`,
       getKey: (item) => item.id,
       sync: {
@@ -802,7 +802,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `order-update-test`,
       getKey: (val) => val.id,
       sync: {
@@ -919,7 +919,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create person collection
-    const personCollection = new Collection<Person>({
+    const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
       getKey: (val) => val.id,
       sync: {
@@ -940,7 +940,7 @@ describe(`Query Collections`, () => {
     })
 
     // Create issue collection
-    const issueCollection = new Collection<Issue>({
+    const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
       getKey: (val) => val.id,
       sync: {
@@ -1054,7 +1054,7 @@ describe(`Query Collections`, () => {
     const emitter = mitt()
 
     // Create collection with mutation capability
-    const collection = new Collection<Person>({
+    const collection = createCollection<Person>({
       id: `select-callback-test`,
       getKey: (item) => item.id,
       sync: {

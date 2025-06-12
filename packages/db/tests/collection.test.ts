@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { z } from "zod"
-import { Collection, SchemaValidationError } from "../src/collection"
+import { SchemaValidationError, createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
 import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
-    expect(() => new Collection()).toThrow(`Collection requires a config`)
+    expect(() => createCollection()).toThrow(`Collection requires a config`)
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
     // Create a collection with sync but no mutationFn
-    const collection = new Collection<{ value: string }>({
+    const collection = createCollection<{ value: string }>({
       id: `foo`,
       getKey: (item) => item.value,
       sync: {
@@ -61,7 +61,7 @@ describe(`Collection`, () => {
   })
 
   it(`should throw an error when trying to update an item's ID`, async () => {
-    const collection = new Collection<{ id: string; value: string }>({
+    const collection = createCollection<{ id: string; value: string }>({
       id: `id-update-test`,
       getKey: (item) => item.id,
       sync: {
@@ -98,7 +98,7 @@ describe(`Collection`, () => {
 
   it(`It shouldn't expose any state until the initial sync is finished`, () => {
     // Create a collection with a mock sync plugin
-    new Collection<{ name: string }>({
+    createCollection<{ name: string }>({
       id: `foo`,
       getKey: (item) => item.name,
       sync: {
@@ -141,7 +141,7 @@ describe(`Collection`, () => {
     const syncMock = vi.fn()
 
     // new collection w/ mock sync/mutation
-    const collection = new Collection<{
+    const collection = createCollection<{
       id: number
       value: string
       boolean?: boolean
@@ -422,7 +422,7 @@ describe(`Collection`, () => {
     const emitter = mitt()
 
     // new collection w/ mock sync/mutation
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `mock`,
       getKey: (item) => {
         return item.id
@@ -496,7 +496,7 @@ describe(`Collection`, () => {
   })
 
   it(`should throw errors when deleting items not in the collection`, () => {
-    const collection = new Collection<{ name: string }>({
+    const collection = createCollection<{ name: string }>({
       id: `delete-errors`,
       getKey: (val) => val.name,
       sync: {
@@ -537,7 +537,7 @@ describe(`Collection`, () => {
   })
 
   it(`should not allow inserting documents with IDs that already exist`, async () => {
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `duplicate-id-test`,
       getKey: (item) => item.id,
       sync: {
@@ -578,7 +578,7 @@ describe(`Collection`, () => {
     const onDeleteMock = vi.fn()
 
     // Create a collection with handler functions
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `handlers-test`,
       getKey: (item) => item.id,
       sync: {
@@ -642,7 +642,7 @@ describe(`Collection`, () => {
     })
 
     // Create a collection with handler functions
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `direct-operations-test`,
       getKey: (item) => item.id,
       sync: {
@@ -695,7 +695,7 @@ describe(`Collection`, () => {
 
   it(`should throw errors when operations are called outside transactions without handlers`, async () => {
     // Create a collection without handler functions
-    const collection = new Collection<{ id: number; value: string }>({
+    const collection = createCollection<{ id: number; value: string }>({
       id: `no-handlers-test`,
       getKey: (item) => item.id,
       sync: {
@@ -748,7 +748,7 @@ describe(`Collection with schema validation`, () => {
     })
 
     // Create a collection with the schema
-    const collection = new Collection<z.infer<typeof userSchema>>({
+    const collection = createCollection<z.infer<typeof userSchema>>({
       id: `test`,
       getKey: (item) => item.name,
       sync: {

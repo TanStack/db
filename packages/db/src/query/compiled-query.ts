@@ -1,6 +1,7 @@
 import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
-import { Collection } from "../collection.js"
+import { createCollection } from "../collection.js"
 import { compileQueryPipeline } from "./pipeline-compiler.js"
+import type { Collection } from "../collection.js"
 import type { ChangeMessage, SyncConfig } from "../types.js"
 import type {
   IStreamBuilder,
@@ -96,9 +97,9 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     this.graph = graph
     this.inputs = inputs
-    this.resultCollection = new Collection<TResults>({
+    this.resultCollection = createCollection<TResults>({
       id: crypto.randomUUID(), // TODO: remove when we don't require any more
-      getKey: (val) => {
+      getKey: (val: unknown) => {
         return (val as any)._key
       },
       sync: {

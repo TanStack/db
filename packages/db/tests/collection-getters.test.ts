@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { Collection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
+import { createCollection } from "../src/collection"
+import type { Collection } from "../src/collection"
 import type { ChangeMessage, CollectionConfig } from "../src/types"
 
 describe(`Collection getters`, () => {
@@ -39,11 +40,11 @@ describe(`Collection getters`, () => {
 
     config = {
       id: `test-collection`,
-      getKey: (val) => val.id,
+      getKey: (val) => val.id as string,
       sync: mockSync,
     }
 
-    collection = new Collection(config)
+    collection = createCollection(config)
   })
 
   describe(`state getter`, () => {
@@ -68,10 +69,10 @@ describe(`Collection getters`, () => {
     })
 
     it(`returns 0 for empty collection`, () => {
-      // Create a new collection with no initial data
-      const emptyCollection = new Collection({
+      // Create a createCollection with no initial data
+      const emptyCollection = createCollection({
         id: `empty-collection`,
-        getKey: (val) => val.id,
+        getKey: (val) => val.id as string,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -86,7 +87,7 @@ describe(`Collection getters`, () => {
       let syncCallbacks: any
 
       // Create a collection with controllable sync
-      const syncCollection = new Collection<{ id: string; name: string }>({
+      const syncCollection = createCollection<{ id: string; name: string }>({
         id: `sync-size-test`,
         getKey: (val) => val.id,
         sync: {
@@ -424,7 +425,7 @@ describe(`Collection getters`, () => {
     })
 
     it(`waits for data if not yet available`, async () => {
-      // Create a new collection with a sync that doesn't immediately commit
+      // Create a createCollection with a sync that doesn't immediately commit
       let commitFn: () => void
 
       const delayedSyncMock = {
@@ -440,9 +441,9 @@ describe(`Collection getters`, () => {
         }),
       }
 
-      const delayedCollection = new Collection({
+      const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id,
+        getKey: (val) => val.id as string,
         sync: delayedSyncMock,
       })
 
@@ -483,7 +484,7 @@ describe(`Collection getters`, () => {
     })
 
     it(`waits for data if not yet available`, async () => {
-      // Create a new collection with a sync that doesn't immediately commit
+      // Create a createCollection with a sync that doesn't immediately commit
       let commitFn: () => void
 
       const delayedSyncMock = {
@@ -500,9 +501,9 @@ describe(`Collection getters`, () => {
         }),
       }
 
-      const delayedCollection = new Collection({
+      const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id,
+        getKey: (val) => val.id as string,
         sync: delayedSyncMock,
       })
 

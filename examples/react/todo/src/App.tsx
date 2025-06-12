@@ -132,10 +132,10 @@ const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
     return collectionsCache.get(`todo`)
   } else {
-    let newCollection: Collection
+    let newCollection: Collection<UpdateTodo>
     if (type === CollectionType.Electric) {
-      newCollection = createCollection<UpdateTodo>(
-        electricCollectionOptions({
+      newCollection = createCollection(
+        electricCollectionOptions<UpdateTodo>({
           id: `todos`,
           shapeOptions: {
             url: `http://localhost:3003/v1/shape`,
@@ -179,7 +179,7 @@ const createTodoCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0].txid) }
           },
-        }).options
+        })
       )
     } else {
       // Query collection using our API helper
@@ -224,7 +224,7 @@ const createTodoCollection = (type: CollectionType) => {
               })
             )
           },
-        }).options
+        })
       )
     }
     collectionsCache.set(`todo`, newCollection)
@@ -237,7 +237,7 @@ const createConfigCollection = (type: CollectionType) => {
   if (collectionsCache.has(`config`)) {
     return collectionsCache.get(`config`)
   } else {
-    let newCollection: Collection
+    let newCollection: Collection<UpdateConfig>
     if (type === CollectionType.Electric) {
       newCollection = createCollection(
         electricCollectionOptions({
@@ -275,7 +275,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).options
+        })
       )
     } else {
       // Query collection using our API helper
@@ -319,7 +319,7 @@ const createConfigCollection = (type: CollectionType) => {
 
             return { txid: String(txids[0]) }
           },
-        }).options
+        })
       )
     }
     collectionsCache.set(`config`, newCollection)
