@@ -137,10 +137,10 @@ describe(`Proxy Library`, () => {
       // @ts-expect-error ignore for test
       obj.self = obj // Create circular reference
 
-      // @ts-expect-error ignore for test
-      const { proxy, getChanges } = createChangeProxy(obj)
+      const { proxy, getChanges } = createChangeProxy(
+        obj as Record<string | symbol, any>
+      )
 
-      // @ts-expect-error ignore for test
       proxy.name = `Jane`
 
       expect(getChanges()).toEqual({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
-import { Collection, createCollection } from "../src/collection"
+import { createCollection } from "../src/collection"
 
 describe(`Transactions`, () => {
   it(`calling createTransaction creates a transaction`, () => {

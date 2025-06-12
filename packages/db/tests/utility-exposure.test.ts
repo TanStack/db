@@ -12,10 +12,10 @@ describe(`Utility exposure pattern`, () => {
   test(`exposes utilities at top level and under .utils namespace`, () => {
     // Create mock utility functions
     const testFn = (input: string) => `processed: ${input}`
-    const asyncFn = (input: number) => input * 2
+    const asyncFn = (input: number) => Promise.resolve(input * 2)
 
     // Create a mock sync config
-    const mockSync: SyncConfig = {
+    const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
         return {
           unsubscribe: () => {},
@@ -45,7 +45,7 @@ describe(`Utility exposure pattern`, () => {
 
   test(`supports collections without utilities`, () => {
     // Create a mock sync config
-    const mockSync: SyncConfig = {
+    const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
         return {
           unsubscribe: () => {},
@@ -74,21 +74,15 @@ describe(`Utility exposure pattern`, () => {
 
     // Create mock utility functions
     const testFn = (input: string) => `processed: ${input}`
-    const asyncFn = (input: number) => input * 2
-
-    // Create a mock sync config
-    const mockSync: SyncConfig = {
-      sync: () => {
-        return {
-          unsubscribe: () => {},
-        }
-      },
-    }
+    // eslint-disable-next-line
+    const asyncFn = async (input: number) => input * 2
 
     // Create collection options with utilities
     const options: CollectionConfig<TestItem> & { utils: TestUtils } = {
       getId: (item) => item.id,
-      sync: mockSync,
+      sync: {
+        sync: () => {},
+      },
       utils: {
         testFn,
         asyncFn,
@@ -97,9 +91,6 @@ describe(`Utility exposure pattern`, () => {
 
     // Create collection with utilities
     const collection = createCollection<TestItem, TestUtils>(options)
-
-    // Create an item for the collection
-    const testItem: TestItem = { id: `1`, name: `Test`, value: 42 }
 
     // Let's verify utilities work with the collection
     expect(collection.utils.testFn(`test`)).toBe(`processed: test`)

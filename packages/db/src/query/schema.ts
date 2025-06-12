@@ -197,6 +197,7 @@ export type SelectCallback<TContext extends Context = Context> = (
   context: TContext extends { schema: infer S } ? S : any
 ) => any
 
+// @ts-expect-error TContext is unused but kept for API consistency
 export type As<TContext extends Context = Context> = string
 
 export type From<TContext extends Context = Context> = InputReference<{
@@ -219,8 +220,10 @@ export type GroupBy<TContext extends Context = Context> =
   | PropertyReference<TContext>
   | Array<PropertyReference<TContext>>
 
+// @ts-expect-error TContext is unused but kept for API consistency
 export type Limit<TContext extends Context = Context> = number
 
+// @ts-expect-error TContext is unused but kept for API consistency
 export type Offset<TContext extends Context = Context> = number
 
 export interface BaseQuery<TContext extends Context = Context> {

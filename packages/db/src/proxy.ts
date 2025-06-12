@@ -642,7 +642,7 @@ export function createChangeProxy<
         return value
       },
 
-      set(sobj, prop, value) {
+      set(_sobj, prop, value) {
         const currentValue = changeTracker.copy_[prop as keyof T]
         debugLog(
           `set called for property ${String(prop)}, current:`,
@@ -716,7 +716,7 @@ export function createChangeProxy<
         return true
       },
 
-      defineProperty(ptarget, prop, descriptor) {
+      defineProperty(_ptarget, prop, descriptor) {
         // const result = Reflect.defineProperty(
         //   changeTracker.copy_,
         //   prop,

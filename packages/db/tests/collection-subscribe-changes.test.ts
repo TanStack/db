@@ -5,9 +5,8 @@ import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
   ChangesPayload,
+  MutationFn,
   PendingMutation,
-  Transaction,
-  TransactionConfig,
 } from "../src/types"
 
 // Helper function to wait for changes to be processed
@@ -207,7 +206,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -220,12 +219,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Perform optimistic insert
     const tx = createTransaction({ mutationFn })
-    tx.mutate(() =>
-      collection.insert(
-        { id: 1, value: `optimistic value` },
-        { key: `optimisticItem` }
-      )
-    )
+    tx.mutate(() => collection.insert({ id: 1, value: `optimistic value` }))
 
     // Verify that insert was emitted immediately (optimistically)
     expect(callback).toHaveBeenCalledTimes(1)
@@ -287,7 +281,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Perform optimistic delete
     const deleteTx = createTransaction({ mutationFn })
-    deleteTx.mutate(() => collection.delete(item.id))
+    deleteTx.mutate(() => collection.delete(String(item.id)))
 
     // Verify that delete was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -338,7 +332,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
@@ -503,7 +497,7 @@ describe(`Collection.subscribeChanges`, () => {
         },
       },
     })
-    const mutationFn = async ({ transaction }) => {
+    const mutationFn: MutationFn = async ({ transaction }) => {
       emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }

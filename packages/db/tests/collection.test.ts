@@ -12,6 +12,7 @@ import type {
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
+    // @ts-expect-error we're testing for throwing when there's no config passed in
     expect(() => createCollection()).toThrow(`Collection requires a config`)
   })
 
@@ -273,7 +274,7 @@ describe(`Collection`, () => {
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
     tx2.mutate(() => collection.insert({ id: 2, value: `baz` }))
-    expect(collection.state.get(collection.generateObjectKey(2))).toEqual({
+    expect(collection.state.get(collection.generateObjectKey(2, {}))).toEqual({
       id: 2,
       value: `baz`,
     })
@@ -415,7 +416,7 @@ describe(`Collection`, () => {
 
     // Test bulk delete
     const tx9 = createTransaction({ mutationFn })
-    tx9.mutate(() => collection.delete([keys[2], keys[3]]))
+    tx9.mutate(() => collection.delete([keys[2]!, keys[3]!]))
     // @ts-expect-error possibly undefined is ok in test
     expect(collection.state.has(keys[2])).toBe(false)
     // @ts-expect-error possibly undefined is ok in test
@@ -533,6 +534,7 @@ describe(`Collection`, () => {
     ).not.toThrow()
 
     // Should throw when trying to delete an invalid type
+    // @ts-expect-error - Unused variable for test setup
     const tx3 = createTransaction({ mutationFn })
 
     // Should not throw when deleting by string key (even if key doesn't exist)
@@ -626,7 +628,7 @@ describe(`Collection`, () => {
     )
 
     // Test delete handler
-    tx.mutate(() => collection.delete(1))
+    tx.mutate(() => collection.delete(`1`)) // Convert number to string to match expected type
 
     // Verify the handler functions were defined correctly
     // We're not testing actual invocation since that would require modifying the Collection class
@@ -637,18 +639,18 @@ describe(`Collection`, () => {
 
   it(`should execute operations outside of explicit transactions using handlers`, async () => {
     // Create handler functions that resolve after a short delay to simulate async operations
-    const onInsertMock = vi.fn().mockImplementation(async (tx) => {
+    const onInsertMock = vi.fn().mockImplementation(async () => {
       // Wait a bit to simulate an async operation
       await new Promise((resolve) => setTimeout(resolve, 10))
       return { success: true, operation: `insert` }
     })
 
-    const onUpdateMock = vi.fn().mockImplementation(async (tx) => {
+    const onUpdateMock = vi.fn().mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
       return { success: true, operation: `update` }
     })
 
-    const onDeleteMock = vi.fn().mockImplementation(async (tx) => {
+    const onDeleteMock = vi.fn().mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
       return { success: true, operation: `delete` }
     })
@@ -688,7 +690,7 @@ describe(`Collection`, () => {
     expect(onUpdateMock).toHaveBeenCalledTimes(1)
 
     // Test direct delete operation
-    const deleteTx = collection.delete(1)
+    const deleteTx = collection.delete(`1`) // Convert number to string to match expected type
     expect(deleteTx).toBeDefined()
     expect(onDeleteMock).toHaveBeenCalledTimes(1)
 
@@ -743,7 +745,7 @@ describe(`Collection`, () => {
 
     // Test delete without handler
     expect(() => {
-      collection.delete(1)
+      collection.delete(`1`) // Convert number to string to match expected type
     }).toThrow(
       `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
     )
