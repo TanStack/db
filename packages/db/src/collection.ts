@@ -907,27 +907,27 @@ export class CollectionImpl<
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
     callback: (drafts: Array<TItem>) => void
-  ): TransactionType
+  ): TransactionType | false
 
   // Overload 2: Update multiple items with config and a callback
   update<TItem extends object = T>(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
     callback: (drafts: Array<TItem>) => void
-  ): TransactionType
+  ): TransactionType | false
 
   // Overload 3: Update a single item with a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     callback: (draft: TItem) => void
-  ): TransactionType
+  ): TransactionType | false
 
   // Overload 4: Update a single item with config and a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     config: OperationConfig,
     callback: (draft: TItem) => void
-  ): TransactionType
+  ): TransactionType | false
 
   update<TItem extends object = T>(
     keys: (TKey | unknown) | Array<TKey | unknown>,
@@ -1045,7 +1045,7 @@ export class CollectionImpl<
 
     // If no changes were made, return early
     if (mutations.length === 0) {
-      throw new Error(`No changes were made to any of the objects`)
+      return false
     }
 
     // If an ambient transaction exists, use it
