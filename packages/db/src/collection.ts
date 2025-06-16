@@ -907,27 +907,27 @@ export class CollectionImpl<
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
     callback: (drafts: Array<TItem>) => void
-  ): TransactionType | false
+  ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update<TItem extends object = T>(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
     callback: (drafts: Array<TItem>) => void
-  ): TransactionType | false
+  ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     callback: (draft: TItem) => void
-  ): TransactionType | false
+  ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     config: OperationConfig,
     callback: (draft: TItem) => void
-  ): TransactionType | false
+  ): TransactionType
 
   update<TItem extends object = T>(
     keys: (TKey | unknown) | Array<TKey | unknown>,
@@ -1043,9 +1043,13 @@ export class CollectionImpl<
       })
       .filter(Boolean) as Array<PendingMutation<T>>
 
-    // If no changes were made, return early
+    // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      return false
+      const emptyTransaction = new Transaction({
+        mutationFn: async () => {},
+      })
+      emptyTransaction.commit()
+      return emptyTransaction
     }
 
     // If an ambient transaction exists, use it
