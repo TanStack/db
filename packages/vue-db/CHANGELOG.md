@@ -1,5 +1,12 @@
 # @tanstack/vue-db
 
+## 0.0.9
+
+### Patch Changes
+
+- Updated dependencies [[`38d4505`](https://github.com/TanStack/db/commit/38d45051b065b619b95849f78422e9ace8750361)]:
+  - @tanstack/db@0.0.10
+
 ## 0.0.8
 
 ### Patch Changes
