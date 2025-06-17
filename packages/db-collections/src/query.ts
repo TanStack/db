@@ -187,16 +187,8 @@ export function queryCollectionOptions<
         const currentSyncedItems = new Map(collection.syncedData)
         const newItemsMap = new Map<string | number, TItem>()
         newItemsArray.forEach((item) => {
-          try {
-            const key = getKey(item)
-            newItemsMap.set(key, item)
-          } catch (e) {
-            console.error(
-              `[QueryCollection] Error getting primary key for an item. Skipping item:`,
-              item,
-              e
-            )
-          }
+          const key = getKey(item)
+          newItemsMap.set(key, item)
         })
 
         begin()
@@ -265,21 +257,9 @@ export function queryCollectionOptions<
    * @returns Promise that resolves when the refetch is complete
    */
   const refetch: RefetchFn = async (): Promise<void> => {
-    console.log(`[QueryCollection] refetch() called for ${String(queryKey)}`)
-    try {
-      await queryClient.refetchQueries({
-        queryKey: queryKey,
-      })
-      console.log(
-        `[QueryCollection] Refetch successful for ${String(queryKey)}.`
-      )
-    } catch (error) {
-      console.error(
-        `[QueryCollection] Error during refetch for ${String(queryKey)}:`,
-        error
-      )
-      throw error
-    }
+    return queryClient.refetchQueries({
+      queryKey: queryKey,
+    })
   }
 
   // Create wrapper handlers for direct persistence operations that handle refetching
