@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Condition, Query } from "../../src/query/schema.js"
 
 describe(`Query - Table Aliasing`, () => {
@@ -85,11 +77,11 @@ describe(`Query - Table Aliasing`, () => {
       as: `p`,
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -99,18 +91,13 @@ describe(`Query - Table Aliasing`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(4)
 
@@ -130,11 +117,11 @@ describe(`Query - Table Aliasing`, () => {
       where: [[`@p.category`, `=`, `Electronics`] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -144,18 +131,13 @@ describe(`Query - Table Aliasing`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -174,11 +156,11 @@ describe(`Query - Table Aliasing`, () => {
       having: [[`@p.price`, `>`, 500] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -188,18 +170,13 @@ describe(`Query - Table Aliasing`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -230,11 +207,11 @@ describe(`Query - Table Aliasing`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -244,18 +221,13 @@ describe(`Query - Table Aliasing`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // The condition @p.price > 100 AND @inStock = true should match:
     // - Laptop (price: 1200, inStock: true)
@@ -290,11 +262,11 @@ describe(`Query - Table Aliasing`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -304,18 +276,13 @@ describe(`Query - Table Aliasing`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return Smartphone (Electronics < 1000) and Book (Books with rating >= 4.5)
     expect(results).toHaveLength(2)

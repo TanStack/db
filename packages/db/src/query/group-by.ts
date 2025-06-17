@@ -1,4 +1,4 @@
-import { groupBy, groupByOperators } from "@electric-sql/d2ts"
+import { groupBy, groupByOperators } from "@electric-sql/d2mini"
 import {
   evaluateOperandOnNamespacedRow,
   extractValueFromNamespacedRow,

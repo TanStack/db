@@ -1,14 +1,6 @@
 import { describe, expect, test } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Query } from "../../src/query/index.js"
 import type {
   FlatCompositeCondition,
@@ -89,11 +81,11 @@ describe(`Query`, () => {
         where: [[`@category`, `=`, `Electronics`]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -103,20 +95,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include electronics products
       expect(results).toHaveLength(3) // Laptop, Smartphone, Headphones
@@ -134,11 +121,11 @@ describe(`Query`, () => {
         where: [[`@category`, `!=`, `Electronics`]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -148,20 +135,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should exclude electronics products
       expect(results).toHaveLength(2) // Book and Desk
@@ -179,11 +161,11 @@ describe(`Query`, () => {
         where: [[`@price`, `>`, 500]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -193,20 +175,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include expensive products
       expect(results).toHaveLength(2) // Laptop and Smartphone
@@ -230,11 +207,11 @@ describe(`Query`, () => {
       )
       expect(filteredProducts).toHaveLength(1)
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -244,20 +221,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include products with a discount
       expect(results).toHaveLength(1) // Only Smartphone has a discount
@@ -273,11 +245,11 @@ describe(`Query`, () => {
         where: [[`@price`, `<`, 500]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -287,20 +259,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should include affordable products
       expect(results).toHaveLength(3) // Headphones, Book, and Desk
@@ -325,11 +292,11 @@ describe(`Query`, () => {
       expect(filteredProducts).toHaveLength(1)
       expect(filteredProducts[0]!.name).toBe(`Headphones`)
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -339,20 +306,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should include affordable electronics products
       expect(results).toHaveLength(1) // Only Headphones
@@ -376,11 +338,11 @@ describe(`Query`, () => {
       // This should match all Electronics (3) plus the Book (1)
       expect(filteredProducts).toHaveLength(4)
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -390,20 +352,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should include Electronics OR cheap products
       expect(results).toHaveLength(4)
@@ -449,11 +406,11 @@ describe(`Query`, () => {
       // Should match Laptop (1), Smartphone (2) for electronics > 200, and Book (4)
       expect(filteredProducts).toHaveLength(3)
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -463,21 +420,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should match our expected count
       expect(results).toHaveLength(3)
@@ -507,11 +458,11 @@ describe(`Query`, () => {
         where: [callback],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -521,20 +472,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include expensive products that are in stock
       // From our sample data: Laptop (1200, true) and Smartphone (800, true)
@@ -558,11 +504,11 @@ describe(`Query`, () => {
         where: [[`@inStock`, `=`, true], callback],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -572,20 +518,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should include products that are in stock AND have "tech" tag
       // From our sample data: Laptop (1) and Smartphone (2) - Headphones is not in stock
@@ -609,11 +550,11 @@ describe(`Query`, () => {
         where: [callback1, callback2],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -623,20 +564,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should include Electronics products under $1000
       // From our sample data: Smartphone (800) and Headphones (150)
@@ -662,11 +598,11 @@ describe(`Query`, () => {
         where: [[`@id`, `<=`, 3]], // First three products
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -676,20 +612,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the transformed results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       expect(results).toHaveLength(3) // First three products
 
@@ -726,11 +657,11 @@ describe(`Query`, () => {
         where: [[`@id`, `=`, 1]], // Just the laptop
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, Product]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -740,20 +671,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(
           sampleProducts.map((product) => [[product.id, product], 1])
         )
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the mixed results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       expect(results).toHaveLength(1)
 

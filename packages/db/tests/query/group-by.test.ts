@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest"
-import { D2, MessageType, MultiSet, output, v } from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/schema.js"
 
@@ -37,7 +37,7 @@ type Result = [
 describe(`D2QL GROUP BY`, () => {
   let graph: D2
   let ordersInput: ReturnType<D2[`newInput`]>
-  let messages: Array<any> = []
+  let messages: Array<MultiSet<any>> = []
 
   // Sample data for testing
   const orders: Array<OrderRecord> = [
@@ -80,7 +80,7 @@ describe(`D2QL GROUP BY`, () => {
 
   beforeEach(() => {
     // Create a new graph for each test
-    graph = new D2({ initialFrontier: v([0]) })
+    graph = new D2()
     ordersInput = graph.newInput<OrderRecord>()
     messages = []
   })
@@ -104,11 +104,8 @@ describe(`D2QL GROUP BY`, () => {
 
     // Send the sample data to the input
     for (const order of orders) {
-      ordersInput.sendData(v([1]), new MultiSet([[[order.order_id, order], 1]]))
+      ordersInput.sendData(new MultiSet([[[order.order_id, order], 1]]))
     }
-
-    // Close the input by sending a frontier update
-    ordersInput.sendFrontier(v([2]))
 
     // Run the graph
     graph.run()
@@ -130,16 +127,12 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBe(1)
+    expect(messagesRet.length).toBe(1)
 
     // Verify we got a frontier message
-    const frontierMessages = messagesRet.filter(
-      (m) => m.type === MessageType.FRONTIER
-    )
-    expect(frontierMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner()
+    const result = messagesRet[0]!.getInner()
 
     const expected = [
       [
@@ -195,10 +188,9 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner() as Array<Result>
+    const result = messagesRet[0]!.getInner() as Array<Result>
 
     const expected: Array<Result> = [
       [
@@ -283,10 +275,9 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner() as Array<Result>
+    const result = messagesRet[0]!.getInner() as Array<Result>
 
     const expected: Array<Result> = [
       [
@@ -351,10 +342,9 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner() as Array<Result>
+    const result = messagesRet[0]!.getInner() as Array<Result>
 
     const expected = [
       [
@@ -422,10 +412,9 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner() as Array<Result>
+    const result = messagesRet[0]!.getInner() as Array<Result>
 
     const expected = [
       [
@@ -472,10 +461,9 @@ describe(`D2QL GROUP BY`, () => {
     const messagesRet = runQuery(query)
 
     // Verify we got at least one data message
-    const dataMessages = messagesRet.filter((m) => m.type === MessageType.DATA)
-    expect(dataMessages.length).toBeGreaterThan(0)
+    expect(messagesRet.length).toBeGreaterThan(0)
 
-    const result = dataMessages[0].data.collection.getInner() as Array<Result>
+    const result = messagesRet[0]!.getInner() as Array<Result>
 
     const expected = [
       [

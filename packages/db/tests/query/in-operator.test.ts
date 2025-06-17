@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Condition, Query } from "../../src/query/schema.js"
 
 describe(`Query - IN Operator`, () => {
@@ -85,11 +77,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@category`, `in`, [`Electronics`, `Books`]] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -98,17 +90,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return items in Electronics or Books categories (1, 2, 4, 5)
     expect(results).toHaveLength(4)
@@ -122,11 +108,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@category`, `in`, [`electronics`, `books`]] as Condition], // lowercase categories
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -135,17 +121,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should NOT match 'Electronics' or 'Books' with lowercase 'electronics' and 'books'
     // (case-sensitive matching)
@@ -159,11 +139,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@category`, `not in`, [`Electronics`, `Books`]] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -172,17 +152,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return items NOT in Electronics or Books categories (just Furniture - id 3)
     expect(results).toHaveLength(1)
@@ -197,11 +171,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@id`, `in`, [`1`, `2`, `3`]] as Condition], // String IDs instead of numbers
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -210,17 +184,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return items with IDs 1, 2, and 3, despite string vs number difference
     expect(results).toHaveLength(3)
@@ -244,11 +212,11 @@ describe(`Query - IN Operator`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -257,17 +225,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    // const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    // const results =
-    //   dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    // const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // TODO: Finish this test!
   })
@@ -279,11 +241,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@isActive`, `in`, [null, false]] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -292,17 +254,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return items with isActive that is null/undefined or false (items 3 and 5)
     expect(results).toHaveLength(2)
@@ -331,11 +287,11 @@ describe(`Query - IN Operator`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -344,11 +300,7 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
@@ -366,11 +318,11 @@ describe(`Query - IN Operator`, () => {
       where: [[`@category`, `in`, []] as Condition], // Empty array
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -379,17 +331,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Nothing should be in an empty array
     expect(results).toHaveLength(0)
@@ -408,11 +354,11 @@ describe(`Query - IN Operator`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, TestItem]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -421,17 +367,11 @@ describe(`Query - IN Operator`, () => {
 
     graph.finalize()
 
-    input.sendData(
-      v([1, 0]),
-      new MultiSet(testData.map((item) => [[item.id, item], 1]))
-    )
-    input.sendFrontier(new Antichain([v([1, 0])]))
+    input.sendData(new MultiSet(testData.map((item) => [[item.id, item], 1])))
 
     graph.run()
 
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results =
-      dataMessages[0]?.data.collection.getInner().map(([data]) => data[1]) || []
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Should return items that are in category Electronics or Books AND have price > 100
     // This matches items 1, 2, and 5:

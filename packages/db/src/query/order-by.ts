@@ -3,7 +3,7 @@ import {
   orderBy,
   orderByWithFractionalIndex,
   orderByWithIndex,
-} from "@electric-sql/d2ts"
+} from "@electric-sql/d2mini"
 import { evaluateOperandOnNamespacedRow } from "./extractors"
 import { isOrderIndexFunctionCall } from "./utils"
 import type { ConditionOperand, Query } from "./schema"

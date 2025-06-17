@@ -1,4 +1,4 @@
-import { map } from "@electric-sql/d2ts"
+import { map } from "@electric-sql/d2mini"
 import {
   evaluateOperandOnNamespacedRow,
   extractValueFromNamespacedRow,

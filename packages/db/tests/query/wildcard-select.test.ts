@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest"
-import { D2, MessageType, MultiSet, output, v } from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/schema.js"
 
@@ -66,25 +66,20 @@ describe(`Query Wildcard Select`, () => {
 
   beforeEach(() => {
     // Create a new graph for each test
-    graph = new D2({ initialFrontier: v([0]) })
+    graph = new D2()
     usersInput = graph.newInput<[number, User]>()
     ordersInput = graph.newInput<[number, Order]>()
     messages = []
   })
 
   // Helper function to extract results from messages
-  const extractResults = (messagesToExtract: Array<any>): Array<any> => {
-    const dataMessages = messagesToExtract.filter(
-      (m) => m.type === MessageType.DATA
-    )
+  const extractResults = (dataMessages: Array<any>): Array<any> => {
     if (dataMessages.length === 0) return []
 
     // For single table queries, we need to extract all items from the MultiSet
     const allItems: Array<any> = []
     for (const message of dataMessages) {
-      const items = message.data.collection
-        .getInner()
-        .map(([item]: [any, number]) => item[1])
+      const items = message.getInner().map(([item]: [any, number]) => item[1])
       allItems.push(...items)
     }
     return allItems
@@ -108,12 +103,9 @@ describe(`Query Wildcard Select`, () => {
     graph.finalize()
 
     // Send the sample data to the input
-    for (const user of sampleUsers) {
-      usersInput.sendData(v([1]), new MultiSet([[[user.id, user], 1]]))
-    }
-
-    // Close the input by sending a frontier update
-    usersInput.sendFrontier(v([2]))
+    usersInput.sendData(
+      new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+    )
 
     // Run the graph
     graph.run()
@@ -139,16 +131,13 @@ describe(`Query Wildcard Select`, () => {
     // Finalize the graph
     graph.finalize()
 
-    // Send the sample data to the inputs
-    for (const user of sampleUsers) {
-      usersInput.sendData(v([1]), new MultiSet([[[user.id, user], 1]]))
-    }
-    usersInput.sendFrontier(v([2]))
+    usersInput.sendData(
+      new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+    )
 
-    for (const order of sampleOrders) {
-      ordersInput.sendData(v([1]), new MultiSet([[[order.id, order], 1]]))
-    }
-    ordersInput.sendFrontier(v([2]))
+    ordersInput.sendData(
+      new MultiSet(sampleOrders.map((order) => [[order.id, order], 1]))
+    )
 
     // Run the graph
     graph.run()

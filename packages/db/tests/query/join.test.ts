@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { RootStreamBuilder } from "@electric-sql/d2ts"
+import type { RootStreamBuilder } from "@electric-sql/d2mini"
 import type { Query } from "../../src/query/schema.js"
 
 describe(`Query - JOIN Clauses`, () => {
@@ -153,7 +153,7 @@ describe(`Query - JOIN Clauses`, () => {
     query: Query,
     additionalData: Record<string, Array<any>> = {}
   ): Array<any> {
-    const graph = new D2({ initialFrontier: 0 })
+    const graph = new D2()
 
     // Create inputs for each table
     const mainInput = graph.newInput<[number, T]>()
@@ -176,12 +176,8 @@ describe(`Query - JOIN Clauses`, () => {
     const results: Array<any> = []
     pipeline.pipe(
       output((message) => {
-        if (message.type === MessageType.DATA) {
-          const data = message.data.collection
-            .getInner()
-            .map(([item]: [any, any]) => item[1])
-          results.push(...data)
-        }
+        const data = message.getInner().map(([item]: [any, any]) => item[1])
+        results.push(...data)
       })
     )
 
@@ -189,8 +185,7 @@ describe(`Query - JOIN Clauses`, () => {
     graph.finalize()
 
     // Send data to the main input
-    mainInput.sendData(0, new MultiSet(mainData.map((d) => [[d.id, d], 1])))
-    mainInput.sendFrontier(1)
+    mainInput.sendData(new MultiSet(mainData.map((d) => [[d.id, d], 1])))
 
     // Send data to the joined inputs
     if (query.join) {
@@ -200,8 +195,7 @@ describe(`Query - JOIN Clauses`, () => {
         const input = inputs[tableName]
 
         if (input && data.length > 0) {
-          input.sendData(0, new MultiSet(data.map((d) => [[d.id, d], 1])))
-          input.sendFrontier(1)
+          input.sendData(new MultiSet(data.map((d) => [[d.id, d], 1])))
         }
       }
     }

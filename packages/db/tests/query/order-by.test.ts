@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/index.js"
 
@@ -37,7 +37,7 @@ describe(`Query`, () => {
 
       // Compiling the query should throw an error
       expect(() => {
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -63,7 +63,7 @@ describe(`Query`, () => {
 
       // Compiling the query should throw an error
       expect(() => {
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -88,23 +88,20 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<[number, Input]>()
         let latestMessage: any = null
 
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: undefined }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -113,13 +110,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -142,23 +138,20 @@ describe(`Query`, () => {
           orderBy: `@age`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<[number, User]>()
         let latestMessage: any = null
 
         const pipeline = compileQueryPipeline(query, { users: input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, age: 25, name: `Alice` }], 1],
             [[2, { id: 2, age: 20, name: `Bob` }], 1],
@@ -167,13 +160,12 @@ describe(`Query`, () => {
             [[5, { id: 5, age: 42, name: `Eva` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(sortResults(result, (a, b) => a[1].age - b[1].age)).toEqual([
           [[4, { id: 4, age: null, name: `Dean` }], 1],
@@ -192,7 +184,7 @@ describe(`Query`, () => {
           limit: 3,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -207,16 +199,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -225,13 +214,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -251,7 +239,7 @@ describe(`Query`, () => {
           offset: 2,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -266,16 +254,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -284,13 +269,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -307,7 +291,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -322,9 +306,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -332,18 +314,16 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `c` }], 1],
             [[2, { id: 2, value: `d` }], 1],
             [[3, { id: 3, value: `e` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all three items in alphabetical order
-        let result = latestMessage.collection.getInner()
+        let result = latestMessage.getInner()
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
@@ -354,17 +334,15 @@ describe(`Query`, () => {
 
         // Add new rows that should appear in the result
         input.sendData(
-          1,
           new MultiSet([
             [[4, { id: 4, value: `a` }], 1],
             [[5, { id: 5, value: `b` }], 1],
           ])
         )
-        input.sendFrontier(2)
         graph.run()
 
         // Result should now include the new rows in the correct order
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
 
         const expectedResult = [
           [[4, { id: 4, value: `a` }], 1],
@@ -383,7 +361,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -398,9 +376,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -408,7 +384,6 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `b` }], 1],
@@ -416,11 +391,10 @@ describe(`Query`, () => {
             [[4, { id: 4, value: `d` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all four items
-        let result = latestMessage.collection.getInner()
+        let result = latestMessage.getInner()
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
@@ -431,12 +405,11 @@ describe(`Query`, () => {
         ])
 
         // Remove 'b' from the result set
-        input.sendData(1, new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
-        input.sendFrontier(2)
+        input.sendData(new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
         graph.run()
 
         // Result should show 'b' being removed
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
 
         const expectedResult = [[[2, { id: 2, value: `b` }], -1]]
 
@@ -453,7 +426,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -468,16 +441,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -486,13 +456,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -513,7 +482,7 @@ describe(`Query`, () => {
           limit: 3,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -528,16 +497,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -546,13 +512,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -572,7 +537,7 @@ describe(`Query`, () => {
           offset: 2,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -587,16 +552,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -605,13 +567,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -628,7 +589,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -643,9 +604,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -653,18 +612,16 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `c` }], 1],
             [[2, { id: 2, value: `d` }], 1],
             [[3, { id: 3, value: `e` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all three items in alphabetical order
-        let result = latestMessage.collection.getInner()
+        let result = latestMessage.getInner()
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
@@ -675,17 +632,15 @@ describe(`Query`, () => {
 
         // Add new rows that should appear in the result
         input.sendData(
-          1,
           new MultiSet([
             [[4, { id: 4, value: `a` }], 1],
             [[5, { id: 5, value: `b` }], 1],
           ])
         )
-        input.sendFrontier(2)
         graph.run()
 
         // Result should now include the new rows in the correct order
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
 
         const expectedResult = [
           [[4, { id: 4, value: `a`, index: 0 }], 1],
@@ -710,7 +665,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -725,9 +680,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -735,7 +688,6 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `b` }], 1],
@@ -743,11 +695,10 @@ describe(`Query`, () => {
             [[4, { id: 4, value: `d` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all four items
-        let result = latestMessage.collection.getInner()
+        let result = latestMessage.getInner()
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
@@ -758,12 +709,11 @@ describe(`Query`, () => {
         ])
 
         // Remove 'b' from the result set
-        input.sendData(1, new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
-        input.sendFrontier(2)
+        input.sendData(new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
         graph.run()
 
         // Result should show 'b' being removed and indices adjusted
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
 
         const expectedResult = [
           [[2, { id: 2, value: `b`, index: 1 }], -1],
@@ -786,7 +736,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -801,16 +751,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -819,13 +766,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -846,7 +792,7 @@ describe(`Query`, () => {
           limit: 3,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -861,16 +807,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -879,13 +822,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -905,7 +847,7 @@ describe(`Query`, () => {
           offset: 2,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -920,16 +862,13 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
         graph.finalize()
 
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `z` }], 1],
@@ -938,13 +877,12 @@ describe(`Query`, () => {
             [[5, { id: 5, value: `c` }], 1],
           ])
         )
-        input.sendFrontier(1)
 
         graph.run()
 
         expect(latestMessage).not.toBeNull()
 
-        const result = latestMessage.collection.getInner()
+        const result = latestMessage.getInner()
 
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
@@ -961,7 +899,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -976,9 +914,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -986,18 +922,16 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `c` }], 1],
             [[2, { id: 2, value: `d` }], 1],
             [[3, { id: 3, value: `e` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all three items in alphabetical order
-        let result = latestMessage.collection.getInner()
+        let result = latestMessage.getInner()
         expect(
           sortResults(result, (a, b) => a[1].value.localeCompare(b[1].value))
         ).toEqual([
@@ -1008,17 +942,15 @@ describe(`Query`, () => {
 
         // Add new rows that should appear in the result
         input.sendData(
-          1,
           new MultiSet([
             [[4, { id: 4, value: `a` }], 1],
             [[5, { id: 5, value: `b` }], 1],
           ])
         )
-        input.sendFrontier(2)
         graph.run()
 
         // Result should now include the new rows in the correct order
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
         const expectedResult = [
           [[4, { id: 4, value: `a`, index: `Zz` }], 1],
           [[5, { id: 5, value: `b`, index: `ZzV` }], 1],
@@ -1036,7 +968,7 @@ describe(`Query`, () => {
           orderBy: `@value`,
         }
 
-        const graph = new D2({ initialFrontier: 0 })
+        const graph = new D2()
         const input = graph.newInput<
           [
             number,
@@ -1051,9 +983,7 @@ describe(`Query`, () => {
         const pipeline = compileQueryPipeline(query, { input })
         pipeline.pipe(
           output((message) => {
-            if (message.type === MessageType.DATA) {
-              latestMessage = message.data
-            }
+            latestMessage = message
           })
         )
 
@@ -1061,7 +991,6 @@ describe(`Query`, () => {
 
         // Initial data
         input.sendData(
-          0,
           new MultiSet([
             [[1, { id: 1, value: `a` }], 1],
             [[2, { id: 2, value: `b` }], 1],
@@ -1069,11 +998,10 @@ describe(`Query`, () => {
             [[4, { id: 4, value: `d` }], 1],
           ])
         )
-        input.sendFrontier(1)
         graph.run()
 
         // Initial result should be all four items
-        let result = latestMessage.collection.getInner() as Array<[any, number]>
+        let result = latestMessage.getInner() as Array<[any, number]>
 
         // Verify initial state
         const initialRows = result.filter(
@@ -1082,12 +1010,11 @@ describe(`Query`, () => {
         expect(initialRows.length).toBe(4)
 
         // Remove 'b' from the result set
-        input.sendData(1, new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
-        input.sendFrontier(2)
+        input.sendData(new MultiSet([[[2, { id: 2, value: `b` }], -1]]))
         graph.run()
 
         // Result should show 'b' being removed
-        result = latestMessage.collection.getInner()
+        result = latestMessage.getInner()
         const expectedResult = [[[2, { id: 2, value: `b`, index: `a1` }], -1]]
 
         expect(
