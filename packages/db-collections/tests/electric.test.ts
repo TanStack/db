@@ -26,7 +26,7 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric Integration`, () => {
-  let collection: Collection<Row, ElectricCollectionUtils>
+  let collection: Collection<Row, string | number, ElectricCollectionUtils>
   let subscriber: (messages: Array<Message<Row>>) => void
 
   beforeEach(() => {
@@ -54,7 +54,11 @@ describe(`Electric Integration`, () => {
     const options = electricCollectionOptions(config)
 
     // Create collection with Electric configuration using the new utility exposure pattern
-    collection = createCollection<Row, ElectricCollectionUtils>(options)
+    collection = createCollection<
+      Row,
+      string | number,
+      ElectricCollectionUtils
+    >(options)
   })
 
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
@@ -295,7 +299,7 @@ describe(`Electric Integration`, () => {
       const fakeBackend = {
         data: new Map<number, { txid: string; value: unknown }>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: (mutations: Array<PendingMutation>): Promise<string> => {
+        persist: (mutations: Array<PendingMutation<Row>>): Promise<string> => {
           const txid = String(Date.now())
 
           // Store the changes with the txid
@@ -342,7 +346,9 @@ describe(`Electric Integration`, () => {
       const testMutationFn = vi.fn(
         async ({ transaction }: { transaction: Transaction }) => {
           // Persist to fake backend and get txid
-          const txid = await fakeBackend.persist(transaction.mutations)
+          const txid = await fakeBackend.persist(
+            transaction.mutations as Array<PendingMutation<Row>>
+          )
 
           if (!txid) {
             throw new Error(`No txid found`)
@@ -452,7 +458,7 @@ describe(`Electric Integration`, () => {
       const fakeBackend = {
         data: new Map<string, { txid: string; value: unknown }>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: (mutations: Array<PendingMutation>): Promise<string> => {
+        persist: (mutations: Array<PendingMutation<Row>>): Promise<string> => {
           const txid = String(Date.now())
 
           // Store the changes with the txid

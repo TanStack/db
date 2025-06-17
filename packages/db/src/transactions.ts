@@ -28,7 +28,9 @@ function generateUUID() {
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
 
-export function createTransaction(config: TransactionConfig): Transaction {
+export function createTransaction<
+  TData extends object = Record<string, unknown>,
+>(config: TransactionConfig<TData>): Transaction<TData> {
   if (typeof config.mutationFn === `undefined`) {
     throw `mutationFn is required when creating a transaction`
   }
@@ -37,7 +39,10 @@ export function createTransaction(config: TransactionConfig): Transaction {
   if (!transactionId) {
     transactionId = generateUUID()
   }
-  const newTransaction = new Transaction({ ...config, id: transactionId })
+  const newTransaction = new Transaction<TData>({
+    ...config,
+    id: transactionId,
+  })
 
   transactions.push(newTransaction)
 
