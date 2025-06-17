@@ -3,7 +3,7 @@
   "description": "A reactive client store for building super fast apps on sync",
   "version": "0.0.9",
   "dependencies": {
-    "@electric-sql/d2ts": "^0.1.7",
+    "@electric-sql/d2mini": "^0.1.1",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/store": "^0.7.0"
   },
