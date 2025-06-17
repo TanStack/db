@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.0.11
+
+### Patch Changes
+
+- Export `ElectricCollectionUtils` & allow passing generic to `createTransaction` ([#179](https://github.com/TanStack/db/pull/179))
+
+- Updated dependencies [[`66ed58b`](https://github.com/TanStack/db/commit/66ed58b66553683ff0a5241de8cde83954d18847), [`c5489ff`](https://github.com/TanStack/db/commit/c5489ff276db07a0a4b65876790ccd7f11a6f99d)]:
+  - @tanstack/db@0.0.11
+
 ## 0.0.10
 
 ### Patch Changes

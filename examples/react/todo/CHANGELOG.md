@@ -1,5 +1,15 @@
 # examples/react/todo
 
+## 0.0.15
+
+### Patch Changes
+
+- Export `ElectricCollectionUtils` & allow passing generic to `createTransaction` ([#179](https://github.com/TanStack/db/pull/179))
+
+- Updated dependencies [[`c5489ff`](https://github.com/TanStack/db/commit/c5489ff276db07a0a4b65876790ccd7f11a6f99d)]:
+  - @tanstack/db-collections@0.0.13
+  - @tanstack/react-db@0.0.11
+
 ## 0.0.14
 
 ### Patch Changes

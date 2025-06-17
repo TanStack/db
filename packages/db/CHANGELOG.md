@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.0.11
+
+### Patch Changes
+
+- change the query engine to use d2mini, and simplified version of the d2ts differential dataflow library ([#175](https://github.com/TanStack/db/pull/175))
+
+- Export `ElectricCollectionUtils` & allow passing generic to `createTransaction` ([#179](https://github.com/TanStack/db/pull/179))
+
 ## 0.0.10
 
 ### Patch Changes
