@@ -1,14 +1,6 @@
 import { describe, expect, test } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Query } from "../../src/query/index.js"
 
 // Sample user type for tests
@@ -76,11 +68,11 @@ describe(`Query Function Integration`, () => {
    * Helper function to run a query and return results
    */
   function runQuery(query: Query): Array<any> {
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, User]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -90,18 +82,15 @@ describe(`Query Function Integration`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Return only the data (not the counts)
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    if (dataMessages.length === 0) return []
+    if (messages.length === 0) return []
 
-    return dataMessages[0]!.data.collection.getInner().map(([data]) => data)
+    return messages[0]!.getInner().map(([data]) => data)
   }
 
   describe(`String functions`, () => {

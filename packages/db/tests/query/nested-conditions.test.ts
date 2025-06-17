@@ -1,15 +1,7 @@
 import { describe, expect, test } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
 import type { Query } from "../../src/query/index.js"
-import type { Message } from "@electric-sql/d2ts"
 import type {
   FlatCompositeCondition,
   NestedCompositeCondition,
@@ -315,11 +307,11 @@ describe(`Query`, () => {
 
 // Helper function to run queries and collect results
 function runQuery(query: Query): Array<any> {
-  const graph = new D2({ initialFrontier: v([0, 0]) })
+  const graph = new D2()
   const input = graph.newInput<[number, Product]>()
   const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-  const messages: Array<Message<any>> = []
+  const messages: Array<MultiSet<any>> = []
   pipeline.pipe(
     output((message) => {
       messages.push(message)
@@ -329,18 +321,11 @@ function runQuery(query: Query): Array<any> {
   graph.finalize()
 
   input.sendData(
-    v([1, 0]),
     new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
   )
-  input.sendFrontier(new Antichain([v([1, 0])]))
 
   graph.run()
 
   // Check the filtered results
-  const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-  if (dataMessages.length === 0) {
-    return []
-  }
-
-  return dataMessages[0]!.data.collection.getInner().map(([data]) => data[1])
+  return messages[0]!.getInner().map(([data]) => data[1])
 }

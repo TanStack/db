@@ -1,4 +1,4 @@
-import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQueryPipeline } from "./pipeline-compiler.js"
 import type { Collection } from "../collection.js"
@@ -7,7 +7,7 @@ import type {
   IStreamBuilder,
   MultiSetArray,
   RootStreamBuilder,
-} from "@electric-sql/d2ts"
+} from "@electric-sql/d2mini"
 import type { QueryBuilder, ResultsFromContext } from "./query-builder.js"
 import type { Context, Schema } from "./types.js"
 
@@ -25,7 +25,6 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
   private inputCollections: Record<string, Collection<any>>
   private resultCollection: Collection<TResults>
   public state: `compiled` | `running` | `stopped` = `compiled`
-  private version = 0
   private unsubscribeCallbacks: Array<() => void> = []
 
   constructor(queryBuilder: QueryBuilder<Context<Schema>>) {
@@ -38,7 +37,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     this.inputCollections = collections
 
-    const graph = new D2({ initialFrontier: this.version })
+    const graph = new D2()
     const inputs = Object.fromEntries(
       Object.entries(collections).map(([key]) => [key, graph.newInput<any>()])
     )
@@ -48,48 +47,46 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
         query,
         inputs
       ).pipe(
-        output(({ type, data }) => {
-          if (type === MessageType.DATA) {
-            begin()
-            data.collection
-              .getInner()
-              .reduce((acc, [[key, value], multiplicity]) => {
-                const changes = acc.get(key) || {
-                  deletes: 0,
-                  inserts: 0,
-                  value,
-                }
-                if (multiplicity < 0) {
-                  changes.deletes += Math.abs(multiplicity)
-                } else if (multiplicity > 0) {
-                  changes.inserts += multiplicity
-                  changes.value = value
-                }
-                acc.set(key, changes)
-                return acc
-              }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
-              .forEach((changes, rawKey) => {
-                const { deletes, inserts, value } = changes
-                const valueWithKey = { ...value, _key: rawKey }
-                if (inserts && !deletes) {
-                  write({
-                    value: valueWithKey,
-                    type: `insert`,
-                  })
-                } else if (inserts >= deletes) {
-                  write({
-                    value: valueWithKey,
-                    type: `update`,
-                  })
-                } else if (deletes > 0) {
-                  write({
-                    value: valueWithKey,
-                    type: `delete`,
-                  })
-                }
-              })
-            commit()
-          }
+        output((data) => {
+          begin()
+          data
+            .getInner()
+            .reduce((acc, [[key, value], multiplicity]) => {
+              const changes = acc.get(key) || {
+                deletes: 0,
+                inserts: 0,
+                value,
+              }
+              if (multiplicity < 0) {
+                changes.deletes += Math.abs(multiplicity)
+              } else if (multiplicity > 0) {
+                changes.inserts += multiplicity
+                changes.value = value
+              }
+              acc.set(key, changes)
+              return acc
+            }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
+            .forEach((changes, rawKey) => {
+              const { deletes, inserts, value } = changes
+              const valueWithKey = { ...value, _key: rawKey }
+              if (inserts && !deletes) {
+                write({
+                  value: valueWithKey,
+                  type: `insert`,
+                })
+              } else if (inserts >= deletes) {
+                write({
+                  value: valueWithKey,
+                  type: `update`,
+                })
+              } else if (deletes > 0) {
+                write({
+                  value: valueWithKey,
+                  type: `delete`,
+                })
+              }
+            })
+          commit()
         })
       )
       graph.finalize()
@@ -131,22 +128,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
         multiSetArray.push([[key, change.value], -1])
       }
     }
-    input.sendData(this.version, new MultiSet(multiSetArray))
-  }
-
-  private sendFrontierToInput(inputKey: string) {
-    const input = this.inputs[inputKey]!
-    input.sendFrontier(this.version)
-  }
-
-  private sendFrontierToAllInputs() {
-    Object.entries(this.inputs).forEach(([key]) => {
-      this.sendFrontierToInput(key)
-    })
-  }
-
-  private incrementVersion() {
-    this.version++
+    input.sendData(new MultiSet(multiSetArray))
   }
 
   private runGraph() {
@@ -168,16 +150,12 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
         collection.config.getKey
       )
     })
-    this.incrementVersion()
-    this.sendFrontierToAllInputs()
     this.runGraph()
 
     // Subscribe to changes
     Object.entries(this.inputCollections).forEach(([key, collection]) => {
       const unsubscribe = collection.subscribeChanges((changes) => {
         this.sendChangesToInput(key, changes, collection.config.getKey)
-        this.incrementVersion()
-        this.sendFrontierToAllInputs()
         this.runGraph()
       })
 

@@ -1,11 +1,11 @@
-import { filter, map } from "@electric-sql/d2ts"
+import { filter, map } from "@electric-sql/d2mini"
 import { evaluateWhereOnNamespacedRow } from "./evaluators.js"
 import { processJoinClause } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelect } from "./select.js"
 import type { Query } from "./schema.js"
-import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type { IStreamBuilder } from "@electric-sql/d2mini"
 import type {
   InputRow,
   KeyedStream,

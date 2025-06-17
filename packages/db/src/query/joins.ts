@@ -3,11 +3,11 @@ import {
   filter,
   join as joinOperator,
   map,
-} from "@electric-sql/d2ts"
+} from "@electric-sql/d2mini"
 import { evaluateConditionOnNamespacedRow } from "./evaluators.js"
 import { extractJoinKey } from "./extractors.js"
 import type { Query } from "./index.js"
-import type { IStreamBuilder, JoinType } from "@electric-sql/d2ts"
+import type { IStreamBuilder, JoinType } from "@electric-sql/d2mini"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,

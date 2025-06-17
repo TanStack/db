@@ -1,14 +1,6 @@
 import { describe, expect, test } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Query } from "../../src/query/schema.js"
 
 // Sample user type for tests
@@ -51,11 +43,11 @@ describe(`Query`, () => {
         from: `users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -65,18 +57,15 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check that we have 4 users in the result
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      expect(dataMessages).toHaveLength(1)
+      expect(messages).toHaveLength(1)
 
-      const collection = dataMessages[0]!.data.collection
+      const collection = messages[0]!
       expect(collection.getInner()).toHaveLength(4)
 
       // Check the structure of the results
@@ -101,11 +90,11 @@ describe(`Query`, () => {
         from: `users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -115,18 +104,13 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the structure of the results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // The results should contain objects with only the selected columns and aliases
       expect(results).toContainEqual([
@@ -154,11 +138,11 @@ describe(`Query`, () => {
         where: [[`@age`, `>`, 20]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -168,18 +152,13 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include users with age > 20
       expect(results).toHaveLength(3) // Alice, Charlie, Dave
@@ -201,11 +180,11 @@ describe(`Query`, () => {
         where: [[`@age`, `>`, 20, `and`, `@active`, `=`, true]],
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -215,18 +194,13 @@ describe(`Query`, () => {
       graph.finalize()
 
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       graph.run()
 
       // Check the filtered results
-      const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-      const results = dataMessages[0]!.data.collection
-        .getInner()
-        .map(([data]) => data)
+      const results = messages[0]!.getInner().map(([data]) => data)
 
       // Should only include users with age > 20 AND active = true
       expect(results).toHaveLength(2) // Alice and Dave

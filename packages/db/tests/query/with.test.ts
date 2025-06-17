@@ -1,14 +1,6 @@
 import { describe, expect, test } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Query } from "../../src/query/schema.js"
 
 // Sample user type for tests
@@ -66,11 +58,11 @@ describe(`Query`, () => {
         from: `adult_users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { users: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -81,18 +73,14 @@ describe(`Query`, () => {
 
       // Send data to the input
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       // Run the graph
       graph.run()
 
       // Check the results
-      const results = messages
-        .filter((m) => m.type === MessageType.DATA)
-        .flatMap((m) => m.data.collection.getInner().map(([data]) => data[1]))
+      const results = messages[0]!.getInner().map(([data]) => data[1])
 
       // Should only include users over 20
       expect(results).toHaveLength(3)
@@ -131,11 +119,11 @@ describe(`Query`, () => {
         from: `active_adult_users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
       const pipeline = compileQueryPipeline(query, { users: input })
 
-      const messages: Array<Message<any>> = []
+      const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
@@ -146,18 +134,14 @@ describe(`Query`, () => {
 
       // Send data to the input
       input.sendData(
-        v([1, 0]),
         new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
       )
-      input.sendFrontier(new Antichain([v([1, 0])]))
 
       // Run the graph
       graph.run()
 
       // Check the results
-      const results = messages
-        .filter((m) => m.type === MessageType.DATA)
-        .flatMap((m) => m.data.collection.getInner().map(([data]) => data[1]))
+      const results = messages[0]!.getInner().map(([data]) => data[1])
 
       // Should only include active users over 20
       expect(results).toHaveLength(2)
@@ -181,7 +165,7 @@ describe(`Query`, () => {
         from: `adult_users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
 
       // Should throw an error because the CTE is missing the 'as' property
@@ -211,7 +195,7 @@ describe(`Query`, () => {
         from: `filtered_users`,
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
 
       // Should throw an error because of duplicate CTE names
@@ -235,7 +219,7 @@ describe(`Query`, () => {
         from: `non_existent_cte`, // This CTE doesn't exist
       }
 
-      const graph = new D2({ initialFrontier: v([0, 0]) })
+      const graph = new D2()
       const input = graph.newInput<[number, User]>()
 
       // Should throw an error because the referenced CTE doesn't exist

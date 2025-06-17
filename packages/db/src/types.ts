@@ -1,4 +1,4 @@
-import type { IStreamBuilder } from "@electric-sql/d2ts"
+import type { IStreamBuilder } from "@electric-sql/d2mini"
 import type { Collection } from "./collection"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"

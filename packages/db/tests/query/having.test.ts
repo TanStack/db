@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest"
-import {
-  Antichain,
-  D2,
-  MessageType,
-  MultiSet,
-  output,
-  v,
-} from "@electric-sql/d2ts"
+import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { Message } from "@electric-sql/d2ts"
 import type { Condition, Query } from "../../src/query/schema.js"
 
 describe(`Query - HAVING Clause`, () => {
@@ -107,11 +99,11 @@ describe(`Query - HAVING Clause`, () => {
       having: [[`@price`, `>`, 300] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -121,18 +113,13 @@ describe(`Query - HAVING Clause`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(4)
     expect(results.every((p) => p.price > 300)).toBe(true)
@@ -151,11 +138,11 @@ describe(`Query - HAVING Clause`, () => {
       having: [[`@price`, `>`, 200] as Condition],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -165,18 +152,13 @@ describe(`Query - HAVING Clause`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(3)
     expect(results.every((p) => p.inStock === true)).toBe(true)
@@ -202,11 +184,11 @@ describe(`Query - HAVING Clause`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -216,18 +198,13 @@ describe(`Query - HAVING Clause`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     expect(results).toHaveLength(2)
 
@@ -258,11 +235,11 @@ describe(`Query - HAVING Clause`, () => {
       ],
     }
 
-    const graph = new D2({ initialFrontier: v([0, 0]) })
+    const graph = new D2()
     const input = graph.newInput<[number, Product]>()
     const pipeline = compileQueryPipeline(query, { [query.from]: input })
 
-    const messages: Array<Message<any>> = []
+    const messages: Array<MultiSet<any>> = []
     pipeline.pipe(
       output((message) => {
         messages.push(message)
@@ -272,18 +249,13 @@ describe(`Query - HAVING Clause`, () => {
     graph.finalize()
 
     input.sendData(
-      v([1, 0]),
       new MultiSet(sampleProducts.map((product) => [[product.id, product], 1]))
     )
-    input.sendFrontier(new Antichain([v([1, 0])]))
 
     graph.run()
 
     // Check the filtered results
-    const dataMessages = messages.filter((m) => m.type === MessageType.DATA)
-    const results = dataMessages[0]!.data.collection
-      .getInner()
-      .map(([data]) => data[1])
+    const results = messages[0]!.getInner().map(([data]) => data[1])
 
     // Expected: inexpensive electronics or in-stock furniture
     expect(results).toHaveLength(3)
