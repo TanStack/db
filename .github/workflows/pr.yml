@@ -12,6 +12,7 @@ env:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -42,5 +43,17 @@ jobs:
         uses: tanstack/config/.github/setup@main
       - name: Build Packages
         run: pnpm run build
+      - name: Compressed Size Action - DB Package
+        uses: preactjs/compressed-size-action@v2
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          pattern: "./packages/db/dist/**/*.{js,mjs}"
+          comment-key: "db-package-size"
+      - name: Compressed Size Action - React DB Package
+        uses: preactjs/compressed-size-action@v2
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          pattern: "./packages/react-db/dist/**/*.{js,mjs}"
+          comment-key: "react-db-package-size"
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
