@@ -1043,9 +1043,13 @@ export class CollectionImpl<
       })
       .filter(Boolean) as Array<PendingMutation<T>>
 
-    // If no changes were made, return early
+    // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      throw new Error(`No changes were made to any of the objects`)
+      const emptyTransaction = new Transaction({
+        mutationFn: async () => {},
+      })
+      emptyTransaction.commit()
+      return emptyTransaction
     }
 
     // If an ambient transaction exists, use it
