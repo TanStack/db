@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.10
+
+### Patch Changes
+
+- If collection.update is called and nothing is changed, return a transaction instead of throwing ([#174](https://github.com/TanStack/db/pull/174))
+
 ## 0.0.9
 
 ### Patch Changes
