@@ -74,14 +74,14 @@ export interface ElectricCollectionConfig<
   ) => Promise<{ txid: string } | undefined>
 }
 
-function isUpToDateMessage<T>(
+function isUpToDateMessage<T extends Row<unknown>>(
   message: Message<T>
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
 // Check if a message contains txids in its headers
-function hasTxids<T>(
+function hasTxids<T extends Row<unknown>>(
   message: Message<T>
 ): message is Message<T> & { headers: { txids?: Array<number> } } {
   return (
@@ -233,7 +233,7 @@ export function electricCollectionOptions<
 /**
  * Internal function to create ElectricSQL sync configuration
  */
-function createElectricSync<T>(
+function createElectricSync<T extends object>(
   shapeOptions: ShapeStreamOptions,
   options: {
     seenTxids: Store<Set<string>>
