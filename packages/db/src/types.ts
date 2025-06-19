@@ -5,6 +5,8 @@ import type { Transaction } from "./transactions"
 
 /**
  * Helper type to extract the output type from a standard schema
+ *
+ * @internal This is used by the type resolution system
  */
 export type InferSchemaOutput<T> = T extends StandardSchemaV1
   ? StandardSchemaV1.InferOutput<T> extends object
@@ -17,6 +19,10 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
  * 1. Explicit generic TExplicit (if not 'unknown')
  * 2. Schema output type (if schema provided)
  * 3. Fallback type TFallback
+ *
+ * @remarks
+ * This type is used internally to resolve the collection item type based on the provided generics and schema.
+ * Users should not need to use this type directly, but understanding the priority order helps when defining collections.
  */
 export type ResolveType<
   TExplicit,

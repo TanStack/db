@@ -44,12 +44,34 @@ export interface Collection<
  * Creates a new Collection instance with the given configuration
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param options - Collection options with optional utilities
  * @returns A new Collection with utilities exposed both at top level and under .utils
+ *
+ * @example
+ * // Using explicit type
+ * const todos = createCollection<Todo>({
+ *   getKey: (todo) => todo.id,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Using schema for type inference (preferred as it also gives you client side validation)
+ * const todoSchema = z.object({
+ *   id: z.string(),
+ *   title: z.string(),
+ *   completed: z.boolean()
+ * })
+ *
+ * const todos = createCollection({
+ *   schema: todoSchema,
+ *   getKey: (todo) => todo.id,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Note: You must provide either an explicit type or a schema, but not both
  */
 export function createCollection<
   TExplicit = unknown,
