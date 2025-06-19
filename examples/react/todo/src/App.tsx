@@ -6,9 +6,9 @@ import {
 } from "@tanstack/db-collections"
 // import { DevTools } from "./DevTools"
 import { QueryClient } from "@tanstack/query-core"
-import { updateConfigSchema, updateTodoSchema } from "./db/validation"
+import { selectConfigSchema, selectTodoSchema } from "./db/validation"
 import type { Collection } from "@tanstack/react-db"
-import type { UpdateConfig, UpdateTodo } from "./db/validation"
+import type { SelectConfig, SelectTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
 // API helper for todos and config
@@ -17,21 +17,21 @@ const API_BASE_URL = `http://localhost:3001/api`
 const api = {
   // Todo API methods
   todos: {
-    getAll: async (): Promise<Array<UpdateTodo>> => {
+    getAll: async (): Promise<Array<SelectTodo>> => {
       const response = await fetch(`${API_BASE_URL}/todos`)
       if (!response.ok)
         throw new Error(`HTTP error! Status: ${response.status}`)
       return response.json()
     },
-    getById: async (id: number): Promise<UpdateTodo> => {
+    getById: async (id: number): Promise<SelectTodo> => {
       const response = await fetch(`${API_BASE_URL}/todos/${id}`)
       if (!response.ok)
         throw new Error(`HTTP error! Status: ${response.status}`)
       return response.json()
     },
     create: async (
-      todo: Partial<UpdateTodo>
-    ): Promise<{ todo: UpdateTodo; txid: number }> => {
+      todo: Partial<SelectTodo>
+    ): Promise<{ todo: SelectTodo; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/todos`, {
         method: `POST`,
         headers: { "Content-Type": `application/json` },
@@ -43,8 +43,8 @@ const api = {
     },
     update: async (
       id: unknown,
-      changes: Partial<UpdateTodo>
-    ): Promise<{ todo: UpdateTodo; txid: number }> => {
+      changes: Partial<SelectTodo>
+    ): Promise<{ todo: SelectTodo; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
         method: `PUT`,
         headers: { "Content-Type": `application/json` },
@@ -68,21 +68,21 @@ const api = {
 
   // Config API methods
   config: {
-    getAll: async (): Promise<Array<UpdateConfig>> => {
+    getAll: async (): Promise<Array<SelectConfig>> => {
       const response = await fetch(`${API_BASE_URL}/config`)
       if (!response.ok)
         throw new Error(`HTTP error! Status: ${response.status}`)
       return response.json()
     },
-    getById: async (id: number): Promise<UpdateConfig> => {
+    getById: async (id: number): Promise<SelectConfig> => {
       const response = await fetch(`${API_BASE_URL}/config/${id}`)
       if (!response.ok)
         throw new Error(`HTTP error! Status: ${response.status}`)
       return response.json()
     },
     create: async (
-      config: Partial<UpdateConfig>
-    ): Promise<{ config: UpdateConfig; txid: number }> => {
+      config: Partial<SelectConfig>
+    ): Promise<{ config: SelectConfig; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/config`, {
         method: `POST`,
         headers: { "Content-Type": `application/json` },
@@ -94,8 +94,8 @@ const api = {
     },
     update: async (
       id: number,
-      changes: Partial<UpdateConfig>
-    ): Promise<{ config: UpdateConfig; txid: number }> => {
+      changes: Partial<SelectConfig>
+    ): Promise<{ config: SelectConfig; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/config/${id}`, {
         method: `PUT`,
         headers: { "Content-Type": `application/json` },
@@ -130,12 +130,12 @@ const collectionsCache = new Map()
 // Function to create the appropriate todo collection based on type
 const createTodoCollection = (type: CollectionType) => {
   if (collectionsCache.has(`todo`)) {
-    return collectionsCache.get(`todo`) as Collection<UpdateTodo>
+    return collectionsCache.get(`todo`) as Collection<SelectTodo>
   } else {
-    let newCollection: Collection<UpdateTodo>
+    let newCollection: Collection<SelectTodo>
     if (type === CollectionType.Electric) {
       newCollection = createCollection(
-        electricCollectionOptions<UpdateTodo>({
+        electricCollectionOptions({
           id: `todos`,
           shapeOptions: {
             url: `http://localhost:3003/v1/shape`,
@@ -147,8 +147,8 @@ const createTodoCollection = (type: CollectionType) => {
               timestamptz: (date: string) => new Date(date),
             },
           },
-          getKey: (item) => item.id!,
-          schema: updateTodoSchema,
+          getKey: (item) => item.id,
+          schema: selectTodoSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
             const response = await api.todos.create(modified)
@@ -165,7 +165,7 @@ const createTodoCollection = (type: CollectionType) => {
               })
             )
 
-            return { txid: String(txids[0].txid) }
+            return { txid: String(txids[0]!.txid) }
           },
           onDelete: async ({ transaction }) => {
             const txids = await Promise.all(
@@ -177,7 +177,7 @@ const createTodoCollection = (type: CollectionType) => {
               })
             )
 
-            return { txid: String(txids[0].txid) }
+            return { txid: String(txids[0]!.txid) }
           },
         })
       )
@@ -190,19 +190,15 @@ const createTodoCollection = (type: CollectionType) => {
           refetchInterval: 3000,
           queryFn: async () => {
             const todos = await api.todos.getAll()
-            // Turn date strings into Dates if needed
+            // Turn date strings into Dates
             return todos.map((todo) => ({
               ...todo,
-              created_at: todo.created_at
-                ? new Date(todo.created_at)
-                : undefined,
-              updated_at: todo.updated_at
-                ? new Date(todo.updated_at)
-                : undefined,
+              created_at: new Date(todo.created_at),
+              updated_at: new Date(todo.updated_at),
             }))
           },
-          getKey: (item: UpdateTodo) => item.id!,
-          schema: updateTodoSchema,
+          getKey: (item: SelectTodo) => item.id,
+          schema: selectTodoSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -235,9 +231,9 @@ const createTodoCollection = (type: CollectionType) => {
 // Function to create the appropriate config collection based on type
 const createConfigCollection = (type: CollectionType) => {
   if (collectionsCache.has(`config`)) {
-    return collectionsCache.get(`config`)
+    return collectionsCache.get(`config`) as Collection<SelectConfig>
   } else {
-    let newCollection: Collection<UpdateConfig>
+    let newCollection: Collection<SelectConfig>
     if (type === CollectionType.Electric) {
       newCollection = createCollection(
         electricCollectionOptions({
@@ -254,8 +250,8 @@ const createConfigCollection = (type: CollectionType) => {
               },
             },
           },
-          getKey: (item: UpdateConfig) => item.id!,
-          schema: updateConfigSchema,
+          getKey: (item: SelectConfig) => item.id,
+          schema: selectConfigSchema,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
             const response = await api.config.create(modified)
@@ -286,19 +282,15 @@ const createConfigCollection = (type: CollectionType) => {
           refetchInterval: 3000,
           queryFn: async () => {
             const configs = await api.config.getAll()
-            // Turn date strings into Dates if needed
+            // Turn date strings into Dates
             return configs.map((config) => ({
               ...config,
-              created_at: config.created_at
-                ? new Date(config.created_at)
-                : undefined,
-              updated_at: config.updated_at
-                ? new Date(config.updated_at)
-                : undefined,
+              created_at: new Date(config.created_at),
+              updated_at: new Date(config.updated_at),
             }))
           },
-          getKey: (item: UpdateConfig) => item.id,
-          schema: updateConfigSchema,
+          getKey: (item: SelectConfig) => item.id,
+          schema: selectConfigSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
             const modified = transaction.mutations[0].modified
@@ -345,15 +337,12 @@ export default function App() {
 
   // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todoCollection: todoCollection })
-      .orderBy(`@created_at`)
-      .select(`@id`, `@created_at`, `@text`, `@completed`)
+    q.from({ todoCollection: todoCollection }).orderBy(`@created_at`)
   )
 
   const { data: configData } = useLiveQuery((q) =>
     q
-      .from({ configCollection: configCollection as Collection<UpdateConfig> })
+      .from({ configCollection: configCollection })
       .select(`@id`, `@key`, `@value`)
   )
 
@@ -371,7 +360,7 @@ export default function App() {
   const getConfigValue = (key: string): string => {
     for (const config of configData) {
       if (config.key === key) {
-        return config.value!
+        return config.value
       }
     }
     return ``
@@ -391,8 +380,11 @@ export default function App() {
 
     // If the config doesn't exist yet, create it
     configCollection.insert({
+      id: Math.random(),
       key,
       value,
+      created_at: new Date(),
+      updated_at: new Date(),
     })
   }
 
@@ -457,11 +449,13 @@ export default function App() {
       text: newTodo,
       completed: false,
       id: Math.round(Math.random() * 1000000),
+      created_at: new Date(),
+      updated_at: new Date(),
     })
     setNewTodo(``)
   }
 
-  const toggleTodo = (todo: UpdateTodo) => {
+  const toggleTodo = (todo: SelectTodo) => {
     console.log(todoCollection)
     todoCollection.update(todo.id, (draft) => {
       draft.completed = !draft.completed
