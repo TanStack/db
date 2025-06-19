@@ -224,6 +224,9 @@ importers:
 
   packages/db-collections:
     dependencies:
+      '@standard-schema/spec':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
