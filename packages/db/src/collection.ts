@@ -11,22 +11,15 @@ import type {
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
+  ResolveType,
   StandardSchema,
   Transaction as TransactionType,
   UtilsRecord,
 } from "./types"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
-
-// Map to track loading collections
-const loadingCollectionResolvers = new Map<
-  string,
-  {
-    promise: Promise<CollectionImpl<any, any>>
-    resolve: (value: CollectionImpl<any, any>) => void
-  }
->()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -36,6 +29,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
  * @template T - The type of items in the collection
+ * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
  */
 export interface Collection<
@@ -49,20 +43,31 @@ export interface Collection<
 /**
  * Creates a new Collection instance with the given configuration
  *
- * @template T - The type of items in the collection
+ * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TFallback - The fallback type if no explicit or schema type is provided
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
  * @param options - Collection options with optional utilities
  * @returns A new Collection with utilities exposed both at top level and under .utils
  */
 export function createCollection<
-  T extends object = Record<string, unknown>,
+  TExplicit = unknown,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TFallback extends object = Record<string, unknown>,
 >(
-  options: CollectionConfig<T, TKey> & { utils?: TUtils }
-): Collection<T, TKey, TUtils> {
-  const collection = new CollectionImpl<T, TKey>(options)
+  options: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    TSchema
+  > & { utils?: TUtils }
+): Collection<ResolveType<TExplicit, TSchema, TFallback>, TKey, TUtils> {
+  const collection = new CollectionImpl<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey
+  >(options)
 
   // Copy utils to both top level and .utils namespace
   if (options.utils) {
@@ -71,98 +76,11 @@ export function createCollection<
     collection.utils = {} as TUtils
   }
 
-  return collection as Collection<T, TKey, TUtils>
-}
-
-/**
- * Preloads a collection with the given configuration
- * Returns a promise that resolves once the sync tool has done its first commit (initial sync is finished)
- * If the collection has already loaded, it resolves immediately
- *
- * This function is useful in route loaders or similar pre-rendering scenarios where you want
- * to ensure data is available before a route transition completes. It uses the same shared collection
- * instance that will be used by useCollection, ensuring data consistency.
- *
- * @example
- * ```typescript
- * // In a route loader
- * async function loader({ params }) {
- *   await preloadCollection({
- *     id: `users-${params.userId}`,
- *     sync: { ... },
- *   });
- *
- *   return null;
- * }
- * ```
- *
- * @template T - The type of items in the collection
- * @param config - Configuration for the collection, including id and sync
- * @returns Promise that resolves when the initial sync is finished
- */
-export function preloadCollection<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
->(config: CollectionConfig<T, TKey>): Promise<CollectionImpl<T, TKey>> {
-  if (!config.id) {
-    throw new Error(`The id property is required for preloadCollection`)
-  }
-
-  // If the collection is already fully loaded, return a resolved promise
-  if (
-    collectionsStore.has(config.id) &&
-    !loadingCollectionResolvers.has(config.id)
-  ) {
-    return Promise.resolve(
-      collectionsStore.get(config.id)! as CollectionImpl<T, TKey>
-    )
-  }
-
-  // If the collection is in the process of loading, return its promise
-  if (loadingCollectionResolvers.has(config.id)) {
-    return loadingCollectionResolvers.get(config.id)!.promise
-  }
-
-  // Create a new collection instance if it doesn't exist
-  if (!collectionsStore.has(config.id)) {
-    collectionsStore.set(
-      config.id,
-      createCollection<T, TKey>({
-        id: config.id,
-        getKey: config.getKey,
-        sync: config.sync,
-        schema: config.schema,
-      })
-    )
-  }
-
-  const collection = collectionsStore.get(config.id)! as CollectionImpl<T, TKey>
-
-  // Create a promise that will resolve after the first commit
-  let resolveFirstCommit: (value: CollectionImpl<T, TKey>) => void
-  const firstCommitPromise = new Promise<CollectionImpl<T, TKey>>((resolve) => {
-    resolveFirstCommit = resolve
-  })
-
-  // Store the loading promise first
-  loadingCollectionResolvers.set(config.id, {
-    promise: firstCommitPromise,
-    resolve: resolveFirstCommit!,
-  })
-
-  // Register a one-time listener for the first commit
-  collection.onFirstCommit(() => {
-    if (!config.id) {
-      throw new Error(`The id property is required for preloadCollection`)
-    }
-    if (loadingCollectionResolvers.has(config.id)) {
-      const resolver = loadingCollectionResolvers.get(config.id)!
-      loadingCollectionResolvers.delete(config.id)
-      resolver.resolve(collection)
-    }
-  })
-
-  return firstCommitPromise
+  return collection as Collection<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    TUtils
+  >
 }
 
 /**
@@ -221,7 +139,7 @@ export class CollectionImpl<
 
   private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   private syncedKeys = new Set<TKey>()
-  public config: CollectionConfig<T, TKey>
+  public config: CollectionConfig<T, TKey, any>
   private hasReceivedFirstCommit = false
 
   // Array to store one-time commit listeners
@@ -244,7 +162,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey>) {
+  constructor(config: CollectionConfig<T, TKey, any>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)

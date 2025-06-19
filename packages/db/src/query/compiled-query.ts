@@ -2,7 +2,7 @@ import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQueryPipeline } from "./pipeline-compiler.js"
 import type { Collection } from "../collection.js"
-import type { ChangeMessage, SyncConfig } from "../types.js"
+import type { ChangeMessage, ResolveType, SyncConfig } from "../types.js"
 import type {
   IStreamBuilder,
   MultiSetArray,
@@ -42,6 +42,7 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       Object.entries(collections).map(([key]) => [key, graph.newInput<any>()])
     )
 
+    // Use TResults directly to ensure type compatibility
     const sync: SyncConfig<TResults>[`sync`] = ({ begin, write, commit }) => {
       compileQueryPipeline<IStreamBuilder<[unknown, TResults]>>(
         query,
@@ -95,14 +96,30 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     this.graph = graph
     this.inputs = inputs
     this.resultCollection = createCollection<TResults>({
-      id: crypto.randomUUID(), // TODO: remove when we don't require any more
       getKey: (val: unknown) => {
         return (val as any)._key
       },
       sync: {
-        sync,
+        sync: sync as unknown as (params: {
+          collection: Collection<
+            ResolveType<TResults, never, Record<string, unknown>>,
+            string | number,
+            {}
+          >
+          begin: () => void
+          write: (
+            message: Omit<
+              ChangeMessage<
+                ResolveType<TResults, never, Record<string, unknown>>,
+                string | number
+              >,
+              `key`
+            >
+          ) => void
+          commit: () => void
+        }) => void,
       },
-    })
+    }) as unknown as Collection<TResults, string | number, {}>
   }
 
   get results() {

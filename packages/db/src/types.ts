@@ -3,6 +3,33 @@ import type { Collection } from "./collection"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 
+/**
+ * Helper type to extract the output type from a standard schema
+ */
+export type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * Helper type to determine the final type based on priority:
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema output type (if schema provided)
+ * 3. Fallback type TFallback
+ */
+export type ResolveType<
+  TExplicit,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaOutput<TSchema>
+  : TExplicit extends object
+    ? TExplicit
+    : Record<string, unknown>
+
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -151,12 +178,13 @@ export interface InsertConfig {
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
   id?: string
   sync: SyncConfig<T, TKey>
-  schema?: StandardSchema<T>
+  schema?: TSchema
   /**
    * Function to extract the ID from an object
    * This is required for update/delete operations which now only accept IDs

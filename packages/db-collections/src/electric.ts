@@ -7,9 +7,11 @@ import { Store } from "@tanstack/store"
 import type {
   CollectionConfig,
   MutationFnParams,
+  ResolveType,
   SyncConfig,
   UtilsRecord,
 } from "@tanstack/db"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ControlMessage,
   Message,
@@ -19,8 +21,15 @@ import type {
 
 /**
  * Configuration interface for Electric collection options
+ * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TFallback - The fallback type if no explicit or schema type is provided
  */
-export interface ElectricCollectionConfig<T extends Row<unknown>> {
+export interface ElectricCollectionConfig<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends Row<unknown> = Row<unknown>,
+> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
@@ -30,9 +39,9 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * All standard Collection configuration properties
    */
   id?: string
-  schema?: CollectionConfig<T>[`schema`]
-  getKey: CollectionConfig<T>[`getKey`]
-  sync?: CollectionConfig<T>[`sync`]
+  schema?: TSchema
+  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
+  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -41,7 +50,7 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @returns Promise resolving to an object with txid
    */
   onInsert?: (
-    params: MutationFnParams<T>
+    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 
   /**
@@ -51,7 +60,7 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @returns Promise resolving to an object with txid
    */
   onUpdate?: (
-    params: MutationFnParams<T>
+    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 
   /**
@@ -61,18 +70,18 @@ export interface ElectricCollectionConfig<T extends Row<unknown>> {
    * @returns Promise resolving to an object with txid
    */
   onDelete?: (
-    params: MutationFnParams<T>
+    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 }
 
-function isUpToDateMessage<T extends Row<unknown>>(
+function isUpToDateMessage<T>(
   message: Message<T>
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
 // Check if a message contains txids in its headers
-function hasTxids<T extends Row<unknown> = Row>(
+function hasTxids<T>(
   message: Message<T>
 ): message is Message<T> & { headers: { txids?: Array<number> } } {
   return (
@@ -97,16 +106,24 @@ export interface ElectricCollectionUtils extends UtilsRecord {
 /**
  * Creates Electric collection options for use with a standard Collection
  *
+ * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the Electric collection
  * @returns Collection options with utilities
  */
-export function electricCollectionOptions<T extends Row<unknown>>(
-  config: ElectricCollectionConfig<T>
-) {
+export function electricCollectionOptions<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends Row<unknown> = Row<unknown>,
+>(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
   const seenTxids = new Store<Set<string>>(new Set([`${Math.random()}`]))
-  const sync = createElectricSync<T>(config.shapeOptions, {
-    seenTxids,
-  })
+  const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
+    config.shapeOptions,
+    {
+      seenTxids,
+    }
+  )
 
   /**
    * Wait for a specific transaction ID to be synced
@@ -139,7 +156,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
-    ? async (params: MutationFnParams<T>) => {
+    ? async (
+        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+      ) => {
         const handlerResult = (await config.onInsert!(params)) ?? {}
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -155,7 +174,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (params: MutationFnParams<T>) => {
+    ? async (
+        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+      ) => {
         const handlerResult = await config.onUpdate!(params)
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -171,7 +192,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (params: MutationFnParams<T>) => {
+    ? async (
+        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+      ) => {
         const handlerResult = await config.onDelete!(params)
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -210,7 +233,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 /**
  * Internal function to create ElectricSQL sync configuration
  */
-function createElectricSync<T extends Row<unknown>>(
+function createElectricSync<T>(
   shapeOptions: ShapeStreamOptions,
   options: {
     seenTxids: Store<Set<string>>
