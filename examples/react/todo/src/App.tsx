@@ -150,7 +150,12 @@ const createTodoCollection = (type: CollectionType) => {
           getKey: (item) => item.id,
           schema: selectTodoSchema,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0].modified
+            const {
+              id: _id,
+              created_at: _f,
+              updated_at: _ff,
+              ...modified
+            } = transaction.mutations[0].modified
             const response = await api.todos.create(modified)
 
             return { txid: String(response.txid) }
@@ -201,7 +206,12 @@ const createTodoCollection = (type: CollectionType) => {
           schema: selectTodoSchema,
           queryClient,
           onInsert: async ({ transaction }) => {
-            const modified = transaction.mutations[0].modified
+            const {
+              id: _id,
+              created_at: _crea,
+              updated_at: _up,
+              ...modified
+            } = transaction.mutations[0].modified
             return await api.todos.create(modified)
           },
           onUpdate: async ({ transaction }) => {
@@ -337,7 +347,10 @@ export default function App() {
 
   // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
-    q.from({ todoCollection: todoCollection }).orderBy(`@created_at`)
+    q
+      .from({ todoCollection: todoCollection })
+      .orderBy(`@created_at`)
+      .select(`@*`)
   )
 
   const { data: configData } = useLiveQuery((q) =>
@@ -453,13 +466,6 @@ export default function App() {
       updated_at: new Date(),
     })
     setNewTodo(``)
-  }
-
-  const toggleTodo = (todo: SelectTodo) => {
-    console.log(todoCollection)
-    todoCollection.update(todo.id, (draft) => {
-      draft.completed = !draft.completed
-    })
   }
 
   const activeTodos = todos.filter((todo) => !todo.completed)
@@ -591,7 +597,11 @@ export default function App() {
                         <input
                           type="checkbox"
                           checked={todo.completed}
-                          onChange={() => toggleTodo(todo)}
+                          onChange={() =>
+                            todoCollection.update(todo.id, (draft) => {
+                              draft.completed = !draft.completed
+                            })
+                          }
                           className="absolute left-[12px] top-0 bottom-0 my-auto h-[40px] w-[40px] cursor-pointer"
                         />
                         <label
