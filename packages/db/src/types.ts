@@ -59,7 +59,11 @@ export interface PendingMutation<
   mutationId: string
   original: TOperation extends `insert` ? {} : T
   modified: T
-  changes: TOperation extends `insert` ? T : Partial<T>
+  changes: TOperation extends `insert`
+    ? T
+    : TOperation extends `delete`
+      ? T
+      : Partial<T>
   globalKey: string
   key: any
   type: OperationType
@@ -92,8 +96,9 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
  */
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
 > = Transaction<T> & {
-  mutations: NonEmptyArray<PendingMutation<T>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
