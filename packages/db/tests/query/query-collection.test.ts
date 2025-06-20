@@ -258,12 +258,30 @@ describe(`Query Collections`, () => {
           id: `4`,
         },
       },
+      {
+        key: `5`,
+        type: `insert`,
+        changes: {
+          id: `5`,
+          name: `Kyle Doe5`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+        },
+      },
+      {
+        type: `update`,
+        changes: {
+          id: `5`,
+          name: `Kyle Doe 5`,
+        },
+      },
     ])
 
     await waitForChanges()
 
-    expect(result.state.size).toBe(3)
-    expect(result.asStoreArray().state.length).toBe(3)
+    expect(result.state.size).toBe(4)
+    expect(result.asStoreArray().state.length).toBe(4)
     expect(result.state.get(`4`)).toBeUndefined()
   })
 

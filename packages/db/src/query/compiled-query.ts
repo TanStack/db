@@ -83,8 +83,9 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
                   type: `insert`,
                 })
               } else if (
-                inserts >= deletes &&
-                collection.has(valueWithKey._key as string | number)
+                inserts > deletes ||
+                (inserts === deletes &&
+                  collection.has(valueWithKey._key as string | number))
               ) {
                 console.log(2)
                 write({
