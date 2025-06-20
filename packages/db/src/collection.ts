@@ -965,9 +965,9 @@ export class CollectionImpl<
 
         return {
           mutationId: crypto.randomUUID(),
-          original: originalItem as Record<string, unknown>,
-          modified: modifiedItem as Record<string, unknown>,
-          changes: validatedUpdatePayload as Record<string, unknown>,
+          original: originalItem,
+          modified: modifiedItem,
+          changes: validatedUpdatePayload as Partial<T>,
           globalKey,
           key,
           metadata: config.metadata as unknown,
@@ -1063,9 +1063,9 @@ export class CollectionImpl<
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
-        original: this.get(key) || {},
+        original: this.get(key)!,
         modified: this.get(key)!,
-        changes: this.get(key) || {},
+        changes: this.get(key)!,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
