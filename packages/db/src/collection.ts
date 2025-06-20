@@ -125,7 +125,7 @@ export class SchemaValidationError extends Error {
   ) {
     const defaultMessage = `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
       .map((issue) => `\n- ${issue.message} - path: ${issue.path}`)
-      .join(`\n`)}`
+      .join(``)}`
 
     super(message || defaultMessage)
     this.name = `SchemaValidationError`
