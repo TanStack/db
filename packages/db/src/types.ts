@@ -54,7 +54,7 @@ export type UtilsRecord = Record<string, Fn>
  */
 export interface PendingMutation<T extends object = Record<string, unknown>> {
   mutationId: string
-  original: T
+  original: T | {}
   modified: T
   changes: Partial<T>
   globalKey: string
