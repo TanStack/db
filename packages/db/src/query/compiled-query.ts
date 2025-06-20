@@ -74,8 +74,10 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
             }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
             .forEach((changes, rawKey) => {
               const { deletes, inserts, value } = changes
+              console.log({ deletes, inserts, value, _key: rawKey })
               const valueWithKey = { ...value, _key: rawKey }
               if (inserts && !deletes) {
+                console.log(1)
                 write({
                   value: valueWithKey,
                   type: `insert`,
@@ -84,16 +86,19 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
                 inserts >= deletes &&
                 collection.has(valueWithKey._key as string | number)
               ) {
+                console.log(2)
                 write({
                   value: valueWithKey,
                   type: `update`,
                 })
               } else if (deletes > 0) {
+                console.log(3)
                 write({
                   value: valueWithKey,
                   type: `delete`,
                 })
               }
+              console.log(4)
             })
           commit()
         })
