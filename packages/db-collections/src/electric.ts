@@ -6,9 +6,11 @@ import {
 import { Store } from "@tanstack/store"
 import type {
   CollectionConfig,
-  MutationFnParams,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
   ResolveType,
   SyncConfig,
+  UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
@@ -58,7 +60,7 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid
    */
   onInsert?: (
-    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 
   /**
@@ -68,7 +70,7 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid
    */
   onUpdate?: (
-    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 
   /**
@@ -78,7 +80,7 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid
    */
   onDelete?: (
-    params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
   ) => Promise<{ txid: string } | undefined>
 }
 
