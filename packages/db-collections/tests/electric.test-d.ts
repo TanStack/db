@@ -116,7 +116,7 @@ describe(`Electric collection type resolution tests`, () => {
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(params.transaction.mutations[0].original).toEqualTypeOf<
-          Partial<ExplicitType>
+          ExplicitType | {}
         >()
         return Promise.resolve({ txid: `test` })
       },
