@@ -5,6 +5,7 @@
   "dependencies": {
     "@tanstack/db": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
+    "@standard-schema/spec": "^1.0.0",
     "@tanstack/store": "^0.7.0"
   },
   "devDependencies": {
