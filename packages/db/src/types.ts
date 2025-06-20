@@ -52,11 +52,14 @@ export type UtilsRecord = Record<string, Fn>
  * Represents a pending mutation within a transaction
  * Contains information about the original and modified data, as well as metadata
  */
-export interface PendingMutation<T extends object = Record<string, unknown>> {
+export interface PendingMutation<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> {
   mutationId: string
-  original: T | {}
+  original: TOperation extends `insert` ? {} : T
   modified: T
-  changes: Partial<T>
+  changes: TOperation extends `insert` ? T : Partial<T>
   globalKey: string
   key: any
   type: OperationType

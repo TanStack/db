@@ -743,7 +743,7 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T>> = []
+    const mutations: Array<PendingMutation<T, `insert`>> = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -757,7 +757,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T> = {
+      const mutation: PendingMutation<T, `insert`> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -927,7 +927,7 @@ export class CollectionImpl<
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T>> = keysArray
+    const mutations: Array<PendingMutation<T, `update`>> = keysArray
       .map((key, index) => {
         const itemChanges = changesArray[index] // User-provided changes for this specific item
 
@@ -981,7 +981,7 @@ export class CollectionImpl<
           collection: this,
         }
       })
-      .filter(Boolean) as Array<PendingMutation<T>>
+      .filter(Boolean) as Array<PendingMutation<T, `update`>>
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
@@ -1057,7 +1057,7 @@ export class CollectionImpl<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T>> = []
+    const mutations: Array<PendingMutation<T, `delete`>> = []
 
     for (const key of keysArray) {
       if (!this.has(key)) {
@@ -1066,7 +1066,7 @@ export class CollectionImpl<
         )
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T> = {
+      const mutation: PendingMutation<T, `delete`> = {
         mutationId: crypto.randomUUID(),
         original: this.get(key)!,
         modified: this.get(key)!,
