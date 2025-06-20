@@ -2,7 +2,12 @@ import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { electricCollectionOptions } from "../src/electric"
 import type { ElectricCollectionConfig } from "../src/electric"
-import type { MutationFnParams, ResolveType } from "@tanstack/db"
+import type {
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
+  ResolveType,
+  UpdateMutationFnParams,
+} from "@tanstack/db"
 import type { Row } from "@electric-sql/client"
 
 describe(`Electric collection type resolution tests`, () => {
@@ -115,9 +120,9 @@ describe(`Electric collection type resolution tests`, () => {
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
-        expectTypeOf(params.transaction.mutations[0].original).toEqualTypeOf<
-          ExplicitType | {}
-        >()
+        expectTypeOf(
+          params.transaction.mutations[0].original
+        ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ txid: `test` })
       },
     })
@@ -125,19 +130,19 @@ describe(`Electric collection type resolution tests`, () => {
     // Verify that the handlers are properly typed
     if (options.onInsert) {
       expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-        [MutationFnParams<ExplicitType>]
+        [InsertMutationFnParams<ExplicitType>]
       >()
     }
 
     if (options.onUpdate) {
       expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-        [MutationFnParams<ExplicitType>]
+        [UpdateMutationFnParams<ExplicitType>]
       >()
     }
 
     if (options.onDelete) {
       expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-        [MutationFnParams<ExplicitType>]
+        [DeleteMutationFnParams<ExplicitType>]
       >()
     }
   })
