@@ -61,7 +61,7 @@ export interface ElectricCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string } | undefined>
+  ) => Promise<{ txid: string }>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -71,7 +71,7 @@ export interface ElectricCollectionConfig<
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string } | undefined>
+  ) => Promise<{ txid: string }>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -81,7 +81,7 @@ export interface ElectricCollectionConfig<
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string } | undefined>
+  ) => Promise<{ txid: string }>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -167,8 +167,12 @@ export function electricCollectionOptions<
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
     ? async (
-        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+        params: InsertMutationFnParams<
+          ResolveType<TExplicit, TSchema, TFallback>
+        >
       ) => {
+        // Runtime check (that doesn't follow type)
+        // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
         const txid = (handlerResult as { txid?: string }).txid
 
@@ -185,9 +189,13 @@ export function electricCollectionOptions<
 
   const wrappedOnUpdate = config.onUpdate
     ? async (
-        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+        params: UpdateMutationFnParams<
+          ResolveType<TExplicit, TSchema, TFallback>
+        >
       ) => {
-        const handlerResult = await config.onUpdate!(params)
+        // Runtime check (that doesn't follow type)
+        // eslint-disable-next-line
+        const handlerResult = (await config.onUpdate!(params)) ?? {}
         const txid = (handlerResult as { txid?: string }).txid
 
         if (!txid) {
@@ -203,9 +211,13 @@ export function electricCollectionOptions<
 
   const wrappedOnDelete = config.onDelete
     ? async (
-        params: MutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+        params: DeleteMutationFnParams<
+          ResolveType<TExplicit, TSchema, TFallback>
+        >
       ) => {
-        const handlerResult = await config.onDelete!(params)
+        // Runtime check (that doesn't follow type)
+        // eslint-disable-next-line
+        const handlerResult = (await config.onDelete!(params)) ?? {}
         const txid = (handlerResult as { txid?: string }).txid
 
         if (!txid) {

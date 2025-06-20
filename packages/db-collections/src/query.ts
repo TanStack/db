@@ -79,6 +79,7 @@ export interface QueryCollectionConfig<
    * @returns Promise resolving to void or { refetch?: boolean } to control refetching
    */
   onDelete?: CollectionConfig<TItem>[`onDelete`]
+  // TODO type returning { refetch: boolean }
 }
 
 /**
