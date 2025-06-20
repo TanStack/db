@@ -189,6 +189,33 @@ export interface InsertConfig {
   metadata?: Record<string, unknown>
 }
 
+export type UpdateMutationFnParams<T extends object = Record<string, unknown>> =
+  {
+    transaction: TransactionWithMutations<T, `update`>
+  }
+
+export type InsertMutationFnParams<T extends object = Record<string, unknown>> =
+  {
+    transaction: TransactionWithMutations<T, `insert`>
+  }
+
+export type DeleteMutationFnParams<T extends object = Record<string, unknown>> =
+  {
+    transaction: TransactionWithMutations<T, `delete`>
+  }
+
+export type InsertMutationFn<T extends object = Record<string, unknown>> = (
+  params: InsertMutationFnParams<T>
+) => Promise<any>
+
+export type UpdateMutationFn<T extends object = Record<string, unknown>> = (
+  params: UpdateMutationFnParams<T>
+) => Promise<any>
+
+export type DeleteMutationFn<T extends object = Record<string, unknown>> = (
+  params: DeleteMutationFnParams<T>
+) => Promise<any>
+
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -214,19 +241,19 @@ export interface CollectionConfig<
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onInsert?: MutationFn<T>
+  onInsert?: InsertMutationFn<T>
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onUpdate?: MutationFn<T>
+  onUpdate?: UpdateMutationFn<T>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onDelete?: MutationFn<T>
+  onDelete?: DeleteMutationFn<T>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

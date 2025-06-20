@@ -8,14 +8,12 @@ import type {
   CollectionConfig,
   Fn,
   InsertConfig,
-  MutationFnParams,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
   ResolveType,
   StandardSchema,
   Transaction as TransactionType,
-  TransactionWithMutations,
   UtilsRecord,
 } from "./types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
@@ -789,11 +787,8 @@ export class CollectionImpl<
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = new Transaction<T>({
         mutationFn: async (params) => {
-          const insertParams = params as MutationFnParams<T> & {
-            transaction: TransactionWithMutations<T, `insert`>
-          }
           // Call the onInsert handler with the transaction
-          return this.config.onInsert!(insertParams)
+          return this.config.onInsert!(params)
         },
       })
 
@@ -1012,12 +1007,8 @@ export class CollectionImpl<
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = new Transaction<T>({
       mutationFn: async (params) => {
-        const updateParams = params as MutationFnParams<T> & {
-          transaction: TransactionWithMutations<T, `update`>
-        }
-
         // Call the onUpdate handler with the transaction
-        return this.config.onUpdate!(updateParams)
+        return this.config.onUpdate!(params)
       },
     })
 
@@ -1110,12 +1101,8 @@ export class CollectionImpl<
     const directOpTransaction = new Transaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
-        const deleteParams = params as MutationFnParams<T> & {
-          transaction: TransactionWithMutations<T, `delete`>
-        }
-
         // Call the onDelete handler with the transaction
-        return this.config.onDelete!(deleteParams)
+        return this.config.onDelete!(params)
       },
     })
 
