@@ -187,7 +187,7 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`4`)).toBeUndefined()
   })
 
-  it(`should handle deletes`, async () => {
+  it(`should handle multiple operations corrrectly`, async () => {
     const emitter = mitt()
 
     // Create collection with mutation capability

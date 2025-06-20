@@ -74,32 +74,33 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
             }, new Map<unknown, { deletes: number; inserts: number; value: TResults }>())
             .forEach((changes, rawKey) => {
               const { deletes, inserts, value } = changes
-              console.log({ deletes, inserts, value, _key: rawKey })
               const valueWithKey = { ...value, _key: rawKey }
-              if (inserts && !deletes) {
-                console.log(1)
+
+              // Simple singular insert.
+              if (inserts && deletes === 0) {
                 write({
                   value: valueWithKey,
                   type: `insert`,
                 })
               } else if (
+                // Insert & update(s) (updates are a delete & insert)
                 inserts > deletes ||
+                // Just update(s) but the item is already in the collection (so
+                // was inserted previously).
                 (inserts === deletes &&
                   collection.has(valueWithKey._key as string | number))
               ) {
-                console.log(2)
                 write({
                   value: valueWithKey,
                   type: `update`,
                 })
+                // Only delete is left as an option
               } else if (deletes > 0) {
-                console.log(3)
                 write({
                   value: valueWithKey,
                   type: `delete`,
                 })
               }
-              console.log(4)
             })
           commit()
         })
