@@ -187,6 +187,86 @@ describe(`Query Collections`, () => {
     expect(result.state.get(`4`)).toBeUndefined()
   })
 
+  it(`should handle deletes`, async () => {
+    const emitter = mitt()
+
+    // Create collection with mutation capability
+    const collection = createCollection<Person>({
+      id: `optimistic-changes-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Listen for sync events
+          emitter.on(`sync`, (changes) => {
+            begin()
+            ;(changes as Array<PendingMutation>).forEach((change) => {
+              write({
+                type: change.type,
+                value: change.changes as Person,
+              })
+            })
+            commit()
+          })
+        },
+      },
+    })
+
+    // Sync from initial state
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    const query = queryBuilder().from({ person: collection })
+
+    const compiledQuery = compileQuery(query)
+
+    compiledQuery.start()
+
+    const result = compiledQuery.results
+
+    expect(result.state.size).toBe(3)
+    expect(result.state.get(`3`)).toEqual({
+      _key: `3`,
+      age: 35,
+      email: `john.smith@example.com`,
+      id: `3`,
+      isActive: false,
+      name: `John Smith`,
+      createdAt: new Date(`2024-01-03`),
+    })
+
+    // Insert a new person and then delete it
+    emitter.emit(`sync`, [
+      {
+        key: `4`,
+        type: `insert`,
+        changes: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+        },
+      },
+      {
+        type: `delete`,
+        changes: {
+          id: `4`,
+        },
+      },
+    ])
+
+    await waitForChanges()
+
+    expect(result.state.size).toBe(3)
+    expect(result.asStoreArray().state.length).toBe(3)
+    expect(result.state.get(`4`)).toBeUndefined()
+  })
+
   it(`should be able to query a collection without a select using a callback for the where clause`, async () => {
     const emitter = mitt()
 
@@ -313,6 +393,7 @@ describe(`Query Collections`, () => {
     await waitForChanges()
 
     expect(result.state.size).toBe(1)
+    expect(result.asStoreArray().state.length).toBe(1)
     expect(result.state.get(`4`)).toBeUndefined()
   })
 

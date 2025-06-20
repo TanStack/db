@@ -43,7 +43,12 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     )
 
     // Use TResults directly to ensure type compatibility
-    const sync: SyncConfig<TResults>[`sync`] = ({ begin, write, commit }) => {
+    const sync: SyncConfig<TResults>[`sync`] = ({
+      begin,
+      write,
+      commit,
+      collection,
+    }) => {
       compileQueryPipeline<IStreamBuilder<[unknown, TResults]>>(
         query,
         inputs
@@ -75,7 +80,10 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
                   value: valueWithKey,
                   type: `insert`,
                 })
-              } else if (inserts >= deletes) {
+              } else if (
+                inserts >= deletes &&
+                collection.has(valueWithKey._key as string | number)
+              ) {
                 write({
                   value: valueWithKey,
                   type: `update`,
