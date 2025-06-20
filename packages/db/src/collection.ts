@@ -1060,6 +1060,11 @@ export class CollectionImpl<
     const mutations: Array<PendingMutation<T>> = []
 
     for (const key of keysArray) {
+      if (!this.has(key)) {
+        throw new Error(
+          `Collection.delete was called with key '${key}' but there is no item in the collection with this key`
+        )
+      }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
       const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
