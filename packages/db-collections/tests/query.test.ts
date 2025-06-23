@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
 import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
-import type { MutationFnParams, Transaction } from "@tanstack/db"
+import type {
+  MutationFnParams,
+  Transaction,
+  TransactionWithMutations,
+} from "@tanstack/db"
 import type { QueryCollectionConfig } from "../src/query"
 
 interface TestItem {
@@ -423,8 +427,12 @@ describe(`QueryCollection`, () => {
       const queryFn = vi.fn().mockResolvedValue(items)
 
       // Create a mock transaction for testing
-      const mockTransaction = { id: `test-transaction` } as Transaction
-      const mockParams: MutationFnParams = { transaction: mockTransaction }
+      const mockTransaction = {
+        id: `test-transaction`,
+      } as Transaction<TestItem>
+      const mockParams: MutationFnParams<TestItem> = {
+        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+      }
 
       // Create handlers
       const onInsert = vi.fn().mockResolvedValue(undefined)
@@ -457,8 +465,12 @@ describe(`QueryCollection`, () => {
 
     it(`should call refetch based on handler return value`, async () => {
       // Create a mock transaction for testing
-      const mockTransaction = { id: `test-transaction` } as Transaction
-      const mockParams: MutationFnParams = { transaction: mockTransaction }
+      const mockTransaction = {
+        id: `test-transaction`,
+      } as Transaction<TestItem>
+      const mockParams: MutationFnParams<TestItem> = {
+        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+      }
 
       // Create handlers with different return values
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch

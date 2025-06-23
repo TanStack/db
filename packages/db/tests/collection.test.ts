@@ -515,17 +515,11 @@ describe(`Collection`, () => {
     const tx1 = createTransaction({ mutationFn })
     tx1.mutate(() => collection.insert(item))
 
-    // Should not throw when trying to delete a non-existent ID
+    // Throw when trying to delete a non-existent ID
     const tx2 = createTransaction({ mutationFn })
     expect(() =>
       tx2.mutate(() => collection.delete(`non-existent-id`))
-    ).not.toThrow()
-
-    // Should not throw when deleting by string key (even if key doesn't exist)
-    const tx4 = createTransaction({ mutationFn })
-    expect(() =>
-      tx4.mutate(() => collection.delete(`non-existent-key`))
-    ).not.toThrow()
+    ).toThrow()
 
     // Should not throw when deleting by ID
     const tx5 = createTransaction({ mutationFn })
@@ -612,7 +606,7 @@ describe(`Collection`, () => {
     )
 
     // Test delete handler
-    tx.mutate(() => collection.delete(`1`)) // Convert number to string to match expected type
+    tx.mutate(() => collection.delete(1))
 
     // Verify the handler functions were defined correctly
     // We're not testing actual invocation since that would require modifying the Collection class
@@ -674,7 +668,7 @@ describe(`Collection`, () => {
     expect(onUpdateMock).toHaveBeenCalledTimes(1)
 
     // Test direct delete operation
-    const deleteTx = collection.delete(`1`) // Convert number to string to match expected type
+    const deleteTx = collection.delete(1)
     expect(deleteTx).toBeDefined()
     expect(onDeleteMock).toHaveBeenCalledTimes(1)
 

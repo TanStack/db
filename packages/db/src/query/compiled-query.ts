@@ -2,7 +2,7 @@ import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQueryPipeline } from "./pipeline-compiler.js"
 import type { Collection } from "../collection.js"
-import type { ChangeMessage, SyncConfig } from "../types.js"
+import type { ChangeMessage, ResolveType, SyncConfig } from "../types.js"
 import type {
   IStreamBuilder,
   MultiSetArray,
@@ -42,7 +42,13 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       Object.entries(collections).map(([key]) => [key, graph.newInput<any>()])
     )
 
-    const sync: SyncConfig<TResults>[`sync`] = ({ begin, write, commit }) => {
+    // Use TResults directly to ensure type compatibility
+    const sync: SyncConfig<TResults>[`sync`] = ({
+      begin,
+      write,
+      commit,
+      collection,
+    }) => {
       compileQueryPipeline<IStreamBuilder<[unknown, TResults]>>(
         query,
         inputs
@@ -69,21 +75,35 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
             .forEach((changes, rawKey) => {
               const { deletes, inserts, value } = changes
               const valueWithKey = { ...value, _key: rawKey }
-              if (inserts && !deletes) {
+
+              // Simple singular insert.
+              if (inserts && deletes === 0) {
                 write({
                   value: valueWithKey,
                   type: `insert`,
                 })
-              } else if (inserts >= deletes) {
+              } else if (
+                // Insert & update(s) (updates are a delete & insert)
+                inserts > deletes ||
+                // Just update(s) but the item is already in the collection (so
+                // was inserted previously).
+                (inserts === deletes &&
+                  collection.has(valueWithKey._key as string | number))
+              ) {
                 write({
                   value: valueWithKey,
                   type: `update`,
                 })
+                // Only delete is left as an option
               } else if (deletes > 0) {
                 write({
                   value: valueWithKey,
                   type: `delete`,
                 })
+              } else {
+                throw new Error(
+                  `This should never happen ${JSON.stringify(changes)}`
+                )
               }
             })
           commit()
@@ -95,14 +115,30 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
     this.graph = graph
     this.inputs = inputs
     this.resultCollection = createCollection<TResults>({
-      id: crypto.randomUUID(), // TODO: remove when we don't require any more
       getKey: (val: unknown) => {
         return (val as any)._key
       },
       sync: {
-        sync,
+        sync: sync as unknown as (params: {
+          collection: Collection<
+            ResolveType<TResults, never, Record<string, unknown>>,
+            string | number,
+            {}
+          >
+          begin: () => void
+          write: (
+            message: Omit<
+              ChangeMessage<
+                ResolveType<TResults, never, Record<string, unknown>>,
+                string | number
+              >,
+              `key`
+            >
+          ) => void
+          commit: () => void
+        }) => void,
       },
-    })
+    }) as unknown as Collection<TResults, string | number, {}>
   }
 
   get results() {

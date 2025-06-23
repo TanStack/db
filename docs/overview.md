@@ -163,14 +163,18 @@ You can also use:
 
 All collections optionally support a `schema`.
 
-If provided, this should be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as a [Zod](https://zod.dev) or [Effect](https://effect.website/docs/schema/introduction/) schema.
+If provided, this must be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as a [Zod](https://zod.dev) or [Effect](https://effect.website/docs/schema/introduction/) schema.
+
+The collection will use the schema for its type so if you provide a schema, you can't also pass in an explicit
+type (e.g. `createCollection<Todo>()`).
+
 
 #### `QueryCollection`
 
 [TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `queryCollectionOptions` to fetch data into a collection using TanStack Query:
 
 ```ts
-const todoCollection = createCollection<Todo>(queryCollectionOptions({
+const todoCollection = createCollection(queryCollectionOptions({
   queryKey: ['todoItems'],
   queryFn: async () => fetch('/api/todos'),
   getKey: (item) => item.id,
@@ -190,7 +194,7 @@ Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/gu
 import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/db-collections'
 
-export const todoCollection = createCollection<Todo>(electricCollectionOptions({
+export const todoCollection = createCollection(electricCollectionOptions({
   id: 'todos',
   shapeOptions: {
     url: 'https://example.com/v1/shape',
@@ -215,7 +219,7 @@ When you create the collection, sync starts automatically.
 Electric shapes allow you to filter data using where clauses:
 
 ```ts
-export const myPendingTodos = createCollection<Todo>(electricCollectionOptions({
+export const myPendingTodos = createCollection(electricCollectionOptions({
   id: 'todos',
   shapeOptions: {
     url: 'https://example.com/v1/shape',

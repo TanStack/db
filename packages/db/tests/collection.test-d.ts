@@ -1,6 +1,9 @@
 import { assertType, describe, expectTypeOf, it } from "vitest"
+import { z } from "zod"
+import { createCollection } from "../src/collection"
 import type { CollectionImpl } from "../src/collection"
-import type { OperationConfig } from "../src/types"
+import type { OperationConfig, ResolveType } from "../src/types"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 describe(`Collection.update type tests`, () => {
   type TypeTestItem = { id: string; value: number; optional?: boolean }
@@ -39,5 +42,96 @@ describe(`Collection.update type tests`, () => {
       // @ts-expect-error - This line should error.
       assertType<Array<TypeTestItem>>(draft)
     })
+  })
+})
+
+describe(`Collection type resolution tests`, () => {
+  // Define test types
+  type ExplicitType = { id: string; explicit: boolean }
+  type FallbackType = { id: string; fallback: boolean }
+
+  const testSchema = z.object({
+    id: z.string(),
+    schema: z.boolean(),
+  })
+
+  type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
+  type ItemOf<T> = T extends Array<infer U> ? U : T
+
+  it(`should prioritize explicit type when provided`, () => {
+    const _collection = createCollection<ExplicitType>({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: testSchema,
+    })
+
+    type ExpectedType = ResolveType<
+      ExplicitType,
+      typeof testSchema,
+      FallbackType
+    >
+    type Param = Parameters<typeof _collection.insert>[0]
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
+    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
+  })
+
+  it(`should use schema type when explicit type is not provided`, () => {
+    const _collection = createCollection<
+      unknown,
+      string,
+      {},
+      typeof testSchema
+    >({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: testSchema,
+    })
+
+    type ExpectedType = ResolveType<unknown, typeof testSchema, FallbackType>
+    type Param = Parameters<typeof _collection.insert>[0]
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
+    expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
+  })
+
+  it(`should use fallback type when neither explicit nor schema type is provided`, () => {
+    const _collection = createCollection<
+      unknown,
+      string,
+      {},
+      never,
+      FallbackType
+    >({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    type ExpectedType = ResolveType<unknown, never, FallbackType>
+    type Param = Parameters<typeof _collection.insert>[0]
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<FallbackType>()
+    expectTypeOf<ExpectedType>().toEqualTypeOf<FallbackType>()
+  })
+
+  it(`should correctly resolve type with all three types provided`, () => {
+    // Explicit type should win
+    const _collection = createCollection<
+      ExplicitType,
+      string,
+      {},
+      typeof testSchema,
+      FallbackType
+    >({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: testSchema,
+    })
+
+    type ExpectedType = ResolveType<
+      ExplicitType,
+      typeof testSchema,
+      FallbackType
+    >
+    type Param = Parameters<typeof _collection.insert>[0]
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
+    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
 })
