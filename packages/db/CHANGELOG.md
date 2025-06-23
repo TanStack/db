@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.0.12
+
+### Patch Changes
+
+- If a schema is passed, use that for the collection type. ([#186](https://github.com/TanStack/db/pull/186))
+
+  You now must either pass an explicit type or schema - passing both will conflict.
+
 ## 0.0.11
 
 ### Patch Changes
