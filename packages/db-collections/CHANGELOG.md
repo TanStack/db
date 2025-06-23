@@ -1,5 +1,11 @@
 # @tanstack/db-collections
 
+## 0.0.15
+
+### Patch Changes
+
+- Validate that the txId passed to awaitTxId is a string of numbers ([#193](https://github.com/TanStack/db/pull/193))
+
 ## 0.0.14
 
 ### Patch Changes
