@@ -217,6 +217,15 @@ describe(`Electric Integration`, () => {
         },
       ])
 
+      // awaitTxId throws if you pass it a number
+      // @ts-expect-error
+      await expect(collection.utils.awaitTxId(123)).rejects.toThrow(
+        `Expected string in awaitTxId, received number`
+      )
+      await expect(collection.utils.awaitTxId(`123ab`)).rejects.toThrow(
+        `txId must contain only numbers`
+      )
+
       // The txid should be tracked and awaitTxId should resolve immediately
       await expect(collection.utils.awaitTxId(testTxid)).resolves.toBe(true)
     })
