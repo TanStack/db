@@ -145,6 +145,15 @@ export function electricCollectionOptions<
     txId: string,
     timeout = 30000
   ): Promise<boolean> => {
+    if (typeof txId !== `string`) {
+      throw new TypeError(
+        `Expected string in awaitTxId, received ${typeof txId}`
+      )
+    }
+    if (!/^\d+$/.test(txId)) {
+      throw new Error(`txId must contain only numbers`)
+    }
+
     const hasTxid = seenTxids.state.has(txId)
     if (hasTxid) return true
 
