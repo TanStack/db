@@ -100,6 +100,10 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
                   value: valueWithKey,
                   type: `delete`,
                 })
+              } else {
+                throw new Error(
+                  `This should never happen ${JSON.stringify(changes)}`
+                )
               }
             })
           commit()
