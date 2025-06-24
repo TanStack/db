@@ -385,6 +385,8 @@ export class CollectionImpl<
 
     // Update status
     this._status = `cleaned-up`
+
+    return Promise.resolve()
   }
 
   /**
