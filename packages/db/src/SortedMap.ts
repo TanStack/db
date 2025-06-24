@@ -33,6 +33,37 @@ export class SortedMap<TKey, TValue> {
   }
 
   /**
+   * Finds the index where a key-value pair should be inserted to maintain sort order.
+   * Uses binary search to find the correct position based on the value.
+   * Hence, it is in O(log n) time.
+   *
+   * @param key - The key to find position for
+   * @param value - The value to compare against
+   * @returns The index where the key should be inserted
+   */
+  private indexOf(value: TValue): number {
+    let left = 0
+    let right = this.sortedKeys.length
+
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2)
+      const midKey = this.sortedKeys[mid]!
+      const midValue = this.map.get(midKey)!
+      const comparison = this.comparator(value, midValue)
+
+      if (comparison < 0) {
+        right = mid
+      } else if (comparison > 0) {
+        left = mid + 1
+      } else {
+        return mid
+      }
+    }
+
+    return left
+  }
+
+  /**
    * Sets a key-value pair in the map and maintains sort order
    *
    * @param key - The key to set
@@ -40,18 +71,18 @@ export class SortedMap<TKey, TValue> {
    * @returns This SortedMap instance for chaining
    */
   set(key: TKey, value: TValue): this {
-    this.map.set(key, value)
-
-    if (!this.sortedKeys.includes(key)) {
-      this.sortedKeys.push(key)
+    if (this.map.has(key)) {
+      // Need to remove the old key from the sorted keys array
+      const oldValue = this.map.get(key)!
+      const oldIndex = this.indexOf(oldValue)
+      this.sortedKeys.splice(oldIndex, 1)
     }
 
-    // Re-sort keys based on values
-    this.sortedKeys.sort((a, b) => {
-      const valueA = this.map.get(a)!
-      const valueB = this.map.get(b)!
-      return this.comparator(valueA, valueB)
-    })
+    // Insert the new key at the correct position
+    const index = this.indexOf(value)
+    this.sortedKeys.splice(index, 0, key)
+
+    this.map.set(key, value)
 
     return this
   }
@@ -73,11 +104,13 @@ export class SortedMap<TKey, TValue> {
    * @returns True if the key was found and removed, false otherwise
    */
   delete(key: TKey): boolean {
-    if (this.map.delete(key)) {
-      const index = this.sortedKeys.indexOf(key)
+    if (this.map.has(key)) {
+      const oldValue = this.map.get(key)
+      const index = this.indexOf(oldValue!)
       this.sortedKeys.splice(index, 1)
-      return true
+      return this.map.delete(key)
     }
+
     return false
   }
 

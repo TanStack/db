@@ -141,7 +141,7 @@ export class CollectionImpl<
   public transactions: SortedMap<string, Transaction<any>>
 
   // Core state - make public for testing
-  public syncedData = new Map<TKey, T>()
+  public syncedData: Map<TKey, T> | SortedMap<TKey, T>
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
@@ -205,6 +205,12 @@ export class CollectionImpl<
     )
 
     this.config = config
+
+    if (this.config.compare) {
+      this.syncedData = new SortedMap<TKey, T>(this.config.compare)
+    } else {
+      this.syncedData = new Map<TKey, T>()
+    }
 
     // Start the sync process
     config.sync.sync({
@@ -492,7 +498,10 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        yield value
+        const { _orderByIndex, ...copy } = value as T & {
+          _orderByIndex?: number | string
+        }
+        yield copy as T
       }
     }
   }
@@ -504,7 +513,10 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        yield [key, value]
+        const { _orderByIndex, ...copy } = value as T & {
+          _orderByIndex?: number | string
+        }
+        yield [key, copy as T]
       }
     }
   }
@@ -1155,19 +1167,7 @@ export class CollectionImpl<
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    const array = Array.from(this.values())
-
-    // Currently a query with an orderBy will add a _orderByIndex to the items
-    // so for now we need to sort the array by _orderByIndex if it exists
-    // TODO: in the future it would be much better is the keys are sorted - this
-    // should be done by the query engine.
-    if (array[0] && (array[0] as { _orderByIndex?: number })._orderByIndex) {
-      return (array as Array<{ _orderByIndex: number }>).sort(
-        (a, b) => a._orderByIndex - b._orderByIndex
-      ) as Array<T>
-    }
-
-    return array
+    return Array.from(this.values())
   }
 
   /**

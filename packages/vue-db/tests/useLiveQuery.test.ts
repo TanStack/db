@@ -120,19 +120,19 @@ describe(`Query Collections`, () => {
 
     expect(state.value.size).toBe(1)
     expect(state.value.get(`3`)).toEqual({
-      _orderByIndex: 0,
       id: `3`,
       _key: `3`,
       name: `John Smith`,
     })
 
     expect(data.value.length).toBe(1)
-    expect(data.value[0]).toEqual({
-      _orderByIndex: 0,
-      id: `3`,
-      _key: `3`,
-      name: `John Smith`,
-    })
+    expect(data.value).toEqual([
+      {
+        id: `3`,
+        _key: `3`,
+        name: `John Smith`,
+      },
+    ])
 
     // Insert a new person
     emitter.emit(`sync`, [
@@ -152,31 +152,29 @@ describe(`Query Collections`, () => {
 
     expect(state.value.size).toBe(2)
     expect(state.value.get(`3`)).toEqual({
-      _orderByIndex: 0,
       id: `3`,
       _key: `3`,
       name: `John Smith`,
     })
     expect(state.value.get(`4`)).toEqual({
-      _orderByIndex: 1,
       id: `4`,
       _key: `4`,
       name: `Kyle Doe`,
     })
 
     expect(data.value.length).toBe(2)
-    expect(data.value).toContainEqual({
-      _orderByIndex: 0,
-      id: `3`,
-      _key: `3`,
-      name: `John Smith`,
-    })
-    expect(data.value).toContainEqual({
-      _orderByIndex: 1,
-      id: `4`,
-      _key: `4`,
-      name: `Kyle Doe`,
-    })
+    expect(data.value).toEqual([
+      {
+        id: `3`,
+        _key: `3`,
+        name: `John Smith`,
+      },
+      {
+        id: `4`,
+        _key: `4`,
+        name: `Kyle Doe`,
+      },
+    ])
 
     // Update the person
     emitter.emit(`sync`, [
@@ -193,19 +191,24 @@ describe(`Query Collections`, () => {
 
     expect(state.value.size).toBe(2)
     expect(state.value.get(`4`)).toEqual({
-      _orderByIndex: 1,
       id: `4`,
       _key: `4`,
       name: `Kyle Doe 2`,
     })
 
     expect(data.value.length).toBe(2)
-    expect(data.value).toContainEqual({
-      _orderByIndex: 1,
-      id: `4`,
-      _key: `4`,
-      name: `Kyle Doe 2`,
-    })
+    expect(data.value).toEqual([
+      {
+        id: `3`,
+        _key: `3`,
+        name: `John Smith`,
+      },
+      {
+        id: `4`,
+        _key: `4`,
+        name: `Kyle Doe 2`,
+      },
+    ])
 
     // Delete the person
     emitter.emit(`sync`, [
@@ -223,12 +226,13 @@ describe(`Query Collections`, () => {
     expect(state.value.get(`4`)).toBeUndefined()
 
     expect(data.value.length).toBe(1)
-    expect(data.value).toContainEqual({
-      _orderByIndex: 0,
-      id: `3`,
-      _key: `3`,
-      name: `John Smith`,
-    })
+    expect(data.value).toEqual([
+      {
+        id: `3`,
+        _key: `3`,
+        name: `John Smith`,
+      },
+    ])
   })
 
   it(`should join collections and return combined results`, async () => {

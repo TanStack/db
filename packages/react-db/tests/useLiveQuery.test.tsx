@@ -124,18 +124,18 @@ describe(`Query Collections`, () => {
     expect(result.current.state.size).toBe(1)
     expect(result.current.state.get(`3`)).toEqual({
       _key: `3`,
-      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
 
     expect(result.current.data.length).toBe(1)
-    expect(result.current.data[0]).toEqual({
-      _key: `3`,
-      _orderByIndex: 0,
-      id: `3`,
-      name: `John Smith`,
-    })
+    expect(result.current.data).toEqual([
+      {
+        _key: `3`,
+        id: `3`,
+        name: `John Smith`,
+      },
+    ])
 
     // Insert a new person
     act(() => {
@@ -158,30 +158,28 @@ describe(`Query Collections`, () => {
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`3`)).toEqual({
       _key: `3`,
-      _orderByIndex: 0,
       id: `3`,
       name: `John Smith`,
     })
     expect(result.current.state.get(`4`)).toEqual({
       _key: `4`,
-      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe`,
     })
 
     expect(result.current.data.length).toBe(2)
-    expect(result.current.data).toContainEqual({
-      _key: `3`,
-      _orderByIndex: 0,
-      id: `3`,
-      name: `John Smith`,
-    })
-    expect(result.current.data).toContainEqual({
-      _key: `4`,
-      _orderByIndex: 1,
-      id: `4`,
-      name: `Kyle Doe`,
-    })
+    expect(result.current.data).toEqual([
+      {
+        _key: `3`,
+        id: `3`,
+        name: `John Smith`,
+      },
+      {
+        _key: `4`,
+        id: `4`,
+        name: `Kyle Doe`,
+      },
+    ])
 
     // Update the person
     act(() => {
@@ -201,18 +199,23 @@ describe(`Query Collections`, () => {
     expect(result.current.state.size).toBe(2)
     expect(result.current.state.get(`4`)).toEqual({
       _key: `4`,
-      _orderByIndex: 1,
       id: `4`,
       name: `Kyle Doe 2`,
     })
 
     expect(result.current.data.length).toBe(2)
-    expect(result.current.data).toContainEqual({
-      _key: `4`,
-      _orderByIndex: 1,
-      id: `4`,
-      name: `Kyle Doe 2`,
-    })
+    expect(result.current.data).toEqual([
+      {
+        _key: `3`,
+        id: `3`,
+        name: `John Smith`,
+      },
+      {
+        _key: `4`,
+        id: `4`,
+        name: `Kyle Doe 2`,
+      },
+    ])
 
     // Delete the person
     act(() => {
@@ -232,12 +235,13 @@ describe(`Query Collections`, () => {
     expect(result.current.state.get(`4`)).toBeUndefined()
 
     expect(result.current.data.length).toBe(1)
-    expect(result.current.data).toContainEqual({
-      _key: `3`,
-      _orderByIndex: 0,
-      id: `3`,
-      name: `John Smith`,
-    })
+    expect(result.current.data).toEqual([
+      {
+        _key: `3`,
+        id: `3`,
+        name: `John Smith`,
+      },
+    ])
   })
 
   it(`should join collections and return combined results`, async () => {
