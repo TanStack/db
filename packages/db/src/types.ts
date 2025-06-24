@@ -216,6 +216,16 @@ export type DeleteMutationFn<T extends object = Record<string, unknown>> = (
   params: DeleteMutationFnParams<T>
 ) => Promise<any>
 
+/**
+ * Collection status values for lifecycle management
+ */
+export type CollectionStatus =
+  | `idle`
+  | `loading`
+  | `ready`
+  | `error`
+  | `cleaned-up`
+
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -236,6 +246,11 @@ export interface CollectionConfig<
    * getKey: (item) => item.uuid
    */
   getKey: (item: T) => TKey
+  /**
+   * Time in milliseconds after which the collection will be garbage collected
+   * when it has no active subscribers. Defaults to 5 minutes (300000ms).
+   */
+  gcTime?: number
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and mutation information

@@ -6,6 +6,7 @@ import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
+  CollectionStatus,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -167,6 +168,13 @@ export class CollectionImpl<
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
 
+  // Lifecycle management
+  private _status: CollectionStatus = `idle`
+  private activeSubscribersCount = 0
+  private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
+  private preloadPromise: Promise<void> | null = null
+  private syncCleanupFn: (() => void) | null = null
+
   /**
    * Register a callback to be executed on the next commit
    * Useful for preloading collections
@@ -177,6 +185,13 @@ export class CollectionImpl<
   }
 
   public id = ``
+
+  /**
+   * Gets the current status of the collection
+   */
+  public get status(): CollectionStatus {
+    return this._status
+  }
 
   /**
    * Creates a new Collection instance
@@ -206,68 +221,223 @@ export class CollectionImpl<
 
     this.config = config
 
-    // Start the sync process
-    config.sync.sync({
-      collection: this,
-      begin: () => {
-        this.pendingSyncedTransactions.push({
-          committed: false,
-          operations: [],
-        })
-      },
-      write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
-        const pendingTransaction =
-          this.pendingSyncedTransactions[
-            this.pendingSyncedTransactions.length - 1
-          ]
-        if (!pendingTransaction) {
-          throw new Error(`No pending sync transaction to write to`)
-        }
-        if (pendingTransaction.committed) {
-          throw new Error(
-            `The pending sync transaction is already committed, you can't still write to it.`
-          )
-        }
-        const key = this.getKeyFromItem(messageWithoutKey.value)
+    // Store in global collections store
+    collectionsStore.set(this.id, this)
 
-        // Check if an item with this key already exists when inserting
-        if (messageWithoutKey.type === `insert`) {
-          if (
-            this.syncedData.has(key) &&
-            !pendingTransaction.operations.some(
-              (op) => op.key === key && op.type === `delete`
-            )
-          ) {
+    // Start sync immediately to ensure we don't miss any initial events
+    this.startSync()
+  }
+
+  /**
+   * Start the sync process for this collection
+   * This is called when the collection is first accessed or preloaded
+   */
+  private startSync(): void {
+    if (this._status !== `idle` && this._status !== `cleaned-up`) {
+      return // Already started or in progress
+    }
+
+    this._status = `loading`
+
+    try {
+      const cleanupFn = this.config.sync.sync({
+        collection: this,
+        begin: () => {
+          this.pendingSyncedTransactions.push({
+            committed: false,
+            operations: [],
+          })
+        },
+        write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
+          const pendingTransaction =
+            this.pendingSyncedTransactions[
+              this.pendingSyncedTransactions.length - 1
+            ]
+          if (!pendingTransaction) {
+            throw new Error(`No pending sync transaction to write to`)
+          }
+          if (pendingTransaction.committed) {
             throw new Error(
-              `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
+              `The pending sync transaction is already committed, you can't still write to it.`
             )
           }
-        }
+          const key = this.getKeyFromItem(messageWithoutKey.value)
 
-        const message: ChangeMessage<T> = {
-          ...messageWithoutKey,
-          key,
-        }
-        pendingTransaction.operations.push(message)
-      },
-      commit: () => {
-        const pendingTransaction =
-          this.pendingSyncedTransactions[
-            this.pendingSyncedTransactions.length - 1
-          ]
-        if (!pendingTransaction) {
-          throw new Error(`No pending sync transaction to commit`)
-        }
-        if (pendingTransaction.committed) {
-          throw new Error(
-            `The pending sync transaction is already committed, you can't commit it again.`
-          )
-        }
+          // Check if an item with this key already exists when inserting
+          if (messageWithoutKey.type === `insert`) {
+            if (
+              this.syncedData.has(key) &&
+              !pendingTransaction.operations.some(
+                (op) => op.key === key && op.type === `delete`
+              )
+            ) {
+              throw new Error(
+                `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
+              )
+            }
+          }
 
-        pendingTransaction.committed = true
-        this.commitPendingTransactions()
-      },
+          const message: ChangeMessage<T> = {
+            ...messageWithoutKey,
+            key,
+          }
+          pendingTransaction.operations.push(message)
+        },
+        commit: () => {
+          const pendingTransaction =
+            this.pendingSyncedTransactions[
+              this.pendingSyncedTransactions.length - 1
+            ]
+          if (!pendingTransaction) {
+            throw new Error(`No pending sync transaction to commit`)
+          }
+          if (pendingTransaction.committed) {
+            throw new Error(
+              `The pending sync transaction is already committed, you can't commit it again.`
+            )
+          }
+
+          pendingTransaction.committed = true
+          this.commitPendingTransactions()
+
+          // Update status to ready after first commit
+          if (this._status === `loading`) {
+            this._status = `ready`
+          }
+        },
+      })
+
+      // Store cleanup function if provided
+      this.syncCleanupFn = typeof cleanupFn === `function` ? cleanupFn : null
+    } catch (error) {
+      this._status = `error`
+      throw error
+    }
+  }
+
+  /**
+   * Preload the collection data by starting sync if not already started
+   * Multiple concurrent calls will share the same promise
+   */
+  public preload(): Promise<void> {
+    if (this.preloadPromise) {
+      return this.preloadPromise
+    }
+
+    this.preloadPromise = new Promise<void>((resolve, reject) => {
+      if (this._status === `ready`) {
+        resolve()
+        return
+      }
+
+      if (this._status === `error`) {
+        reject(new Error(`Collection is in error state`))
+        return
+      }
+
+      // Start sync if collection was cleaned up
+      if (this._status === `cleaned-up`) {
+        try {
+          this.startSync()
+        } catch (error) {
+          reject(error)
+          return
+        }
+      }
+
+      // Wait for first commit
+      this.onFirstCommit(() => {
+        resolve()
+      })
     })
+
+    return this.preloadPromise
+  }
+
+  /**
+   * Clean up the collection by stopping sync and clearing data
+   * This can be called manually or automatically by garbage collection
+   */
+  public async cleanup(): Promise<void> {
+    // Clear GC timeout
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+      this.gcTimeoutId = null
+    }
+
+    // Stop sync
+    if (this.syncCleanupFn) {
+      this.syncCleanupFn()
+      this.syncCleanupFn = null
+    }
+
+    // Clear data
+    this.syncedData.clear()
+    this.syncedMetadata.clear()
+    this.derivedUpserts.clear()
+    this.derivedDeletes.clear()
+    this._size = 0
+    this.pendingSyncedTransactions = []
+    this.syncedKeys.clear()
+    this.hasReceivedFirstCommit = false
+    this.onFirstCommitCallbacks = []
+    this.preloadPromise = null
+
+    // Update status
+    this._status = `cleaned-up`
+  }
+
+  /**
+   * Start the garbage collection timer
+   * Called when the collection becomes inactive (no subscribers)
+   */
+  private startGCTimer(): void {
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+    }
+
+    const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+    this.gcTimeoutId = setTimeout(() => {
+      if (this.activeSubscribersCount === 0) {
+        this.cleanup()
+      }
+    }, gcTime)
+  }
+
+  /**
+   * Cancel the garbage collection timer
+   * Called when the collection becomes active again
+   */
+  private cancelGCTimer(): void {
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+      this.gcTimeoutId = null
+    }
+  }
+
+  /**
+   * Increment the active subscribers count and start sync if needed
+   */
+  private addSubscriber(): void {
+    this.activeSubscribersCount++
+    this.cancelGCTimer()
+
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+  }
+
+  /**
+   * Decrement the active subscribers count and start GC timer if needed
+   */
+  private removeSubscriber(): void {
+    this.activeSubscribersCount--
+
+    if (this.activeSubscribersCount <= 0) {
+      this.activeSubscribersCount = 0
+      this.startGCTimer()
+    }
   }
 
   /**
@@ -1122,6 +1292,11 @@ export class CollectionImpl<
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
   get state() {
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+
     const result = new Map<TKey, T>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
@@ -1136,6 +1311,11 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, T>> {
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+
     // If we already have data or there are no loading collections, resolve immediately
     if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.state)
@@ -1155,6 +1335,11 @@ export class CollectionImpl<
    * @returns An Array containing all items in the collection
    */
   get toArray() {
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+
     const array = Array.from(this.values())
 
     // Currently a query with an orderBy will add a _orderByIndex to the items
@@ -1177,6 +1362,11 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<T>> {
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+
     // If we already have data or there are no loading collections, resolve immediately
     if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.toArray)
@@ -1195,6 +1385,11 @@ export class CollectionImpl<
    * @returns An array of changes
    */
   public currentStateAsChanges(): Array<ChangeMessage<T>> {
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up`) {
+      this.startSync()
+    }
+
     return Array.from(this.entries()).map(([key, value]) => ({
       type: `insert`,
       key,
@@ -1211,6 +1406,9 @@ export class CollectionImpl<
     callback: (changes: Array<ChangeMessage<T>>) => void,
     { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
+    // Start sync and track subscriber
+    this.addSubscriber()
+
     if (includeInitialState) {
       // First send the current state as changes
       callback(this.currentStateAsChanges())
@@ -1221,6 +1419,7 @@ export class CollectionImpl<
 
     return () => {
       this.changeListeners.delete(callback)
+      this.removeSubscriber()
     }
   }
 
@@ -1232,6 +1431,9 @@ export class CollectionImpl<
     listener: ChangeListener<T, TKey>,
     { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
+    // Start sync and track subscriber
+    this.addSubscriber()
+
     if (!this.changeKeyListeners.has(key)) {
       this.changeKeyListeners.set(key, new Set())
     }
@@ -1257,6 +1459,7 @@ export class CollectionImpl<
           this.changeKeyListeners.delete(key)
         }
       }
+      this.removeSubscriber()
     }
   }
 
@@ -1279,7 +1482,12 @@ export class CollectionImpl<
   public asStoreMap(): Store<Map<TKey, T>> {
     if (!this._storeMap) {
       this._storeMap = new Store(new Map(this.entries()))
-      this.subscribeChanges(() => {
+
+      // Start sync and track subscriber - this subscription will never be removed
+      // as the store is kept alive for the lifetime of the collection
+      this.addSubscriber()
+
+      this.changeListeners.add(() => {
         this._storeMap!.setState(() => new Map(this.entries()))
       })
     }
@@ -1297,7 +1505,12 @@ export class CollectionImpl<
   public asStoreArray(): Store<Array<T>> {
     if (!this._storeArray) {
       this._storeArray = new Store(this.toArray)
-      this.subscribeChanges(() => {
+
+      // Start sync and track subscriber - this subscription will never be removed
+      // as the store is kept alive for the lifetime of the collection
+      this.addSubscriber()
+
+      this.changeListeners.add(() => {
         this._storeArray!.setState(() => this.toArray)
       })
     }
