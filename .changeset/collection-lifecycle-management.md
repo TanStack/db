@@ -7,6 +7,7 @@ feat: implement Collection Lifecycle Management
 Adds automatic lifecycle management for collections to optimize resource usage and align with application routing behavior.
 
 **New Features:**
+
 - **Lazy initialization**: Collections start syncing immediately but track subscribers for lifecycle management
 - **Automatic garbage collection**: Collections are cleaned up after `gcTime` (default 5 minutes) of inactivity
 - **Status tracking**: Collections have status: "loading" | "ready" | "error" | "cleaned-up"
@@ -14,11 +15,13 @@ Adds automatic lifecycle management for collections to optimize resource usage a
 - **Subscriber tracking**: Collections automatically track active subscribers and manage GC timers
 
 **Breaking Changes:**
+
 - Collections now start syncing immediately when created (previously lazy)
 - Added new `gcTime` configuration option (defaults to 300000ms / 5 minutes)
 - Added new `status` getter to expose collection lifecycle state
 
 **Configuration:**
+
 ```typescript
 const collection = createCollection({
   // ... existing config
