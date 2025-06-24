@@ -214,7 +214,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should emit changes from optimistic operations`, () => {
+  it(`should emit changes from optimistic operations`, async () => {
     const emitter = mitt()
     const callback = vi.fn()
 

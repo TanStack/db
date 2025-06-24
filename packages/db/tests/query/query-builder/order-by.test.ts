@@ -129,7 +129,7 @@ describe(`QueryBuilder orderBy, limit, and offset`, () => {
         `@e.id`,
         `@e.name`,
         `@d.name`,
-        { _orderByIndex: { ORDER_INDEX: `numeric` } }, // Added by the orderBy method
+        { _orderByIndex: { ORDER_INDEX: `fractional` } }, // Added by the orderBy method
       ])
     })
   })

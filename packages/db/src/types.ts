@@ -257,6 +257,17 @@ export interface CollectionConfig<
    */
   startSync?: boolean
   /**
+   * Optional function to compare two items.
+   * This is used to order the items in the collection.
+   * @param x The first item to compare
+   * @param y The second item to compare
+   * @returns A number indicating the order of the items
+   * @example
+   * // For a collection with a 'createdAt' field
+   * compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
+   */
+  compare?: (x: T, y: T) => number
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value

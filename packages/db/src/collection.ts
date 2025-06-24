@@ -142,7 +142,7 @@ export class CollectionImpl<
   public transactions: SortedMap<string, Transaction<any>>
 
   // Core state - make public for testing
-  public syncedData = new Map<TKey, T>()
+  public syncedData: Map<TKey, T> | SortedMap<TKey, T>
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
@@ -224,10 +224,25 @@ export class CollectionImpl<
     // Store in global collections store
     collectionsStore.set(this.id, this)
 
+    // Set up data storage with optional comparison function
+    if (this.config.compare) {
+      this.syncedData = new SortedMap<TKey, T>(this.config.compare)
+    } else {
+      this.syncedData = new Map<TKey, T>()
+    }
+
     // Only start sync immediately if explicitly enabled
     if (config.startSync !== false) {
       this.startSync()
     }
+  }
+
+  /**
+   * Start sync immediately - internal method for compiled queries
+   * This bypasses lazy loading for special cases like live query results
+   */
+  public startSyncImmediate(): void {
+    this.startSync()
   }
 
   /**
@@ -666,7 +681,10 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        yield value
+        const { _orderByIndex, ...copy } = value as T & {
+          _orderByIndex?: number | string
+        }
+        yield copy as T
       }
     }
   }
@@ -678,7 +696,10 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        yield [key, value]
+        const { _orderByIndex, ...copy } = value as T & {
+          _orderByIndex?: number | string
+        }
+        yield [key, copy as T]
       }
     }
   }
