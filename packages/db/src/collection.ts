@@ -224,8 +224,10 @@ export class CollectionImpl<
     // Store in global collections store
     collectionsStore.set(this.id, this)
 
-    // Start sync immediately to ensure we don't miss any initial events
-    this.startSync()
+    // Only start sync immediately if explicitly enabled
+    if (config.startSync !== false) {
+      this.startSync()
+    }
   }
 
   /**

@@ -252,6 +252,11 @@ export interface CollectionConfig<
    */
   gcTime?: number
   /**
+   * Whether to start syncing immediately when the collection is created.
+   * Defaults to true to maintain backward compatibility. Set to false for lazy loading.
+   */
+  startSync?: boolean
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value

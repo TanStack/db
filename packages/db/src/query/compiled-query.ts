@@ -118,6 +118,8 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       getKey: (val: unknown) => {
         return (val as any)._key
       },
+      gcTime: 0,
+      startSync: true,
       sync: {
         sync: sync as unknown as (params: {
           collection: Collection<
