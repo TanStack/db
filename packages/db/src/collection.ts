@@ -167,7 +167,6 @@ export class CollectionImpl<
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
 
-
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
 
@@ -289,8 +288,6 @@ export class CollectionImpl<
       return
     }
 
-
-
     const previousState = new Map(this.derivedUpserts)
     const previousDeletes = new Set(this.derivedDeletes)
 
@@ -326,9 +323,11 @@ export class CollectionImpl<
     // Collect events for changes
     const events: Array<ChangeMessage<T, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
-    
+
     // Filter out events for recently synced keys to prevent duplicates
-    const filteredEventsBySyncStatus = events.filter(event => !this.recentlySyncedKeys.has(event.key))
+    const filteredEventsBySyncStatus = events.filter(
+      (event) => !this.recentlySyncedKeys.has(event.key)
+    )
 
     // Filter out redundant delete events if there are pending sync transactions
     // that will immediately restore the same data, but only for completed transactions
@@ -609,7 +608,7 @@ export class CollectionImpl<
         }
       }
 
-      // Use pre-captured state if available (from optimistic scenarios), 
+      // Use pre-captured state if available (from optimistic scenarios),
       // otherwise capture current state (for pure sync scenarios)
       let currentVisibleState = this.preSyncVisibleState
       if (currentVisibleState.size === 0) {
@@ -675,8 +674,6 @@ export class CollectionImpl<
       this.derivedUpserts.clear()
       this.derivedDeletes.clear()
 
-
-
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
       const activeTransactions = Array.from(this.transactions.values())
@@ -702,16 +699,16 @@ export class CollectionImpl<
 
       // Check for redundant sync operations that match completed optimistic operations
       const completedOptimisticOps = new Map<TKey, any>()
-      const completedTransactions = Array.from(this.transactions.values()).filter(
-        tx => tx.state === 'completed'
-      )
-      
+      const completedTransactions = Array.from(
+        this.transactions.values()
+      ).filter((tx) => tx.state === `completed`)
+
       for (const tx of completedTransactions) {
         for (const mutation of tx.mutations) {
           if (mutation.collection === this && changedKeys.has(mutation.key)) {
             completedOptimisticOps.set(mutation.key, {
               type: mutation.type,
-              value: mutation.modified
+              value: mutation.modified,
             })
           }
         }
@@ -721,14 +718,13 @@ export class CollectionImpl<
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
-        
+
         // Check if this sync operation is redundant with a completed optimistic operation
         const completedOp = completedOptimisticOps.get(key)
-        const isRedundantSync = completedOp && 
+        const isRedundantSync =
+          completedOp &&
           newVisibleValue !== undefined &&
           this.deepEqual(completedOp.value, newVisibleValue)
-
-
 
         if (!isRedundantSync) {
           if (
@@ -771,16 +767,14 @@ export class CollectionImpl<
       this.emitEvents(events)
 
       this.pendingSyncedTransactions = []
-      
+
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
-      
+
       // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
       Promise.resolve().then(() => {
         this.recentlySyncedKeys.clear()
       })
-
-
 
       // Call any registered one-time commit listeners
       if (!this.hasReceivedFirstCommit) {
@@ -1440,18 +1434,16 @@ export class CollectionImpl<
     }
   }
 
-
-
   /**
    * Capture visible state for keys that will be affected by pending sync operations
    * This must be called BEFORE onTransactionStateChange clears optimistic state
    */
   private capturePreSyncVisibleState(): void {
     if (this.pendingSyncedTransactions.length === 0) return
-    
+
     // Clear any previous capture
     this.preSyncVisibleState.clear()
-    
+
     // Get all keys that will be affected by sync operations
     const syncedKeys = new Set<TKey>()
     for (const transaction of this.pendingSyncedTransactions) {
@@ -1459,12 +1451,12 @@ export class CollectionImpl<
         syncedKeys.add(operation.key as TKey)
       }
     }
-    
+
     // Mark keys as about to be synced to suppress intermediate events from recomputeOptimisticState
     for (const key of syncedKeys) {
       this.recentlySyncedKeys.add(key)
     }
-    
+
     // Capture current visible state for ALL keys, not just sync keys
     // This ensures we have the correct "before" state for event detection
     for (const key of this.keys()) {
@@ -1482,7 +1474,7 @@ export class CollectionImpl<
   public onTransactionStateChange(): void {
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()
-    
+
     this.recomputeOptimisticState()
   }
 
