@@ -156,7 +156,12 @@ export class Transaction<T extends object = Record<string, unknown>> {
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
         mutation.collection.onTransactionStateChange()
-        mutation.collection.commitPendingTransactions()
+
+        // Only call commitPendingTransactions if there are pending sync transactions
+        if (mutation.collection.pendingSyncedTransactions.length > 0) {
+          mutation.collection.commitPendingTransactions()
+        }
+
         hasCalled.add(mutation.collection.id)
       }
     }
