@@ -8,7 +8,7 @@ Adds automatic lifecycle management for collections to optimize resource usage.
 
 **New Features:**
 
-- Added `startSync` option (defaults to `true`, set to `false` for lazy loading)
+- Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
 - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
 - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
 - Manual `preload()` and `cleanup()` methods for lifecycle control

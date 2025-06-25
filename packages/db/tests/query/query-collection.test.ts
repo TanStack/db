@@ -78,6 +78,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -194,6 +195,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -292,6 +294,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -422,6 +425,7 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -442,6 +446,7 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -583,6 +588,7 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -603,6 +609,8 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
+      startSync: true,
+
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -798,6 +806,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `order-by-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -975,6 +984,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `order-update-test`,
       getKey: (val) => val.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -1119,6 +1129,7 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
       getKey: (val) => val.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1140,6 +1151,7 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
       getKey: (val) => val.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1254,6 +1266,7 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `select-callback-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events

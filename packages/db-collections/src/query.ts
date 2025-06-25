@@ -57,6 +57,7 @@ export interface QueryCollectionConfig<
   getKey: CollectionConfig<TItem>[`getKey`]
   schema?: CollectionConfig<TItem>[`schema`]
   sync?: CollectionConfig<TItem>[`sync`]
+  startSync?: CollectionConfig<TItem>[`startSync`]
 
   // Direct persistence handlers
   /**
@@ -250,7 +251,11 @@ export function queryCollectionOptions<
       }
     })
 
-    return actualUnsubscribeFn
+    return async () => {
+      actualUnsubscribeFn()
+      await queryClient.cancelQueries({ queryKey })
+      queryClient.removeQueries({ queryKey })
+    }
   }
 
   /**

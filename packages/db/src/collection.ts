@@ -232,7 +232,7 @@ export class CollectionImpl<
     }
 
     // Only start sync immediately if explicitly enabled
-    if (config.startSync !== false) {
+    if (config.startSync === true) {
       this.startSync()
     }
   }
@@ -352,8 +352,13 @@ export class CollectionImpl<
         return
       }
 
-      // Start sync if collection was cleaned up
-      if (this._status === `cleaned-up`) {
+      // Register callback BEFORE starting sync to avoid race condition
+      this.onFirstCommit(() => {
+        resolve()
+      })
+
+      // Start sync if collection hasn't started yet or was cleaned up
+      if (this._status === `idle` || this._status === `cleaned-up`) {
         try {
           this.startSync()
         } catch (error) {
@@ -361,11 +366,6 @@ export class CollectionImpl<
           return
         }
       }
-
-      // Wait for first commit
-      this.onFirstCommit(() => {
-        resolve()
-      })
     })
 
     return this.preloadPromise
@@ -442,7 +442,7 @@ export class CollectionImpl<
     this.cancelGCTimer()
 
     // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
+    if (this._status === `cleaned-up` || this._status === `idle`) {
       this.startSync()
     }
   }
@@ -1317,11 +1317,6 @@ export class CollectionImpl<
    * @returns A Map containing all items in the collection, with keys as identifiers
    */
   get state() {
-    // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
-      this.startSync()
-    }
-
     const result = new Map<TKey, T>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
@@ -1336,11 +1331,6 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, T>> {
-    // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
-      this.startSync()
-    }
-
     // If we already have data or there are no loading collections, resolve immediately
     if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.state)
@@ -1360,11 +1350,6 @@ export class CollectionImpl<
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
-      this.startSync()
-    }
-
     const array = Array.from(this.values())
 
     // Currently a query with an orderBy will add a _orderByIndex to the items
@@ -1387,11 +1372,6 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<T>> {
-    // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
-      this.startSync()
-    }
-
     // If we already have data or there are no loading collections, resolve immediately
     if (this.size > 0 || this.hasReceivedFirstCommit === true) {
       return Promise.resolve(this.toArray)
@@ -1410,11 +1390,6 @@ export class CollectionImpl<
    * @returns An array of changes
    */
   public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    // Start sync if collection was cleaned up
-    if (this._status === `cleaned-up`) {
-      this.startSync()
-    }
-
     return Array.from(this.entries()).map(([key, value]) => ({
       type: `insert`,
       key,
@@ -1507,11 +1482,6 @@ export class CollectionImpl<
   public asStoreMap(): Store<Map<TKey, T>> {
     if (!this._storeMap) {
       this._storeMap = new Store(new Map(this.entries()))
-
-      // Start sync and track subscriber - this subscription will never be removed
-      // as the store is kept alive for the lifetime of the collection
-      this.addSubscriber()
-
       this.changeListeners.add(() => {
         this._storeMap!.setState(() => new Map(this.entries()))
       })
@@ -1530,11 +1500,6 @@ export class CollectionImpl<
   public asStoreArray(): Store<Array<T>> {
     if (!this._storeArray) {
       this._storeArray = new Store(this.toArray)
-
-      // Start sync and track subscriber - this subscription will never be removed
-      // as the store is kept alive for the lifetime of the collection
-      this.addSubscriber()
-
       this.changeListeners.add(() => {
         this._storeArray!.setState(() => this.toArray)
       })

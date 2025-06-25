@@ -44,13 +44,41 @@ describe(`Collection Lifecycle Management`, () => {
   }
 
   describe(`Collection Status Tracking`, () => {
-    it(`should start with loading status and transition to ready after first commit`, () => {
+    it(`should start with idle status and transition to ready after first commit when startSync is false`, () => {
       let beginCallback: (() => void) | undefined
       let commitCallback: (() => void) | undefined
 
       const collection = createCollection<{ id: string; name: string }>({
         id: `status-test`,
         getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit }) => {
+            beginCallback = begin as () => void
+            commitCallback = commit as () => void
+          },
+        },
+      })
+
+      expect(collection.status).toBe(`idle`)
+
+      collection.preload()
+
+      if (beginCallback && commitCallback) {
+        beginCallback()
+        commitCallback()
+      }
+
+      expect(collection.status).toBe(`ready`)
+    })
+
+    it(`should start with loading status and transition to ready after first commit when startSync is true`, () => {
+      let beginCallback: (() => void) | undefined
+      let commitCallback: (() => void) | undefined
+
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `status-test`,
+        getKey: (item) => item.id,
+        startSync: true,
         sync: {
           sync: ({ begin, commit }) => {
             beginCallback = begin as () => void
@@ -84,28 +112,70 @@ describe(`Collection Lifecycle Management`, () => {
       expect(collection.status).toBe(`cleaned-up`)
     })
 
+    it(`should transition when subscribing to changes`, async () => {
+      let beginCallback: (() => void) | undefined
+      let commitCallback: (() => void) | undefined
+
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `subscribe-test`,
+        getKey: (item) => item.id,
+        gcTime: 0,
+        sync: {
+          sync: ({ begin, commit }) => {
+            beginCallback = begin as () => void
+            commitCallback = commit as () => void
+          },
+        },
+      })
+
+      expect(collection.status).toBe(`idle`)
+
+      const unsubscribe = collection.subscribeChanges(() => {})
+
+      expect(collection.status).toBe(`loading`)
+
+      if (beginCallback && commitCallback) {
+        beginCallback()
+        commitCallback()
+      }
+
+      expect(collection.status).toBe(`ready`)
+
+      unsubscribe()
+
+      expect(collection.status).toBe(`ready`)
+    })
+
     it(`should restart sync when accessing cleaned-up collection`, async () => {
       let syncCallCount = 0
 
       const collection = createCollection<{ id: string; name: string }>({
         id: `restart-test`,
         getKey: (item) => item.id,
+        startSync: false, // Test lazy loading behavior
         sync: {
-          sync: () => {
+          sync: ({ begin, commit }) => {
+            begin()
+            commit()
             syncCallCount++
           },
         },
       })
 
-      expect(syncCallCount).toBe(1) // Initial sync
+      expect(syncCallCount).toBe(0) // no sync yet
+
+      await collection.preload()
+
+      expect(syncCallCount).toBe(1) // sync called when subscribing
 
       await collection.cleanup()
+
       expect(collection.status).toBe(`cleaned-up`)
 
-      // Access collection data should restart sync
-      collection.state // This should restart sync
+      await collection.preload()
+
       expect(syncCallCount).toBe(2)
-      expect(collection.status).toBe(`loading`)
+      expect(collection.status).toBe(`ready`) // Sync completes immediately in this test
     })
   })
 
@@ -158,25 +228,6 @@ describe(`Collection Lifecycle Management`, () => {
       unsubscribe2()
       unsubscribe3()
       expect((collection as any).activeSubscribersCount).toBe(0)
-    })
-
-    it(`should track store-based subscribers`, () => {
-      const collection = createCollection<{ id: string; name: string }>({
-        id: `store-subscriber-test`,
-        getKey: (item) => item.id,
-        sync: {
-          sync: () => {},
-        },
-      })
-
-      expect((collection as any).activeSubscribersCount).toBe(0)
-
-      // Store subscriptions are permanent
-      collection.asStoreMap()
-      expect((collection as any).activeSubscribersCount).toBe(1)
-
-      collection.asStoreArray()
-      expect((collection as any).activeSubscribersCount).toBe(2)
     })
   })
 
@@ -274,6 +325,7 @@ describe(`Collection Lifecycle Management`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `preload-ready-test`,
         getKey: (item) => item.id,
+        startSync: true,
         sync: {
           sync: ({ begin, commit }) => {
             beginCallback = begin as () => void
@@ -317,6 +369,7 @@ describe(`Collection Lifecycle Management`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `manual-cleanup-test`,
         getKey: (item) => item.id,
+        startSync: true,
         sync: {
           sync: () => {
             return () => {
@@ -332,63 +385,6 @@ describe(`Collection Lifecycle Management`, () => {
 
       expect(collection.status).toBe(`cleaned-up`)
       expect(cleanupCalled).toBe(true)
-    })
-  })
-
-  describe(`Integration with Data Access`, () => {
-    it(`should restart sync when accessing cleaned-up collection data`, async () => {
-      let syncCallCount = 0
-
-      const collection = createCollection<{ id: string; name: string }>({
-        id: `data-access-restart-test`,
-        getKey: (item) => item.id,
-        sync: {
-          sync: () => {
-            syncCallCount++
-          },
-        },
-      })
-
-      expect(syncCallCount).toBe(1)
-
-      await collection.cleanup()
-      expect(collection.status).toBe(`cleaned-up`)
-
-      // Each data access method should restart sync
-      collection.state
-      expect(syncCallCount).toBe(2)
-
-      await collection.cleanup()
-      collection.toArray
-      expect(syncCallCount).toBe(3)
-
-      await collection.cleanup()
-      collection.currentStateAsChanges()
-      expect(syncCallCount).toBe(4)
-    })
-
-    it(`should not restart sync for non-cleaned-up collections`, () => {
-      let syncCallCount = 0
-
-      const collection = createCollection<{ id: string; name: string }>({
-        id: `no-restart-test`,
-        getKey: (item) => item.id,
-        sync: {
-          sync: () => {
-            syncCallCount++
-          },
-        },
-      })
-
-      expect(syncCallCount).toBe(1)
-
-      // Multiple data accesses should not restart sync
-      collection.get(`test`)
-      collection.state
-      collection.toArray
-      collection.currentStateAsChanges()
-
-      expect(syncCallCount).toBe(1) // Should still be 1
     })
   })
 
@@ -408,6 +404,8 @@ describe(`Collection Lifecycle Management`, () => {
           },
         },
       })
+
+      const unsubscribe = collection.subscribeChanges(() => {})
 
       // Register callbacks
       collection.onFirstCommit(() => callbacks.push(() => `callback1`))
@@ -429,6 +427,8 @@ describe(`Collection Lifecycle Management`, () => {
         commitCallback()
       }
       expect(callbacks).toHaveLength(2)
+
+      unsubscribe()
     })
   })
 })

@@ -290,15 +290,21 @@ function createElectricSync<T extends object>(
     }
   }
 
+  // Abort controller for the stream and somewhere to store the unsubscribe function
+  const abortController = new AbortController()
+  let unsubscribeStream: () => void
+
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(shapeOptions)
+      const stream = new ShapeStream({
+        ...shapeOptions,
+        signal: abortController.signal,
+      })
       let transactionStarted = false
       let newTxids = new Set<string>()
 
-      // Return the unsubscribe function
-      return stream.subscribe((messages: Array<Message<Row>>) => {
+      unsubscribeStream = stream.subscribe((messages: Array<Message<Row>>) => {
         let hasUpToDate = false
 
         for (const message of messages) {
@@ -339,8 +345,14 @@ function createElectricSync<T extends object>(
           }
         }
 
-        if (hasUpToDate && transactionStarted) {
-          commit()
+        if (hasUpToDate) {
+          // Commit transaction if one was started
+          if (transactionStarted) {
+            commit()
+            transactionStarted = false
+          }
+
+          // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set(currentTxids)
             newTxids.forEach((txid) => clonedSeen.add(String(txid)))
@@ -348,9 +360,16 @@ function createElectricSync<T extends object>(
             newTxids = new Set()
             return clonedSeen
           })
-          transactionStarted = false
         }
       })
+
+      // Return the unsubscribe function
+      return () => {
+        // Unsubscribe from the stream
+        unsubscribeStream()
+        // Abort the abort controller to stop the stream
+        abortController.abort()
+      }
     },
     // Expose the getSyncMetadata function
     getSyncMetadata,
