@@ -490,7 +490,7 @@ describe(`Electric Integration`, () => {
                 value: value.value as Row,
                 headers: {
                   operation: `insert`,
-                  txids: [Number(txid)], // Convert to number as the API expects numbers but our code converts to strings
+                  txids: [txid],
                 },
               })
             }
