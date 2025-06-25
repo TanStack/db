@@ -297,7 +297,8 @@ function createElectricSync<T extends object>(
       let transactionStarted = false
       let newTxids = new Set<string>()
 
-      stream.subscribe((messages: Array<Message<Row>>) => {
+      // Return the unsubscribe function
+      return stream.subscribe((messages: Array<Message<Row>>) => {
         let hasUpToDate = false
 
         for (const message of messages) {
