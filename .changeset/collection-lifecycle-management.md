@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+"@tanstack/db": patch
 ---
 
 feat: implement Collection Lifecycle Management
