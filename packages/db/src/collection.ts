@@ -138,9 +138,11 @@ export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > {
-  public transactions: SortedMap<string, Transaction<any>>
+  public config: CollectionConfig<T, TKey, any>
 
   // Core state - make public for testing
+  public transactions: SortedMap<string, Transaction<any>>
+  public pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   public syncedData: Map<TKey, T> | SortedMap<TKey, T>
   public syncedMetadata = new Map<TKey, unknown>()
 
@@ -159,11 +161,10 @@ export class CollectionImpl<
   // This is populated by createCollection
   public utils: Record<string, Fn> = {}
 
-  public pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
+  // State used for computing the change events
   private syncedKeys = new Set<TKey>()
   private preSyncVisibleState = new Map<TKey, T>()
   private recentlySyncedKeys = new Set<TKey>()
-  public config: CollectionConfig<T, TKey, any>
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
 

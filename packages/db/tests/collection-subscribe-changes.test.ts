@@ -296,7 +296,7 @@ describe(`Collection.subscribeChanges`, () => {
     await waitForChanges()
 
     // Verify that update was emitted
-    expect(callback).toHaveBeenCalledTimes(1) // ✅ MUST be 1 - only the optimistic update, no redundant sync events
+    expect(callback).toHaveBeenCalledTimes(1)
 
     // Check that the call contains the correct update
     const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
