@@ -295,23 +295,31 @@ export class CollectionImpl<
     this.derivedUpserts.clear()
     this.derivedDeletes.clear()
 
+    const activeTransactions: Array<Transaction<any>> = []
+    const completedTransactions: Array<Transaction<any>> = []
+
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed`) {
+        completedTransactions.push(transaction)
+      } else if (![`completed`, `failed`].includes(transaction.state)) {
+        activeTransactions.push(transaction)
+      }
+    }
+
     // Apply active transactions only (completed transactions are handled by sync operations)
-    const activeTransactions = Array.from(this.transactions.values())
     for (const transaction of activeTransactions) {
-      if (![`completed`, `failed`].includes(transaction.state)) {
-        for (const mutation of transaction.mutations) {
-          if (mutation.collection === this) {
-            switch (mutation.type) {
-              case `insert`:
-              case `update`:
-                this.derivedUpserts.set(mutation.key, mutation.modified as T)
-                this.derivedDeletes.delete(mutation.key)
-                break
-              case `delete`:
-                this.derivedUpserts.delete(mutation.key)
-                this.derivedDeletes.add(mutation.key)
-                break
-            }
+      for (const mutation of transaction.mutations) {
+        if (mutation.collection === this) {
+          switch (mutation.type) {
+            case `insert`:
+            case `update`:
+              this.derivedUpserts.set(mutation.key, mutation.modified as T)
+              this.derivedDeletes.delete(mutation.key)
+              break
+            case `delete`:
+              this.derivedUpserts.delete(mutation.key)
+              this.derivedDeletes.add(mutation.key)
+              break
           }
         }
       }
@@ -343,9 +351,6 @@ export class CollectionImpl<
       }
 
       // Collect mutation IDs from completed transactions
-      const completedTransactions = Array.from(
-        this.transactions.values()
-      ).filter((tx) => tx.state === `completed`)
       for (const tx of completedTransactions) {
         for (const mutation of tx.mutations) {
           if (mutation.collection === this) {
@@ -361,15 +366,10 @@ export class CollectionImpl<
         if (event.type === `delete` && pendingSyncKeys.has(event.key)) {
           // Check if this delete is from clearing optimistic state of completed transactions
           // We can infer this by checking if we have no remaining optimistic mutations for this key
-          const hasActiveOptimisticMutation = Array.from(
-            this.transactions.values()
-          ).some(
-            (tx) =>
-              tx.state !== `completed` &&
-              tx.state !== `failed` &&
-              tx.mutations.some(
-                (m) => m.collection === this && m.key === event.key
-              )
+          const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
+            tx.mutations.some(
+              (m) => m.collection === this && m.key === event.key
+            )
           )
 
           if (!hasActiveOptimisticMutation) {
@@ -592,11 +592,16 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    if (
-      !Array.from(this.transactions.values()).some(
-        ({ state }) => state === `persisting`
-      )
-    ) {
+    // Check if there are any persisting transaction
+    let hasPersistingTransaction = false
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `persisting`) {
+        hasPersistingTransaction = true
+        break
+      }
+    }
+
+    if (!hasPersistingTransaction) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -676,8 +681,7 @@ export class CollectionImpl<
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
-      const activeTransactions = Array.from(this.transactions.values())
-      for (const transaction of activeTransactions) {
+      for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
           for (const mutation of transaction.mutations) {
             if (mutation.collection === this) {
@@ -699,17 +703,16 @@ export class CollectionImpl<
 
       // Check for redundant sync operations that match completed optimistic operations
       const completedOptimisticOps = new Map<TKey, any>()
-      const completedTransactions = Array.from(
-        this.transactions.values()
-      ).filter((tx) => tx.state === `completed`)
 
-      for (const tx of completedTransactions) {
-        for (const mutation of tx.mutations) {
-          if (mutation.collection === this && changedKeys.has(mutation.key)) {
-            completedOptimisticOps.set(mutation.key, {
-              type: mutation.type,
-              value: mutation.modified,
-            })
+      for (const transaction of this.transactions.values()) {
+        if (transaction.state === `completed`) {
+          for (const mutation of transaction.mutations) {
+            if (mutation.collection === this && changedKeys.has(mutation.key)) {
+              completedOptimisticOps.set(mutation.key, {
+                type: mutation.type,
+                value: mutation.modified,
+              })
+            }
           }
         }
       }
@@ -823,8 +826,9 @@ export class CollectionImpl<
       const keysB = Object.keys(b)
       if (keysA.length !== keysB.length) return false
 
+      const keysBSet = new Set(keysB)
       for (const key of keysA) {
-        if (!keysB.includes(key)) return false
+        if (!keysBSet.has(key)) return false
         if (!this.deepEqual(a[key], b[key])) return false
       }
       return true
@@ -1457,9 +1461,9 @@ export class CollectionImpl<
       this.recentlySyncedKeys.add(key)
     }
 
-    // Capture current visible state for ALL keys, not just sync keys
-    // This ensures we have the correct "before" state for event detection
-    for (const key of this.keys()) {
+    // Only capture current visible state for keys that will be affected by sync operations
+    // This is much more efficient than capturing the entire collection state
+    for (const key of syncedKeys) {
       const currentValue = this.get(key)
       if (currentValue !== undefined) {
         this.preSyncVisibleState.set(key, currentValue)
