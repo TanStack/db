@@ -1,5 +1,8 @@
 ---
 "@tanstack/db": patch
+"@tanstack/vue-db": patch
+"@tanstack/react-db": patch
+"@tanstack/db-collections": patch
 ---
 
 feat: implement Collection Lifecycle Management
