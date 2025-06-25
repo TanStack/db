@@ -38,11 +38,6 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
 
     this.inputCollections = collections
 
-    // Start sync immediately for all input collections to ensure they receive data
-    Object.values(collections).forEach((collection) => {
-      collection.startSyncImmediate()
-    })
-
     const graph = new D2()
     const inputs = Object.fromEntries(
       Object.entries(collections).map(([key]) => [key, graph.newInput<any>()])
@@ -210,25 +205,20 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       throw new Error(`Query is stopped`)
     }
 
-    // Send initial state
-    Object.entries(this.inputCollections).forEach(([key, collection]) => {
-      this.sendChangesToInput(
-        key,
-        collection.currentStateAsChanges(),
-        collection.config.getKey
-      )
-    })
-    this.runGraph()
-
     // Subscribe to changes
     Object.entries(this.inputCollections).forEach(([key, collection]) => {
-      const unsubscribe = collection.subscribeChanges((changes) => {
-        this.sendChangesToInput(key, changes, collection.config.getKey)
-        this.runGraph()
-      })
+      const unsubscribe = collection.subscribeChanges(
+        (changes) => {
+          this.sendChangesToInput(key, changes, collection.config.getKey)
+          this.runGraph()
+        },
+        { includeInitialState: true }
+      )
 
       this.unsubscribeCallbacks.push(unsubscribe)
     })
+
+    this.runGraph()
 
     this.state = `running`
     return () => {

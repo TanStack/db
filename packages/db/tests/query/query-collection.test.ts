@@ -78,7 +78,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -96,15 +95,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     const query = queryBuilder()
       .from({ collection })
       .where(`@age`, `>`, 30)
@@ -112,7 +102,17 @@ describe(`Query Collections`, () => {
 
     const compiledQuery = compileQuery(query)
 
+    // Starting the query should trigger collection syncing
     compiledQuery.start()
+
+    // Now sync the initial state after the query has started
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
 
     const result = compiledQuery.results
 
@@ -195,7 +195,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -213,7 +212,14 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
+    const query = queryBuilder().from({ person: collection })
+
+    const compiledQuery = compileQuery(query)
+
+    // Starting the query should trigger collection syncing
+    compiledQuery.start()
+
+    // Now sync the initial state after the query has started
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
@@ -221,12 +227,6 @@ describe(`Query Collections`, () => {
         changes: person,
       }))
     )
-
-    const query = queryBuilder().from({ person: collection })
-
-    const compiledQuery = compileQuery(query)
-
-    compiledQuery.start()
 
     const result = compiledQuery.results
 
@@ -294,7 +294,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `optimistic-changes-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -312,7 +311,16 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
+    const query = queryBuilder()
+      .from({ person: collection })
+      .where(({ person }) => (person.age ?? 0) > 30)
+
+    const compiledQuery = compileQuery(query)
+
+    // Starting the query should trigger collection syncing
+    compiledQuery.start()
+
+    // Now sync the initial state after the query has started
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
@@ -320,14 +328,6 @@ describe(`Query Collections`, () => {
         changes: person,
       }))
     )
-
-    const query = queryBuilder()
-      .from({ person: collection })
-      .where(({ person }) => (person.age ?? 0) > 30)
-
-    const compiledQuery = compileQuery(query)
-
-    compiledQuery.start()
 
     const result = compiledQuery.results
 
@@ -425,7 +425,6 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -446,7 +445,6 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -463,24 +461,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync initial person data
-    emitter.emit(
-      `sync-person`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
-    // Sync initial issue data
-    emitter.emit(
-      `sync-issue`,
-      initialIssues.map((issue) => ({
-        type: `insert`,
-        changes: issue,
-      }))
-    )
-
     // Create a query with a join between persons and issues
     const query = queryBuilder()
       .from({ issues: issueCollection })
@@ -492,7 +472,25 @@ describe(`Query Collections`, () => {
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
 
     const compiledQuery = compileQuery(query)
+    // Starting the query should trigger collection syncing for both collections
     compiledQuery.start()
+
+    // Now sync the initial data after the query has started
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        type: `insert`,
+        changes: issue,
+      }))
+    )
 
     const result = compiledQuery.results
 
@@ -588,7 +586,6 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-person`, (changes) => {
@@ -609,8 +606,6 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test`,
       getKey: (item) => item.id,
-      startSync: true,
-
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync-issue`, (changes) => {
@@ -627,24 +622,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync initial person data
-    emitter.emit(
-      `sync-person`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
-    // Sync initial issue data
-    emitter.emit(
-      `sync-issue`,
-      initialIssues.map((issue) => ({
-        type: `insert`,
-        changes: issue,
-      }))
-    )
-
     // Create a query with a join between persons and issues
     const query = queryBuilder()
       .from({ issues: issueCollection })
@@ -655,7 +632,25 @@ describe(`Query Collections`, () => {
       })
 
     const compiledQuery = compileQuery(query)
+    // Starting the query should trigger collection syncing for both collections
     compiledQuery.start()
+
+    // Now sync the initial data after the query has started
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        type: `insert`,
+        changes: issue,
+      }))
+    )
 
     const result = compiledQuery.results
 
@@ -806,7 +801,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `order-by-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -823,15 +817,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     // Test ascending order by age
     const ascendingQuery = queryBuilder()
       .from({ collection })
@@ -839,7 +824,17 @@ describe(`Query Collections`, () => {
       .select(`@id`, `@name`, `@age`)
 
     const compiledAscendingQuery = compileQuery(ascendingQuery)
+    // Starting the query should trigger collection syncing
     compiledAscendingQuery.start()
+
+    // Now sync the initial state after the query has started
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
 
     const ascendingResult = compiledAscendingQuery.results
 
@@ -984,7 +979,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `order-update-test`,
       getKey: (val) => val.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           emitter.on(`sync`, (changes) => {
@@ -1001,15 +995,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     // Create a query that orders by age in ascending order
     const query = queryBuilder()
       .from({ collection })
@@ -1017,7 +1002,17 @@ describe(`Query Collections`, () => {
       .select(`@id`, `@name`, `@age`)
 
     const compiledQuery = compileQuery(query)
+    // Starting the query should trigger collection syncing
     compiledQuery.start()
+
+    // Now sync the initial state after the query has started
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
 
     await waitForChanges()
 
@@ -1129,7 +1124,6 @@ describe(`Query Collections`, () => {
     const personCollection = createCollection<Person>({
       id: `person-collection-test-bug`,
       getKey: (val) => val.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1151,7 +1145,6 @@ describe(`Query Collections`, () => {
     const issueCollection = createCollection<Issue>({
       id: `issue-collection-test-bug`,
       getKey: (val) => val.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error Mitt typing doesn't match our usage
@@ -1169,24 +1162,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync initial person data
-    emitter.emit(
-      `sync-person`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
-    // Sync initial issue data
-    emitter.emit(
-      `sync-issue`,
-      initialIssues.map((issue) => ({
-        type: `insert`,
-        changes: issue,
-      }))
-    )
-
     // Create a query with a join between persons and issues
     const query = queryBuilder()
       .from({ issues: issueCollection })
@@ -1198,7 +1173,25 @@ describe(`Query Collections`, () => {
       .select(`@issues.id`, `@issues.title`, `@persons.name`)
 
     const compiledQuery = compileQuery(query)
+    // Starting the query should trigger collection syncing for both collections
     compiledQuery.start()
+
+    // Now sync the initial data after the query has started
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        type: `insert`,
+        changes: issue,
+      }))
+    )
 
     const result = compiledQuery.results
 
@@ -1266,7 +1259,6 @@ describe(`Query Collections`, () => {
     const collection = createCollection<Person>({
       id: `select-callback-test`,
       getKey: (item) => item.id,
-      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events
@@ -1283,15 +1275,6 @@ describe(`Query Collections`, () => {
         },
       },
     })
-
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        type: `insert`,
-        changes: person,
-      }))
-    )
 
     const query = queryBuilder()
       .from({ collection })
@@ -1312,7 +1295,17 @@ describe(`Query Collections`, () => {
 
     const compiledQuery = compileQuery(query)
 
+    // Starting the query should trigger collection syncing
     compiledQuery.start()
+
+    // Now sync the initial state after the query has started
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        type: `insert`,
+        changes: person,
+      }))
+    )
 
     const result = compiledQuery.results
 
