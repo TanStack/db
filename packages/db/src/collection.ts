@@ -609,9 +609,19 @@ export class CollectionImpl<
         }
       }
 
-      // Use the pre-captured visible state (captured before optimistic state was cleared)
-      // This ensures we correctly detect existing vs new rows
-      const currentVisibleState = this.preSyncVisibleState
+      // Use pre-captured state if available (from optimistic scenarios), 
+      // otherwise capture current state (for pure sync scenarios)
+      let currentVisibleState = this.preSyncVisibleState
+      if (currentVisibleState.size === 0) {
+        // No pre-captured state, capture it now for pure sync operations
+        currentVisibleState = new Map<TKey, T>()
+        for (const key of changedKeys) {
+          const currentValue = this.get(key)
+          if (currentValue !== undefined) {
+            currentVisibleState.set(key, currentValue)
+          }
+        }
+      }
 
       const events: Array<ChangeMessage<T, TKey>> = []
 
