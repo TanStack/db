@@ -100,7 +100,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should emit changes from synced operations using mitt emitter`, () => {
+  it(`should emit changes from synced operations`, () => {
     const emitter = mitt()
     const callback = vi.fn()
 
@@ -118,7 +118,7 @@ describe(`Collection.subscribeChanges`, () => {
               write({
                 type: change.type,
                 // @ts-expect-error TODO type changes
-                value: change.changes,
+                value: change.modified,
               })
             })
             commit()
@@ -141,7 +141,7 @@ describe(`Collection.subscribeChanges`, () => {
     emitter.emit(`testEvent`, [
       {
         type: `insert`,
-        changes: { id: 1, value: `sync value 1` },
+        modified: { id: 1, value: `sync value 1` },
       },
     ])
 
@@ -152,14 +152,12 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(insertChanges).toHaveLength(1)
 
-    if (insertChanges.length > 0) {
-      const insertChange = insertChanges[0]! as ChangeMessage<{
-        value: string
-      }>
-      expect(insertChange).toBeDefined()
-      expect(insertChange.type).toBe(`insert`)
-      expect(insertChange.value).toEqual({ id: 1, value: `sync value 1` })
-    }
+    const insertChange = insertChanges[0]! as ChangeMessage<{
+      value: string
+    }>
+    expect(insertChange).toBeDefined()
+    expect(insertChange.type).toBe(`insert`)
+    expect(insertChange.value).toEqual({ id: 1, value: `sync value 1` })
 
     // Reset mock
     callback.mockReset()
@@ -168,18 +166,18 @@ describe(`Collection.subscribeChanges`, () => {
     emitter.emit(`testEvent`, [
       {
         type: `update`,
-        changes: { id: 1, value: `updated sync value` },
+        modified: { id: 1, value: `updated sync value` },
       },
     ])
 
     // Verify that update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
-    const undateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+    const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string
     }>
-    expect(undateChanges).toHaveLength(1)
+    expect(updateChanges).toHaveLength(1)
 
-    const updateChange = undateChanges[0]! as ChangeMessage<{
+    const updateChange = updateChanges[0]! as ChangeMessage<{
       value: string
     }>
     expect(updateChange).toBeDefined()
@@ -193,7 +191,7 @@ describe(`Collection.subscribeChanges`, () => {
     emitter.emit(`testEvent`, [
       {
         type: `delete`,
-        changes: { id: 1, value: `updated sync value` },
+        modified: { id: 1, value: `updated sync value` },
       },
     ])
 
@@ -270,17 +268,15 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(insertChanges).toHaveLength(1)
 
-    if (insertChanges.length > 0) {
-      const insertChange = insertChanges[0]! as ChangeMessage<{
-        value: string
-      }>
-      expect(insertChange).toBeDefined()
-      expect(insertChange).toEqual({
-        key: 1,
-        type: `insert`,
-        value: { id: 1, value: `optimistic value` },
-      })
-    }
+    const insertChange = insertChanges[0]! as ChangeMessage<{
+      value: string
+    }>
+    expect(insertChange).toBeDefined()
+    expect(insertChange).toEqual({
+      key: 1,
+      type: `insert`,
+      value: { id: 1, value: `optimistic value` },
+    })
 
     // Reset mock
     callback.mockReset()
@@ -298,8 +294,12 @@ describe(`Collection.subscribeChanges`, () => {
       })
     )
 
+    await waitForChanges()
+
     // Verify that update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
+
+    // Check that the call contains the correct update
     const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string
       updated?: boolean
@@ -412,7 +412,6 @@ describe(`Collection.subscribeChanges`, () => {
     tx.mutate(() => collection.insert({ id: 2, value: `optimistic value` }))
 
     // Verify optimistic insert was emitted - this is the synchronous optimistic update
-    // and so we don't await here
     expect(callback).toHaveBeenCalledTimes(1)
     expect(callback.mock.calls[0]![0]).toEqual([
       {
@@ -425,26 +424,20 @@ describe(`Collection.subscribeChanges`, () => {
 
     await tx.isPersisted.promise
 
-    // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2) // FIXME: this should ideally be 0 - we currently see a delete and an insert
-    // This is called 1 time when the mutationFn call returns
-    // and the optimistic state is dropped and the synced state applied.
+    // Verify no changes were emitted as the sync should match the optimistic state
+    expect(callback).toHaveBeenCalledTimes(0)
     callback.mockReset()
 
     // Update both items in optimistic and synced ways
     // First update the optimistic item optimistically
-    const optItem = collection.state.get(2)
-    let updateTx
-    if (optItem) {
-      updateTx = createTransaction({ mutationFn })
-      updateTx.mutate(() =>
-        collection.update(optItem.id, (draft) => {
-          draft.value = `updated optimistic value`
-        })
-      )
-    }
-
-    // We don't await here as the optimistic update is sync
+    const optItem = collection.state.get(2)!
+    expect(optItem).toBeDefined()
+    const updateTx = createTransaction({ mutationFn })
+    updateTx.mutate(() =>
+      collection.update(optItem.id, (draft) => {
+        draft.value = `updated optimistic value`
+      })
+    )
 
     // Verify the optimistic update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
@@ -457,7 +450,6 @@ describe(`Collection.subscribeChanges`, () => {
           value: `updated optimistic value`,
         },
         previousValue: {
-          // TODO why isn't this working?
           id: 2,
           value: `optimistic value`,
         },
@@ -465,12 +457,10 @@ describe(`Collection.subscribeChanges`, () => {
     ])
     callback.mockReset()
 
-    await updateTx?.isPersisted.promise
+    await updateTx.isPersisted.promise
 
-    // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2) // FIXME: check is we can reduce this
-    // This is called 1 time when the mutationFn call returns
-    // and the optimistic state is dropped and the synced state applied.
+    // Verify no redundant sync events were emitted
+    expect(callback).toHaveBeenCalledTimes(0)
     callback.mockReset()
 
     // Then update the synced item with a synced update
@@ -583,11 +573,8 @@ describe(`Collection.subscribeChanges`, () => {
     // Wait for changes to propagate
     await waitForChanges()
 
-    // Verify synced update was emitted
-    expect(callback).toHaveBeenCalledTimes(2) // FIXME: this should ideally be 0 - we currently see a delete and an insert
-    // This is called when the mutationFn returns and
-    // the optimistic state is dropped and synced state is
-    // applied.
+    // Verify no changes were emitted as the sync should match the optimistic state
+    expect(callback).toHaveBeenCalledTimes(0)
     callback.mockReset()
 
     // Update one item only
