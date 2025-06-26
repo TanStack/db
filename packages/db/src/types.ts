@@ -15,6 +15,48 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
+ * Helper type to extract the input type from a standard schema
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type InferSchemaInput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends object
+    ? StandardSchemaV1.InferInput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * Helper type to determine the insert input type
+ * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
+ *
+ * Priority:
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema input type (if schema provided)
+ * 3. Fallback type TFallback
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type ResolveInsertInput<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaInput<TSchema>
+  : TExplicit extends object
+    ? TExplicit
+    : Record<string, unknown>
+
+export type CollectionInsertInput<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> =
+  | ResolveInsertInput<TExplicit, TSchema, TFallback>
+  | Array<ResolveInsertInput<TExplicit, TSchema, TFallback>>
+
+/**
  * Helper type to determine the final type based on priority:
  * 1. Explicit generic TExplicit (if not 'unknown')
  * 2. Schema output type (if schema provided)
@@ -55,12 +97,16 @@ export type UtilsRecord = Record<string, Fn>
 export interface PendingMutation<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TInsertInput = T,
 > {
   mutationId: string
+  // The state of the object before the mutation.
   original: TOperation extends `insert` ? {} : T
+  // The result state of the object after all mutations.
   modified: T
+  // The actual changes made.
   changes: TOperation extends `insert`
-    ? T
+    ? TInsertInput
     : TOperation extends `delete`
       ? T
       : Partial<T>
@@ -71,7 +117,7 @@ export interface PendingMutation<
   syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T, any>
+  collection: Collection<T, any, any, any>
 }
 
 /**
@@ -143,7 +189,7 @@ export interface SyncConfig<
   TKey extends string | number = string | number,
 > {
   sync: (params: {
-    collection: Collection<T, TKey>
+    collection: Collection<T, TKey, any, any>
     begin: () => void
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
