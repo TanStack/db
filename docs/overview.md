@@ -425,7 +425,7 @@ const Todo = () => {
 ## Manual Transactions
 
 By manually creating transactions, you can fully control their lifecycles and behaviors. `createOptimisticAction` is a ~25 line
-function which implements a common transaction pattern. Feel free to invent your own patterns and hooks!
+function which implements a common transaction pattern. Feel free to invent your own patterns!
 
 
 Here's one way you could use transactions.
