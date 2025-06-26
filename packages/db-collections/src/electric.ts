@@ -290,8 +290,17 @@ function createElectricSync<T extends object>(
     }
   }
 
-  // Abort controller for the stream and somewhere to store the unsubscribe function
+  // Abort controller for the stream - wraps the signal if provided
   const abortController = new AbortController()
+  if (shapeOptions.signal) {
+    shapeOptions.signal.addEventListener(`abort`, () => {
+      abortController.abort()
+    })
+    if (shapeOptions.signal.aborted) {
+      abortController.abort()
+    }
+  }
+
   let unsubscribeStream: () => void
 
   return {
