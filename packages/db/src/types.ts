@@ -112,7 +112,7 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
 }
 
 /**
- * Options for the useOptimisticMutation hook
+ * Options for the createOptimisticAction helper
  */
 export interface CreateOptimisticActionsOptions<TVars = unknown>
   extends Omit<TransactionConfig, `mutationFn`> {
