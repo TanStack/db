@@ -534,9 +534,13 @@ export class CollectionImpl<
   private removeSubscriber(): void {
     this.activeSubscribersCount--
 
-    if (this.activeSubscribersCount <= 0) {
+    if (this.activeSubscribersCount === 0) {
       this.activeSubscribersCount = 0
       this.startGCTimer()
+    } else if (this.activeSubscribersCount < 0) {
+      throw new Error(
+        `Active subscribers count is negative - this should never happen`
+      )
     }
   }
 
