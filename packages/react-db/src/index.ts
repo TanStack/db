@@ -1,5 +1,4 @@
 // Re-export all public APIs
-export * from "./useOptimisticMutation"
 export * from "./useLiveQuery"
 
 // Re-export everything from @tanstack/db
