@@ -258,7 +258,7 @@ export interface CollectionConfig<
   gcTime?: number
   /**
    * Whether to start syncing immediately when the collection is created.
-   * Defaults to true to maintain backward compatibility. Set to false for lazy loading.
+   * Defaults to false for lazy loading. Set to true to immediately sync.
    */
   startSync?: boolean
   /**

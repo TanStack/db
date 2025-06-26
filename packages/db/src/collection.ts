@@ -224,15 +224,19 @@ export class CollectionImpl<
     from: CollectionStatus,
     to: CollectionStatus
   ): void {
+    if (from === to) {
+      // Allow same state transitions
+      return
+    }
     const validTransitions: Record<
       CollectionStatus,
       Array<CollectionStatus>
     > = {
-      idle: [`loading`, `error`, `cleaned-up`], // Allow cleanup from idle
+      idle: [`loading`, `error`, `cleaned-up`],
       loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
-      error: [`cleaned-up`, `idle`], // Allow reset to idle for recovery
-      "cleaned-up": [`loading`, `error`], // Allow restart
+      error: [`cleaned-up`, `idle`],
+      "cleaned-up": [`loading`, `error`],
     }
 
     if (!validTransitions[from].includes(to)) {
@@ -440,10 +444,29 @@ export class CollectionImpl<
       this.gcTimeoutId = null
     }
 
-    // Stop sync
-    if (this.syncCleanupFn) {
-      this.syncCleanupFn()
-      this.syncCleanupFn = null
+    // Stop sync - wrap in try/catch since it's user-provided code
+    try {
+      if (this.syncCleanupFn) {
+        this.syncCleanupFn()
+        this.syncCleanupFn = null
+      }
+    } catch (error) {
+      // Re-throw in a microtask to surface the error after cleanup completes
+      queueMicrotask(() => {
+        if (error instanceof Error) {
+          // Preserve the original error and stack trace
+          const wrappedError = new Error(
+            `Collection "${this.id}" sync cleanup function threw an error: ${error.message}`
+          )
+          wrappedError.cause = error
+          wrappedError.stack = error.stack
+          throw wrappedError
+        } else {
+          throw new Error(
+            `Collection "${this.id}" sync cleanup function threw an error: ${String(error)}`
+          )
+        }
+      })
     }
 
     // Clear data
