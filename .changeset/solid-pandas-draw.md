@@ -31,7 +31,7 @@ An example of converting a `useOptimisticMutation` hook to `createOptimisticActi
 +    return response.json()
 +  }
 +})
- 
+
  const Todo = () => {
 -  // Create the `addTodo` mutator, passing in your `mutationFn`.
 -  const addTodo = useOptimisticMutation({ mutationFn })
@@ -49,7 +49,7 @@ An example of converting a `useOptimisticMutation` hook to `createOptimisticActi
 +    // Triggers the onMutate and then the mutationFn
 +    addTodo('🔥 Make app faster')
    }
- 
+
    return <Button onClick={ handleClick } />
  }
 ```
