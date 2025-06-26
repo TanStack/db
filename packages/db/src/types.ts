@@ -220,10 +220,15 @@ export type DeleteMutationFn<T extends object = Record<string, unknown>> = (
  * Collection status values for lifecycle management
  */
 export type CollectionStatus =
+  /** Collection is created but sync hasn't started yet (when startSync config is false) */
   | `idle`
+  /** Sync has started but hasn't received the first commit yet */
   | `loading`
+  /** Collection has received at least one commit and is ready for use */
   | `ready`
+  /** An error occurred during sync initialization */
   | `error`
+  /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
 export interface CollectionConfig<

@@ -198,6 +198,60 @@ export class CollectionImpl<
   }
 
   /**
+   * Validates that the collection is in a usable state for data operations
+   * @private
+   */
+  private validateCollectionUsable(operation: string): void {
+    switch (this._status) {
+      case `error`:
+        throw new Error(
+          `Cannot perform ${operation} on collection "${this.id}" - collection is in error state. ` +
+            `Try calling cleanup() and restarting the collection.`
+        )
+      case `cleaned-up`:
+        throw new Error(
+          `Cannot perform ${operation} on collection "${this.id}" - collection has been cleaned up. ` +
+            `The collection will automatically restart on next access.`
+        )
+    }
+  }
+
+  /**
+   * Validates state transitions to prevent invalid status changes
+   * @private
+   */
+  private validateStatusTransition(
+    from: CollectionStatus,
+    to: CollectionStatus
+  ): void {
+    const validTransitions: Record<
+      CollectionStatus,
+      Array<CollectionStatus>
+    > = {
+      idle: [`loading`, `error`, `cleaned-up`], // Allow cleanup from idle
+      loading: [`ready`, `error`, `cleaned-up`],
+      ready: [`cleaned-up`, `error`],
+      error: [`cleaned-up`, `idle`], // Allow reset to idle for recovery
+      "cleaned-up": [`loading`, `error`], // Allow restart
+    }
+
+    if (!validTransitions[from].includes(to)) {
+      throw new Error(
+        `Invalid collection status transition from "${from}" to "${to}" for collection "${this.id}"`
+      )
+    }
+  }
+
+  /**
+   * Safely update the collection status with validation
+   * @private
+   */
+  private setStatus(newStatus: CollectionStatus): void {
+    this.validateStatusTransition(this._status, newStatus)
+    this._status = newStatus
+  }
+
+  /**
    * Creates a new Collection instance
    *
    * @param config - Configuration object for the collection
@@ -258,7 +312,7 @@ export class CollectionImpl<
       return // Already started or in progress
     }
 
-    this._status = `loading`
+    this.setStatus(`loading`)
 
     try {
       const cleanupFn = this.config.sync.sync({
@@ -323,7 +377,7 @@ export class CollectionImpl<
 
           // Update status to ready after first commit
           if (this._status === `loading`) {
-            this._status = `ready`
+            this.setStatus(`ready`)
           }
         },
       })
@@ -331,7 +385,7 @@ export class CollectionImpl<
       // Store cleanup function if provided
       this.syncCleanupFn = typeof cleanupFn === `function` ? cleanupFn : null
     } catch (error) {
-      this._status = `error`
+      this.setStatus(`error`)
       throw error
     }
   }
@@ -405,7 +459,7 @@ export class CollectionImpl<
     this.preloadPromise = null
 
     // Update status
-    this._status = `cleaned-up`
+    this.setStatus(`cleaned-up`)
 
     return Promise.resolve()
   }
@@ -1107,6 +1161,8 @@ export class CollectionImpl<
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
   insert = (data: T | Array<T>, config?: InsertConfig) => {
+    this.validateCollectionUsable(`insert`)
+
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
@@ -1251,6 +1307,8 @@ export class CollectionImpl<
     if (typeof keys === `undefined`) {
       throw new Error(`The first argument to update is missing`)
     }
+
+    this.validateCollectionUsable(`update`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -1417,6 +1475,8 @@ export class CollectionImpl<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
+    this.validateCollectionUsable(`delete`)
+
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
