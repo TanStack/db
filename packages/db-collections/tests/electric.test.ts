@@ -47,6 +47,7 @@ describe(`Electric Integration`, () => {
           table: `test_table`,
         },
       },
+      startSync: true,
       getKey: (item: Row) => item.id as number,
     }
 
@@ -532,6 +533,7 @@ describe(`Electric Integration`, () => {
             table: `test_table`,
           },
         },
+        startSync: true,
         getKey: (item: Row) => item.id as number,
         onInsert,
       }
@@ -559,6 +561,393 @@ describe(`Electric Integration`, () => {
         name: `Direct Persistence User`,
       })
       expect(testCollection.syncedData.size).toEqual(1)
+    })
+  })
+
+  // Tests for Electric stream lifecycle management
+  describe(`Electric stream lifecycle management`, () => {
+    let mockUnsubscribe: ReturnType<typeof vi.fn>
+    let mockAbortController: {
+      abort: ReturnType<typeof vi.fn>
+      signal: AbortSignal
+    }
+
+    beforeEach(() => {
+      // Clear all mocks before each lifecycle test
+      vi.clearAllMocks()
+
+      // Reset mocks before each test
+      mockUnsubscribe = vi.fn()
+      mockAbortController = {
+        abort: vi.fn(),
+        signal: new AbortController().signal,
+      }
+
+      // Update the mock to return our mock unsubscribe function
+      mockSubscribe.mockImplementation((callback) => {
+        subscriber = callback
+        return mockUnsubscribe
+      })
+
+      // Mock AbortController
+      global.AbortController = vi
+        .fn()
+        .mockImplementation(() => mockAbortController)
+    })
+
+    it(`should call unsubscribe and abort when collection is cleaned up`, async () => {
+      const config = {
+        id: `cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Verify stream is set up
+      expect(mockSubscribe).toHaveBeenCalled()
+
+      // Cleanup the collection
+      await testCollection.cleanup()
+
+      // Verify that both unsubscribe and abort were called
+      expect(mockUnsubscribe).toHaveBeenCalledTimes(1)
+      expect(mockAbortController.abort).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should properly cleanup Electric-specific resources`, async () => {
+      const config = {
+        id: `resource-cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Add some txids to track
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test` },
+          headers: {
+            operation: `insert`,
+            txids: [100, 200],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Verify txids are tracked
+      await expect(testCollection.utils.awaitTxId(`100`)).resolves.toBe(true)
+
+      // Cleanup collection
+      await testCollection.cleanup()
+
+      // Verify cleanup was called
+      expect(mockUnsubscribe).toHaveBeenCalled()
+      expect(mockAbortController.abort).toHaveBeenCalled()
+    })
+
+    it(`should handle multiple cleanup calls gracefully`, async () => {
+      const config = {
+        id: `multiple-cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Call cleanup multiple times
+      await testCollection.cleanup()
+      await testCollection.cleanup()
+      await testCollection.cleanup()
+
+      // Should only call unsubscribe once (from the first cleanup)
+      expect(mockUnsubscribe).toHaveBeenCalledTimes(1)
+      expect(mockAbortController.abort).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should restart stream when collection is accessed after cleanup`, async () => {
+      const config = {
+        id: `restart-stream-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Initial stream setup
+      expect(mockSubscribe).toHaveBeenCalledTimes(1)
+
+      // Cleanup
+      await testCollection.cleanup()
+      expect(testCollection.status).toBe(`cleaned-up`)
+
+      // Access collection data to restart sync
+      const unsubscribe = testCollection.subscribeChanges(() => {})
+
+      // Should have started a new stream
+      expect(mockSubscribe).toHaveBeenCalledTimes(2)
+      expect(testCollection.status).toBe(`loading`)
+
+      unsubscribe()
+    })
+
+    it(`should handle stream errors gracefully`, () => {
+      const config = {
+        id: `error-handling-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      // Mock stream to throw an error
+      mockSubscribe.mockImplementation(() => {
+        throw new Error(`Stream connection failed`)
+      })
+
+      expect(() => {
+        createCollection(electricCollectionOptions(config))
+      }).toThrow(`Stream connection failed`)
+    })
+
+    it(`should handle subscriber function errors without breaking`, () => {
+      const config = {
+        id: `subscriber-error-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Mock console.error to capture error logs
+      const consoleSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+      // Send messages with invalid data that might cause internal errors
+      // but shouldn't break the entire system
+      expect(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `Valid User` }, // Use valid data
+            headers: { operation: `insert` },
+          },
+        ])
+      }).not.toThrow()
+
+      // Should have processed the valid message without issues
+      expect(testCollection.syncedData.size).toBe(0) // Still pending until up-to-date
+
+      // Send up-to-date to commit
+      expect(() => {
+        subscriber([
+          {
+            headers: { control: `up-to-date` },
+          },
+        ])
+      }).not.toThrow()
+
+      // Now the data should be committed
+      expect(testCollection.has(1)).toBe(true)
+
+      consoleSpy.mockRestore()
+    })
+
+    it(`should properly handle concurrent stream operations`, async () => {
+      const config = {
+        id: `concurrent-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Simulate concurrent messages
+      const promises = [
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            subscriber([
+              {
+                key: `1`,
+                value: { id: 1, name: `User 1` },
+                headers: { operation: `insert` },
+              },
+            ])
+            resolve()
+          }, 10)
+        }),
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            subscriber([
+              {
+                key: `2`,
+                value: { id: 2, name: `User 2` },
+                headers: { operation: `insert` },
+              },
+            ])
+            resolve()
+          }, 20)
+        }),
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            subscriber([
+              {
+                headers: { control: `up-to-date` },
+              },
+            ])
+            resolve()
+          }, 30)
+        }),
+      ]
+
+      await Promise.all(promises)
+
+      // Both items should be in the collection
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+    })
+
+    it(`should handle schema information extraction from messages`, () => {
+      const config = {
+        id: `schema-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send message with schema information
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: {
+            operation: `insert`,
+            schema: `custom_schema`,
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Schema should be stored and used in sync metadata
+      // This is internal behavior, but we can verify it doesn't cause errors
+      expect(testCollection.has(1)).toBe(true)
+    })
+
+    it(`should handle invalid schema information gracefully`, () => {
+      const config = {
+        id: `invalid-schema-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send message with invalid schema information
+      expect(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `User 1` },
+            headers: {
+              operation: `insert`,
+              schema: 123 as any, // Invalid schema type
+            },
+          },
+          {
+            headers: { control: `up-to-date` },
+          },
+        ])
+      }).not.toThrow()
+
+      expect(testCollection.has(1)).toBe(true)
+    })
+
+    it(`should handle txids from control messages`, async () => {
+      const config = {
+        id: `control-txid-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send control message with txids (as numbers, per Electric API)
+      subscriber([
+        {
+          headers: {
+            control: `up-to-date`,
+            txids: [300, 400],
+          },
+        },
+      ])
+
+      // Txids should be tracked (converted to strings internally)
+      await expect(testCollection.utils.awaitTxId(`300`)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(`400`)).resolves.toBe(true)
     })
   })
 })

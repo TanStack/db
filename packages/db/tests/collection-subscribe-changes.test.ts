@@ -226,6 +226,7 @@ describe(`Collection.subscribeChanges`, () => {
       getKey: (item) => {
         return item.id
       },
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Listen for sync events

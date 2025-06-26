@@ -56,6 +56,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey,
+      startSync: true,
     }
 
     const options = queryCollectionOptions(config)
@@ -107,6 +108,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey,
+      startSync: true,
     }
 
     const options = queryCollectionOptions(config)
@@ -184,6 +186,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey,
+      startSync: true,
       retry: 0, // Disable retries for this test case
     })
     const collection = createCollection(options)
@@ -232,6 +235,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey,
+      startSync: true,
     })
     const collection = createCollection(options)
 
@@ -280,6 +284,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey,
+      startSync: true,
     })
     const collection = createCollection(options)
 
@@ -338,6 +343,7 @@ describe(`QueryCollection`, () => {
       queryKey,
       queryFn,
       getKey: getKeySpy,
+      startSync: true,
     })
     const collection = createCollection(options)
 
@@ -522,6 +528,475 @@ describe(`QueryCollection`, () => {
 
       // Restore original function
       vi.restoreAllMocks()
+    })
+  })
+
+  // Tests for lifecycle management
+  describe(`lifecycle management`, () => {
+    it(`should properly cleanup query and collection when collection is cleaned up`, async () => {
+      const queryKey = [`cleanup-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `cleanup-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data to load
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      // Cleanup the collection
+      await collection.cleanup()
+
+      // Verify collection status
+      expect(collection.status).toBe(`cleaned-up`)
+
+      // Note: Query cleanup happens during sync cleanup, not collection cleanup
+      // We're mainly verifying the collection cleanup works without errors
+    })
+
+    it(`should call cancelQueries and removeQueries on sync cleanup`, async () => {
+      const queryKey = [`sync-cleanup-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `sync-cleanup-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      // Spy on the queryClient methods that should be called during sync cleanup
+      const cancelQueriesSpy = vi
+        .spyOn(queryClient, `cancelQueries`)
+        .mockResolvedValue()
+      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data to load
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      // Cleanup the collection which should trigger sync cleanup
+      await collection.cleanup()
+
+      // Wait a bit to ensure all async operations complete
+      await flushPromises()
+
+      // Verify collection status
+      expect(collection.status).toBe(`cleaned-up`)
+
+      // Verify that the TanStack Query cleanup methods were called
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+
+      // Restore spies
+      cancelQueriesSpy.mockRestore()
+      removeQueriesSpy.mockRestore()
+    })
+
+    it(`should handle multiple cleanup calls gracefully`, async () => {
+      const queryKey = [`multiple-cleanup-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `multiple-cleanup-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Call cleanup multiple times
+      await collection.cleanup()
+      expect(collection.status).toBe(`cleaned-up`)
+
+      await collection.cleanup()
+      await collection.cleanup()
+
+      // Should handle multiple cleanups gracefully
+      expect(collection.status).toBe(`cleaned-up`)
+    })
+
+    it(`should restart sync when collection is accessed after cleanup`, async () => {
+      const queryKey = [`restart-sync-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `restart-sync-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      // Cleanup
+      await collection.cleanup()
+      expect(collection.status).toBe(`cleaned-up`)
+
+      // Access collection data to restart sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
+      // Should restart sync (might be ready immediately if query is cached)
+      expect([`loading`, `ready`]).toContain(collection.status)
+
+      unsubscribe()
+    })
+
+    it(`should handle query lifecycle during restart cycle`, async () => {
+      const queryKey = [`restart-lifecycle-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `restart-lifecycle-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      // Spy on queryClient methods
+      const cancelQueriesSpy = vi
+        .spyOn(queryClient, `cancelQueries`)
+        .mockResolvedValue()
+      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Cleanup which should call query cleanup methods
+      await collection.cleanup()
+      await flushPromises()
+      expect(collection.status).toBe(`cleaned-up`)
+
+      // Verify cleanup methods were called
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+
+      // Clear the spies to track new calls
+      cancelQueriesSpy.mockClear()
+      removeQueriesSpy.mockClear()
+
+      // Restart by accessing collection
+      const unsubscribe = collection.subscribeChanges(() => {})
+
+      // Should restart sync
+      expect([`loading`, `ready`]).toContain(collection.status)
+
+      // Cleanup again to verify the new sync cleanup works
+      unsubscribe()
+      await collection.cleanup()
+      await flushPromises()
+
+      // Verify cleanup methods were called again for the restarted sync
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+
+      // Restore spies
+      cancelQueriesSpy.mockRestore()
+      removeQueriesSpy.mockRestore()
+    })
+
+    it(`should handle query invalidation and refetch properly`, async () => {
+      const queryKey = [`invalidation-test`]
+      let items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockImplementation(() => Promise.resolve(items))
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `invalidation-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      // Update data for next fetch
+      items = [
+        { id: `1`, name: `Updated Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      // Invalidate and refetch
+      await queryClient.invalidateQueries({ queryKey })
+
+      // Wait for refetch to complete
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.size).toBe(2)
+      })
+
+      expect(collection.get(`1`)).toEqual({ id: `1`, name: `Updated Item 1` })
+      expect(collection.get(`2`)).toEqual({ id: `2`, name: `Item 2` })
+    })
+
+    it(`should handle concurrent query operations`, async () => {
+      const queryKey = [`concurrent-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `concurrent-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Perform concurrent operations
+      const promises = [
+        collection.utils.refetch(),
+        collection.utils.refetch(),
+        collection.utils.refetch(),
+      ]
+
+      // All should complete without errors
+      await Promise.all(promises)
+
+      // Collection should remain in a consistent state
+      expect(collection.size).toBe(1)
+      expect(collection.get(`1`)).toEqual({ id: `1`, name: `Item 1` })
+    })
+
+    it(`should handle query state transitions properly`, async () => {
+      const queryKey = [`state-transition-test`]
+      const items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `state-transition-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Initially loading
+      expect(collection.status).toBe(`loading`)
+
+      // Wait for data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Trigger a refetch which should transition to loading and back to ready
+      const refetchPromise = collection.utils.refetch()
+
+      // Should transition back to ready after refetch
+      await refetchPromise
+      expect(collection.status).toBe(`ready`)
+    })
+
+    it(`should properly handle subscription lifecycle`, async () => {
+      const queryKey = [`subscription-lifecycle-test`]
+      let items = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockImplementation(() => Promise.resolve(items))
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `subscription-lifecycle-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Create multiple subscriptions
+      const changeHandler1 = vi.fn()
+      const changeHandler2 = vi.fn()
+
+      const unsubscribe1 = collection.subscribeChanges(changeHandler1)
+      const unsubscribe2 = collection.subscribeChanges(changeHandler2)
+
+      // Change the data and trigger a refetch
+      items = [{ id: `1`, name: `Item 1 Updated` }]
+      await collection.utils.refetch()
+
+      // Wait for changes to propagate
+      await vi.waitFor(() => {
+        expect(collection.get(`1`)?.name).toBe(`Item 1 Updated`)
+      })
+
+      // Both handlers should have been called
+      expect(changeHandler1).toHaveBeenCalled()
+      expect(changeHandler2).toHaveBeenCalled()
+
+      // Unsubscribe one
+      unsubscribe1()
+      changeHandler1.mockClear()
+      changeHandler2.mockClear()
+
+      // Change data again and trigger another refetch
+      items = [{ id: `1`, name: `Item 1 Updated Again` }]
+      await collection.utils.refetch()
+
+      // Wait for changes to propagate
+      await vi.waitFor(() => {
+        expect(collection.get(`1`)?.name).toBe(`Item 1 Updated Again`)
+      })
+
+      // Only the second handler should be called
+      expect(changeHandler1).not.toHaveBeenCalled()
+      expect(changeHandler2).toHaveBeenCalled()
+
+      // Cleanup
+      unsubscribe2()
+    })
+
+    it(`should handle query cancellation gracefully`, async () => {
+      const queryKey = [`cancellation-test`]
+      let resolvePromise: (value: Array<TestItem>) => void
+      const queryPromise = new Promise<Array<TestItem>>((resolve) => {
+        resolvePromise = resolve
+      })
+      const queryFn = vi.fn().mockReturnValue(queryPromise)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `cancellation-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should be in loading state
+      expect(collection.status).toBe(`loading`)
+
+      // Cancel by cleaning up before query resolves
+      await collection.cleanup()
+
+      // Now resolve the promise
+      resolvePromise!([{ id: `1`, name: `Item 1` }])
+
+      // Wait a bit to ensure any async operations complete
+      await flushPromises()
+
+      // Collection should be cleaned up and not have processed the data
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection.size).toBe(0)
+    })
+
+    it(`should maintain data consistency during rapid updates`, async () => {
+      const queryKey = [`rapid-updates-test`]
+      let updateCount = 0
+      const queryFn = vi.fn().mockImplementation(() => {
+        updateCount++
+        return Promise.resolve([{ id: `1`, name: `Item ${updateCount}` }])
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `rapid-updates-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Perform rapid updates
+      const updatePromises = []
+      for (let i = 0; i < 5; i++) {
+        updatePromises.push(collection.utils.refetch())
+      }
+
+      await Promise.all(updatePromises)
+
+      // Collection should be in a consistent state
+      expect(collection.size).toBe(1)
+      expect(collection.status).toBe(`ready`)
+
+      // The final data should reflect one of the updates
+      const finalItem = collection.get(`1`)
+      expect(finalItem?.name).toMatch(/^Item \d+$/)
     })
   })
 })
