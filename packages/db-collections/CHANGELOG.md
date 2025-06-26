@@ -1,5 +1,36 @@
 # @tanstack/db-collections
 
+## 0.0.16
+
+### Patch Changes
+
+- feat: implement Collection Lifecycle Management ([#198](https://github.com/TanStack/db/pull/198))
+
+  Adds automatic lifecycle management for collections to optimize resource usage.
+
+  **New Features:**
+
+  - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
+  - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
+  - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
+  - Manual `preload()` and `cleanup()` methods for lifecycle control
+
+  **Usage:**
+
+  ```typescript
+  const collection = createCollection({
+    startSync: false, // Enable lazy loading
+    gcTime: 300000, // Cleanup timeout (default: 5 minutes)
+  })
+
+  console.log(collection.status) // Current state
+  await collection.preload() // Ensure ready
+  await collection.cleanup() // Manual cleanup
+  ```
+
+- Updated dependencies [[`945868e`](https://github.com/TanStack/db/commit/945868e95944543ccf5d778409548679a952e249), [`0f8a008`](https://github.com/TanStack/db/commit/0f8a008be8b368f231c8518ad1adfcac08132da2), [`57b5f5d`](https://github.com/TanStack/db/commit/57b5f5de6297326a57ef205a400428af0697b48b)]:
+  - @tanstack/db@0.0.13
+
 ## 0.0.15
 
 ### Patch Changes

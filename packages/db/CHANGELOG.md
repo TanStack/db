@@ -1,5 +1,85 @@
 # @tanstack/db
 
+## 0.0.13
+
+### Patch Changes
+
+- feat: implement Collection Lifecycle Management ([#198](https://github.com/TanStack/db/pull/198))
+
+  Adds automatic lifecycle management for collections to optimize resource usage.
+
+  **New Features:**
+
+  - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
+  - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
+  - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
+  - Manual `preload()` and `cleanup()` methods for lifecycle control
+
+  **Usage:**
+
+  ```typescript
+  const collection = createCollection({
+    startSync: false, // Enable lazy loading
+    gcTime: 300000, // Cleanup timeout (default: 5 minutes)
+  })
+
+  console.log(collection.status) // Current state
+  await collection.preload() // Ensure ready
+  await collection.cleanup() // Manual cleanup
+  ```
+
+- Refactored the way we compute change events over the synced state and the optimistic changes. This fixes a couple of issues where the change events were not being emitted correctly. ([#206](https://github.com/TanStack/db/pull/206))
+
+- Add createOptimisticAction helper that replaces useOptimisticMutation ([#210](https://github.com/TanStack/db/pull/210))
+
+  An example of converting a `useOptimisticMutation` hook to `createOptimisticAction`. Now all optimistic & server mutation logic are consolidated.
+
+  ```diff
+  -import { useOptimisticMutation } from '@tanstack/react-db'
+  +import { createOptimisticAction } from '@tanstack/react-db'
+  +
+  +// Create the `addTodo` action, passing in your `mutationFn` and `onMutate`.
+  +const addTodo = createOptimisticAction<string>({
+  +  onMutate: (text) => {
+  +    // Instantly applies the local optimistic state.
+  +    todoCollection.insert({
+  +      id: uuid(),
+  +      text,
+  +      completed: false
+  +    })
+  +  },
+  +  mutationFn: async (text) => {
+  +    // Persist the todo to your backend
+  +    const response = await fetch('/api/todos', {
+  +      method: 'POST',
+  +      body: JSON.stringify({ text, completed: false }),
+  +    })
+  +    return response.json()
+  +  }
+  +})
+
+   const Todo = () => {
+  -  // Create the `addTodo` mutator, passing in your `mutationFn`.
+  -  const addTodo = useOptimisticMutation({ mutationFn })
+  -
+     const handleClick = () => {
+  -    // Triggers the mutationFn
+  -    addTodo.mutate(() =>
+  -      // Instantly applies the local optimistic state.
+  -      todoCollection.insert({
+  -        id: uuid(),
+  -        text: '🔥 Make app faster',
+  -        completed: false
+  -      })
+  -    )
+  +    // Triggers the onMutate and then the mutationFn
+  +    addTodo('🔥 Make app faster')
+     }
+
+     return <Button onClick={ handleClick } />
+   }
+  ```
+
 ## 0.0.12
 
 ### Patch Changes
