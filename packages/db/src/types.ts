@@ -111,6 +111,17 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
   metadata?: Record<string, unknown>
 }
 
+/**
+ * Options for the useOptimisticMutation hook
+ */
+export interface CreateOptimisticActionsOptions<TVars = unknown>
+  extends Omit<TransactionConfig, `mutationFn`> {
+  /** Function to apply optimistic updates locally before the mutation completes */
+  onMutate: (vars: TVars) => void
+  /** Function to execute the mutation on the server */
+  mutationFn: (vars: TVars, params: MutationFnParams) => Promise<any>
+}
+
 export type { Transaction }
 
 type Value<TExtensions = never> =
