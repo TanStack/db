@@ -16,7 +16,8 @@ export function createOptimisticAction<TVariables = unknown>(
       },
     })
 
-    // Execute the transaction (no callback needed since onMutate was already called)
+    // Execute the transaction. The mutationFn is called once mutate()
+    // is finished.
     transaction.mutate(() => {
       // Call onMutate with variables to apply optimistic updates
       onMutate(variables)
