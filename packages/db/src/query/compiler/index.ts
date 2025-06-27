@@ -82,9 +82,34 @@ export function compileQuery(
     )
   }
 
+  // Process functional WHERE clauses if they exist
+  if (query.fnWhere && query.fnWhere.length > 0) {
+    for (const fnWhere of query.fnWhere) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return fnWhere(namespacedRow)
+        })
+      )
+    }
+  }
+
   // Process the SELECT clause early - always create __select_results
   // This eliminates duplication and allows for future DISTINCT implementation
-  if (query.select) {
+  if (query.fnSelect) {
+    // Handle functional select - apply the function to transform the row
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]) => {
+        const selectResults = query.fnSelect!(namespacedRow)
+        return [
+          key,
+          {
+            ...namespacedRow,
+            __select_results: selectResults,
+          },
+        ] as [string, typeof namespacedRow & { __select_results: any }]
+      })
+    )
+  } else if (query.select) {
     pipeline = processSelectToResults(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create __select_results with the main table data
@@ -112,7 +137,8 @@ export function compileQuery(
       pipeline,
       query.groupBy,
       query.having,
-      query.select
+      query.select,
+      query.fnHaving
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
@@ -125,7 +151,8 @@ export function compileQuery(
         pipeline,
         [], // Empty group by means single group
         query.having,
-        query.select
+        query.select,
+        query.fnHaving
       )
     }
   }
@@ -139,6 +166,22 @@ export function compileQuery(
 
     if (!hasAggregates) {
       throw new Error(`HAVING clause requires GROUP BY clause`)
+    }
+  }
+
+  // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
+  if (
+    query.fnHaving &&
+    query.fnHaving.length > 0 &&
+    (!query.groupBy || query.groupBy.length === 0)
+  ) {
+    // If there's no GROUP BY but there are fnHaving clauses, apply them as filters
+    for (const fnHaving of query.fnHaving) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return fnHaving(namespacedRow)
+        })
+      )
     }
   }
 

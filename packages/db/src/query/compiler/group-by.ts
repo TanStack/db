@@ -62,7 +62,8 @@ export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
   groupByClause: GroupBy,
   havingClause?: Having,
-  selectClause?: Select
+  selectClause?: Select,
+  fnHavingClauses?: Array<(row: any) => any>
 ): NamespacedAndKeyedStream {
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
@@ -130,6 +131,19 @@ export function processGroupBy(
           return compiledHaving(namespacedRow)
         })
       )
+    }
+
+    // Apply functional HAVING clauses if present
+    if (fnHavingClauses && fnHavingClauses.length > 0) {
+      for (const fnHaving of fnHavingClauses) {
+        pipeline = pipeline.pipe(
+          filter(([, row]) => {
+            // Create a namespaced row structure for functional HAVING evaluation
+            const namespacedRow = { result: (row as any).__select_results }
+            return fnHaving(namespacedRow)
+          })
+        )
+      }
     }
 
     return pipeline
@@ -247,6 +261,19 @@ export function processGroupBy(
         return compiledHaving(namespacedRow)
       })
     )
+  }
+
+  // Apply functional HAVING clauses if present
+  if (fnHavingClauses && fnHavingClauses.length > 0) {
+    for (const fnHaving of fnHavingClauses) {
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          // Create a namespaced row structure for functional HAVING evaluation
+          const namespacedRow = { result: (row as any).__select_results }
+          return fnHaving(namespacedRow)
+        })
+      )
+    }
   }
 
   return pipeline

@@ -17,9 +17,9 @@ export interface Query {
   offset?: Offset
 
   // Functional variants
-  fnSelect: (row: NamespacedRow) => any
-  fnWhere: Array<(row: NamespacedRow) => any>
-  fnHaving: Array<(row: NamespacedRow) => any>
+  fnSelect?: (row: NamespacedRow) => any
+  fnWhere?: Array<(row: NamespacedRow) => any>
+  fnHaving?: Array<(row: NamespacedRow) => any>
 }
 
 export type From = CollectionRef | QueryRef
