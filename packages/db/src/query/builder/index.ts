@@ -1,6 +1,7 @@
 import { CollectionImpl } from "../../collection.js"
 import { CollectionRef, QueryRef } from "../ir.js"
 import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
+import type { NamespacedRow } from "../../types.js"
 import type {
   Agg,
   Expression,
@@ -223,6 +224,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return new BaseQueryBuilder({
       ...this.query,
       select,
+      fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
   }
 
@@ -299,6 +301,53 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
 
     return aliases
+  }
+
+  /**
+   * Functional variants of the query builder
+   * These are imperative function that are called for ery row.
+   * Warning: that these cannot be optimized by the query compiler, and may prevent
+   * some type of optimizations being possible.
+   * @example
+   * ```ts
+   * q.fn.select((row) => row.user.name)
+   * ```
+   */
+  get fn() {
+    const builder = this
+    return {
+      select<TFuncSelectResult>(
+        callback: (row: TContext[`schema`]) => TFuncSelectResult
+      ): QueryBuilder<WithResult<TContext, TFuncSelectResult>> {
+        return new BaseQueryBuilder({
+          ...builder.query,
+          select: undefined, // remove the select clause if it exists
+          fnSelect: callback,
+        })
+      },
+      where(
+        callback: (row: TContext[`schema`]) => any
+      ): QueryBuilder<TContext> {
+        return new BaseQueryBuilder({
+          ...builder.query,
+          fnWhere: [
+            ...(builder.query.fnWhere || []),
+            callback as (row: NamespacedRow) => any,
+          ],
+        })
+      },
+      having(
+        callback: (row: TContext[`schema`]) => any
+      ): QueryBuilder<TContext> {
+        return new BaseQueryBuilder({
+          ...builder.query,
+          fnHaving: [
+            ...(builder.query.fnHaving || []),
+            callback as (row: NamespacedRow) => any,
+          ],
+        })
+      },
+    }
   }
 
   _getQuery(): Query {

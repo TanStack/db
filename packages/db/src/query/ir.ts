@@ -3,6 +3,7 @@ This is the intermediate representation of the query.
 */
 
 import type { CollectionImpl } from "../collection"
+import type { NamespacedRow } from "../types"
 
 export interface Query {
   from: From
@@ -14,6 +15,11 @@ export interface Query {
   orderBy?: OrderBy
   limit?: Limit
   offset?: Offset
+
+  // Functional variants
+  fnSelect: (row: NamespacedRow) => any
+  fnWhere: Array<(row: NamespacedRow) => any>
+  fnHaving: Array<(row: NamespacedRow) => any>
 }
 
 export type From = CollectionRef | QueryRef
