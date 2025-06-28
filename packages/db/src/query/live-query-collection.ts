@@ -418,7 +418,7 @@ export function createLiveQueryCollection<
 }
 
 /**
- * Bridge function that handles the type compatibility between query2's TResult
+ * Bridge function that handles the type compatibility between query's TResult
  * and core collection's ResolveType without exposing ugly type assertions to users
  */
 function bridgeToCreateCollection<

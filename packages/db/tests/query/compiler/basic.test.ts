@@ -28,7 +28,7 @@ const sampleUsers: Array<User> = [
   { id: 4, name: `Dave`, age: 22, email: `dave@example.com`, active: true },
 ]
 
-describe(`Query2 Compiler`, () => {
+describe(`Query Compiler`, () => {
   describe(`Basic Compilation`, () => {
     test(`compiles a simple FROM query`, () => {
       // Create a mock collection

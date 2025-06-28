@@ -27,6 +27,12 @@ import type {
   WithResult,
 } from "./types.js"
 
+export function defineQuery<TQueryBuilder extends QueryBuilder<any>>(
+  fn: (builder: InitialQueryBuilder) => TQueryBuilder
+): TQueryBuilder {
+  return fn(new BaseQueryBuilder()) as TQueryBuilder
+}
+
 export function buildQuery(
   fn: (builder: InitialQueryBuilder) => QueryBuilder<any>
 ): Query {
