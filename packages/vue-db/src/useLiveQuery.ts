@@ -6,7 +6,7 @@ import {
   toValue,
   watchEffect,
 } from "vue"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { BaseQueryBuilder, createLiveQueryCollection } from "@tanstack/db"
 import type {
   Collection,
   Context,
@@ -54,6 +54,12 @@ export function useLiveQuery<
   liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
 
+// Overload 4: Accept a predefined QueryBuilder (can be reactive)
+export function useLiveQuery<TContext extends Context>(
+  queryBuilder: MaybeRefOrGetter<QueryBuilder<TContext>>,
+  deps?: Array<MaybeRefOrGetter<unknown>>
+): UseLiveQueryReturn<GetResult<TContext>>
+
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
@@ -85,6 +91,18 @@ export function useLiveQuery(
       // It's already a collection, ensure sync is started for Vue hooks
       unwrappedParam.startSyncImmediate()
       return unwrappedParam
+    }
+
+    // Check if it's a QueryBuilder instance
+    const isQueryBuilder = unwrappedParam instanceof BaseQueryBuilder
+
+    if (isQueryBuilder) {
+      // It's a predefined QueryBuilder, create a live query collection from it
+      const queryBuilderCollection = createLiveQueryCollection(
+        unwrappedParam as QueryBuilder<any>
+      )
+      queryBuilderCollection.startSyncImmediate()
+      return queryBuilderCollection
     }
 
     // Reference deps to make computed reactive to them

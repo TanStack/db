@@ -4,6 +4,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   createOptimisticAction,
+  defineQuery,
   eq,
   gt,
 } from "@tanstack/db"
@@ -815,6 +816,227 @@ describe(`Query Collections`, () => {
       name: `Bob Dylan`,
     })
     expect(returnedCollection.value.id).toBe(liveQueryCollection2.id)
+
+    // Verify we no longer have data from the first collection
+    expect(state.value.get(`3`)).toBeUndefined()
+  })
+
+  it(`should accept a predefined QueryBuilder directly`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `predefined-querybuilder-test-vue`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Create a predefined query using defineQuery
+    const predefinedQuery = defineQuery((q) =>
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => gt(persons.age, 30))
+        .select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+          age: persons.age,
+        }))
+    )
+
+    const { state, data } = useLiveQuery(predefinedQuery)
+
+    // Wait for collection to sync and state to update
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(1) // Only John Smith (age 35)
+    expect(data.value).toHaveLength(1)
+
+    const johnSmith = data.value[0]
+    expect(johnSmith).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+      age: 35,
+    })
+  })
+
+  it(`should handle reactivity with predefined QueryBuilder`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `predefined-querybuilder-reactivity-test-vue`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Create a predefined query for active team members
+    const activeTeamQuery = defineQuery((q) =>
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => gt(persons.age, 25))
+        .select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+          team: persons.team,
+        }))
+    )
+
+    const { state } = useLiveQuery(activeTeamQuery)
+
+    // Wait for collection to sync - should have John Doe (30) and John Smith (35)
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(2)
+    expect(state.value.get(`1`)).toMatchObject({
+      id: `1`,
+      name: `John Doe`,
+      team: `team1`,
+    })
+    expect(state.value.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+      team: `team1`,
+    })
+
+    // Insert a new person that matches the query
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: {
+        id: `6`,
+        name: `Emma Wilson`,
+        age: 28,
+        email: `emma.wilson@example.com`,
+        isActive: true,
+        team: `team2`,
+      },
+    })
+    collection.utils.commit()
+
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(3)
+    expect(state.value.get(`6`)).toMatchObject({
+      id: `6`,
+      name: `Emma Wilson`,
+      team: `team2`,
+    })
+
+    // Update a person to no longer match the query (age <= 25)
+    collection.utils.begin()
+    collection.utils.write({
+      type: `update`,
+      value: {
+        id: `6`,
+        name: `Emma Wilson`,
+        age: 24, // Now age <= 25, should be filtered out
+        email: `emma.wilson@example.com`,
+        isActive: true,
+        team: `team2`,
+      },
+    })
+    collection.utils.commit()
+
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(2) // Back to just John Doe and John Smith
+    expect(state.value.get(`6`)).toBeUndefined()
+
+    // Delete a person
+    collection.utils.begin()
+    collection.utils.write({
+      type: `delete`,
+      value: {
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      },
+    })
+    collection.utils.commit()
+
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(1) // Only John Smith left
+    expect(state.value.get(`1`)).toBeUndefined()
+    expect(state.value.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+      team: `team1`,
+    })
+  })
+
+  it(`should handle reactive QueryBuilder changes`, async () => {
+    const collection1 = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `querybuilder-deps-test-1-vue`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const collection2 = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `querybuilder-deps-test-2-vue`,
+        getKey: (person: Person) => person.id,
+        initialData: [
+          {
+            id: `7`,
+            name: `David Johnson`,
+            age: 42,
+            email: `david.johnson@example.com`,
+            isActive: true,
+            team: `team3`,
+          },
+        ],
+      })
+    )
+
+    // Create separate queries for each collection
+    const query1 = defineQuery((q) =>
+      q
+        .from({ persons: collection1 })
+        .where(({ persons }) => gt(persons.age, 30))
+        .select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+        }))
+    )
+
+    const query2 = defineQuery((q) =>
+      q
+        .from({ persons: collection2 })
+        .where(({ persons }) => gt(persons.age, 30))
+        .select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+        }))
+    )
+
+    // Use a reactive ref for the QueryBuilder
+    const currentQuery = ref(query1)
+    const { state } = useLiveQuery(currentQuery)
+
+    // Wait for first collection to sync - should have John Smith
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(1)
+    expect(state.value.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+
+    // Switch to second query/collection by updating the reactive ref
+    currentQuery.value = query2
+
+    // Wait for the reactive change to propagate
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(1)
+    expect(state.value.get(`7`)).toMatchObject({
+      id: `7`,
+      name: `David Johnson`,
+    })
 
     // Verify we no longer have data from the first collection
     expect(state.value.get(`3`)).toBeUndefined()

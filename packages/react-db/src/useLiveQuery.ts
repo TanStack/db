@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { BaseQueryBuilder, createLiveQueryCollection } from "@tanstack/db"
 import type {
   Collection,
   Context,
@@ -42,6 +42,16 @@ export function useLiveQuery<
   collection: Collection<TResult, TKey, TUtils>
 }
 
+// Overload 4: Accept a predefined QueryBuilder
+export function useLiveQuery<TContext extends Context>(
+  queryBuilder: QueryBuilder<TContext>,
+  deps?: Array<unknown>
+): {
+  state: Map<string | number, GetResult<TContext>>
+  data: Array<GetResult<TContext>>
+  collection: Collection<GetResult<TContext>, string | number, {}>
+}
+
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
   configOrQueryOrCollection: any,
@@ -55,12 +65,24 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
+  // Check if it's a QueryBuilder instance
+  const isQueryBuilder = configOrQueryOrCollection instanceof BaseQueryBuilder
+
   const collection = useMemo(
     () => {
       if (isCollection) {
         // It's already a collection, ensure sync is started for React hooks
         configOrQueryOrCollection.startSyncImmediate()
         return configOrQueryOrCollection
+      }
+
+      if (isQueryBuilder) {
+        // It's a predefined QueryBuilder, create a live query collection from it
+        const queryBuilderCollection = createLiveQueryCollection(
+          configOrQueryOrCollection as QueryBuilder<any>
+        )
+        queryBuilderCollection.startSyncImmediate()
+        return queryBuilderCollection
       }
 
       // Original logic for creating collections
@@ -77,7 +99,11 @@ export function useLiveQuery(
         })
       }
     },
-    isCollection ? [configOrQueryOrCollection] : [...deps]
+    isCollection
+      ? [configOrQueryOrCollection]
+      : isQueryBuilder
+        ? [configOrQueryOrCollection, ...deps]
+        : [...deps]
   )
 
   // Infer types from the actual collection

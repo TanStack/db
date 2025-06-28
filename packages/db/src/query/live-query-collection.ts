@@ -1,7 +1,7 @@
 import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQuery } from "./compiler/index.js"
-import { buildQuery, getQuery, BaseQueryBuilder } from "./builder/index.js"
+import { BaseQueryBuilder, buildQuery, getQuery } from "./builder/index.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection.js"
 import type {
@@ -55,7 +55,9 @@ export interface LiveQueryCollectionConfig<
   /**
    * Query builder function or predefined query builder instance that defines the live query
    */
-  query: ((q: InitialQueryBuilder) => QueryBuilder<TContext>) | QueryBuilder<TContext>
+  query:
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | QueryBuilder<TContext>
 
   /**
    * Function to extract the key from result items
@@ -115,9 +117,10 @@ export function liveQueryCollectionOptions<
   const id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
   // Build the query using the provided query builder function or predefined query builder
-  const query = typeof config.query === 'function' 
-    ? buildQuery(config.query)
-    : getQuery(config.query)
+  const query =
+    typeof config.query === `function`
+      ? buildQuery(config.query)
+      : getQuery(config.query)
 
   // WeakMap to store the keys of the results so that we can retreve them in the
   // getKey function
@@ -378,9 +381,7 @@ export function createLiveQueryCollection<
 export function createLiveQueryCollection<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
->(
-  query: QueryBuilder<TContext>
-): Collection<TResult, string | number, {}>
+>(query: QueryBuilder<TContext>): Collection<TResult, string | number, {}>
 
 // Overload 3: Accept full config object with optional utilities
 export function createLiveQueryCollection<

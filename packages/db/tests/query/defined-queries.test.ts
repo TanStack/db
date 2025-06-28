@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import {
+  and,
   createLiveQueryCollection,
   defineQuery,
-  and,
   eq,
   gt,
   upper,
@@ -73,9 +73,9 @@ describe(`Defined Queries`, () => {
       const results = liveCollection.toArray
 
       expect(results).toHaveLength(3) // Alice, Bob, Dave are active
-      expect(results.every((u) => typeof u.id === 'number')).toBe(true)
-      expect(results.every((u) => typeof u.name === 'string')).toBe(true)
-      expect(results.every((u) => typeof u.email === 'string')).toBe(true)
+      expect(results.every((u) => typeof u.id === `number`)).toBe(true)
+      expect(results.every((u) => typeof u.name === `string`)).toBe(true)
+      expect(results.every((u) => typeof u.email === `string`)).toBe(true)
       expect(results.map((u) => u.name)).toEqual(
         expect.arrayContaining([`Alice`, `Bob`, `Dave`])
       )
@@ -271,17 +271,14 @@ describe(`Defined Queries`, () => {
 
       // Extend the query with a single WHERE clause that combines conditions
       const activeAdultUsersQuery = baseUsersQuery
-        .where(({ user }) => and(
-          eq(user.active, true),
-          gt(user.age, 20)
-        ))
+        .where(({ user }) => and(eq(user.active, true), gt(user.age, 20)))
         .select(({ user }) => ({
           id: user.id,
           name: user.name,
           age: user.age,
         }))
 
-      // Use the extended query  
+      // Use the extended query
       const liveCollection = createLiveQueryCollection({
         query: activeAdultUsersQuery,
         startSync: true,
@@ -304,7 +301,7 @@ describe(`Defined Queries`, () => {
           .where(({ user }) => eq(user.active, true))
       )
 
-             // Use the predefined query as a subquery
+      // Use the predefined query as a subquery
       const enhancedActiveUsersQuery = defineQuery((q) =>
         q
           .from({ activeUser: activeUsersQuery })
@@ -312,11 +309,11 @@ describe(`Defined Queries`, () => {
           .fn.select((row) => ({
             id: row.activeUser.id,
             name: row.activeUser.name,
-            category: row.activeUser.age > 25 ? 'senior' : 'junior',
+            category: row.activeUser.age > 25 ? `senior` : `junior`,
           }))
       )
 
-             // Use the final query
+      // Use the final query
       const liveCollection = createLiveQueryCollection({
         query: enhancedActiveUsersQuery,
         startSync: true,
@@ -332,8 +329,8 @@ describe(`Defined Queries`, () => {
       const alice = results.find((u) => u.name === `Alice`)
       const dave = results.find((u) => u.name === `Dave`)
 
-      expect(alice?.category).toBe('junior') // 25 is not > 25
-      expect(dave?.category).toBe('junior') // 22 is not > 25
+      expect(alice?.category).toBe(`junior`) // 25 is not > 25
+      expect(dave?.category).toBe(`junior`) // 22 is not > 25
     })
 
     test(`should maintain reactivity with predefined queries`, () => {
@@ -423,6 +420,135 @@ describe(`Defined Queries`, () => {
       expect(liveCollection.get(5)).toBeUndefined()
     })
 
-    
+    test(`should work with predefined queries in JOIN operations`, () => {
+      // Create a second collection for posts
+      type Post = {
+        id: number
+        title: string
+        authorId: number
+        published: boolean
+      }
+
+      const samplePosts: Array<Post> = [
+        { id: 1, title: `Alice's First Post`, authorId: 1, published: true },
+        { id: 2, title: `Bob's Draft`, authorId: 2, published: false },
+        { id: 3, title: `Alice's Second Post`, authorId: 1, published: true },
+        { id: 4, title: `Dave's Article`, authorId: 4, published: true },
+        { id: 5, title: `Charlie's Work`, authorId: 3, published: false },
+      ]
+
+      const postsCollection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `test-posts`,
+          getKey: (post) => post.id,
+          initialData: samplePosts,
+        })
+      )
+
+      // Define predefined queries
+      const activeUsersQuery = defineQuery((q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true))
+          .select(({ user }) => ({
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email,
+          }))
+      )
+
+      const publishedPostsQuery = defineQuery((q) =>
+        q
+          .from({ post: postsCollection })
+          .where(({ post }) => eq(post.published, true))
+          .select(({ post }) => ({
+            postId: post.id,
+            postTitle: post.title,
+            postAuthorId: post.authorId,
+          }))
+      )
+
+      // Create a query that joins the two predefined subqueries
+      const activeUsersWithPublishedPostsQuery = defineQuery((q) =>
+        q
+          .from({ activeUser: activeUsersQuery })
+          .join(
+            { publishedPost: publishedPostsQuery },
+            ({ activeUser, publishedPost }) =>
+              eq(activeUser.userId, publishedPost.postAuthorId),
+            `inner`
+          )
+          .select(({ activeUser, publishedPost }) => ({
+            authorId: activeUser.userId,
+            authorName: activeUser.userName,
+            authorEmail: activeUser.userEmail,
+            postId: publishedPost.postId,
+            postTitle: publishedPost.postTitle,
+          }))
+      )
+
+      // Use the complex joined query
+      const liveCollection = createLiveQueryCollection({
+        query: activeUsersWithPublishedPostsQuery,
+        startSync: true,
+      })
+
+      const results = liveCollection.toArray
+
+      // Should have results for Alice (2 posts) and Dave (1 post) - both active with published posts
+      // Bob has no published posts, Charlie is inactive
+      expect(results).toHaveLength(3)
+
+      const aliceResults = results.filter((r) => r.authorName === `Alice`)
+      const daveResults = results.filter((r) => r.authorName === `Dave`)
+
+      expect(aliceResults).toHaveLength(2) // Alice has 2 published posts
+      expect(daveResults).toHaveLength(1) // Dave has 1 published post
+
+      // Verify Alice's posts
+      expect(aliceResults.map((r) => r.postTitle)).toEqual(
+        expect.arrayContaining([`Alice's First Post`, `Alice's Second Post`])
+      )
+
+      // Verify Dave's post
+      expect(daveResults[0]).toMatchObject({
+        authorId: 4,
+        authorName: `Dave`,
+        postTitle: `Dave's Article`,
+      })
+
+      // Test reactivity: publish Bob's draft (Bob is active)
+      const bobDraft = samplePosts.find((p) => p.id === 2)!
+      const updatedBobPost: Post = {
+        id: bobDraft.id,
+        title: bobDraft.title,
+        authorId: bobDraft.authorId,
+        published: true,
+      }
+      postsCollection.utils.begin()
+      postsCollection.utils.write({
+        type: `update`,
+        value: updatedBobPost,
+      })
+      postsCollection.utils.commit()
+
+      expect(liveCollection.size).toBe(4) // Should now include Bob's published post
+      const bobResult = liveCollection.toArray.find(
+        (r) => r.authorName === `Bob`
+      )
+      expect(bobResult).toMatchObject({
+        authorId: 2,
+        authorName: `Bob`,
+        postTitle: `Bob's Draft`,
+      })
+
+      // Clean up
+      postsCollection.utils.begin()
+      postsCollection.utils.write({
+        type: `update`,
+        value: bobDraft, // Revert to unpublished
+      })
+      postsCollection.utils.commit()
+    })
   })
-}) 
+})

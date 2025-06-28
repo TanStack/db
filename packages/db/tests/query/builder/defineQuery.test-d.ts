@@ -2,7 +2,7 @@ import { describe, expectTypeOf, test } from "vitest"
 import { createCollection } from "../../../src/collection.js"
 import { mockSyncCollectionOptions } from "../../utls.js"
 import { defineQuery } from "../../../src/query/builder/index.js"
-import { eq, gt, count, sum } from "../../../src/query/builder/functions.js"
+import { count, eq, gt, sum } from "../../../src/query/builder/functions.js"
 import type { ExtractContext } from "../../../src/query/builder/index.js"
 import type { GetResult } from "../../../src/query/builder/types.js"
 
@@ -67,16 +67,16 @@ describe(`defineQuery Type Tests`, () => {
 
   test(`defineQuery return type matches callback return type`, () => {
     // Test that defineQuery returns exactly the same type as the callback
-    const queryBuilder = defineQuery((q) => q.from({ users: usersCollection }))
+    const _queryBuilder = defineQuery((q) => q.from({ users: usersCollection }))
 
     // Test that the result type is correctly inferred as User
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<User>()
   })
 
   test(`defineQuery with simple select`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q.from({ users: usersCollection }).select(({ users }) => ({
         id: users.id,
         name: users.name,
@@ -86,7 +86,7 @@ describe(`defineQuery Type Tests`, () => {
 
     // Test that the result type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       id: number
       name: string
@@ -95,40 +95,40 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery with join`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
-        .join({ dept: departmentsCollection }, ({ users, dept }) =>
-          eq(users.department_id, dept.id)
+        .join({ _dept: departmentsCollection }, ({ users, _dept }) =>
+          eq(users.department_id, _dept.id)
         )
     )
 
     // Test that join result type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       users: User
-      dept: Department | undefined
+      _dept: Department | undefined
     }>()
   })
 
   test(`defineQuery with join and select`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
-        .join({ dept: departmentsCollection }, ({ users, dept }) =>
-          eq(users.department_id, dept.id)
+        .join({ _dept: departmentsCollection }, ({ users, _dept }) =>
+          eq(users.department_id, _dept.id)
         )
-        .select(({ users, dept }) => ({
+        .select(({ users, _dept }) => ({
           userName: users.name,
-          deptName: dept.name,
+          deptName: _dept.name,
           userEmail: users.email,
         }))
     )
 
     // Test that join with select result type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       userName: string
       deptName: string | undefined
@@ -137,18 +137,18 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery with where clause`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q.from({ users: usersCollection }).where(({ users }) => gt(users.age, 18))
     )
 
     // Test that where clause doesn't change the result type
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<User>()
   })
 
   test(`defineQuery with groupBy and aggregates`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
         .groupBy(({ users }) => users.department_id)
@@ -161,7 +161,7 @@ describe(`defineQuery Type Tests`, () => {
 
     // Test that groupBy with aggregates is correctly typed
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       departmentId: number | null
       userCount: number
@@ -170,18 +170,18 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery with orderBy`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q.from({ users: usersCollection }).orderBy(({ users }) => users.name)
     )
 
     // Test that orderBy doesn't change the result type
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<User>()
   })
 
   test(`defineQuery with limit and offset`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
         .orderBy(({ users }) => users.name)
@@ -191,32 +191,32 @@ describe(`defineQuery Type Tests`, () => {
 
     // Test that limit/offset don't change the result type
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<User>()
   })
 
   test(`defineQuery with complex multi-join query`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
-        .join({ dept: departmentsCollection }, ({ users, dept }) =>
-          eq(users.department_id, dept.id)
+        .join({ _dept: departmentsCollection }, ({ users, _dept }) =>
+          eq(users.department_id, _dept.id)
         )
-        .join({ project: projectsCollection }, ({ users, dept, project }) =>
-          eq(project.user_id, users.id)
+        .join({ _project: projectsCollection }, ({ users, _dept, _project }) =>
+          eq(_project.user_id, users.id)
         )
-        .select(({ users, dept, project }) => ({
+        .select(({ users, _dept, _project }) => ({
           userId: users.id,
           userName: users.name,
-          deptName: dept.name,
-          projectName: project.name,
-          projectStatus: project.status,
+          deptName: _dept.name,
+          projectName: _project.name,
+          projectStatus: _project.status,
         }))
     )
 
     // Test complex multi-join with select
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       userId: number
       userName: string
@@ -227,67 +227,67 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery with inner join`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
         .join(
-          { dept: departmentsCollection },
-          ({ users, dept }) => eq(users.department_id, dept.id),
-          "inner"
+          { _dept: departmentsCollection },
+          ({ users, _dept }) => eq(users.department_id, _dept.id),
+          `inner`
         )
     )
 
     // Test that inner join type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       users: User
-      dept: Department
+      _dept: Department
     }>()
   })
 
   test(`defineQuery with right join`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
         .join(
-          { dept: departmentsCollection },
-          ({ users, dept }) => eq(users.department_id, dept.id),
-          "right"
+          { _dept: departmentsCollection },
+          ({ users, _dept }) => eq(users.department_id, _dept.id),
+          `right`
         )
     )
 
     // Test that right join type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       users: User | undefined
-      dept: Department
+      _dept: Department
     }>()
   })
 
   test(`defineQuery with full join`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q
         .from({ users: usersCollection })
         .join(
-          { dept: departmentsCollection },
-          ({ users, dept }) => eq(users.department_id, dept.id),
-          "full"
+          { _dept: departmentsCollection },
+          ({ users, _dept }) => eq(users.department_id, _dept.id),
+          `full`
         )
     )
 
     // Test that full join type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       users: User | undefined
-      dept: Department | undefined
+      _dept: Department | undefined
     }>()
   })
 
   test(`defineQuery with functional select`, () => {
-    const queryBuilder = defineQuery((q) =>
+    const _queryBuilder = defineQuery((q) =>
       q.from({ users: usersCollection }).fn.select((row) => ({
         upperName: row.users.name.toUpperCase(),
         ageNextYear: row.users.age + 1,
@@ -296,7 +296,7 @@ describe(`defineQuery Type Tests`, () => {
 
     // Test that functional select result type is correctly inferred
     expectTypeOf<
-      GetResult<ExtractContext<typeof queryBuilder>>
+      GetResult<ExtractContext<typeof _queryBuilder>>
     >().toEqualTypeOf<{
       upperName: string
       ageNextYear: number
@@ -304,10 +304,10 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery result can be used like any QueryBuilder`, () => {
-    const baseQuery = defineQuery((q) => q.from({ users: usersCollection }))
+    const _baseQuery = defineQuery((q) => q.from({ users: usersCollection }))
 
     // Test that the result can be extended like any QueryBuilder
-    const extendedQuery = baseQuery
+    const _extendedQuery = _baseQuery
       .where(({ users }) => gt(users.age, 18))
       .select(({ users }) => ({
         id: users.id,
@@ -315,7 +315,7 @@ describe(`defineQuery Type Tests`, () => {
       }))
 
     expectTypeOf<
-      GetResult<ExtractContext<typeof extendedQuery>>
+      GetResult<ExtractContext<typeof _extendedQuery>>
     >().toEqualTypeOf<{
       id: number
       name: string
@@ -323,19 +323,19 @@ describe(`defineQuery Type Tests`, () => {
   })
 
   test(`defineQuery with subquery`, () => {
-    const subQuery = defineQuery((q) =>
+    const _subQuery = defineQuery((q) =>
       q.from({ users: usersCollection }).where(({ users }) => gt(users.age, 18))
     )
 
-    const mainQuery = defineQuery((q) =>
-      q.from({ activeUsers: subQuery }).select(({ activeUsers }) => ({
+    const _mainQuery = defineQuery((q) =>
+      q.from({ activeUsers: _subQuery }).select(({ activeUsers }) => ({
         id: activeUsers.id,
         name: activeUsers.name,
       }))
     )
 
     // Test that subquery usage is correctly typed
-    expectTypeOf<GetResult<ExtractContext<typeof mainQuery>>>().toEqualTypeOf<{
+    expectTypeOf<GetResult<ExtractContext<typeof _mainQuery>>>().toEqualTypeOf<{
       id: number
       name: string
     }>()

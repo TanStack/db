@@ -30,7 +30,7 @@ import type {
 export function defineQuery<TQueryBuilder extends QueryBuilder<any>>(
   fn: (builder: InitialQueryBuilder) => TQueryBuilder
 ): TQueryBuilder {
-  return fn(new BaseQueryBuilder()) as TQueryBuilder
+  return fn(new BaseQueryBuilder())
 }
 
 export function buildQuery(
