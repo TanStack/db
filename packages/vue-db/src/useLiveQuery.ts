@@ -1,60 +1,172 @@
-import { computed, toValue, watch } from "vue"
-import { useStore } from "@tanstack/vue-store"
-import { compileQuery, queryBuilder } from "@tanstack/db"
+import {
+  computed,
+  getCurrentInstance,
+  onUnmounted,
+  ref,
+  toValue,
+  watchEffect,
+} from "vue"
+import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   Collection,
   Context,
+  GetResult,
   InitialQueryBuilder,
+  LiveQueryCollectionConfig,
   QueryBuilder,
-  ResultsFromContext,
-  Schema,
 } from "@tanstack/db"
 import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
 export interface UseLiveQueryReturn<T extends object> {
   state: ComputedRef<Map<string | number, T>>
   data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T>>
+  collection: ComputedRef<Collection<T, string | number, {}>>
 }
 
+export interface UseLiveQueryReturnWithCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> {
+  state: ComputedRef<Map<TKey, T>>
+  data: ComputedRef<Array<T>>
+  collection: ComputedRef<Collection<T, TKey, TUtils>>
+}
+
+// Overload 1: Accept just the query function
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
+  deps?: Array<MaybeRefOrGetter<unknown>>
+): UseLiveQueryReturn<GetResult<TContext>>
+
+// Overload 2: Accept config object
+export function useLiveQuery<TContext extends Context>(
+  config: LiveQueryCollectionConfig<TContext>,
+  deps?: Array<MaybeRefOrGetter<unknown>>
+): UseLiveQueryReturn<GetResult<TContext>>
+
+// Overload 3: Accept pre-created live query collection (can be reactive)
 export function useLiveQuery<
-  TResultContext extends Context<Schema> = Context<Schema>,
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
 >(
-  queryFn: (
-    q: InitialQueryBuilder<Context<Schema>>
-  ) => QueryBuilder<TResultContext>,
+  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+
+// Implementation
+export function useLiveQuery(
+  configOrQueryOrCollection: any,
   deps: Array<MaybeRefOrGetter<unknown>> = []
-): UseLiveQueryReturn<ResultsFromContext<TResultContext>> {
-  const compiledQuery = computed(() => {
-    // Just reference deps to make computed reactive to them
-    deps.forEach((dep) => toValue(dep))
-
-    const query = queryFn(queryBuilder())
-    const compiled = compileQuery(query)
-    compiled.start()
-    return compiled
-  })
-
-  const state = computed(() => {
-    return useStore(compiledQuery.value.results.asStoreMap()).value
-  })
-  const data = computed(() => {
-    return useStore(compiledQuery.value.results.asStoreArray()).value
-  })
-
-  watch(compiledQuery, (newQuery, oldQuery, onInvalidate) => {
-    if (newQuery.state === `stopped`) {
-      newQuery.start()
+): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
+  const collection = computed(() => {
+    // First check if the original parameter might be a ref/getter
+    // by seeing if toValue returns something different than the original
+    let unwrappedParam = configOrQueryOrCollection
+    try {
+      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
+      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
+        unwrappedParam = potentiallyUnwrapped
+      }
+    } catch {
+      // If toValue fails, use original parameter
+      unwrappedParam = configOrQueryOrCollection
     }
 
+    // Check if it's already a collection by checking for specific collection methods
+    const isCollection =
+      unwrappedParam &&
+      typeof unwrappedParam === `object` &&
+      typeof unwrappedParam.subscribeChanges === `function` &&
+      typeof unwrappedParam.startSyncImmediate === `function` &&
+      typeof unwrappedParam.id === `string`
+
+    if (isCollection) {
+      // It's already a collection, ensure sync is started for Vue hooks
+      unwrappedParam.startSyncImmediate()
+      return unwrappedParam
+    }
+
+    // Reference deps to make computed reactive to them
+    deps.forEach((dep) => toValue(dep))
+
+    // Ensure we always start sync for Vue hooks
+    if (typeof unwrappedParam === `function`) {
+      return createLiveQueryCollection({
+        query: unwrappedParam,
+        startSync: true,
+      })
+    } else {
+      return createLiveQueryCollection({
+        ...unwrappedParam,
+        startSync: true,
+      })
+    }
+  })
+
+  // Reactive state that updates when collection changes
+  const state = ref<Map<string | number, any>>(new Map())
+  const data = ref<Array<any>>([])
+
+  // Track current unsubscribe function
+  let currentUnsubscribe: (() => void) | null = null
+
+  // Watch for collection changes and subscribe to updates
+  watchEffect((onInvalidate) => {
+    const currentCollection = collection.value
+
+    // Clean up previous subscription
+    if (currentUnsubscribe) {
+      currentUnsubscribe()
+    }
+
+    // Update initial state function
+    const updateState = () => {
+      const newEntries = new Map<string | number, any>(
+        currentCollection.entries()
+      )
+      const newData = Array.from(currentCollection.values())
+
+      // Force Vue reactivity by creating new references
+      state.value = newEntries
+      data.value = newData
+    }
+
+    // Set initial state
+    updateState()
+
+    // Subscribe to collection changes
+    currentUnsubscribe = currentCollection.subscribeChanges(() => {
+      updateState()
+    })
+
+    // Preload collection data if not already started
+    if (currentCollection.status === `idle`) {
+      currentCollection.preload().catch(console.error)
+    }
+
+    // Cleanup when effect is invalidated
     onInvalidate(() => {
-      oldQuery.stop()
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
     })
   })
 
+  // Cleanup on unmount (only if we're in a component context)
+  const instance = getCurrentInstance()
+  if (instance) {
+    onUnmounted(() => {
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+      }
+    })
+  }
+
   return {
-    state,
-    data,
-    collection: computed(() => compiledQuery.value.results),
+    state: computed(() => state.value),
+    data: computed(() => data.value),
+    collection: computed(() => collection.value),
   }
 }

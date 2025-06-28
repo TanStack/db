@@ -154,6 +154,15 @@ export interface SyncConfig<
    * @returns Record containing relation information
    */
   getSyncMetadata?: () => Record<string, unknown>
+
+  /**
+   * The row update mode used to sync to the collection.
+   * @default `partial`
+   * @description
+   * - `partial`: Updates contain only the changes to the row.
+   * - `full`: Updates contain the entire row.
+   */
+  rowUpdateMode?: `partial` | `full`
 }
 
 export interface ChangeMessage<
@@ -317,6 +326,12 @@ export type InputRow = [unknown, Record<string, unknown>]
  * This is used as the inputs from a collection to a query
  */
 export type KeyedStream = IStreamBuilder<InputRow>
+
+/**
+ * Result stream type representing the output of compiled queries
+ * Always returns [key, [result, orderByIndex]] where orderByIndex is undefined for unordered queries
+ */
+export type ResultStream = IStreamBuilder<[unknown, [any, string | undefined]]>
 
 /**
  * A namespaced row is a row withing a pipeline that had each table wrapped in its alias
