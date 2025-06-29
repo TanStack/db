@@ -119,7 +119,7 @@ function createDepartmentsCollection() {
   )
 }
 
-describe(`Query2 OrderBy Compiler`, () => {
+describe(`Query OrderBy Compiler`, () => {
   let employeesCollection: ReturnType<typeof createEmployeesCollection>
   let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 

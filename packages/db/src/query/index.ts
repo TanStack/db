@@ -1,9 +1,9 @@
-// Main exports for the new query builder system
+// Main exports for the query builder system
 
 // Query builder exports
 export {
+  defineQuery,
   BaseQueryBuilder,
-  buildQuery,
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
@@ -39,9 +39,6 @@ export {
   min,
   max,
 } from "./builder/functions.js"
-
-// Ref proxy utilities
-export { val, toExpression, isRefProxy } from "./builder/ref-proxy.js"
 
 // IR types (for advanced usage)
 export type {

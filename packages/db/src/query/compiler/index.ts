@@ -17,7 +17,7 @@ import type {
 type QueryCache = WeakMap<Query, ResultStream>
 
 /**
- * Compiles a query2 IR into a D2 pipeline
+ * Compiles a query IR into a D2 pipeline
  * @param query The query IR to compile
  * @param inputs Mapping of collection names to input streams
  * @param cache Optional cache for compiled subqueries (used internally for recursion)

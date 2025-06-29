@@ -1,3 +1,4 @@
+import type { NamespacedRow } from "../../types.js"
 import type { CollectionImpl } from "../../collection.js"
 import type { Agg, Expression } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
@@ -86,6 +87,11 @@ export type JoinOnCallback<TContext extends Context> = (
 // Type for creating RefProxy objects based on context
 export type RefProxyForContext<TContext extends Context> = {
   [K in keyof TContext[`schema`]]: RefProxyFor<TContext[`schema`][K]>
+}
+
+// Type for creating RefProxy objects based on a namespace row
+export type RefProxyForNamespaceRow<TNamespaceRow extends NamespacedRow> = {
+  [K in keyof TNamespaceRow]: RefProxyFor<TNamespaceRow[K]>
 }
 
 // Helper type to check if T is exactly undefined

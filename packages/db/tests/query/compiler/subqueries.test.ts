@@ -124,7 +124,7 @@ const sendUserData = (input: any, users: Array<User>) => {
   )
 }
 
-describe(`Query2 Subqueries`, () => {
+describe(`Query Subqueries`, () => {
   describe(`Subqueries in FROM clause`, () => {
     it(`supports simple subquery in from clause`, () => {
       // Create a base query that filters issues for project 1
