@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createCollection } from "../../../src/collection.js"
 import { mockSyncCollectionOptions } from "../../utls.js"
-import { defineQuery } from "../../../src/query/builder/index.js"
+import { defineQuery } from "../../../src/query/builder/composables.js"
 import { count, eq, gt, sum } from "../../../src/query/builder/functions.js"
 import type { ExtractContext } from "../../../src/query/builder/index.js"
 import type { GetResult } from "../../../src/query/builder/types.js"

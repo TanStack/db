@@ -2,7 +2,6 @@
 
 // Query builder exports
 export {
-  defineQuery,
   BaseQueryBuilder,
   type InitialQueryBuilder,
   type QueryBuilder,
@@ -10,6 +9,7 @@ export {
   type Source,
   type GetResult,
 } from "./builder/index.js"
+export { defineQuery, defineForRow } from "./builder/composables.js"
 
 // Expression functions exports
 export {
