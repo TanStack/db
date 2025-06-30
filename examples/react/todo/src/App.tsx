@@ -271,10 +271,7 @@ const createConfigCollection = (type: CollectionType) => {
             const txids = await Promise.all(
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
-                const response = await api.config.update(
-                  original.id as number,
-                  changes
-                )
+                const response = await api.config.update(original.id, changes)
                 return { txid: String(response.txid) }
               })
             )
@@ -311,10 +308,7 @@ const createConfigCollection = (type: CollectionType) => {
             const txids = await Promise.all(
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
-                const response = await api.config.update(
-                  original.id as number,
-                  changes
-                )
+                const response = await api.config.update(original.id, changes)
                 return { txid: String(response.txid) }
               })
             )
@@ -350,15 +344,10 @@ export default function App() {
     q
       .from({ todo: todoCollection })
       .orderBy(({ todo }) => todo.created_at, `asc`)
-      .select(({ todo }) => ({
-        ...todo,
-      }))
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: configCollection }).select(({ config }) => ({
-      ...config,
-    }))
+    q.from({ config: configCollection })
   )
 
   // Handle collection type change directly
@@ -383,6 +372,8 @@ export default function App() {
 
   // Define a helper function to update config values
   const setConfigValue = (key: string, value: string): void => {
+    console.log(`setConfigValue`, key, value)
+    console.log(`configData`, configData)
     for (const config of configData) {
       if (config.key === key) {
         configCollection.update(config.id, (draft) => {
@@ -395,7 +386,7 @@ export default function App() {
 
     // If the config doesn't exist yet, create it
     configCollection.insert({
-      id: Math.random(),
+      id: Math.round(Math.random() * 1000000),
       key,
       value,
       created_at: new Date(),

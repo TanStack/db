@@ -7,9 +7,10 @@ import {
   validateUpdateConfig,
   validateUpdateTodo,
 } from "../db/validation"
+import type { Express } from "express"
 
 // Create Express app
-const app = express()
+const app: Express = express()
 const PORT = process.env.PORT || 3001
 
 // Middleware
@@ -22,9 +23,9 @@ app.get(`/api/health`, (req, res) => {
 })
 
 // Generate a transaction ID
-async function generateTxId(tx: any): Promise<number> {
+async function generateTxId(tx: any): Promise<string> {
   const [{ txid }] = await tx`SELECT txid_current() as txid`
-  return Number(txid)
+  return String(txid)
 }
 
 // ===== TODOS API =====
@@ -68,7 +69,7 @@ app.post(`/api/todos`, async (req, res) => {
   try {
     const todoData = validateInsertTodo(req.body)
 
-    let txid: number
+    let txid!: string
     const newTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -95,7 +96,7 @@ app.put(`/api/todos/:id`, async (req, res) => {
     const { id } = req.params
     const todoData = validateUpdateTodo(req.body)
 
-    let txid: number
+    let txid!: string
     const updatedTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -132,7 +133,7 @@ app.delete(`/api/todos/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid: number
+    let txid!: string
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -200,9 +201,10 @@ app.get(`/api/config/:id`, async (req, res) => {
 // POST create a new config
 app.post(`/api/config`, async (req, res) => {
   try {
+    console.log(`POST /api/config`, req.body)
     const configData = validateInsertConfig(req.body)
 
-    let txid: number
+    let txid!: string
     const newConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -229,7 +231,7 @@ app.put(`/api/config/:id`, async (req, res) => {
     const { id } = req.params
     const configData = validateUpdateConfig(req.body)
 
-    let txid: number
+    let txid!: string
     const updatedConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -266,7 +268,7 @@ app.delete(`/api/config/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid: number
+    let txid!: string
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
