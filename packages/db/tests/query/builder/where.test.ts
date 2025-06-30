@@ -6,7 +6,7 @@ import {
   eq,
   gt,
   gte,
-  isIn,
+  inArray,
   like,
   lt,
   lte,
@@ -113,7 +113,7 @@ describe(`QueryBuilder.where`, () => {
     const builder = new BaseQueryBuilder()
     const query = builder
       .from({ employees: employeesCollection })
-      .where(({ employees }) => isIn(employees.department_id, [1, 2, 3]))
+      .where(({ employees }) => inArray(employees.department_id, [1, 2, 3]))
 
     expect((getQuery(query).where as any)[0]?.name).toBe(`in`)
   })

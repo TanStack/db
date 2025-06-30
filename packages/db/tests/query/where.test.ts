@@ -10,7 +10,7 @@ import {
   eq,
   gt,
   gte,
-  isIn,
+  inArray,
   length,
   like,
   lower,
@@ -559,13 +559,13 @@ describe(`Query WHERE Execution`, () => {
       employeesCollection = createEmployeesCollection()
     })
 
-    test(`isIn operator - membership testing`, () => {
+    test(`inArray operator - membership testing`, () => {
       const specificDepartments = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
           q
             .from({ emp: employeesCollection })
-            .where(({ emp }) => isIn(emp.department_id, [1, 2]))
+            .where(({ emp }) => inArray(emp.department_id, [1, 2]))
             .select(({ emp }) => ({
               id: emp.id,
               name: emp.name,
@@ -586,7 +586,7 @@ describe(`Query WHERE Execution`, () => {
         query: (q) =>
           q
             .from({ emp: employeesCollection })
-            .where(({ emp }) => isIn(emp.id, [1, 3, 5]))
+            .where(({ emp }) => inArray(emp.id, [1, 3, 5]))
             .select(({ emp }) => ({ id: emp.id, name: emp.name })),
       })
 
@@ -598,7 +598,7 @@ describe(`Query WHERE Execution`, () => {
         query: (q) =>
           q
             .from({ emp: employeesCollection })
-            .where(({ emp }) => isIn(emp.salary, [55000, 75000, 95000]))
+            .where(({ emp }) => inArray(emp.salary, [55000, 75000, 95000]))
             .select(({ emp }) => ({
               id: emp.id,
               name: emp.name,

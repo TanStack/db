@@ -121,7 +121,7 @@ export function not(value: ExpressionLike): Expression<boolean> {
   return new Func(`not`, [toExpression(value)])
 }
 
-export function isIn(
+export function inArray(
   value: ExpressionLike,
   array: ExpressionLike
 ): Expression<boolean> {
