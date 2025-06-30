@@ -97,7 +97,7 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
-> = Transaction<T> & {
+> = Transaction<T, TOperation> & {
   mutations: NonEmptyArray<PendingMutation<T, TOperation>>
 }
 
