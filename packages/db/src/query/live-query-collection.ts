@@ -115,7 +115,7 @@ export function liveQueryCollectionOptions<
   const id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
   // Build the query using the provided query builder function
-  const query = buildQuery(config.query)
+  const query = buildQuery<TContext>(config.query)
 
   // WeakMap to store the keys of the results so that we can retreve them in the
   // getKey function

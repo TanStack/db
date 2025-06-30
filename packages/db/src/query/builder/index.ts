@@ -27,8 +27,8 @@ import type {
   WithResult,
 } from "./types.js"
 
-export function buildQuery(
-  fn: (builder: InitialQueryBuilder) => QueryBuilder<any>
+export function buildQuery<TContext extends Context>(
+  fn: (builder: InitialQueryBuilder) => QueryBuilder<TContext>
 ): Query {
   const result = fn(new BaseQueryBuilder())
   return getQuery(result)
@@ -632,7 +632,7 @@ export function getQuery(
 }
 
 // Type-only exports for the query builder
-export type InitialQueryBuilder = Pick<BaseQueryBuilder, `from`>
+export type InitialQueryBuilder = Pick<BaseQueryBuilder<Context>, `from`>
 
 export type QueryBuilder<TContext extends Context> = Omit<
   BaseQueryBuilder<TContext>,
