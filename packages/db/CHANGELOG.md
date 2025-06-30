@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.14
+
+### Patch Changes
+
+- fixed the types on the onInsert/Update/Delete transactions ([#218](https://github.com/TanStack/db/pull/218))
+
 ## 0.0.13
 
 ### Patch Changes
