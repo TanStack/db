@@ -2,6 +2,7 @@ import { createDeferred } from "./deferred"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
+  OperationType,
   PendingMutation,
   TransactionConfig,
   TransactionState,
@@ -55,12 +56,15 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
-export class Transaction<T extends object = Record<string, unknown>> {
+export class Transaction<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
-  public mutations: Array<PendingMutation<T>>
-  public isPersisted: Deferred<Transaction<T>>
+  public mutations: Array<PendingMutation<T, TOperation>>
+  public isPersisted: Deferred<Transaction<T, TOperation>>
   public autoCommit: boolean
   public createdAt: Date
   public metadata: Record<string, unknown>
@@ -74,7 +78,7 @@ export class Transaction<T extends object = Record<string, unknown>> {
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T>>()
+    this.isPersisted = createDeferred<Transaction<T, TOperation>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.metadata = config.metadata ?? {}
