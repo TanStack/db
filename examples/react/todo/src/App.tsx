@@ -348,15 +348,17 @@ export default function App() {
   // Always call useLiveQuery hooks
   const { data: todos } = useLiveQuery((q) =>
     q
-      .from({ todoCollection: todoCollection })
-      .orderBy(`@created_at`)
-      .select(`@*`)
+      .from({ todo: todoCollection })
+      .orderBy(({ todo }) => todo.created_at, `asc`)
+      .select(({ todo }) => ({
+        ...todo,
+      }))
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q
-      .from({ configCollection: configCollection })
-      .select(`@id`, `@key`, `@value`)
+    q.from({ config: configCollection }).select(({ config }) => ({
+      ...config,
+    }))
   )
 
   // Handle collection type change directly
