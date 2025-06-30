@@ -154,7 +154,7 @@ describe(`Query2 Compiler`, () => {
           name: new Ref([`users`, `name`]),
           age: new Ref([`users`, `age`]),
         },
-        where: new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)]),
+        where: [new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)])],
       }
 
       const graph = new D2()
@@ -206,10 +206,12 @@ describe(`Query2 Compiler`, () => {
           id: new Ref([`users`, `id`]),
           name: new Ref([`users`, `name`]),
         },
-        where: new Func(`and`, [
-          new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)]),
-          new Func(`eq`, [new Ref([`users`, `active`]), new Value(true)]),
-        ]),
+        where: [
+          new Func(`and`, [
+            new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)]),
+            new Func(`eq`, [new Ref([`users`, `active`]), new Value(true)]),
+          ]),
+        ],
       }
 
       const graph = new D2()

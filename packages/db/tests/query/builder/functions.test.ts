@@ -53,7 +53,7 @@ describe(`QueryBuilder Functions`, () => {
 
       const builtQuery = getQuery(query)
       expect(builtQuery.where).toBeDefined()
-      expect((builtQuery.where as any)?.name).toBe(`eq`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
     })
 
     it(`gt function works`, () => {
@@ -63,7 +63,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => gt(employees.salary, 50000))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`gt`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`gt`)
     })
 
     it(`lt function works`, () => {
@@ -73,7 +73,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => lt(employees.salary, 100000))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`lt`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`lt`)
     })
 
     it(`gte function works`, () => {
@@ -83,7 +83,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => gte(employees.salary, 50000))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`gte`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`gte`)
     })
 
     it(`lte function works`, () => {
@@ -93,7 +93,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => lte(employees.salary, 100000))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`lte`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`lte`)
     })
   })
 
@@ -107,7 +107,7 @@ describe(`QueryBuilder Functions`, () => {
         )
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`and`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`and`)
     })
 
     it(`or function works`, () => {
@@ -119,7 +119,7 @@ describe(`QueryBuilder Functions`, () => {
         )
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`or`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`or`)
     })
 
     it(`not function works`, () => {
@@ -129,7 +129,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => not(eq(employees.active, false)))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`not`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`not`)
     })
   })
 
@@ -185,7 +185,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => like(employees.name, `%John%`))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`like`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`like`)
     })
   })
 
@@ -225,7 +225,7 @@ describe(`QueryBuilder Functions`, () => {
         .where(({ employees }) => isIn(employees.department_id, [1, 2, 3]))
 
       const builtQuery = getQuery(query)
-      expect((builtQuery.where as any)?.name).toBe(`in`)
+      expect((builtQuery.where as any)[0]?.name).toBe(`in`)
     })
   })
 

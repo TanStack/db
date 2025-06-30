@@ -73,13 +73,18 @@ export function compileQuery(
   }
 
   // Process the WHERE clause if it exists
-  if (query.where) {
-    const compiledWhere = compileExpression(query.where)
-    pipeline = pipeline.pipe(
-      filter(([_key, namespacedRow]) => {
-        return compiledWhere(namespacedRow)
-      })
-    )
+  if (query.where && query.where.length > 0) {
+    // Compile all WHERE expressions
+    const compiledWheres = query.where.map((where) => compileExpression(where))
+
+    // Apply each WHERE condition as a filter (they are ANDed together)
+    for (const compiledWhere of compiledWheres) {
+      pipeline = pipeline.pipe(
+        filter(([_key, namespacedRow]) => {
+          return compiledWhere(namespacedRow)
+        })
+      )
+    }
   }
 
   // Process functional WHERE clauses if they exist

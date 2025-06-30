@@ -217,6 +217,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *     gt(users.age, 18),
    *     eq(users.active, true)
    *   ))
+   *
+   * // Multiple where calls are ANDed together
+   * query
+   *   .from({ users: usersCollection })
+   *   .where(({users}) => gt(users.age, 18))
+   *   .where(({users}) => eq(users.active, true))
    * ```
    */
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
@@ -224,9 +230,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const expression = callback(refProxy)
 
+    const existingWhere = this.query.where || []
+
     return new BaseQueryBuilder({
       ...this.query,
-      where: expression,
+      where: [...existingWhere, expression],
     }) as any
   }
 
@@ -249,6 +257,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   .from({ orders: ordersCollection })
    *   .groupBy(({orders}) => orders.customerId)
    *   .having(({orders}) => gt(avg(orders.total), 100))
+   *
+   * // Multiple having calls are ANDed together
+   * query
+   *   .from({ orders: ordersCollection })
+   *   .groupBy(({orders}) => orders.customerId)
+   *   .having(({orders}) => gt(count(orders.id), 5))
+   *   .having(({orders}) => gt(avg(orders.total), 100))
    * ```
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
@@ -256,9 +271,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const expression = callback(refProxy)
 
+    const existingHaving = this.query.having || []
+
     return new BaseQueryBuilder({
       ...this.query,
-      having: expression,
+      having: [...existingHaving, expression],
     }) as any
   }
 

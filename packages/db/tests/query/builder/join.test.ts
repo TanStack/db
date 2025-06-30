@@ -126,7 +126,7 @@ describe(`QueryBuilder.join`, () => {
 
     const builtQuery = getQuery(query)
     expect(builtQuery.where).toBeDefined()
-    expect((builtQuery.where as any)?.name).toBe(`gt`)
+    expect((builtQuery.where as any)[0]?.name).toBe(`gt`)
   })
 
   it(`supports sub-queries in joins`, () => {

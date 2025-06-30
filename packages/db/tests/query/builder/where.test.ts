@@ -39,8 +39,10 @@ describe(`QueryBuilder.where`, () => {
 
     const builtQuery = getQuery(query)
     expect(builtQuery.where).toBeDefined()
-    expect(builtQuery.where?.type).toBe(`func`)
-    expect((builtQuery.where as any)?.name).toBe(`eq`)
+    expect(Array.isArray(builtQuery.where)).toBe(true)
+    expect(builtQuery.where).toHaveLength(1)
+    expect((builtQuery.where as any)[0]?.type).toBe(`func`)
+    expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
   })
 
   it(`supports various comparison operators`, () => {
@@ -50,25 +52,25 @@ describe(`QueryBuilder.where`, () => {
     const gtQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => gt(employees.salary, 50000))
-    expect((getQuery(gtQuery).where as any)?.name).toBe(`gt`)
+    expect((getQuery(gtQuery).where as any)[0]?.name).toBe(`gt`)
 
     // Test gte
     const gteQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => gte(employees.salary, 50000))
-    expect((getQuery(gteQuery).where as any)?.name).toBe(`gte`)
+    expect((getQuery(gteQuery).where as any)[0]?.name).toBe(`gte`)
 
     // Test lt
     const ltQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => lt(employees.salary, 100000))
-    expect((getQuery(ltQuery).where as any)?.name).toBe(`lt`)
+    expect((getQuery(ltQuery).where as any)[0]?.name).toBe(`lt`)
 
     // Test lte
     const lteQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => lte(employees.salary, 100000))
-    expect((getQuery(lteQuery).where as any)?.name).toBe(`lte`)
+    expect((getQuery(lteQuery).where as any)[0]?.name).toBe(`lte`)
   })
 
   it(`supports boolean operations`, () => {
@@ -80,7 +82,7 @@ describe(`QueryBuilder.where`, () => {
       .where(({ employees }) =>
         and(eq(employees.active, true), gt(employees.salary, 50000))
       )
-    expect((getQuery(andQuery).where as any)?.name).toBe(`and`)
+    expect((getQuery(andQuery).where as any)[0]?.name).toBe(`and`)
 
     // Test or
     const orQuery = builder
@@ -88,13 +90,13 @@ describe(`QueryBuilder.where`, () => {
       .where(({ employees }) =>
         or(eq(employees.department_id, 1), eq(employees.department_id, 2))
       )
-    expect((getQuery(orQuery).where as any)?.name).toBe(`or`)
+    expect((getQuery(orQuery).where as any)[0]?.name).toBe(`or`)
 
     // Test not
     const notQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => not(eq(employees.active, false)))
-    expect((getQuery(notQuery).where as any)?.name).toBe(`not`)
+    expect((getQuery(notQuery).where as any)[0]?.name).toBe(`not`)
   })
 
   it(`supports string operations`, () => {
@@ -104,7 +106,7 @@ describe(`QueryBuilder.where`, () => {
     const likeQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => like(employees.name, `%John%`))
-    expect((getQuery(likeQuery).where as any)?.name).toBe(`like`)
+    expect((getQuery(likeQuery).where as any)[0]?.name).toBe(`like`)
   })
 
   it(`supports in operator`, () => {
@@ -113,7 +115,7 @@ describe(`QueryBuilder.where`, () => {
       .from({ employees: employeesCollection })
       .where(({ employees }) => isIn(employees.department_id, [1, 2, 3]))
 
-    expect((getQuery(query).where as any)?.name).toBe(`in`)
+    expect((getQuery(query).where as any)[0]?.name).toBe(`in`)
   })
 
   it(`supports boolean literals`, () => {
@@ -124,7 +126,7 @@ describe(`QueryBuilder.where`, () => {
 
     const builtQuery = getQuery(query)
     expect(builtQuery.where).toBeDefined()
-    expect((builtQuery.where as any)?.name).toBe(`eq`)
+    expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
   })
 
   it(`supports null comparisons`, () => {
@@ -150,7 +152,7 @@ describe(`QueryBuilder.where`, () => {
 
     const builtQuery = getQuery(query)
     expect(builtQuery.where).toBeDefined()
-    expect((builtQuery.where as any)?.name).toBe(`and`)
+    expect((builtQuery.where as any)[0]?.name).toBe(`and`)
   })
 
   it(`allows combining where with other methods`, () => {
@@ -169,15 +171,18 @@ describe(`QueryBuilder.where`, () => {
     expect(builtQuery.select).toBeDefined()
   })
 
-  it(`overrides previous where clauses`, () => {
+  it(`accumulates multiple where clauses (ANDed together)`, () => {
     const builder = new BaseQueryBuilder()
     const query = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => eq(employees.active, true))
-      .where(({ employees }) => gt(employees.salary, 50000)) // This should override
+      .where(({ employees }) => gt(employees.salary, 50000)) // This should be ANDed
 
     const builtQuery = getQuery(query)
     expect(builtQuery.where).toBeDefined()
-    expect((builtQuery.where as any)?.name).toBe(`gt`)
+    expect(Array.isArray(builtQuery.where)).toBe(true)
+    expect(builtQuery.where).toHaveLength(2)
+    expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
+    expect((builtQuery.where as any)[1]?.name).toBe(`gt`)
   })
 })

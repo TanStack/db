@@ -61,7 +61,7 @@ function validateAndCreateMapping(
 export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
   groupByClause: GroupBy,
-  havingClause?: Having,
+  havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>
 ): NamespacedAndKeyedStream {
@@ -116,21 +116,23 @@ export function processGroupBy(
       })
     )
 
-    // Apply HAVING clause if present
-    if (havingClause) {
-      const transformedHavingClause = transformHavingClause(
-        havingClause,
-        selectClause || {}
-      )
-      const compiledHaving = compileExpression(transformedHavingClause)
+    // Apply HAVING clauses if present
+    if (havingClauses && havingClauses.length > 0) {
+      for (const havingClause of havingClauses) {
+        const transformedHavingClause = transformHavingClause(
+          havingClause,
+          selectClause || {}
+        )
+        const compiledHaving = compileExpression(transformedHavingClause)
 
-      pipeline = pipeline.pipe(
-        filter(([, row]) => {
-          // Create a namespaced row structure for HAVING evaluation
-          const namespacedRow = { result: (row as any).__select_results }
-          return compiledHaving(namespacedRow)
-        })
-      )
+        pipeline = pipeline.pipe(
+          filter(([, row]) => {
+            // Create a namespaced row structure for HAVING evaluation
+            const namespacedRow = { result: (row as any).__select_results }
+            return compiledHaving(namespacedRow)
+          })
+        )
+      }
     }
 
     // Apply functional HAVING clauses if present
@@ -246,21 +248,23 @@ export function processGroupBy(
     })
   )
 
-  // Apply HAVING clause if present
-  if (havingClause) {
-    const transformedHavingClause = transformHavingClause(
-      havingClause,
-      selectClause || {}
-    )
-    const compiledHaving = compileExpression(transformedHavingClause)
+  // Apply HAVING clauses if present
+  if (havingClauses && havingClauses.length > 0) {
+    for (const havingClause of havingClauses) {
+      const transformedHavingClause = transformHavingClause(
+        havingClause,
+        selectClause || {}
+      )
+      const compiledHaving = compileExpression(transformedHavingClause)
 
-    pipeline = pipeline.pipe(
-      filter(([, row]) => {
-        // Create a namespaced row structure for HAVING evaluation
-        const namespacedRow = { result: (row as any).__select_results }
-        return compiledHaving(namespacedRow)
-      })
-    )
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          // Create a namespaced row structure for HAVING evaluation
+          const namespacedRow = { result: (row as any).__select_results }
+          return compiledHaving(namespacedRow)
+        })
+      )
+    }
   }
 
   // Apply functional HAVING clauses if present

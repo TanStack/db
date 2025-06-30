@@ -1130,5 +1130,134 @@ describe(`Query WHERE Execution`, () => {
       // Should match: Alice (active, dept 1, 75k), Eve (active, dept 2, age 25), Frank (inactive, age 40 > 35)
       expect(deeplyNested.size).toBe(3) // Alice, Eve, Frank
     })
+
+    test(`multiple WHERE calls should be ANDed together`, () => {
+      // Test that multiple .where() calls are combined with AND logic
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ emp: employeesCollection })
+            .where(({ emp }) => eq(emp.active, true)) // First condition
+            .where(({ emp }) => gt(emp.salary, 70000)) // Second condition (should be ANDed)
+            .select(({ emp }) => ({
+              id: emp.id,
+              name: emp.name,
+              active: emp.active,
+              salary: emp.salary,
+            })),
+      })
+
+      // Should only return employees that are BOTH active AND have salary > 70000
+      // Expected: Alice (active, 75k), Diana (active, 95k)
+      // Should NOT include: Bob (active, 65k - fails salary), Charlie (85k, inactive - fails active)
+      expect(result.size).toBe(2)
+
+      const resultArray = result.toArray
+      expect(resultArray.every((emp) => emp.active && emp.salary > 70000)).toBe(
+        true
+      )
+
+      const names = resultArray.map((emp) => emp.name).sort()
+      expect(names).toEqual([`Alice Johnson`, `Diana Miller`])
+    })
+
+    test(`three WHERE calls should all be ANDed together`, () => {
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ emp: employeesCollection })
+            .where(({ emp }) => eq(emp.active, true)) // First condition
+            .where(({ emp }) => gte(emp.salary, 65000)) // Second condition
+            .where(({ emp }) => lt(emp.age, 35)) // Third condition
+            .select(({ emp }) => ({
+              id: emp.id,
+              name: emp.name,
+              active: emp.active,
+              salary: emp.salary,
+              age: emp.age,
+            })),
+      })
+
+      // Should only return employees that are active AND salary >= 65000 AND age < 35
+      // Expected: Alice (active, 75k, 28), Bob (active, 65k, 32), Diana (active, 95k, 29)
+      // Should NOT include: Eve (active, 55k, 25 - fails salary), Charlie (inactive), Frank (inactive)
+      expect(result.size).toBe(3)
+
+      const resultArray = result.toArray
+      expect(
+        resultArray.every(
+          (emp) => emp.active && emp.salary >= 65000 && emp.age < 35
+        )
+      ).toBe(true)
+
+      const names = resultArray.map((emp) => emp.name).sort()
+      expect(names).toEqual([`Alice Johnson`, `Bob Smith`, `Diana Miller`])
+    })
+
+    test(`multiple WHERE calls with live updates`, () => {
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ emp: employeesCollection })
+            .where(({ emp }) => eq(emp.active, true))
+            .where(({ emp }) => gte(emp.salary, 70000))
+            .select(({ emp }) => ({
+              id: emp.id,
+              name: emp.name,
+              active: emp.active,
+              salary: emp.salary,
+            })),
+      })
+
+      // Initial state: Alice (active, 75k), Diana (active, 95k)
+      expect(result.size).toBe(2)
+
+      // Add employee that meets both criteria
+      const newEmployee: Employee = {
+        id: 10,
+        name: `John Doe`,
+        department_id: 1,
+        salary: 80000, // >= 70k
+        active: true, // active
+        hire_date: `2023-01-01`,
+        email: `john@company.com`,
+        first_name: `John`,
+        last_name: `Doe`,
+        age: 30,
+      }
+
+      employeesCollection.utils.begin()
+      employeesCollection.utils.write({ type: `insert`, value: newEmployee })
+      employeesCollection.utils.commit()
+
+      expect(result.size).toBe(3) // Should include John
+      expect(result.get(10)?.name).toBe(`John Doe`)
+
+      // Update John to not meet salary criteria
+      const updatedJohn = { ...newEmployee, salary: 60000 } // < 70k
+      employeesCollection.utils.begin()
+      employeesCollection.utils.write({ type: `update`, value: updatedJohn })
+      employeesCollection.utils.commit()
+
+      expect(result.size).toBe(2) // Should exclude John
+      expect(result.get(10)).toBeUndefined()
+
+      // Update John to not meet active criteria but meet salary
+      const inactiveJohn = { ...newEmployee, active: false, salary: 80000 }
+      employeesCollection.utils.begin()
+      employeesCollection.utils.write({ type: `update`, value: inactiveJohn })
+      employeesCollection.utils.commit()
+
+      expect(result.size).toBe(2) // Should still exclude John
+      expect(result.get(10)).toBeUndefined()
+
+      // Clean up
+      employeesCollection.utils.begin()
+      employeesCollection.utils.write({ type: `delete`, value: inactiveJohn })
+      employeesCollection.utils.commit()
+    })
   })
 })

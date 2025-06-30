@@ -9,9 +9,9 @@ export interface Query {
   from: From
   select?: Select
   join?: Join
-  where?: Where
+  where?: Array<Where>
   groupBy?: GroupBy
-  having?: Having
+  having?: Array<Having>
   orderBy?: OrderBy
   limit?: Limit
   offset?: Offset
