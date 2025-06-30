@@ -376,12 +376,15 @@ export class CollectionImpl<
           }
 
           pendingTransaction.committed = true
-          this.commitPendingTransactions()
 
-          // Update status to ready after first commit
+          // Update status to ready
+          // We do this before committing as we want the events from the changes to
+          // be from a "ready" state.
           if (this._status === `loading`) {
             this.setStatus(`ready`)
           }
+
+          this.commitPendingTransactions()
         },
       })
 
