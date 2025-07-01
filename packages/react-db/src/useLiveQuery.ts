@@ -88,30 +88,25 @@ export function useLiveQuery(
       ? K
       : string | number
 
-  const [state, setState] = useState<Map<KeyType, CollectionType>>(
-    () => new Map(collection.entries())
-  )
-  const [data, setData] = useState<Array<CollectionType>>(() =>
-    Array.from(collection.values())
-  )
+  // Use a simple counter to force re-renders when collection changes
+  const [, forceUpdate] = useState(0)
 
   useEffect(() => {
-    // Update initial state in case collection has data
-    setState(new Map(collection.entries()))
-    setData(Array.from(collection.values()))
-
-    // Subscribe to changes and update state
+    // Subscribe to changes and force re-render
     const unsubscribe = collection.subscribeChanges(() => {
-      setState(new Map(collection.entries()))
-      setData(Array.from(collection.values()))
+      forceUpdate((prev) => prev + 1)
     })
 
     return unsubscribe
   }, [collection])
 
   return {
-    state,
-    data,
-    collection: collection,
+    get state(): Map<KeyType, CollectionType> {
+      return new Map(collection.entries())
+    },
+    get data(): Array<CollectionType> {
+      return Array.from(collection.values())
+    },
+    collection,
   }
 }
