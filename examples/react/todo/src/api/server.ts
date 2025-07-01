@@ -24,7 +24,13 @@ app.get(`/api/health`, (req, res) => {
 
 // Generate a transaction ID
 async function generateTxId(tx: any): Promise<string> {
-  const [{ txid }] = await tx`SELECT txid_current() as txid`
+  const result = await tx`SELECT txid_current() as txid`
+  const txid = result[0]?.txid
+
+  if (txid === undefined) {
+    throw new Error(`Failed to get transaction ID`)
+  }
+
   return String(txid)
 }
 
@@ -34,10 +40,10 @@ async function generateTxId(tx: any): Promise<string> {
 app.get(`/api/todos`, async (req, res) => {
   try {
     const todos = await sql`SELECT * FROM todos`
-    res.status(200).json(todos)
+    return res.status(200).json(todos)
   } catch (error) {
     console.error(`Error fetching todos:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to fetch todos`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -54,10 +60,10 @@ app.get(`/api/todos/:id`, async (req, res) => {
       return res.status(404).json({ error: `Todo not found` })
     }
 
-    res.status(200).json(todo)
+    return res.status(200).json(todo)
   } catch (error) {
     console.error(`Error fetching todo:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to fetch todo`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -80,10 +86,10 @@ app.post(`/api/todos`, async (req, res) => {
       return result
     })
 
-    res.status(201).json({ todo: newTodo, txid })
+    return res.status(201).json({ todo: newTodo, txid })
   } catch (error) {
     console.error(`Error creating todo:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to create todo`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -114,14 +120,14 @@ app.put(`/api/todos/:id`, async (req, res) => {
       return result
     })
 
-    res.status(200).json({ todo: updatedTodo, txid })
+    return res.status(200).json({ todo: updatedTodo, txid })
   } catch (error) {
     if (error instanceof Error && error.message === `Todo not found`) {
       return res.status(404).json({ error: `Todo not found` })
     }
 
     console.error(`Error updating todo:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to update todo`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -148,14 +154,14 @@ app.delete(`/api/todos/:id`, async (req, res) => {
       }
     })
 
-    res.status(200).json({ success: true, txid })
+    return res.status(200).json({ success: true, txid })
   } catch (error) {
     if (error instanceof Error && error.message === `Todo not found`) {
       return res.status(404).json({ error: `Todo not found` })
     }
 
     console.error(`Error deleting todo:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to delete todo`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -168,10 +174,10 @@ app.delete(`/api/todos/:id`, async (req, res) => {
 app.get(`/api/config`, async (req, res) => {
   try {
     const config = await sql`SELECT * FROM config`
-    res.status(200).json(config)
+    return res.status(200).json(config)
   } catch (error) {
     console.error(`Error fetching config:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to fetch config`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -188,10 +194,10 @@ app.get(`/api/config/:id`, async (req, res) => {
       return res.status(404).json({ error: `Config not found` })
     }
 
-    res.status(200).json(config)
+    return res.status(200).json(config)
   } catch (error) {
     console.error(`Error fetching config:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to fetch config`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -215,10 +221,10 @@ app.post(`/api/config`, async (req, res) => {
       return result
     })
 
-    res.status(201).json({ config: newConfig, txid })
+    return res.status(201).json({ config: newConfig, txid })
   } catch (error) {
     console.error(`Error creating config:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to create config`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -249,14 +255,14 @@ app.put(`/api/config/:id`, async (req, res) => {
       return result
     })
 
-    res.status(200).json({ config: updatedConfig, txid })
+    return res.status(200).json({ config: updatedConfig, txid })
   } catch (error) {
     if (error instanceof Error && error.message === `Config not found`) {
       return res.status(404).json({ error: `Config not found` })
     }
 
     console.error(`Error updating config:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to update config`,
       details: error instanceof Error ? error.message : String(error),
     })
@@ -283,14 +289,14 @@ app.delete(`/api/config/:id`, async (req, res) => {
       }
     })
 
-    res.status(200).json({ success: true, txid })
+    return res.status(200).json({ success: true, txid })
   } catch (error) {
     if (error instanceof Error && error.message === `Config not found`) {
       return res.status(404).json({ error: `Config not found` })
     }
 
     console.error(`Error deleting config:`, error)
-    res.status(500).json({
+    return res.status(500).json({
       error: `Failed to delete config`,
       details: error instanceof Error ? error.message : String(error),
     })

@@ -1,5 +1,5 @@
 import type postgres from "postgres"
-import type { PendingMutation } from "../types"
+import type { PendingMutation } from "@tanstack/react-db"
 
 /**
  * Get the table name from the relation metadata
@@ -11,7 +11,7 @@ function getTableName(relation?: Array<string>): string {
 
   // The table name is typically the second element in the relation array
   // e.g. ['public', 'todos'] -> 'todos'
-  return relation[1]
+  return relation[1]!
 }
 
 /**
@@ -23,7 +23,12 @@ export async function processMutations(
 ): Promise<number> {
   return await sql.begin(async (tx) => {
     // Get the transaction ID
-    const [{ txid }] = await tx`SELECT txid_current() as txid`
+    const result = await tx`SELECT txid_current() as txid`
+    const txid = result[0]?.txid
+
+    if (txid === undefined) {
+      throw new Error(`Failed to get transaction ID`)
+    }
 
     // Process each mutation in order
     for (const mutation of pendingMutations) {
@@ -67,7 +72,9 @@ export async function processMutations(
           // Combine all values
           const allValues = [
             ...setValues,
-            ...primaryKey.map((k) => mutation.original[k]),
+            ...primaryKey.map(
+              (k) => (mutation.original as Record<string, unknown>)[k]
+            ),
           ]
 
           await tx.unsafe(
@@ -86,7 +93,9 @@ export async function processMutations(
             .join(` AND `)
 
           // Extract primary key values in same order as columns
-          const primaryKeyValues = primaryKey.map((k) => mutation.original[k])
+          const primaryKeyValues = primaryKey.map(
+            (k) => (mutation.original as Record<string, unknown>)[k]
+          )
 
           await tx.unsafe(
             `DELETE FROM ${tableName}
