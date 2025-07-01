@@ -171,6 +171,10 @@ export class CollectionImpl<
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
 
+  // Event batching for preventing duplicate emissions during transaction flows
+  private batchedEvents: Array<ChangeMessage<T, TKey>> = []
+  private shouldBatchEvents = false
+
   // Lifecycle management
   private _status: CollectionStatus = `idle`
   private activeSubscribersCount = 0
@@ -482,6 +486,8 @@ export class CollectionImpl<
     this.hasReceivedFirstCommit = false
     this.onFirstCommitCallbacks = []
     this.preloadPromise = null
+    this.batchedEvents = []
+    this.shouldBatchEvents = false
 
     // Update status
     this.setStatus(`cleaned-up`)
@@ -728,34 +734,55 @@ export class CollectionImpl<
   }
 
   /**
-   * Emit multiple events at once to all listeners
+   * Emit events either immediately or batch them for later emission
    */
-  private emitEvents(changes: Array<ChangeMessage<T, TKey>>): void {
-    if (changes.length > 0) {
-      // Emit to general listeners
-      for (const listener of this.changeListeners) {
-        listener(changes)
+  private emitEvents(
+    changes: Array<ChangeMessage<T, TKey>>,
+    endBatching = false
+  ): void {
+    if (this.shouldBatchEvents && !endBatching) {
+      // Add events to the batch
+      this.batchedEvents.push(...changes)
+      return
+    }
+
+    // Either we're not batching, or we're ending the batching cycle
+    let eventsToEmit = changes
+
+    if (endBatching) {
+      // End batching: combine any batched events with new events and clean up state
+      if (this.batchedEvents.length > 0) {
+        eventsToEmit = [...this.batchedEvents, ...changes]
+      }
+      this.batchedEvents = []
+      this.shouldBatchEvents = false
+    }
+
+    if (eventsToEmit.length === 0) return
+
+    // Emit to all listeners
+    for (const listener of this.changeListeners) {
+      listener(eventsToEmit)
+    }
+
+    // Emit to key-specific listeners
+    if (this.changeKeyListeners.size > 0) {
+      // Group changes by key, but only for keys that have listeners
+      const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+      for (const change of eventsToEmit) {
+        if (this.changeKeyListeners.has(change.key)) {
+          if (!changesByKey.has(change.key)) {
+            changesByKey.set(change.key, [])
+          }
+          changesByKey.get(change.key)!.push(change)
+        }
       }
 
-      // Emit to key-specific listeners
-      if (this.changeKeyListeners.size > 0) {
-        // Group changes by key, but only for keys that have listeners
-        const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
-        for (const change of changes) {
-          if (this.changeKeyListeners.has(change.key)) {
-            if (!changesByKey.has(change.key)) {
-              changesByKey.set(change.key, [])
-            }
-            changesByKey.get(change.key)!.push(change)
-          }
-        }
-
-        // Emit batched changes to each key's listeners
-        for (const [key, keyChanges] of changesByKey) {
-          const keyListeners = this.changeKeyListeners.get(key)!
-          for (const listener of keyListeners) {
-            listener(keyChanges)
-          }
+      // Emit batched changes to each key's listeners
+      for (const [key, keyChanges] of changesByKey) {
+        const keyListeners = this.changeKeyListeners.get(key)!
+        for (const listener of keyListeners) {
+          listener(keyChanges)
         }
       }
     }
@@ -1038,8 +1065,8 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
-      // Emit all events at once
-      this.emitEvents(events)
+      // End batching and emit all events (combines any batched events with sync events)
+      this.emitEvents(events, true)
 
       this.pendingSyncedTransactions = []
 
@@ -1774,6 +1801,10 @@ export class CollectionImpl<
    * This method should be called by the Transaction class when state changes
    */
   public onTransactionStateChange(): void {
+    // Check if commitPendingTransactions will be called after this
+    // by checking if there are pending sync transactions (same logic as in transactions.ts)
+    this.shouldBatchEvents = this.pendingSyncedTransactions.length > 0
+
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()
 
