@@ -147,8 +147,8 @@ export class CollectionImpl<
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
-  public derivedUpserts = new Map<TKey, T>()
-  public derivedDeletes = new Set<TKey>()
+  public optimisticUpserts = new Map<TKey, T>()
+  public optimisticDeletes = new Set<TKey>()
 
   // Cached size for performance
   private _size = 0
@@ -478,8 +478,8 @@ export class CollectionImpl<
     // Clear data
     this.syncedData.clear()
     this.syncedMetadata.clear()
-    this.derivedUpserts.clear()
-    this.derivedDeletes.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
     this._size = 0
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
@@ -561,12 +561,12 @@ export class CollectionImpl<
       return
     }
 
-    const previousState = new Map(this.derivedUpserts)
-    const previousDeletes = new Set(this.derivedDeletes)
+    const previousState = new Map(this.optimisticUpserts)
+    const previousDeletes = new Set(this.optimisticDeletes)
 
     // Clear current optimistic state
-    this.derivedUpserts.clear()
-    this.derivedDeletes.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
 
     const activeTransactions: Array<Transaction<any>> = []
     const completedTransactions: Array<Transaction<any>> = []
@@ -586,12 +586,12 @@ export class CollectionImpl<
           switch (mutation.type) {
             case `insert`:
             case `update`:
-              this.derivedUpserts.set(mutation.key, mutation.modified as T)
-              this.derivedDeletes.delete(mutation.key)
+              this.optimisticUpserts.set(mutation.key, mutation.modified as T)
+              this.optimisticDeletes.delete(mutation.key)
               break
             case `delete`:
-              this.derivedUpserts.delete(mutation.key)
-              this.derivedDeletes.add(mutation.key)
+              this.optimisticUpserts.delete(mutation.key)
+              this.optimisticDeletes.add(mutation.key)
               break
           }
         }
@@ -664,10 +664,10 @@ export class CollectionImpl<
    */
   private calculateSize(): number {
     const syncedSize = this.syncedData.size
-    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
+    const deletesFromSynced = Array.from(this.optimisticDeletes).filter(
+      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key)
     ).length
-    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
+    const upsertsNotInSynced = Array.from(this.optimisticUpserts.keys()).filter(
       (key) => !this.syncedData.has(key)
     ).length
 
@@ -684,9 +684,9 @@ export class CollectionImpl<
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
-      ...this.derivedUpserts.keys(),
+      ...this.optimisticUpserts.keys(),
       ...previousDeletes,
-      ...this.derivedDeletes,
+      ...this.optimisticDeletes,
     ])
 
     for (const key of allKeys) {
@@ -793,13 +793,13 @@ export class CollectionImpl<
    */
   public get(key: TKey): T | undefined {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return undefined
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
-      return this.derivedUpserts.get(key)
+    if (this.optimisticUpserts.has(key)) {
+      return this.optimisticUpserts.get(key)
     }
 
     // Fall back to synced data
@@ -811,12 +811,12 @@ export class CollectionImpl<
    */
   public has(key: TKey): boolean {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return false
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
+    if (this.optimisticUpserts.has(key)) {
       return true
     }
 
@@ -837,14 +837,14 @@ export class CollectionImpl<
   public *keys(): IterableIterator<TKey> {
     // Yield keys from synced data, skipping any that are deleted.
     for (const key of this.syncedData.keys()) {
-      if (!this.derivedDeletes.has(key)) {
+      if (!this.optimisticDeletes.has(key)) {
         yield key
       }
     }
     // Yield keys from upserts that were not already in synced data.
-    for (const key of this.derivedUpserts.keys()) {
-      if (!this.syncedData.has(key) && !this.derivedDeletes.has(key)) {
-        // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
+    for (const key of this.optimisticUpserts.keys()) {
+      if (!this.syncedData.has(key) && !this.optimisticDeletes.has(key)) {
+        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
         // but it's safer to keep it.
         yield key
       }
@@ -975,8 +975,8 @@ export class CollectionImpl<
       }
 
       // Clear optimistic state since sync operations will now provide the authoritative data
-      this.derivedUpserts.clear()
-      this.derivedDeletes.clear()
+      this.optimisticUpserts.clear()
+      this.optimisticDeletes.clear()
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
@@ -987,12 +987,15 @@ export class CollectionImpl<
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
-                  this.derivedUpserts.set(mutation.key, mutation.modified as T)
-                  this.derivedDeletes.delete(mutation.key)
+                  this.optimisticUpserts.set(
+                    mutation.key,
+                    mutation.modified as T
+                  )
+                  this.optimisticDeletes.delete(mutation.key)
                   break
                 case `delete`:
-                  this.derivedUpserts.delete(mutation.key)
-                  this.derivedDeletes.add(mutation.key)
+                  this.optimisticUpserts.delete(mutation.key)
+                  this.optimisticDeletes.add(mutation.key)
                   break
               }
             }
