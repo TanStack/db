@@ -2,12 +2,13 @@ import {
   computed,
   getCurrentInstance,
   onUnmounted,
-  ref,
+  reactive,
   toValue,
   watchEffect,
 } from "vue"
 import { createLiveQueryCollection } from "@tanstack/db"
 import type {
+  ChangeMessage,
   Collection,
   Context,
   GetResult,
@@ -104,9 +105,22 @@ export function useLiveQuery(
     }
   })
 
-  // Reactive state that updates when collection changes
-  const state = ref<Map<string | number, any>>(new Map())
-  const data = ref<Array<any>>([])
+  // Reactive state that gets updated granularly through change events
+  const state = reactive(new Map<string | number, any>())
+
+  // Reactive data array that maintains sorted order
+  const internalData = reactive<Array<any>>([])
+
+  // Computed wrapper for the data to match expected return type
+  const data = computed(() => internalData)
+
+  // Helper to sync data array from collection in correct order
+  const syncDataFromCollection = (
+    currentCollection: Collection<any, any, any>
+  ) => {
+    internalData.length = 0
+    internalData.push(...Array.from(currentCollection.values()))
+  }
 
   // Track current unsubscribe function
   let currentUnsubscribe: (() => void) | null = null
@@ -120,25 +134,35 @@ export function useLiveQuery(
       currentUnsubscribe()
     }
 
-    // Update initial state function
-    const updateState = () => {
-      const newEntries = new Map<string | number, any>(
-        currentCollection.entries()
-      )
-      const newData = Array.from(currentCollection.values())
-
-      // Force Vue reactivity by creating new references
-      state.value = newEntries
-      data.value = newData
+    // Initialize state with current collection data
+    state.clear()
+    for (const [key, value] of currentCollection.entries()) {
+      state.set(key, value)
     }
 
-    // Set initial state
-    updateState()
+    // Initialize data array in correct order
+    syncDataFromCollection(currentCollection)
 
-    // Subscribe to collection changes
-    currentUnsubscribe = currentCollection.subscribeChanges(() => {
-      updateState()
-    })
+    // Subscribe to collection changes with granular updates
+    currentUnsubscribe = currentCollection.subscribeChanges(
+      (changes: Array<ChangeMessage<any>>) => {
+        // Apply each change individually to the reactive state
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+            case `update`:
+              state.set(change.key, change.value)
+              break
+            case `delete`:
+              state.delete(change.key)
+              break
+          }
+        }
+
+        // Update the data array to maintain sorted order
+        syncDataFromCollection(currentCollection)
+      }
+    )
 
     // Preload collection data if not already started
     if (currentCollection.status === `idle`) {
@@ -165,8 +189,8 @@ export function useLiveQuery(
   }
 
   return {
-    state: computed(() => state.value),
-    data: computed(() => data.value),
+    state: computed(() => state),
+    data,
     collection: computed(() => collection.value),
   }
 }
