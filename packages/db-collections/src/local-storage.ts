@@ -248,108 +248,117 @@ export function localStorageCollectionOptions<
   }
 
   // Create wrapper handlers for direct persistence operations that perform actual storage operations
-  const wrappedOnInsert = config.onInsert
-    ? async (params: InsertMutationFnParams<ResolvedType>) => {
-        // Validate that all values in the transaction can be JSON serialized
-        params.transaction.mutations.forEach((mutation) => {
-          validateJsonSerializable(mutation.modified, `insert`)
-        })
+  const wrappedOnInsert = async (
+    params: InsertMutationFnParams<ResolvedType>
+  ) => {
+    // Validate that all values in the transaction can be JSON serialized
+    params.transaction.mutations.forEach((mutation) => {
+      validateJsonSerializable(mutation.modified, `insert`)
+    })
 
-        // Call the user handler BEFORE persisting changes
-        const handlerResult = (await config.onInsert!(params)) ?? {}
+    // Call the user handler BEFORE persisting changes (if provided)
+    let handlerResult: any = {}
+    if (config.onInsert) {
+      handlerResult = (await config.onInsert(params)) ?? {}
+    }
 
-        // Only persist to storage if the handler succeeded
-        // Load current data from storage
-        const currentData = loadFromStorage<ResolvedType>(
-          config.storageKey,
-          storage
-        )
+    // Always persist to storage
+    // Load current data from storage
+    const currentData = loadFromStorage<ResolvedType>(
+      config.storageKey,
+      storage
+    )
 
-        // Add new items with version keys
-        params.transaction.mutations.forEach((mutation) => {
-          const key = config.getKey(mutation.modified)
-          const storedItem: StoredItem<ResolvedType> = {
-            versionKey: generateUuid(),
-            data: mutation.modified,
-          }
-          currentData.set(key, storedItem)
-        })
-
-        // Save to storage
-        saveToStorage(currentData)
-
-        // Manually trigger local sync since storage events don't fire for current tab
-        triggerLocalSync()
-
-        return handlerResult
+    // Add new items with version keys
+    params.transaction.mutations.forEach((mutation) => {
+      const key = config.getKey(mutation.modified)
+      const storedItem: StoredItem<ResolvedType> = {
+        versionKey: generateUuid(),
+        data: mutation.modified,
       }
-    : undefined
+      currentData.set(key, storedItem)
+    })
 
-  const wrappedOnUpdate = config.onUpdate
-    ? async (params: UpdateMutationFnParams<ResolvedType>) => {
-        // Validate that all values in the transaction can be JSON serialized
-        params.transaction.mutations.forEach((mutation) => {
-          validateJsonSerializable(mutation.modified, `update`)
-        })
+    // Save to storage
+    saveToStorage(currentData)
 
-        // Call the user handler BEFORE persisting changes
-        const handlerResult = (await config.onUpdate!(params)) ?? {}
+    // Manually trigger local sync since storage events don't fire for current tab
+    triggerLocalSync()
 
-        // Only persist to storage if the handler succeeded
-        // Load current data from storage
-        const currentData = loadFromStorage<ResolvedType>(
-          config.storageKey,
-          storage
-        )
+    return handlerResult
+  }
 
-        // Update items with new version keys
-        params.transaction.mutations.forEach((mutation) => {
-          const key = config.getKey(mutation.modified)
-          const storedItem: StoredItem<ResolvedType> = {
-            versionKey: generateUuid(),
-            data: mutation.modified,
-          }
-          currentData.set(key, storedItem)
-        })
+  const wrappedOnUpdate = async (
+    params: UpdateMutationFnParams<ResolvedType>
+  ) => {
+    // Validate that all values in the transaction can be JSON serialized
+    params.transaction.mutations.forEach((mutation) => {
+      validateJsonSerializable(mutation.modified, `update`)
+    })
 
-        // Save to storage
-        saveToStorage(currentData)
+    // Call the user handler BEFORE persisting changes (if provided)
+    let handlerResult: any = {}
+    if (config.onUpdate) {
+      handlerResult = (await config.onUpdate(params)) ?? {}
+    }
 
-        // Manually trigger local sync since storage events don't fire for current tab
-        triggerLocalSync()
+    // Always persist to storage
+    // Load current data from storage
+    const currentData = loadFromStorage<ResolvedType>(
+      config.storageKey,
+      storage
+    )
 
-        return handlerResult
+    // Update items with new version keys
+    params.transaction.mutations.forEach((mutation) => {
+      const key = config.getKey(mutation.modified)
+      const storedItem: StoredItem<ResolvedType> = {
+        versionKey: generateUuid(),
+        data: mutation.modified,
       }
-    : undefined
+      currentData.set(key, storedItem)
+    })
 
-  const wrappedOnDelete = config.onDelete
-    ? async (params: DeleteMutationFnParams<ResolvedType>) => {
-        // Call the user handler BEFORE persisting changes
-        const handlerResult = (await config.onDelete!(params)) ?? {}
+    // Save to storage
+    saveToStorage(currentData)
 
-        // Only persist to storage if the handler succeeded
-        // Load current data from storage
-        const currentData = loadFromStorage<ResolvedType>(
-          config.storageKey,
-          storage
-        )
+    // Manually trigger local sync since storage events don't fire for current tab
+    triggerLocalSync()
 
-        // Remove items
-        params.transaction.mutations.forEach((mutation) => {
-          // For delete operations, mutation.original contains the full object
-          const key = config.getKey(mutation.original)
-          currentData.delete(key)
-        })
+    return handlerResult
+  }
 
-        // Save to storage
-        saveToStorage(currentData)
+  const wrappedOnDelete = async (
+    params: DeleteMutationFnParams<ResolvedType>
+  ) => {
+    // Call the user handler BEFORE persisting changes (if provided)
+    let handlerResult: any = {}
+    if (config.onDelete) {
+      handlerResult = (await config.onDelete(params)) ?? {}
+    }
 
-        // Manually trigger local sync since storage events don't fire for current tab
-        triggerLocalSync()
+    // Always persist to storage
+    // Load current data from storage
+    const currentData = loadFromStorage<ResolvedType>(
+      config.storageKey,
+      storage
+    )
 
-        return handlerResult
-      }
-    : undefined
+    // Remove items
+    params.transaction.mutations.forEach((mutation) => {
+      // For delete operations, mutation.original contains the full object
+      const key = config.getKey(mutation.original)
+      currentData.delete(key)
+    })
+
+    // Save to storage
+    saveToStorage(currentData)
+
+    // Manually trigger local sync since storage events don't fire for current tab
+    triggerLocalSync()
+
+    return handlerResult
+  }
 
   // Extract standard Collection config properties
   const {

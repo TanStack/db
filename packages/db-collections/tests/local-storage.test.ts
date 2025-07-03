@@ -238,6 +238,124 @@ describe(`localStorage collection`, () => {
   })
 
   describe(`mutation handlers with storage operations`, () => {
+    it(`should persist data even without mutation handlers`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+          // No onInsert, onUpdate, or onDelete handlers provided
+        })
+      )
+
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
+      const todo: Todo = {
+        id: `1`,
+        title: `Test Todo Without Handlers`,
+        completed: false,
+        createdAt: new Date(),
+      }
+
+      // Insert without handlers should still persist
+      const insertTx = collection.insert(todo)
+      await insertTx.isPersisted.promise
+
+      // Check that it was saved to storage
+      let storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      let parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.title).toBe(`Test Todo Without Handlers`)
+
+      // Update without handlers should still persist
+      const updateTx = collection.update(`1`, (draft) => {
+        draft.title = `Updated Without Handlers`
+      })
+      await updateTx.isPersisted.promise
+
+      // Check that update was saved to storage
+      storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.title).toBe(`Updated Without Handlers`)
+
+      // Delete without handlers should still persist
+      const deleteTx = collection.delete(`1`)
+      await deleteTx.isPersisted.promise
+
+      // Check that deletion was saved to storage
+      storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      parsed = JSON.parse(storedData!)
+      expect(parsed[`1`]).toBeUndefined()
+
+      unsubscribe()
+    })
+
+    it(`should call mutation handlers when provided and still persist data`, async () => {
+      const insertSpy = vi.fn().mockResolvedValue({ success: true })
+      const updateSpy = vi.fn().mockResolvedValue({ success: true })
+      const deleteSpy = vi.fn().mockResolvedValue({ success: true })
+
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+          onInsert: insertSpy,
+          onUpdate: updateSpy,
+          onDelete: deleteSpy,
+        })
+      )
+
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
+      const todo: Todo = {
+        id: `1`,
+        title: `Test Todo With Handlers`,
+        completed: false,
+        createdAt: new Date(),
+      }
+
+      // Insert should call handler AND persist
+      const insertTx = collection.insert(todo)
+      await insertTx.isPersisted.promise
+
+      expect(insertSpy).toHaveBeenCalledOnce()
+      let storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      let parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.title).toBe(`Test Todo With Handlers`)
+
+      // Update should call handler AND persist
+      const updateTx = collection.update(`1`, (draft) => {
+        draft.title = `Updated With Handlers`
+      })
+      await updateTx.isPersisted.promise
+
+      expect(updateSpy).toHaveBeenCalledOnce()
+      storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.title).toBe(`Updated With Handlers`)
+
+      // Delete should call handler AND persist
+      const deleteTx = collection.delete(`1`)
+      await deleteTx.isPersisted.promise
+
+      expect(deleteSpy).toHaveBeenCalledOnce()
+      storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      parsed = JSON.parse(storedData!)
+      expect(parsed[`1`]).toBeUndefined()
+
+      unsubscribe()
+    })
+
     it(`should perform insert operations and update storage`, async () => {
       const collection = createCollection(
         localStorageCollectionOptions<Todo>({
