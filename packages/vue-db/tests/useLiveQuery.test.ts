@@ -100,7 +100,15 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
+    const { state, data } = useLiveQuery((q) =>
+      q
+        .from({ collection })
+        .where(`@age`, `>`, 30)
+        .select(`@id`, `@name`)
+        .orderBy({ "@id": `asc` })
+    )
+
+    // Now sync the initial state after the hook has started - this should trigger collection syncing
     emitter.emit(
       `sync`,
       initialPersons.map((person) => ({
@@ -108,14 +116,6 @@ describe(`Query Collections`, () => {
         type: `insert`,
         changes: person,
       }))
-    )
-
-    const { state, data } = useLiveQuery((q) =>
-      q
-        .from({ collection })
-        .where(`@age`, `>`, 30)
-        .select(`@id`, `@name`)
-        .orderBy({ "@id": `asc` })
     )
 
     expect(state.value.size).toBe(1)
@@ -278,26 +278,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync initial person data
-    emitter.emit(
-      `sync-person`,
-      initialPersons.map((person) => ({
-        key: person.id,
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
-    // Sync initial issue data
-    emitter.emit(
-      `sync-issue`,
-      initialIssues.map((issue) => ({
-        key: issue.id,
-        type: `insert`,
-        changes: issue,
-      }))
-    )
-
     const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
@@ -307,6 +287,25 @@ describe(`Query Collections`, () => {
           on: [`@persons.id`, `=`, `@issues.userId`],
         })
         .select(`@issues.id`, `@issues.title`, `@persons.name`)
+    )
+
+    // Now sync the initial data after the hook has started - this should trigger collection syncing for both collections
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        key: issue.id,
+        type: `insert`,
+        changes: issue,
+      }))
     )
 
     await waitForChanges()
@@ -417,16 +416,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        key: person.id,
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     const minAge = ref(30)
 
     const { state } = useLiveQuery((q) => {
@@ -435,6 +424,16 @@ describe(`Query Collections`, () => {
         .where(`@age`, `>`, minAge.value)
         .select(`@id`, `@name`, `@age`)
     })
+
+    // Now sync the initial state after the hook has started - this should trigger collection syncing
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
+    )
 
     // Initially should return only people older than 30
     expect(state.value.size).toBe(1)
@@ -530,16 +529,6 @@ describe(`Query Collections`, () => {
       return result as T
     }
 
-    // Sync initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        key: person.id,
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     const minAge = ref(30)
     useTrackedLiveQuery(
       (q) =>
@@ -548,6 +537,16 @@ describe(`Query Collections`, () => {
           .where(`@age`, `>`, minAge.value)
           .select(`@id`, `@name`),
       [minAge]
+    )
+
+    // Now sync the initial state after the hook has started - this should trigger collection syncing
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
     )
 
     // Initial query should be created
@@ -599,16 +598,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync from initial state
-    emitter.emit(
-      `sync`,
-      initialPersons.map((person) => ({
-        key: person.id,
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
     // Initial query
     const result = useLiveQuery((q) =>
       q
@@ -616,6 +605,16 @@ describe(`Query Collections`, () => {
         .where(`@age`, `>`, 30)
         .select(`@id`, `@name`, `@team`)
         .orderBy({ "@id": `asc` })
+    )
+
+    // Now sync the initial state after the hook has started - this should trigger collection syncing
+    emitter.emit(
+      `sync`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
     )
 
     // Grouped query derived from initial query
@@ -730,26 +729,6 @@ describe(`Query Collections`, () => {
       },
     })
 
-    // Sync initial person data
-    emitter.emit(
-      `sync-person`,
-      initialPersons.map((person) => ({
-        key: person.id,
-        type: `insert`,
-        changes: person,
-      }))
-    )
-
-    // Sync initial issue data
-    emitter.emit(
-      `sync-issue`,
-      initialIssues.map((issue) => ({
-        key: issue.id,
-        type: `insert`,
-        changes: issue,
-      }))
-    )
-
     // Render the hook with a query that joins persons and issues
     const { state } = useLiveQuery((q) =>
       q
@@ -760,6 +739,25 @@ describe(`Query Collections`, () => {
           on: [`@persons.id`, `=`, `@issues.userId`],
         })
         .select(`@issues.id`, `@issues.title`, `@persons.name`)
+    )
+
+    // Now sync the initial data after the hook has started - this should trigger collection syncing for both collections
+    emitter.emit(
+      `sync-person`,
+      initialPersons.map((person) => ({
+        key: person.id,
+        type: `insert`,
+        changes: person,
+      }))
+    )
+
+    emitter.emit(
+      `sync-issue`,
+      initialIssues.map((issue) => ({
+        key: issue.id,
+        type: `insert`,
+        changes: issue,
+      }))
     )
 
     // Track each render state

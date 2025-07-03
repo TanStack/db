@@ -142,6 +142,8 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       getKey: (val: unknown) => {
         return (val as any)._key
       },
+      gcTime: 0,
+      startSync: true,
       compare,
       sync: {
         sync: sync as unknown as (params: {
@@ -203,25 +205,20 @@ export class CompiledQuery<TResults extends object = Record<string, unknown>> {
       throw new Error(`Query is stopped`)
     }
 
-    // Send initial state
-    Object.entries(this.inputCollections).forEach(([key, collection]) => {
-      this.sendChangesToInput(
-        key,
-        collection.currentStateAsChanges(),
-        collection.config.getKey
-      )
-    })
-    this.runGraph()
-
     // Subscribe to changes
     Object.entries(this.inputCollections).forEach(([key, collection]) => {
-      const unsubscribe = collection.subscribeChanges((changes) => {
-        this.sendChangesToInput(key, changes, collection.config.getKey)
-        this.runGraph()
-      })
+      const unsubscribe = collection.subscribeChanges(
+        (changes) => {
+          this.sendChangesToInput(key, changes, collection.config.getKey)
+          this.runGraph()
+        },
+        { includeInitialState: true }
+      )
 
       this.unsubscribeCallbacks.push(unsubscribe)
     })
+
+    this.runGraph()
 
     this.state = `running`
     return () => {

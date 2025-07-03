@@ -97,7 +97,7 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
-> = Transaction<T> & {
+> = Transaction<T, TOperation> & {
   mutations: NonEmptyArray<PendingMutation<T, TOperation>>
 }
 
@@ -109,6 +109,17 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
   mutationFn: MutationFn<T>
   /** Custom metadata to associate with the transaction */
   metadata?: Record<string, unknown>
+}
+
+/**
+ * Options for the createOptimisticAction helper
+ */
+export interface CreateOptimisticActionsOptions<TVars = unknown>
+  extends Omit<TransactionConfig, `mutationFn`> {
+  /** Function to apply optimistic updates locally before the mutation completes */
+  onMutate: (vars: TVars) => void
+  /** Function to execute the mutation on the server */
+  mutationFn: (vars: TVars, params: MutationFnParams) => Promise<any>
 }
 
 export type { Transaction }
@@ -216,6 +227,21 @@ export type DeleteMutationFn<T extends object = Record<string, unknown>> = (
   params: DeleteMutationFnParams<T>
 ) => Promise<any>
 
+/**
+ * Collection status values for lifecycle management
+ */
+export type CollectionStatus =
+  /** Collection is created but sync hasn't started yet (when startSync config is false) */
+  | `idle`
+  /** Sync has started but hasn't received the first commit yet */
+  | `loading`
+  /** Collection has received at least one commit and is ready for use */
+  | `ready`
+  /** An error occurred during sync initialization */
+  | `error`
+  /** Collection has been cleaned up and resources freed */
+  | `cleaned-up`
+
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -236,6 +262,16 @@ export interface CollectionConfig<
    * getKey: (item) => item.uuid
    */
   getKey: (item: T) => TKey
+  /**
+   * Time in milliseconds after which the collection will be garbage collected
+   * when it has no active subscribers. Defaults to 5 minutes (300000ms).
+   */
+  gcTime?: number
+  /**
+   * Whether to start syncing immediately when the collection is created.
+   * Defaults to false for lazy loading. Set to true to immediately sync.
+   */
+  startSync?: boolean
   /**
    * Optional function to compare two items.
    * This is used to order the items in the collection.

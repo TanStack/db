@@ -19,7 +19,6 @@
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
-    "prepack": "vite build",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test"
   },
@@ -58,11 +57,6 @@
     "zod": "^3.24.2"
   },
   "exports": {
-    "./react-electric": {
-      "types": "./dist/lib/electric.d.ts",
-      "import": "./dist/lib/electric.mjs",
-      "require": "./dist/cjs/lib/electric.cjs"
-    },
     "./package.json": "./package.json"
   },
   "files": [

@@ -16,6 +16,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ value: string }>({
       id: `foo`,
       getKey: (item) => item.value,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately execute the sync cycle
@@ -65,6 +66,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `id-update-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -102,6 +104,7 @@ describe(`Collection`, () => {
     createCollection<{ name: string }>({
       id: `foo`,
       getKey: (item) => item.name,
+      startSync: true,
       sync: {
         sync: ({ collection, begin, write, commit }) => {
           // Initial state should be empty
@@ -150,6 +153,7 @@ describe(`Collection`, () => {
     }>({
       id: `mock`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust mitt's typing
@@ -428,6 +432,7 @@ describe(`Collection`, () => {
       getKey: (item) => {
         return item.id
       },
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           // @ts-expect-error don't trust Mitt's typing and this works.
@@ -500,6 +505,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ name: string }>({
       id: `delete-errors`,
       getKey: (val) => val.name,
+      startSync: true,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -532,6 +538,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `duplicate-id-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -573,6 +580,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `handlers-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -637,6 +645,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `direct-operations-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -690,6 +699,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `no-handlers-test`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
           begin()
@@ -743,6 +753,7 @@ describe(`Collection with schema validation`, () => {
     const collection = createCollection<z.infer<typeof userSchema>>({
       id: `test`,
       getKey: (item) => item.name,
+      startSync: true,
       sync: {
         sync: ({ begin, commit }) => {
           begin()

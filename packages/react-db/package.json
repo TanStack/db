@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/react-db",
   "description": "React integration for @tanstack/db",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,7 @@
     "react",
     "typescript"
   ],
-  "packageManager": "pnpm@10.5.2",
+  "packageManager": "pnpm@10.6.3",
   "dependencies": {
     "@tanstack/db": "workspace:*",
     "@tanstack/react-store": "^0.7.0",

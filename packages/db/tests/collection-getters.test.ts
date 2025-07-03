@@ -37,6 +37,7 @@ describe(`Collection getters`, () => {
       id: `test-collection`,
       getKey: (val) => val.id as string,
       sync: mockSync,
+      startSync: true,
     }
 
     collection = createCollection(config)
@@ -85,6 +86,7 @@ describe(`Collection getters`, () => {
       const syncCollection = createCollection<{ id: string; name: string }>({
         id: `sync-size-test`,
         getKey: (val) => val.id,
+        startSync: true,
         sync: {
           sync: (callbacks) => {
             syncCallbacks = callbacks
@@ -439,6 +441,7 @@ describe(`Collection getters`, () => {
       const delayedCollection = createCollection({
         id: `delayed-collection`,
         getKey: (val) => val.id as string,
+        startSync: true,
         sync: delayedSyncMock,
       })
 
@@ -499,6 +502,7 @@ describe(`Collection getters`, () => {
       const delayedCollection = createCollection({
         id: `delayed-collection`,
         getKey: (val) => val.id as string,
+        startSync: true,
         sync: delayedSyncMock,
       })
 
