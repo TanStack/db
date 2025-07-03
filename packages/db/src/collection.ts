@@ -858,10 +858,7 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield copy as T
+        yield value
       }
     }
   }
@@ -873,12 +870,44 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield [key, copy as T]
+        yield [key, value]
       }
     }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *[Symbol.iterator](): IterableIterator<[TKey, T]> {
+    for (const [key, value] of this.entries()) {
+      yield [key, value]
+    }
+  }
+
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  public forEach(
+    callbackfn: (value: T, key: TKey, index: number) => void
+  ): void {
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
+  }
+
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  public map<U>(
+    callbackfn: (value: T, key: TKey, index: number) => U
+  ): Array<U> {
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   /**
@@ -1653,19 +1682,7 @@ export class CollectionImpl<
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    const array = Array.from(this.values())
-
-    // Currently a query with an orderBy will add a _orderByIndex to the items
-    // so for now we need to sort the array by _orderByIndex if it exists
-    // TODO: in the future it would be much better is the keys are sorted - this
-    // should be done by the query engine.
-    if (array[0] && (array[0] as { _orderByIndex?: number })._orderByIndex) {
-      return (array as Array<{ _orderByIndex: number }>).sort(
-        (a, b) => a._orderByIndex - b._orderByIndex
-      ) as Array<T>
-    }
-
-    return array
+    return Array.from(this.values())
   }
 
   /**
