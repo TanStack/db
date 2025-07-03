@@ -260,10 +260,9 @@ export function localStorageCollectionOptions<
 
         // Only persist to storage if the handler succeeded
         // Load current data from storage
-        const currentData = loadFromStorage(
+        const currentData = loadFromStorage<ResolvedType>(
           config.storageKey,
-          storage,
-          config.getKey
+          storage
         )
 
         // Add new items with version keys
@@ -298,10 +297,9 @@ export function localStorageCollectionOptions<
 
         // Only persist to storage if the handler succeeded
         // Load current data from storage
-        const currentData = loadFromStorage(
+        const currentData = loadFromStorage<ResolvedType>(
           config.storageKey,
-          storage,
-          config.getKey
+          storage
         )
 
         // Update items with new version keys
@@ -331,16 +329,15 @@ export function localStorageCollectionOptions<
 
         // Only persist to storage if the handler succeeded
         // Load current data from storage
-        const currentData = loadFromStorage(
+        const currentData = loadFromStorage<ResolvedType>(
           config.storageKey,
-          storage,
-          config.getKey
+          storage
         )
 
         // Remove items
         params.transaction.mutations.forEach((mutation) => {
           // For delete operations, mutation.original contains the full object
-          const key = config.getKey(mutation.original as ResolvedType)
+          const key = config.getKey(mutation.original)
           currentData.delete(key)
         })
 
@@ -388,8 +385,7 @@ export function localStorageCollectionOptions<
  */
 function loadFromStorage<T extends object>(
   storageKey: string,
-  storage: StorageApi,
-  getKey: (item: T) => string | number
+  storage: StorageApi
 ): Map<string | number, StoredItem<T>> {
   try {
     const rawData = storage.getItem(storageKey)
@@ -416,18 +412,16 @@ function loadFromStorage<T extends object>(
         ) {
           const storedItem = value as StoredItem<T>
           dataMap.set(key, storedItem)
+        } else {
+          throw new Error(
+            `[LocalStorageCollection] Invalid data format in storage key "${storageKey}" for key "${key}".`
+          )
         }
       })
-    } else if (Array.isArray(parsed)) {
-      // Handle legacy array format - convert to versioned format
-      parsed.forEach((item: T) => {
-        const key = getKey(item)
-        const storedItem: StoredItem<T> = {
-          versionKey: generateUuid(),
-          data: item,
-        }
-        dataMap.set(key, storedItem)
-      })
+    } else {
+      throw new Error(
+        `[LocalStorageCollection] Invalid data format in storage key "${storageKey}". Expected object format.`
+      )
     }
 
     return dataMap
@@ -498,7 +492,7 @@ function createLocalStorageSync<T extends object>(
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage(storageKey, storage, getKey)
+    const newData = loadFromStorage<T>(storageKey, storage)
 
     // Find the specific changes
     const changes = findChanges(lastKnownData, newData)
@@ -529,7 +523,7 @@ function createLocalStorageSync<T extends object>(
       syncParams = params
 
       // Initial load
-      const initialData = loadFromStorage(storageKey, storage, getKey)
+      const initialData = loadFromStorage<T>(storageKey, storage)
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {

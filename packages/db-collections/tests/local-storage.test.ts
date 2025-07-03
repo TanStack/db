@@ -195,36 +195,14 @@ describe(`localStorage collection`, () => {
         })
       )
 
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
       // Should load the existing data
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Existing Todo`)
-    })
 
-    it(`should handle legacy array format in storage`, () => {
-      // Pre-populate storage with legacy array format
-      const existingTodos: Array<Todo> = [
-        {
-          id: `1`,
-          title: `Legacy Todo`,
-          completed: false,
-          createdAt: new Date(),
-        },
-      ]
-
-      mockStorage.setItem(`todos`, JSON.stringify(existingTodos))
-
-      const collection = createCollection(
-        localStorageCollectionOptions<Todo>({
-          storageKey: `todos`,
-          storage: mockStorage,
-          storageEventApi: mockStorageEventApi,
-          getKey: (todo) => todo.id,
-        })
-      )
-
-      // Should load and convert the legacy data
-      expect(collection.size).toBe(1)
-      expect(collection.get(`1`)?.title).toBe(`Legacy Todo`)
+      unsubscribe()
     })
 
     it(`should handle corrupted storage data gracefully`, () => {
@@ -321,6 +299,9 @@ describe(`localStorage collection`, () => {
         })
       )
 
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
       // Update the todo - this automatically creates a transaction and calls onUpdate
       const tx = collection.update(`1`, (draft) => {
         draft.title = `Updated Todo`
@@ -334,6 +315,8 @@ describe(`localStorage collection`, () => {
       const parsed = JSON.parse(storedData!)
       expect(parsed[`1`].versionKey).not.toBe(`initial-version`) // Should have new version key
       expect(parsed[`1`].data.title).toBe(`Updated Todo`)
+
+      unsubscribe()
     })
 
     it(`should perform delete operations and update storage`, async () => {
@@ -361,6 +344,9 @@ describe(`localStorage collection`, () => {
         })
       )
 
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
       // Delete the todo - this automatically creates a transaction and calls onDelete
       const tx = collection.delete(`1`)
       await tx.isPersisted.promise
@@ -371,6 +357,8 @@ describe(`localStorage collection`, () => {
 
       const parsed = JSON.parse(storedData!)
       expect(parsed[`1`]).toBeUndefined()
+
+      unsubscribe()
     })
   })
 
@@ -384,6 +372,9 @@ describe(`localStorage collection`, () => {
           getKey: (todo) => todo.id,
         })
       )
+
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
 
       // Simulate data being added from another tab
       const newTodoData = {
@@ -417,6 +408,8 @@ describe(`localStorage collection`, () => {
       // The collection should now have the new todo
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`From Another Tab`)
+
+      unsubscribe()
     })
 
     it(`should ignore storage events for different keys`, () => {
@@ -556,6 +549,9 @@ describe(`localStorage collection`, () => {
         })
       )
 
+      // Subscribe to trigger sync
+      const unsubscribe = collection.subscribeChanges(() => {})
+
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Initial`)
 
@@ -589,6 +585,8 @@ describe(`localStorage collection`, () => {
       // Should detect the change based on version key difference
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Updated`)
+
+      unsubscribe()
     })
 
     it(`should not trigger unnecessary updates for same version key`, () => {
