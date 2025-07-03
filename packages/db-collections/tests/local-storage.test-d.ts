@@ -169,23 +169,17 @@ describe(`LocalStorage collection type resolution tests`, () => {
     })
 
     // Verify that the handlers are properly typed
-    if (options.onInsert) {
-      expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-        [InsertMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
+      [InsertMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onUpdate) {
-      expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-        [UpdateMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
+      [UpdateMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onDelete) {
-      expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-        [DeleteMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
+      [DeleteMutationFnParams<ExplicitType>]
+    >()
   })
 
   it(`should properly type localStorage-specific configuration options`, () => {
