@@ -66,7 +66,7 @@ Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
 - syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
-- storing local data, for example [in-memory client data or UI state](https://github.com/TanStack/db/issues/79)
+- storing local data, for example [using localStorage for user preferences and settings](#localstoragecollection) or [in-memory client data or UI state](#localonlycollection)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
 Once you have your data in collections, you can query across them using live queries in your components.
@@ -153,7 +153,8 @@ There are a number of built-in collection types implemented in [`@tanstack/db-co
 
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-3. [WIP] [`LocalCollection`](#localcollection) for in-memory client data or UI state
+3. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+4. [WIP] [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -247,9 +248,48 @@ If you need more control over what data syncs into the collection, Electric allo
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
 
-#### `LocalCollection`
+#### `LocalStorageCollection`
+
+localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
+
+Use `localStorageCollectionOptions` to create a collection that stores data in localStorage:
+
+```ts
+import { createCollection } from '@tanstack/react-db'
+import { localStorageCollectionOptions } from '@tanstack/db-collections'
+
+export const userPreferencesCollection = createCollection(localStorageCollectionOptions({
+  id: 'user-preferences',
+  storageKey: 'app-user-prefs', // localStorage key
+  getKey: (item) => item.id,
+  schema: userPrefsSchema
+}))
+```
+
+The localStorage collection requires:
+
+- `storageKey` — the localStorage key where all collection data is stored
+- `getKey` — identifies the id for items in the collection
+
+Mutation handlers (`onInsert`, `onUpdate`, `onDelete`) are completely optional. Data will persist to localStorage whether or not you provide handlers. You can provide alternative storage backends like `sessionStorage` or custom implementations that match the localStorage API.
+
+```ts
+export const sessionCollection = createCollection(localStorageCollectionOptions({
+  id: 'session-data',
+  storageKey: 'session-key',
+  storage: sessionStorage, // Use sessionStorage instead
+  getKey: (item) => item.id
+}))
+```
+
+> [!TIP]
+> localStorage collections are perfect for user preferences, UI state, and other data that should persist locally but doesn't need server synchronization. For server-synchronized data, use [`QueryCollection`](#querycollection) or [`ElectricCollection`](#electriccollection) instead.
+
+#### `LocalOnlyCollection`
 
 This is WIP. Track progress at [#79](https://github.com/TanStack/db/issues/79).
+
+LocalOnly collections will be designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs.
 
 #### Derived collections
 
