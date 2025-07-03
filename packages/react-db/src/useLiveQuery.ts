@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useRef, useSyncExternalStore } from "react"
 import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   Collection,
@@ -55,58 +55,121 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
-  const collection = useMemo(
-    () => {
-      if (isCollection) {
-        // It's already a collection, ensure sync is started for React hooks
-        configOrQueryOrCollection.startSyncImmediate()
-        return configOrQueryOrCollection
-      }
+  // Use refs to cache collection and track dependencies
+  const collectionRef = useRef<any>(null)
+  const depsRef = useRef<Array<unknown> | null>(null)
+  const configRef = useRef<any>(null)
 
+  // Check if we need to create/recreate the collection
+  const needsNewCollection =
+    !collectionRef.current ||
+    (isCollection && configRef.current !== configOrQueryOrCollection) ||
+    (!isCollection &&
+      (depsRef.current === null ||
+        depsRef.current.length !== deps.length ||
+        depsRef.current.some((dep, i) => dep !== deps[i])))
+
+  if (needsNewCollection) {
+    if (isCollection) {
+      // It's already a collection, ensure sync is started for React hooks
+      configOrQueryOrCollection.startSyncImmediate()
+      collectionRef.current = configOrQueryOrCollection
+      configRef.current = configOrQueryOrCollection
+    } else {
       // Original logic for creating collections
       // Ensure we always start sync for React hooks
       if (typeof configOrQueryOrCollection === `function`) {
-        return createLiveQueryCollection({
+        collectionRef.current = createLiveQueryCollection({
           query: configOrQueryOrCollection,
           startSync: true,
+          gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
         })
       } else {
-        return createLiveQueryCollection({
-          ...configOrQueryOrCollection,
+        collectionRef.current = createLiveQueryCollection({
           startSync: true,
+          gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
+          ...configOrQueryOrCollection,
         })
       }
-    },
-    isCollection ? [configOrQueryOrCollection] : [...deps]
+      depsRef.current = [...deps]
+    }
+  }
+
+  // Use refs to track version and memoized snapshot
+  const versionRef = useRef(0)
+  const snapshotRef = useRef<{
+    state: Map<any, any>
+    data: Array<any>
+    collection: Collection<any, any, any>
+    _version: number
+  } | null>(null)
+
+  // Reset refs when collection changes
+  if (needsNewCollection) {
+    versionRef.current = 0
+    snapshotRef.current = null
+  }
+
+  // Create stable subscribe function using ref
+  const subscribeRef = useRef<
+    ((onStoreChange: () => void) => () => void) | null
+  >(null)
+  if (!subscribeRef.current || needsNewCollection) {
+    subscribeRef.current = (onStoreChange: () => void) => {
+      const unsubscribe = collectionRef.current!.subscribeChanges(() => {
+        versionRef.current += 1
+        onStoreChange()
+      })
+      return () => {
+        unsubscribe()
+      }
+    }
+  }
+
+  // Create stable getSnapshot function using ref
+  const getSnapshotRef = useRef<
+    | (() => {
+        state: Map<any, any>
+        data: Array<any>
+        collection: Collection<any, any, any>
+      })
+    | null
+  >(null)
+  if (!getSnapshotRef.current || needsNewCollection) {
+    getSnapshotRef.current = () => {
+      const currentVersion = versionRef.current
+      const currentCollection = collectionRef.current!
+
+      // If we don't have a snapshot or the version changed, create a new one
+      if (
+        !snapshotRef.current ||
+        snapshotRef.current._version !== currentVersion
+      ) {
+        snapshotRef.current = {
+          get state() {
+            return new Map(currentCollection.entries())
+          },
+          get data() {
+            return Array.from(currentCollection.values())
+          },
+          collection: currentCollection,
+          _version: currentVersion,
+        }
+      }
+
+      return snapshotRef.current
+    }
+  }
+
+  // Use useSyncExternalStore to subscribe to collection changes
+  const snapshot = useSyncExternalStore(
+    subscribeRef.current,
+    getSnapshotRef.current
   )
 
-  // Infer types from the actual collection
-  type CollectionType =
-    typeof collection extends Collection<infer T, any, any> ? T : never
-  type KeyType =
-    typeof collection extends Collection<any, infer K, any>
-      ? K
-      : string | number
-
-  // Use a simple counter to force re-renders when collection changes
-  const [, forceUpdate] = useState(0)
-
-  useEffect(() => {
-    // Subscribe to changes and force re-render
-    const unsubscribe = collection.subscribeChanges(() => {
-      forceUpdate((prev) => prev + 1)
-    })
-
-    return unsubscribe
-  }, [collection])
-
   return {
-    get state(): Map<KeyType, CollectionType> {
-      return new Map(collection.entries())
-    },
-    get data(): Array<CollectionType> {
-      return Array.from(collection.values())
-    },
-    collection,
+    state: snapshot.state,
+    data: snapshot.data,
+    collection: snapshot.collection,
   }
 }

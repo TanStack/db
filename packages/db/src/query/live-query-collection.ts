@@ -79,6 +79,11 @@ export interface LiveQueryCollectionConfig<
    * Start sync / the query immediately
    */
   startSync?: boolean
+
+  /**
+   * GC time for the collection
+   */
+  gcTime?: number
 }
 
 /**
@@ -322,6 +327,7 @@ export function liveQueryCollectionOptions<
       config.getKey || ((item) => resultKeys.get(item) as string | number),
     sync,
     compare,
+    gcTime: config.gcTime || 5000, // 5 seconds by default for live queries
     schema: config.schema,
     onInsert: config.onInsert,
     onUpdate: config.onUpdate,
