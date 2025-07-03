@@ -33,10 +33,10 @@ const todoCollection = createCollection({
 
 const Todos = () => {
   // Bind data using live queries
-  const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ todoCollection })
-      .where('@completed', '=', false)
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, false))
   )
 
   const complete = (todo) => {
@@ -258,22 +258,21 @@ Live queries return collections. This allows you to derive collections from othe
 For example:
 
 ```ts
-import { compileQuery, queryBuilder } from "@tanstack/db"
+import { createLiveQueryCollection, eq } from "@tanstack/db"
 
-// Imagine you have a collections of todos.
+// Imagine you have a collection of todos.
 const todoCollection = createCollection({
   // config
 })
 
 // You can derive a new collection that's a subset of it.
-const query = queryBuilder()
-  .from({ todoCollection })
-  .where('@completed', '=', true)
-
-const compiled = compileQuery(query)
-compiled.start()
-
-const completedTodoCollection = compiledQuery.results()
+const completedTodoCollection = createLiveQueryCollection({
+  startSync: true,
+  query: (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, true))
+})
 ```
 
 This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
@@ -292,14 +291,18 @@ Use the `useLiveQuery` hook to assign live query results to a state variable in 
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery(query =>
-    query
-      .from({ todoCollection })
-      .where('@completed', '=', false)
-      .orderBy({'@created_at': 'asc'})
-      .select('@id', '@text')
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, false))
+      .orderBy(({ todo }) => todo.created_at, 'asc')
+      .select(({ todo }) => ({
+        id: todo.id,
+        text: todo.text
+      }))
   )
 
   return <List items={ todos } />
@@ -310,18 +313,23 @@ You can also query across collections with joins:
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery(query =>
-    query
+  const { data: todos } = useLiveQuery((q) =>
+    q
       .from({ todos: todoCollection })
-      .join({
-        type: `inner`,
-        from: { lists: listCollection },
-        on: [`@lists.id`, `=`, `@todos.listId`],
-      })
-      .where('@lists.active', '=', true)
-      .select(`@todos.id`, `@todos.title`, `@lists.name`)
+      .join(
+        { lists: listCollection },
+        ({ todos, lists }) => eq(lists.id, todos.listId),
+        'inner'
+      )
+      .where(({ lists }) => eq(lists.active, true))
+      .select(({ todos, lists }) => ({
+        id: todos.id,
+        title: todos.title,
+        listName: lists.name
+      }))
   )
 
   return <List items={ todos } />
@@ -333,16 +341,16 @@ const Todos = () => {
 You can also build queries directly (outside of the component lifecycle) using the underlying `queryBuilder` API:
 
 ```ts
-import { compileQuery, queryBuilder } from "@tanstack/db"
+import { createLiveQueryCollection, eq } from "@tanstack/db"
 
-const query = queryBuilder()
-  .from({ todoCollection })
-  .where('@completed', '=', true)
+const completedTodos = createLiveQueryCollection({
+  startSync: true,
+  query: (q) =>
+    q.from({ todo: todoCollection })
+     .where(({ todo }) => eq(todo.completed, true))
+})
 
-const compiled = compileQuery(query)
-compiled.start()
-
-const results = compiledQuery.results()
+const results = completedTodos.toArray
 ```
 
 Note also that:
@@ -575,16 +583,21 @@ const listCollection = createCollection<TodoList>(queryCollectionOptions({
 const Todos = () => {
   // Read the data using live queries. Here we show a live
   // query that joins across two collections.
-  const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ t: todoCollection })
-      .join({
-        type: 'inner',
-        from: { l: listCollection },
-        on: [`@l.id`, `=`, `@t.list_id`]
-      })
-      .where('@l.active', '=', true)
-      .select('@t.id', '@t.text', '@t.status', '@l.name')
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .join(
+        { list: listCollection },
+        ({ todo, list }) => eq(list.id, todo.list_id),
+        'inner'
+      )
+      .where(({ list }) => eq(list.active, true))
+      .select(({ todo, list }) => ({
+        id: todo.id,
+        text: todo.text,
+        status: todo.status,
+        listName: list.name
+      }))
   )
 
   // ...
