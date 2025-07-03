@@ -95,24 +95,20 @@ export function useLiveQuery(
     }
   }
 
-  const collection = collectionRef.current!
-
-  // Infer types from the actual collection
-  type CollectionType =
-    typeof collection extends Collection<infer T, any, any> ? T : never
-  type KeyType =
-    typeof collection extends Collection<any, infer K, any>
-      ? K
-      : string | number
-
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
   const snapshotRef = useRef<{
-    state: Map<KeyType, CollectionType>
-    data: Array<CollectionType>
-    collection: typeof collection
+    state: Map<any, any>
+    data: Array<any>
+    collection: Collection<any, any, any>
     _version: number
   } | null>(null)
+
+  // Reset refs when collection changes
+  if (needsNewCollection) {
+    versionRef.current = 0
+    snapshotRef.current = null
+  }
 
   // Create stable subscribe function using ref
   const subscribeRef = useRef<
@@ -120,7 +116,7 @@ export function useLiveQuery(
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
-      const unsubscribe = collection.subscribeChanges(() => {
+      const unsubscribe = collectionRef.current!.subscribeChanges(() => {
         versionRef.current += 1
         onStoreChange()
       })
@@ -133,19 +129,16 @@ export function useLiveQuery(
   // Create stable getSnapshot function using ref
   const getSnapshotRef = useRef<
     | (() => {
-        state: Map<KeyType, CollectionType>
-        data: Array<CollectionType>
-        collection: typeof collection
+        state: Map<any, any>
+        data: Array<any>
+        collection: Collection<any, any, any>
       })
     | null
   >(null)
   if (!getSnapshotRef.current || needsNewCollection) {
-    getSnapshotRef.current = (): {
-      state: Map<KeyType, CollectionType>
-      data: Array<CollectionType>
-      collection: typeof collection
-    } => {
+    getSnapshotRef.current = () => {
       const currentVersion = versionRef.current
+      const currentCollection = collectionRef.current!
 
       // If we don't have a snapshot or the version changed, create a new one
       if (
@@ -153,13 +146,13 @@ export function useLiveQuery(
         snapshotRef.current._version !== currentVersion
       ) {
         snapshotRef.current = {
-          get state(): Map<KeyType, CollectionType> {
-            return new Map(collection.entries())
+          get state() {
+            return new Map(currentCollection.entries())
           },
-          get data(): Array<CollectionType> {
-            return Array.from(collection.values())
+          get data() {
+            return Array.from(currentCollection.values())
           },
-          collection,
+          collection: currentCollection,
           _version: currentVersion,
         }
       }
