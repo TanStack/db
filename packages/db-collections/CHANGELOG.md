@@ -1,5 +1,11 @@
 # @tanstack/db-collections
 
+## 0.0.18
+
+### Patch Changes
+
+- Add localStorage collection with cross-tab sync and configurable storage APIs. ([#203](https://github.com/TanStack/db/pull/203))
+
 ## 0.0.17
 
 ### Patch Changes

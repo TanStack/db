@@ -103,7 +103,7 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/db-collections':
-        specifier: ^0.0.17
+        specifier: ^0.0.18
         version: link:../../../packages/db-collections
       '@tanstack/query-core':
         specifier: ^5.75.7
