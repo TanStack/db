@@ -55,7 +55,11 @@ describe(`Electric collection type resolution tests`, () => {
   })
 
   it(`should use fallback type when neither explicit nor schema type is provided`, () => {
-    const config: ElectricCollectionConfig<unknown, never, FallbackType> = {
+    const config: ElectricCollectionConfig<
+      Row<unknown>,
+      never,
+      FallbackType
+    > = {
       shapeOptions: {
         url: `foo`,
         params: { table: `test_table` },
@@ -63,9 +67,11 @@ describe(`Electric collection type resolution tests`, () => {
       getKey: (item) => item.id,
     }
 
-    const options = electricCollectionOptions<unknown, never, FallbackType>(
-      config
-    )
+    const options = electricCollectionOptions<
+      Row<unknown>,
+      never,
+      FallbackType
+    >(config)
 
     type ExpectedType = ResolveType<unknown, never, FallbackType>
     // The getKey function should have the resolved type
