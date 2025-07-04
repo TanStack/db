@@ -15,3 +15,8 @@ export {
   type StorageApi,
   type StorageEventApi,
 } from "./local-storage"
+export {
+  trailBaseCollectionOptions,
+  type TrailBaseCollectionConfig,
+  type TrailBaseCollectionUtils,
+} from "./trailbase"
