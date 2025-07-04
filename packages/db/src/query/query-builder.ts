@@ -26,7 +26,7 @@ import type {
   Schema,
 } from "./types.js"
 
-type CollectionRef = { [K: string]: Collection<any> }
+type CollectionRef = Record<string, Collection<any, any, any, any, any, any>>
 
 export class BaseQueryBuilder<TContext extends Context<Schema>> {
   private readonly query: Partial<Query<TContext>> = {}
@@ -38,13 +38,20 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     this.query = query
   }
 
-  from<TCollectionRef extends CollectionRef>(
+  from<TCollectionRef extends Record<string, any>>(
     collectionRef: TCollectionRef
   ): QueryBuilder<{
     baseSchema: Flatten<
       TContext[`baseSchema`] & {
         [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-          (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+          (TCollectionRef[keyof TCollectionRef] extends Collection<
+            infer T,
+            any,
+            any,
+            any,
+            any,
+            any
+          >
             ? T
             : never) &
             Input
@@ -53,7 +60,14 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     >
     schema: Flatten<{
       [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-        (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+        (TCollectionRef[keyof TCollectionRef] extends Collection<
+          infer T,
+          any,
+          any,
+          any,
+          any,
+          any
+        >
           ? T
           : never) &
           Input
@@ -127,7 +141,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     }
   }
 
-  private fromCollectionRef<TCollectionRef extends CollectionRef>(
+  private fromCollectionRef<TCollectionRef extends Record<string, any>>(
     collectionRef: TCollectionRef
   ) {
     const keys = Object.keys(collectionRef)
@@ -148,7 +162,12 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       baseSchema: TContext[`baseSchema`] & {
         [K in keyof TCollectionRef &
           string]: (TCollectionRef[keyof TCollectionRef] extends Collection<
-          infer T
+          infer T,
+          any,
+          any,
+          any,
+          any,
+          any
         >
           ? T
           : never) &
@@ -157,7 +176,12 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       schema: {
         [K in keyof TCollectionRef &
           string]: (TCollectionRef[keyof TCollectionRef] extends Collection<
-          infer T
+          infer T,
+          any,
+          any,
+          any,
+          any,
+          any
         >
           ? T
           : never) &
@@ -416,7 +440,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
   /**
    * Add a join clause to the query using a CollectionRef.
    */
-  join<TCollectionRef extends CollectionRef>(joinClause: {
+  join<TCollectionRef extends Record<string, any>>(joinClause: {
     type: `inner` | `left` | `right` | `full` | `cross`
     from: TCollectionRef
     on: Condition<
@@ -424,7 +448,14 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
         baseSchema: TContext[`baseSchema`]
         schema: TContext[`schema`] & {
           [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-            (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+            (TCollectionRef[keyof TCollectionRef] extends Collection<
+              infer T,
+              any,
+              any,
+              any,
+              any,
+              any
+            >
               ? T
               : never) &
               Input
@@ -437,7 +468,14 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
         baseSchema: TContext[`baseSchema`]
         schema: {
           [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-            (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+            (TCollectionRef[keyof TCollectionRef] extends Collection<
+              infer T,
+              any,
+              any,
+              any,
+              any,
+              any
+            >
               ? T
               : never) &
               Input
@@ -450,7 +488,14 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       Omit<TContext, `schema`> & {
         schema: TContext[`schema`] & {
           [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-            (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+            (TCollectionRef[keyof TCollectionRef] extends Collection<
+              infer T,
+              any,
+              any,
+              any,
+              any,
+              any
+            >
               ? T
               : never) &
               Input
@@ -544,7 +589,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
           baseSchema: TContext[`baseSchema`]
           schema: TContext[`baseSchema`]
         }>
-      | CollectionRef,
+      | Record<string, any>,
     TAs extends string | undefined = undefined,
   >(joinClause: {
     type: `inner` | `left` | `right` | `full` | `cross`
@@ -554,10 +599,19 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       Flatten<{
         baseSchema: TContext[`baseSchema`]
         schema: TContext[`schema`] &
-          (TFrom extends CollectionRef
+          (TFrom extends Record<string, any>
             ? {
                 [K in keyof TFrom & string]: RemoveIndexSignature<
-                  (TFrom[keyof TFrom] extends Collection<infer T> ? T : never) &
+                  (TFrom[keyof TFrom] extends Collection<
+                    infer T,
+                    any,
+                    any,
+                    any,
+                    any,
+                    any
+                  >
+                    ? T
+                    : never) &
                     Input
                 >
               }
@@ -574,10 +628,19 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       Flatten<{
         baseSchema: TContext[`baseSchema`]
         schema: TContext[`schema`] &
-          (TFrom extends CollectionRef
+          (TFrom extends Record<string, any>
             ? {
                 [K in keyof TFrom & string]: RemoveIndexSignature<
-                  (TFrom[keyof TFrom] extends Collection<infer T> ? T : never) &
+                  (TFrom[keyof TFrom] extends Collection<
+                    infer T,
+                    any,
+                    any,
+                    any,
+                    any,
+                    any
+                  >
+                    ? T
+                    : never) &
                     Input
                 >
               }
@@ -596,7 +659,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
       return this.joinCollectionRef(
         joinClause as {
           type: `inner` | `left` | `right` | `full` | `cross`
-          from: CollectionRef
+          from: Record<string, any>
           on: Condition<any>
           where?: Condition<any>
         }
@@ -617,7 +680,9 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     }
   }
 
-  private joinCollectionRef<TCollectionRef extends CollectionRef>(joinClause: {
+  private joinCollectionRef<
+    TCollectionRef extends Record<string, any>,
+  >(joinClause: {
     type: `inner` | `left` | `right` | `full` | `cross`
     from: TCollectionRef
     on: Condition<any>
@@ -630,7 +695,7 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
     // Get the collection key
     const keys = Object.keys(joinClause.from)
     if (keys.length !== 1) {
-      throw new Error(`Expected exactly one key in CollectionRef`)
+      throw new Error(`Expected exactly one key`)
     }
     const key = keys[0]!
     const collection = joinClause.from[key]
@@ -663,7 +728,14 @@ export class BaseQueryBuilder<TContext extends Context<Schema>> {
         Omit<TContext, `schema`> & {
           schema: TContext[`schema`] & {
             [K in keyof TCollectionRef & string]: RemoveIndexSignature<
-              (TCollectionRef[keyof TCollectionRef] extends Collection<infer T>
+              (TCollectionRef[keyof TCollectionRef] extends Collection<
+                infer T,
+                any,
+                any,
+                any,
+                any,
+                any
+              >
                 ? T
                 : never) &
                 Input

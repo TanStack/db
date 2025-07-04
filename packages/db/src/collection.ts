@@ -6,6 +6,7 @@ import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
+  CollectionInsertInput,
   CollectionStatus,
   Fn,
   InsertConfig,
@@ -20,7 +21,10 @@ import type {
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Store collections in memory
-export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
+export const collectionsStore = new Map<
+  string,
+  CollectionImpl<any, any, any, any, any>
+>()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -32,12 +36,16 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
+ * @template TSchema - The schema type for validation and type inference
  */
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-> extends CollectionImpl<T, TKey> {
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TExplicit = unknown,
+  TFallback extends object = Record<string, unknown>,
+> extends CollectionImpl<T, TKey, TSchema, TExplicit, TFallback> {
   readonly utils: TUtils
 }
 
@@ -86,10 +94,20 @@ export function createCollection<
     TKey,
     TSchema
   > & { utils?: TUtils }
-): Collection<ResolveType<TExplicit, TSchema, TFallback>, TKey, TUtils> {
+): Collection<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  TExplicit,
+  TFallback
+> {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
-    TKey
+    TKey,
+    TSchema,
+    TExplicit,
+    TFallback
   >(options)
 
   // Copy utils to both top level and .utils namespace
@@ -102,7 +120,10 @@ export function createCollection<
   return collection as Collection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    TUtils
+    TUtils,
+    TSchema,
+    TExplicit,
+    TFallback
   >
 }
 
@@ -138,8 +159,11 @@ export class SchemaValidationError extends Error {
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TExplicit = unknown,
+  TFallback extends object = Record<string, unknown>,
 > {
-  public config: CollectionConfig<T, TKey, any>
+  public config: CollectionConfig<T, TKey, TSchema>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -261,7 +285,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, any>) {
+  constructor(config: CollectionConfig<T, TKey, TSchema>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)
@@ -1187,9 +1211,11 @@ export class CollectionImpl<
    * // Insert with custom key
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
-  insert = (data: T | Array<T>, config?: InsertConfig) => {
+  insert = (
+    data: CollectionInsertInput<TExplicit, TSchema, TFallback>,
+    config?: InsertConfig
+  ) => {
     this.validateCollectionUsable(`insert`)
-
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
@@ -1200,7 +1226,13 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T, `insert`>> = []
+    const mutations: Array<
+      PendingMutation<
+        T,
+        `insert`,
+        CollectionInsertInput<TExplicit, TSchema, TFallback>
+      >
+    > = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -1208,17 +1240,29 @@ export class CollectionImpl<
       const validatedData = this.validateData(item, `insert`)
 
       // Check if an item with this ID already exists in the collection
-      const key = this.getKeyFromItem(item)
+      const key = this.getKeyFromItem(validatedData)
       if (this.has(key)) {
         throw `Cannot insert document with ID "${key}" because it already exists in the collection`
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T, `insert`> = {
+      const mutation: PendingMutation<
+        T,
+        `insert`,
+        CollectionInsertInput<TExplicit, TSchema, TFallback>
+      > = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
-        changes: validatedData,
+        // Pick the values from validatedData based on what's passed in - this is for cases
+        // where a schema has default values. The validated data has the extra default
+        // values but for changes, we just want to show the data that was actually passed in.
+        changes: Object.fromEntries(
+          Object.keys(item).map((k) => [
+            k,
+            validatedData[k as keyof typeof validatedData],
+          ])
+        ) as CollectionInsertInput<TExplicit, TSchema, TFallback>,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
