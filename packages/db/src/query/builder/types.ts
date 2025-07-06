@@ -1,12 +1,12 @@
 import type { CollectionImpl } from "../../collection.js"
-import type { Agg, Expression } from "../ir.js"
+import type { Aggregate, BasicExpression } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
 
 export interface Context {
   // The collections available in the base schema
-  baseSchema: Record<string, any>
+  baseSchema: ContextSchema
   // The current schema available (includes joined collections)
-  schema: Record<string, any>
+  schema: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
   // Whether this query has joins
@@ -19,6 +19,8 @@ export interface Context {
   // The result type after select (if select has been called)
   result?: any
 }
+
+export type ContextSchema = Record<string, unknown>
 
 export type Source = {
   [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
@@ -49,8 +51,8 @@ export type WhereCallback<TContext extends Context> = (
 export type SelectObject<
   T extends Record<
     string,
-    Expression | Agg | RefProxy | RefProxyFor<any>
-  > = Record<string, Expression | Agg | RefProxy | RefProxyFor<any>>,
+    BasicExpression | Aggregate | RefProxy | RefProxyFor<any>
+  > = Record<string, BasicExpression | Aggregate | RefProxy | RefProxyFor<any>>,
 > = T
 
 // Helper type to get the result type from a select object
@@ -58,9 +60,9 @@ export type ResultTypeFromSelect<TSelectObject> = {
   [K in keyof TSelectObject]: TSelectObject[K] extends RefProxy<infer T>
     ? // For RefProxy, preserve the type as-is (including optionality from joins)
       T
-    : TSelectObject[K] extends Expression<infer T>
+    : TSelectObject[K] extends BasicExpression<infer T>
       ? T
-      : TSelectObject[K] extends Agg<infer T>
+      : TSelectObject[K] extends Aggregate<infer T>
         ? T
         : TSelectObject[K] extends RefProxyFor<infer T>
           ? // For RefProxyFor, preserve the type as-is (including optionality from joins)
@@ -98,6 +100,17 @@ type IsOptional<T> = undefined extends T ? true : false
 type NonUndefined<T> = T extends undefined ? never : T
 
 // Helper type to create RefProxy for a specific type with optionality passthrough
+// This is used to create the RefProxy object that is used in the query builder.
+// Much of the complexity here is due to the fact that we need to handle optionality
+// from joins. A left join will make the joined table optional, a right join will make
+// the main table optional etc. This is applied to the schema, with the new namespaced
+// source being `SourceType | undefined`.
+// We then follow this through the ref proxy system so that accessing a property on
+// and optional source will itsself be optional.
+// If for example we join in `joinedTable` with a left join, then
+// `where(({ joinedTable }) => joinedTable.name === `John`)`
+// we want the the type of `name` to be `RefProxy<string | undefined>` to indicate that
+// the `name` property is optional, as the joinedTable is also optional.
 export type RefProxyFor<T> = OmitRefProxy<
   IsExactlyUndefined<T> extends true
     ? // T is exactly undefined
@@ -141,7 +154,7 @@ export interface RefProxy<T = any> {
 // Helper type to apply join optionality immediately when merging contexts
 export type MergeContextWithJoinType<
   TContext extends Context,
-  TNewSchema extends Record<string, any>,
+  TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
 > = {
   baseSchema: TContext[`baseSchema`]
@@ -165,8 +178,8 @@ export type MergeContextWithJoinType<
 
 // Helper type to apply join optionality when merging new schema
 export type ApplyJoinOptionalityToMergedSchema<
-  TExistingSchema extends Record<string, any>,
-  TNewSchema extends Record<string, any>,
+  TExistingSchema extends ContextSchema,
+  TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
   TFromSourceName extends string,
 > = {
@@ -200,7 +213,7 @@ export type GetResult<TContext extends Context> = Prettify<
 
 // Helper type to apply join optionality to the schema based on joinTypes
 export type ApplyJoinOptionalityToSchema<
-  TSchema extends Record<string, any>,
+  TSchema extends ContextSchema,
   TJoinTypes extends Record<string, string>,
   TFromSourceName extends string,
 > = {
@@ -249,7 +262,7 @@ export type HasJoinType<
 // Helper type to merge contexts (for joins) - backward compatibility
 export type MergeContext<
   TContext extends Context,
-  TNewSchema extends Record<string, any>,
+  TNewSchema extends ContextSchema,
 > = MergeContextWithJoinType<TContext, TNewSchema, `left`>
 
 // Helper type for updating context with result type

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { processArgument } from "../../../src/query/compiler/select.js"
-import { Agg, Func, Ref, Value } from "../../../src/query/ir.js"
+import { Aggregate, Func, Ref, Value } from "../../../src/query/ir.js"
 
 describe(`select compiler`, () => {
   // Note: Most of the select compilation logic is tested through the full integration
@@ -33,7 +33,7 @@ describe(`select compiler`, () => {
     })
 
     it(`throws error for aggregate expressions`, () => {
-      const arg = new Agg(`count`, [new Ref([`users`, `id`])])
+      const arg = new Aggregate(`count`, [new Ref([`users`, `id`])])
       const namespacedRow = { users: { id: 1 } }
 
       expect(() => {
@@ -166,11 +166,11 @@ describe(`select compiler`, () => {
       // through the processArgument function's error handling.
 
       const aggregateExpressions = [
-        new Agg(`count`, [new Ref([`users`, `id`])]),
-        new Agg(`sum`, [new Ref([`orders`, `amount`])]),
-        new Agg(`avg`, [new Ref([`products`, `price`])]),
-        new Agg(`min`, [new Ref([`dates`, `created`])]),
-        new Agg(`max`, [new Ref([`dates`, `updated`])]),
+        new Aggregate(`count`, [new Ref([`users`, `id`])]),
+        new Aggregate(`sum`, [new Ref([`orders`, `amount`])]),
+        new Aggregate(`avg`, [new Ref([`products`, `price`])]),
+        new Aggregate(`min`, [new Ref([`dates`, `created`])]),
+        new Aggregate(`max`, [new Ref([`dates`, `updated`])]),
       ]
 
       const namespacedRow = {

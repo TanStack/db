@@ -27,7 +27,7 @@ import {
 } from "../../../src/query/builder/functions.js"
 import type { RefProxyFor } from "../../../src/query/builder/types.js"
 import type { RefProxy } from "../../../src/query/builder/ref-proxy.js"
-import type { Agg, Expression } from "../../../src/query/ir.js"
+import type { Aggregate, BasicExpression } from "../../../src/query/ir.js"
 
 // Sample data types for comprehensive callback type testing
 type User = {
@@ -159,17 +159,23 @@ describe(`Query Builder Callback Types`, () => {
       buildQuery((q) =>
         q.from({ user: usersCollection }).select(({ user }) => {
           // Test that expression functions return correct types
-          expectTypeOf(upper(user.name)).toEqualTypeOf<Expression<string>>()
-          expectTypeOf(lower(user.email)).toEqualTypeOf<Expression<string>>()
-          expectTypeOf(length(user.name)).toEqualTypeOf<Expression<number>>()
+          expectTypeOf(upper(user.name)).toEqualTypeOf<
+            BasicExpression<string>
+          >()
+          expectTypeOf(lower(user.email)).toEqualTypeOf<
+            BasicExpression<string>
+          >()
+          expectTypeOf(length(user.name)).toEqualTypeOf<
+            BasicExpression<number>
+          >()
           expectTypeOf(concat(user.name, user.email)).toEqualTypeOf<
-            Expression<string>
+            BasicExpression<string>
           >()
           expectTypeOf(add(user.age, user.salary)).toEqualTypeOf<
-            Expression<number>
+            BasicExpression<number>
           >()
           expectTypeOf(coalesce(user.name, `Unknown`)).toEqualTypeOf<
-            Expression<any>
+            BasicExpression<any>
           >()
 
           return {
@@ -191,11 +197,11 @@ describe(`Query Builder Callback Types`, () => {
           .groupBy(({ user }) => user.department_id)
           .select(({ user }) => {
             // Test that aggregate functions return correct types
-            expectTypeOf(count(user.id)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(avg(user.age)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(sum(user.salary)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(min(user.age)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(max(user.salary)).toEqualTypeOf<Agg<number>>()
+            expectTypeOf(count(user.id)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(avg(user.age)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(sum(user.salary)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(min(user.age)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(max(user.salary)).toEqualTypeOf<Aggregate<number>>()
 
             return {
               department_id: user.department_id,
@@ -232,26 +238,30 @@ describe(`Query Builder Callback Types`, () => {
         q.from({ user: usersCollection }).where(({ user }) => {
           // Test comparison operators return Expression<boolean>
           expectTypeOf(eq(user.active, true)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
-          expectTypeOf(gt(user.age, 25)).toEqualTypeOf<Expression<boolean>>()
+          expectTypeOf(gt(user.age, 25)).toEqualTypeOf<
+            BasicExpression<boolean>
+          >()
           expectTypeOf(gte(user.salary, 50000)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
-          expectTypeOf(lt(user.age, 65)).toEqualTypeOf<Expression<boolean>>()
+          expectTypeOf(lt(user.age, 65)).toEqualTypeOf<
+            BasicExpression<boolean>
+          >()
           expectTypeOf(lte(user.salary, 100000)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
 
           // Test string comparisons
           expectTypeOf(eq(user.name, `John`)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
           expectTypeOf(like(user.email, `%@company.com`)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
           expectTypeOf(ilike(user.name, `john%`)).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
 
           return and(
@@ -269,12 +279,12 @@ describe(`Query Builder Callback Types`, () => {
           // Test logical operators
           expectTypeOf(
             and(eq(user.active, true), gt(user.age, 25))
-          ).toEqualTypeOf<Expression<boolean>>()
+          ).toEqualTypeOf<BasicExpression<boolean>>()
           expectTypeOf(
             or(eq(user.active, false), lt(user.age, 18))
-          ).toEqualTypeOf<Expression<boolean>>()
+          ).toEqualTypeOf<BasicExpression<boolean>>()
           expectTypeOf(not(eq(user.active, false))).toEqualTypeOf<
-            Expression<boolean>
+            BasicExpression<boolean>
           >()
 
           return and(
@@ -341,7 +351,7 @@ describe(`Query Builder Callback Types`, () => {
             // Test complex join conditions with multiple operators
             expectTypeOf(
               and(eq(user.department_id, dept.id), eq(dept.active, true))
-            ).toEqualTypeOf<Expression<boolean>>()
+            ).toEqualTypeOf<BasicExpression<boolean>>()
 
             return and(eq(user.department_id, dept.id), eq(dept.active, true))
           })
@@ -393,11 +403,17 @@ describe(`Query Builder Callback Types`, () => {
       buildQuery((q) =>
         q.from({ user: usersCollection }).orderBy(({ user }) => {
           // Test expression functions in order by
-          expectTypeOf(upper(user.name)).toEqualTypeOf<Expression<string>>()
-          expectTypeOf(lower(user.email)).toEqualTypeOf<Expression<string>>()
-          expectTypeOf(length(user.name)).toEqualTypeOf<Expression<number>>()
+          expectTypeOf(upper(user.name)).toEqualTypeOf<
+            BasicExpression<string>
+          >()
+          expectTypeOf(lower(user.email)).toEqualTypeOf<
+            BasicExpression<string>
+          >()
+          expectTypeOf(length(user.name)).toEqualTypeOf<
+            BasicExpression<number>
+          >()
           expectTypeOf(add(user.age, user.salary)).toEqualTypeOf<
-            Expression<number>
+            BasicExpression<number>
           >()
 
           return upper(user.name)
@@ -497,11 +513,11 @@ describe(`Query Builder Callback Types`, () => {
           .groupBy(({ user }) => user.department_id)
           .having(({ user }) => {
             // Test aggregate functions in having
-            expectTypeOf(count(user.id)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(avg(user.age)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(sum(user.salary)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(max(user.age)).toEqualTypeOf<Agg<number>>()
-            expectTypeOf(min(user.salary)).toEqualTypeOf<Agg<number>>()
+            expectTypeOf(count(user.id)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(avg(user.age)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(sum(user.salary)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(max(user.age)).toEqualTypeOf<Aggregate<number>>()
+            expectTypeOf(min(user.salary)).toEqualTypeOf<Aggregate<number>>()
 
             return and(
               gt(count(user.id), 5),
@@ -520,19 +536,19 @@ describe(`Query Builder Callback Types`, () => {
           .having(({ user }) => {
             // Test comparison operators with aggregates
             expectTypeOf(gt(count(user.id), 10)).toEqualTypeOf<
-              Expression<boolean>
+              BasicExpression<boolean>
             >()
             expectTypeOf(gte(avg(user.salary), 75000)).toEqualTypeOf<
-              Expression<boolean>
+              BasicExpression<boolean>
             >()
             expectTypeOf(lt(max(user.age), 60)).toEqualTypeOf<
-              Expression<boolean>
+              BasicExpression<boolean>
             >()
             expectTypeOf(lte(min(user.age), 25)).toEqualTypeOf<
-              Expression<boolean>
+              BasicExpression<boolean>
             >()
             expectTypeOf(eq(sum(user.salary), 500000)).toEqualTypeOf<
-              Expression<boolean>
+              BasicExpression<boolean>
             >()
 
             return gt(count(user.id), 10)

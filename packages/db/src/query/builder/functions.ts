@@ -1,75 +1,75 @@
-import { Agg, Func } from "../ir"
+import { Aggregate, Func } from "../ir"
 import { toExpression } from "./ref-proxy.js"
-import type { Expression } from "../ir"
+import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
 
 // Helper type for any expression-like value
-type ExpressionLike = Expression | RefProxy<any> | any
+type ExpressionLike = BasicExpression | RefProxy<any> | any
 
 // Operators
 
 export function eq<T>(
   left: RefProxy<T>,
-  right: T | RefProxy<T> | Expression<T>
-): Expression<boolean>
+  right: T | RefProxy<T> | BasicExpression<T>
+): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
-  left: T | Expression<T>,
-  right: T | Expression<T>
-): Expression<boolean>
-export function eq<T>(left: Agg<T>, right: any): Expression<boolean>
-export function eq(left: any, right: any): Expression<boolean> {
+  left: T | BasicExpression<T>,
+  right: T | BasicExpression<T>
+): BasicExpression<boolean>
+export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function eq(left: any, right: any): BasicExpression<boolean> {
   return new Func(`eq`, [toExpression(left), toExpression(right)])
 }
 
 export function gt<T>(
   left: RefProxy<T>,
-  right: T | RefProxy<T> | Expression<T>
-): Expression<boolean>
+  right: T | RefProxy<T> | BasicExpression<T>
+): BasicExpression<boolean>
 export function gt<T extends string | number>(
-  left: T | Expression<T>,
-  right: T | Expression<T>
-): Expression<boolean>
-export function gt<T>(left: Agg<T>, right: any): Expression<boolean>
-export function gt(left: any, right: any): Expression<boolean> {
+  left: T | BasicExpression<T>,
+  right: T | BasicExpression<T>
+): BasicExpression<boolean>
+export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function gt(left: any, right: any): BasicExpression<boolean> {
   return new Func(`gt`, [toExpression(left), toExpression(right)])
 }
 
 export function gte<T>(
   left: RefProxy<T>,
-  right: T | RefProxy<T> | Expression<T>
-): Expression<boolean>
+  right: T | RefProxy<T> | BasicExpression<T>
+): BasicExpression<boolean>
 export function gte<T extends string | number>(
-  left: T | Expression<T>,
-  right: T | Expression<T>
-): Expression<boolean>
-export function gte<T>(left: Agg<T>, right: any): Expression<boolean>
-export function gte(left: any, right: any): Expression<boolean> {
+  left: T | BasicExpression<T>,
+  right: T | BasicExpression<T>
+): BasicExpression<boolean>
+export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function gte(left: any, right: any): BasicExpression<boolean> {
   return new Func(`gte`, [toExpression(left), toExpression(right)])
 }
 
 export function lt<T>(
   left: RefProxy<T>,
-  right: T | RefProxy<T> | Expression<T>
-): Expression<boolean>
+  right: T | RefProxy<T> | BasicExpression<T>
+): BasicExpression<boolean>
 export function lt<T extends string | number>(
-  left: T | Expression<T>,
-  right: T | Expression<T>
-): Expression<boolean>
-export function lt<T>(left: Agg<T>, right: any): Expression<boolean>
-export function lt(left: any, right: any): Expression<boolean> {
+  left: T | BasicExpression<T>,
+  right: T | BasicExpression<T>
+): BasicExpression<boolean>
+export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function lt(left: any, right: any): BasicExpression<boolean> {
   return new Func(`lt`, [toExpression(left), toExpression(right)])
 }
 
 export function lte<T>(
   left: RefProxy<T>,
-  right: T | RefProxy<T> | Expression<T>
-): Expression<boolean>
+  right: T | RefProxy<T> | BasicExpression<T>
+): BasicExpression<boolean>
 export function lte<T extends string | number>(
-  left: T | Expression<T>,
-  right: T | Expression<T>
-): Expression<boolean>
-export function lte<T>(left: Agg<T>, right: any): Expression<boolean>
-export function lte(left: any, right: any): Expression<boolean> {
+  left: T | BasicExpression<T>,
+  right: T | BasicExpression<T>
+): BasicExpression<boolean>
+export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function lte(left: any, right: any): BasicExpression<boolean> {
   return new Func(`lte`, [toExpression(left), toExpression(right)])
 }
 
@@ -77,17 +77,17 @@ export function lte(left: any, right: any): Expression<boolean> {
 export function and(
   left: ExpressionLike,
   right: ExpressionLike
-): Expression<boolean>
+): BasicExpression<boolean>
 export function and(
   left: ExpressionLike,
   right: ExpressionLike,
   ...rest: Array<ExpressionLike>
-): Expression<boolean>
+): BasicExpression<boolean>
 export function and(
   left: ExpressionLike,
   right: ExpressionLike,
   ...rest: Array<ExpressionLike>
-): Expression<boolean> {
+): BasicExpression<boolean> {
   const allArgs = [left, right, ...rest]
   return new Func(
     `and`,
@@ -99,17 +99,17 @@ export function and(
 export function or(
   left: ExpressionLike,
   right: ExpressionLike
-): Expression<boolean>
+): BasicExpression<boolean>
 export function or(
   left: ExpressionLike,
   right: ExpressionLike,
   ...rest: Array<ExpressionLike>
-): Expression<boolean>
+): BasicExpression<boolean>
 export function or(
   left: ExpressionLike,
   right: ExpressionLike,
   ...rest: Array<ExpressionLike>
-): Expression<boolean> {
+): BasicExpression<boolean> {
   const allArgs = [left, right, ...rest]
   return new Func(
     `or`,
@@ -117,14 +117,14 @@ export function or(
   )
 }
 
-export function not(value: ExpressionLike): Expression<boolean> {
+export function not(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`not`, [toExpression(value)])
 }
 
 export function inArray(
   value: ExpressionLike,
   array: ExpressionLike
-): Expression<boolean> {
+): BasicExpression<boolean> {
   return new Func(`in`, [toExpression(value), toExpression(array)])
 }
 
@@ -134,10 +134,10 @@ export function like(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | Expression<string>,
-  right: string | RefProxy<string> | Expression<string>
-): Expression<boolean>
-export function like(left: any, right: any): Expression<boolean> {
+    | BasicExpression<string>,
+  right: string | RefProxy<string> | BasicExpression<string>
+): BasicExpression<boolean>
+export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
 }
 
@@ -147,9 +147,9 @@ export function ilike(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | Expression<string>,
-  right: string | RefProxy<string> | Expression<string>
-): Expression<boolean> {
+    | BasicExpression<string>,
+  right: string | RefProxy<string> | BasicExpression<string>
+): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }
 
@@ -160,8 +160,8 @@ export function upper(
     | RefProxy<string>
     | RefProxy<string | undefined>
     | string
-    | Expression<string>
-): Expression<string> {
+    | BasicExpression<string>
+): BasicExpression<string> {
   return new Func(`upper`, [toExpression(arg)])
 }
 
@@ -170,8 +170,8 @@ export function lower(
     | RefProxy<string>
     | RefProxy<string | undefined>
     | string
-    | Expression<string>
-): Expression<string> {
+    | BasicExpression<string>
+): BasicExpression<string> {
   return new Func(`lower`, [toExpression(arg)])
 }
 
@@ -183,20 +183,22 @@ export function length(
     | RefProxy<Array<any> | undefined>
     | string
     | Array<any>
-    | Expression<string>
-    | Expression<Array<any>>
-): Expression<number> {
+    | BasicExpression<string>
+    | BasicExpression<Array<any>>
+): BasicExpression<number> {
   return new Func(`length`, [toExpression(arg)])
 }
 
-export function concat(...args: Array<ExpressionLike>): Expression<string> {
+export function concat(
+  ...args: Array<ExpressionLike>
+): BasicExpression<string> {
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg))
   )
 }
 
-export function coalesce(...args: Array<ExpressionLike>): Expression<any> {
+export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg))
@@ -208,20 +210,20 @@ export function add(
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>,
+    | BasicExpression<number>,
   right:
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>
-): Expression<number> {
+    | BasicExpression<number>
+): BasicExpression<number> {
   return new Func(`add`, [toExpression(left), toExpression(right)])
 }
 
 // Aggregates
 
-export function count(arg: ExpressionLike): Agg<number> {
-  return new Agg(`count`, [toExpression(arg)])
+export function count(arg: ExpressionLike): Aggregate<number> {
+  return new Aggregate(`count`, [toExpression(arg)])
 }
 
 export function avg(
@@ -229,9 +231,9 @@ export function avg(
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>
-): Agg<number> {
-  return new Agg(`avg`, [toExpression(arg)])
+    | BasicExpression<number>
+): Aggregate<number> {
+  return new Aggregate(`avg`, [toExpression(arg)])
 }
 
 export function sum(
@@ -239,9 +241,9 @@ export function sum(
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>
-): Agg<number> {
-  return new Agg(`sum`, [toExpression(arg)])
+    | BasicExpression<number>
+): Aggregate<number> {
+  return new Aggregate(`sum`, [toExpression(arg)])
 }
 
 export function min(
@@ -249,9 +251,9 @@ export function min(
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>
-): Agg<number> {
-  return new Agg(`min`, [toExpression(arg)])
+    | BasicExpression<number>
+): Aggregate<number> {
+  return new Aggregate(`min`, [toExpression(arg)])
 }
 
 export function max(
@@ -259,7 +261,7 @@ export function max(
     | RefProxy<number>
     | RefProxy<number | undefined>
     | number
-    | Expression<number>
-): Agg<number> {
-  return new Agg(`max`, [toExpression(arg)])
+    | BasicExpression<number>
+): Aggregate<number> {
+  return new Aggregate(`max`, [toExpression(arg)])
 }

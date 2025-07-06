@@ -36,7 +36,7 @@ const Todos = () => {
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.completed, false))
+      .where(({ todo }) => todo.completed)
   )
 
   const complete = (todo) => {
@@ -357,7 +357,7 @@ const completedTodoCollection = createLiveQueryCollection({
   query: (q) =>
     q
       .from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.completed, true))
+      .where(({ todo }) => todo.completed)
 })
 ```
 

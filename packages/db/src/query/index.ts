@@ -46,8 +46,8 @@ export { val, toExpression, isRefProxy } from "./builder/ref-proxy.js"
 // IR types (for advanced usage)
 export type {
   Query,
-  Expression,
-  Agg,
+  BasicExpression as Expression,
+  Aggregate,
   CollectionRef,
   QueryRef,
   JoinClause,

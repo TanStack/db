@@ -1,4 +1,4 @@
-import type { Expression, Func, Ref } from "../ir.js"
+import type { BasicExpression, Func, Ref } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
 /**
@@ -10,7 +10,7 @@ export type CompiledExpression = (namespacedRow: NamespacedRow) => any
  * Compiles an expression into an optimized evaluator function.
  * This eliminates branching during evaluation by pre-compiling the expression structure.
  */
-export function compileExpression(expr: Expression): CompiledExpression {
+export function compileExpression(expr: BasicExpression): CompiledExpression {
   switch (expr.type) {
     case `val`: {
       // For constant values, return a function that just returns the value

@@ -25,7 +25,7 @@ export interface Query {
 export type From = CollectionRef | QueryRef
 
 export type Select = {
-  [alias: string]: Expression | Agg
+  [alias: string]: BasicExpression | Aggregate
 }
 
 export type Join = Array<JoinClause>
@@ -33,20 +33,20 @@ export type Join = Array<JoinClause>
 export interface JoinClause {
   from: CollectionRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
-  left: Expression
-  right: Expression
+  left: BasicExpression
+  right: BasicExpression
 }
 
-export type Where = Expression<boolean>
+export type Where = BasicExpression<boolean>
 
-export type GroupBy = Array<Expression>
+export type GroupBy = Array<BasicExpression>
 
 export type Having = Where
 
 export type OrderBy = Array<OrderByClause>
 
 export type OrderByClause = {
-  expression: Expression
+  expression: BasicExpression
   direction: OrderByDirection
 }
 
@@ -106,19 +106,22 @@ export class Func<T = any> extends BaseExpression<T> {
   public type = `func` as const
   constructor(
     public name: string, // such as eq, gt, lt, upper, lower, etc.
-    public args: Array<Expression>
+    public args: Array<BasicExpression>
   ) {
     super()
   }
 }
 
-export type Expression<T = any> = Ref<T> | Value<T> | Func<T>
+// This is the basic expression type that is used in the majority of expression
+// builder callbacks (select, where, groupBy, having, orderBy, etc.)
+// it doesn't include aggregate functions as those are only used in the select clause
+export type BasicExpression<T = any> = Ref<T> | Value<T> | Func<T>
 
-export class Agg<T = any> extends BaseExpression<T> {
+export class Aggregate<T = any> extends BaseExpression<T> {
   public type = `agg` as const
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
-    public args: Array<Expression>
+    public args: Array<BasicExpression>
   ) {
     super()
   }

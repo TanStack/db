@@ -1,5 +1,5 @@
 import { Ref, Value } from "../ir.js"
-import type { Expression } from "../ir.js"
+import type { BasicExpression } from "../ir.js"
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -120,9 +120,9 @@ export function createRefProxy<T extends Record<string, any>>(
  * Converts a value to an Expression
  * If it's a RefProxy, creates a Ref, otherwise creates a Value
  */
-export function toExpression<T = any>(value: T): Expression<T>
-export function toExpression(value: RefProxy<any>): Expression<any>
-export function toExpression(value: any): Expression<any> {
+export function toExpression<T = any>(value: T): BasicExpression<T>
+export function toExpression(value: RefProxy<any>): BasicExpression<any>
+export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
     return new Ref(value.__path)
   }
@@ -151,6 +151,6 @@ export function isRefProxy(value: any): value is RefProxy {
 /**
  * Helper to create a Value expression from a literal
  */
-export function val<T>(value: T): Expression<T> {
+export function val<T>(value: T): BasicExpression<T> {
   return new Value(value)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Agg, Func, Ref, Value } from "../../../src/query/ir.js"
+import { Aggregate, Func, Ref, Value } from "../../../src/query/ir.js"
 
 // Import the validation function that we want to test directly
 // Since we can't easily mock the D2 streams, we'll test the validation logic separately
@@ -73,8 +73,8 @@ describe(`group-by compiler`, () => {
         const groupByClause = [new Ref([`users`, `department`])]
         const selectClause = {
           department: new Ref([`users`, `department`]),
-          count: new Agg(`count`, [new Ref([`users`, `id`])]),
-          avg_salary: new Agg(`avg`, [new Ref([`users`, `salary`])]),
+          count: new Aggregate(`count`, [new Ref([`users`, `id`])]),
+          avg_salary: new Aggregate(`avg`, [new Ref([`users`, `salary`])]),
         }
 
         // Should not throw

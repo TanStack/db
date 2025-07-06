@@ -112,34 +112,14 @@ function processJoin(
   )
 
   // Apply the join operation
-  switch (joinType) {
-    case `inner`:
-      return mainPipeline.pipe(
-        joinOperator(joinedPipeline, `inner`),
-        consolidate(),
-        processJoinResults(joinClause.type)
-      )
-    case `left`:
-      return mainPipeline.pipe(
-        joinOperator(joinedPipeline, `left`),
-        consolidate(),
-        processJoinResults(joinClause.type)
-      )
-    case `right`:
-      return mainPipeline.pipe(
-        joinOperator(joinedPipeline, `right`),
-        consolidate(),
-        processJoinResults(joinClause.type)
-      )
-    case `full`:
-      return mainPipeline.pipe(
-        joinOperator(joinedPipeline, `full`),
-        consolidate(),
-        processJoinResults(joinClause.type)
-      )
-    default:
-      throw new Error(`Unsupported join type: ${joinClause.type}`)
+  if (![`inner`, `left`, `right`, `full`].includes(joinType)) {
+    throw new Error(`Unsupported join type: ${joinClause.type}`)
   }
+  return mainPipeline.pipe(
+    joinOperator(joinedPipeline, joinType),
+    consolidate(),
+    processJoinResults(joinClause.type)
+  )
 }
 
 /**

@@ -3,8 +3,8 @@ import { CollectionRef, QueryRef } from "../ir.js"
 import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
 import type { NamespacedRow } from "../../types.js"
 import type {
-  Agg,
-  Expression,
+  Aggregate,
+  BasicExpression,
   JoinClause,
   OrderBy,
   OrderByClause,
@@ -42,6 +42,42 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 
   /**
+   * Creates a CollectionRef or QueryRef from a source object
+   * @param source - An object with a single key-value pair
+   * @param context - Context string for error messages (e.g., "from clause", "join clause")
+   * @returns A tuple of [alias, ref] where alias is the source key and ref is the created reference
+   */
+  private _createRefForSource<TSource extends Source>(
+    source: TSource,
+    context: string
+  ): [string, CollectionRef | QueryRef] {
+    if (Object.keys(source).length !== 1) {
+      throw new Error(`Only one source is allowed in the ${context}`)
+    }
+
+    const alias = Object.keys(source)[0]!
+    const sourceValue = source[alias]
+
+    let ref: CollectionRef | QueryRef
+
+    if (sourceValue instanceof CollectionImpl) {
+      ref = new CollectionRef(sourceValue, alias)
+    } else if (sourceValue instanceof BaseQueryBuilder) {
+      const subQuery = sourceValue._getQuery()
+      if (!(subQuery as Partial<Query>).from) {
+        throw new Error(
+          `A sub query passed to a ${context} must have a from clause itself`
+        )
+      }
+      ref = new QueryRef(subQuery, alias)
+    } else {
+      throw new Error(`Invalid source`)
+    }
+
+    return [alias, ref]
+  }
+
+  /**
    * Specify the source table or subquery for the query
    *
    * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
@@ -65,28 +101,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     fromSourceName: keyof TSource & string
     hasJoins: false
   }> {
-    if (Object.keys(source).length !== 1) {
-      throw new Error(`Only one source is allowed in the from clause`)
-    }
-
-    const alias = Object.keys(source)[0]! as keyof TSource & string
-    const sourceValue = source[alias]
-
-    let from: CollectionRef | QueryRef
-
-    if (sourceValue instanceof CollectionImpl) {
-      from = new CollectionRef(sourceValue, alias)
-    } else if (sourceValue instanceof BaseQueryBuilder) {
-      const subQuery = sourceValue._getQuery()
-      if (!(subQuery as Partial<Query>).from) {
-        throw new Error(
-          `A sub query passed to a from clause must have a from clause itself`
-        )
-      }
-      from = new QueryRef(subQuery, alias)
-    } else {
-      throw new Error(`Invalid source`)
-    }
+    const [, from] = this._createRefForSource(source, `from clause`)
 
     return new BaseQueryBuilder({
       ...this.query,
@@ -133,28 +148,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>
   > {
-    if (Object.keys(source).length !== 1) {
-      throw new Error(`Only one source is allowed in the join clause`)
-    }
-
-    const alias = Object.keys(source)[0]!
-    const sourceValue = source[alias]
-
-    let from: CollectionRef | QueryRef
-
-    if (sourceValue instanceof CollectionImpl) {
-      from = new CollectionRef(sourceValue, alias)
-    } else if (sourceValue instanceof BaseQueryBuilder) {
-      const subQuery = sourceValue._getQuery()
-      if (!(subQuery as Partial<Query>).from) {
-        throw new Error(
-          `A sub query passed to a join clause must have a from clause itself`
-        )
-      }
-      from = new QueryRef(subQuery, alias)
-    } else {
-      throw new Error(`Invalid source`)
-    }
+    const [alias, from] = this._createRefForSource(source, `join clause`)
 
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
@@ -168,8 +162,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Extract left and right from the expression
     // For now, we'll assume it's an eq function with two arguments
-    let left: Expression
-    let right: Expression
+    let left: BasicExpression
+    let right: BasicExpression
 
     if (
       onExpression.type === `func` &&
@@ -324,7 +318,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const spreadSentinels = (refProxy as any).__spreadSentinels as Set<string>
 
     // Convert the select object to use expressions, including spread sentinels
-    const select: Record<string, Expression | Agg> = {}
+    const select: Record<string, BasicExpression | Aggregate> = {}
 
     // First, add spread sentinels for any tables that were spread
     for (const spreadAlias of spreadSentinels) {
@@ -339,15 +333,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       } else if (
         typeof value === `object` &&
         `type` in value &&
-        value.type === `agg`
+        (value.type === `agg` || value.type === `func`)
       ) {
-        select[key] = value
-      } else if (
-        typeof value === `object` &&
-        `type` in value &&
-        value.type === `func`
-      ) {
-        select[key] = value as Expression
+        select[key] = value as BasicExpression | Aggregate
       } else {
         select[key] = toExpression(value)
       }

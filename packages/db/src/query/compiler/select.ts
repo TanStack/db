@@ -1,6 +1,6 @@
 import { map } from "@electric-sql/d2mini"
 import { compileExpression } from "./evaluators.js"
-import type { Agg, Expression, Select } from "../ir.js"
+import type { Aggregate, BasicExpression, Select } from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -39,7 +39,7 @@ export function processSelectToResults(
       } else {
         compiledSelect.push({
           alias,
-          compiledExpression: compileExpression(expression as Expression),
+          compiledExpression: compileExpression(expression as BasicExpression),
         })
       }
     }
@@ -111,7 +111,7 @@ export function processSelect(
       }
       compiledSelect.push({
         alias,
-        compiledExpression: compileExpression(expression as Expression),
+        compiledExpression: compileExpression(expression as BasicExpression),
       })
     }
   }
@@ -146,7 +146,9 @@ export function processSelect(
 /**
  * Helper function to check if an expression is an aggregate
  */
-function isAggregateExpression(expr: Expression | Agg): expr is Agg {
+function isAggregateExpression(
+  expr: BasicExpression | Aggregate
+): expr is Aggregate {
   return expr.type === `agg`
 }
 
@@ -154,7 +156,7 @@ function isAggregateExpression(expr: Expression | Agg): expr is Agg {
  * Processes a single argument in a function context
  */
 export function processArgument(
-  arg: Expression | Agg,
+  arg: BasicExpression | Aggregate,
   namespacedRow: NamespacedRow
 ): any {
   if (isAggregateExpression(arg)) {

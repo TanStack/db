@@ -1,7 +1,13 @@
 import { filter, groupBy, groupByOperators, map } from "@electric-sql/d2mini"
 import { Func, Ref } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
-import type { Agg, Expression, GroupBy, Having, Select } from "../ir.js"
+import type {
+  Aggregate,
+  BasicExpression,
+  GroupBy,
+  Having,
+  Select,
+} from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
 const { sum, count, avg, min, max } = groupByOperators
@@ -324,7 +330,7 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
 /**
  * Helper function to get an aggregate function based on the Agg expression
  */
-function getAggregateFunction(aggExpr: Agg) {
+function getAggregateFunction(aggExpr: Aggregate) {
   // Pre-compile the value extractor expression
   const compiledExpr = compileExpression(aggExpr.args[0]!)
 
@@ -356,9 +362,9 @@ function getAggregateFunction(aggExpr: Agg) {
  * Transforms a HAVING clause to replace Agg expressions with references to computed values
  */
 function transformHavingClause(
-  havingExpr: Expression | Agg,
+  havingExpr: BasicExpression | Aggregate,
   selectClause: Select
-): Expression {
+): BasicExpression {
   switch (havingExpr.type) {
     case `agg`: {
       const aggExpr = havingExpr
@@ -378,8 +384,9 @@ function transformHavingClause(
     case `func`: {
       const funcExpr = havingExpr
       // Transform function arguments recursively
-      const transformedArgs = funcExpr.args.map((arg: Expression | Agg) =>
-        transformHavingClause(arg, selectClause)
+      const transformedArgs = funcExpr.args.map(
+        (arg: BasicExpression | Aggregate) =>
+          transformHavingClause(arg, selectClause)
       )
       return new Func(funcExpr.name, transformedArgs)
     }
@@ -395,12 +402,12 @@ function transformHavingClause(
         }
       }
       // Return as-is for other refs
-      return havingExpr as Expression
+      return havingExpr as BasicExpression
     }
 
     case `val`:
       // Return as-is
-      return havingExpr as Expression
+      return havingExpr as BasicExpression
 
     default:
       throw new Error(
@@ -412,8 +419,10 @@ function transformHavingClause(
 /**
  * Checks if two aggregate expressions are equal
  */
-function aggregatesEqual(agg1: Agg, agg2: Agg): boolean {
-  if (agg1.name !== agg2.name) return false
-  if (agg1.args.length !== agg2.args.length) return false
-  return agg1.args.every((arg, i) => expressionsEqual(arg, agg2.args[i]))
+function aggregatesEqual(agg1: Aggregate, agg2: Aggregate): boolean {
+  return (
+    agg1.name === agg2.name &&
+    agg1.args.length === agg2.args.length &&
+    agg1.args.every((arg, i) => expressionsEqual(arg, agg2.args[i]))
+  )
 }
