@@ -15,3 +15,8 @@ export {
   type StorageApi,
   type StorageEventApi,
 } from "./local-storage"
+export {
+  localOnlyCollectionOptions,
+  type LocalOnlyCollectionConfig,
+  type LocalOnlyCollectionUtils,
+} from "./local-only"

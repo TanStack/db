@@ -154,7 +154,7 @@ There are a number of built-in collection types implemented in [`@tanstack/db-co
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 3. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-4. [WIP] [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+4. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -287,9 +287,55 @@ export const sessionCollection = createCollection(localStorageCollectionOptions(
 
 #### `LocalOnlyCollection`
 
-This is WIP. Track progress at [#79](https://github.com/TanStack/db/issues/79).
+LocalOnly collections are designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs. They provide a simple way to manage temporary, session-only data with full optimistic mutation support.
 
-LocalOnly collections will be designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs.
+Use `localOnlyCollectionOptions` to create a collection that stores data only in memory:
+
+```ts
+import { createCollection } from '@tanstack/react-db'
+import { localOnlyCollectionOptions } from '@tanstack/db-collections'
+
+export const uiStateCollection = createCollection(localOnlyCollectionOptions({
+  id: 'ui-state',
+  getKey: (item) => item.id,
+  schema: uiStateSchema,
+  // Optional initial data to populate the collection
+  initialData: [
+    { id: 'sidebar', isOpen: false },
+    { id: 'theme', mode: 'light' }
+  ]
+}))
+```
+
+The LocalOnly collection requires:
+
+- `getKey` — identifies the id for items in the collection
+
+Optional configuration:
+
+- `initialData` — array of items to populate the collection with on creation
+- `onInsert`, `onUpdate`, `onDelete` — optional mutation handlers for custom logic
+
+Mutation handlers are completely optional. When provided, they are called before the optimistic state is confirmed. The collection automatically manages the transition from optimistic to confirmed state internally.
+
+```ts
+export const tempDataCollection = createCollection(localOnlyCollectionOptions({
+  id: 'temp-data',
+  getKey: (item) => item.id,
+  onInsert: async ({ transaction }) => {
+    // Custom logic before confirming the insert
+    console.log('Inserting:', transaction.mutations[0].modified)
+  },
+  onUpdate: async ({ transaction }) => {
+    // Custom logic before confirming the update
+    const { original, modified } = transaction.mutations[0]
+    console.log('Updating from', original, 'to', modified)
+  }
+}))
+```
+
+> [!TIP]
+> LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
 #### Derived collections
 
