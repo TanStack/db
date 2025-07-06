@@ -12,6 +12,8 @@ import type {
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
 
+let sequenceNumber = 0
+
 export function createTransaction<
   TData extends object = Record<string, unknown>,
 >(config: TransactionConfig<TData>): Transaction<TData> {
@@ -54,6 +56,7 @@ export class Transaction<
   public isPersisted: Deferred<Transaction<T, TOperation>>
   public autoCommit: boolean
   public createdAt: Date
+  public sequenceNumber: number
   public metadata: Record<string, unknown>
   public error?: {
     message: string
@@ -71,6 +74,7 @@ export class Transaction<
     this.isPersisted = createDeferred<Transaction<T, TOperation>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
+    this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
   }
 
@@ -199,5 +203,20 @@ export class Transaction<
     }
 
     return this
+  }
+
+  /**
+   * Compare two transactions by their createdAt time and sequence number in order
+   * to sort them in the order they were created.
+   * @param other - The other transaction to compare to
+   * @returns -1 if this transaction was created before the other, 1 if it was created after, 0 if they were created at the same time
+   */
+  compareCreatedAt(other: Transaction<any>): number {
+    const createdAtComparison =
+      this.createdAt.getTime() - other.createdAt.getTime()
+    if (createdAtComparison !== 0) {
+      return createdAtComparison
+    }
+    return this.sequenceNumber - other.sequenceNumber
   }
 }

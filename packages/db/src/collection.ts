@@ -277,8 +277,8 @@ export class CollectionImpl<
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactions = new SortedMap<string, Transaction<any>>(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
+      a.compareCreatedAt(b)
     )
 
     this.config = config
