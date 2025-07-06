@@ -8,7 +8,6 @@ import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -16,10 +15,31 @@ import type {
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ControlMessage,
+  GetExtensions,
   Message,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
+
+// The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
+// but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
+// This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends Row<unknown>
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+type ResolveType<
+  TExplicit extends Row<unknown> = Row<unknown>,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> =
+  unknown extends GetExtensions<TExplicit>
+    ? [TSchema] extends [never]
+      ? TFallback
+      : InferSchemaOutput<TSchema>
+    : TExplicit
 
 /**
  * Configuration interface for Electric collection options
@@ -36,14 +56,16 @@ import type {
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface ElectricCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  shapeOptions: ShapeStreamOptions
+  shapeOptions: ShapeStreamOptions<
+    GetExtensions<ResolveType<TExplicit, TSchema, TFallback>>
+  >
 
   /**
    * All standard Collection configuration properties
@@ -123,7 +145,7 @@ export interface ElectricCollectionUtils extends UtilsRecord {
  * @returns Collection options with utilities
  */
 export function electricCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 >(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
@@ -264,8 +286,8 @@ export function electricCollectionOptions<
 /**
  * Internal function to create ElectricSQL sync configuration
  */
-function createElectricSync<T extends object>(
-  shapeOptions: ShapeStreamOptions,
+function createElectricSync<T extends Row<unknown>>(
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     seenTxids: Store<Set<string>>
   }
@@ -313,7 +335,7 @@ function createElectricSync<T extends object>(
       let transactionStarted = false
       let newTxids = new Set<string>()
 
-      unsubscribeStream = stream.subscribe((messages: Array<Message<Row>>) => {
+      unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
 
         for (const message of messages) {
