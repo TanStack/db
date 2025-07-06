@@ -45,7 +45,7 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
-export class Transaction<
+class Transaction<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
 > {
@@ -220,3 +220,5 @@ export class Transaction<
     return this.sequenceNumber - other.sequenceNumber
   }
 }
+
+export type { Transaction }

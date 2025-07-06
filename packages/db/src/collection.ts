@@ -1,7 +1,8 @@
 import { Store } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { Transaction, getActiveTransaction } from "./transactions"
+import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -1242,7 +1243,7 @@ export class CollectionImpl<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = new Transaction<T>({
+      const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(params)
@@ -1444,7 +1445,7 @@ export class CollectionImpl<
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      const emptyTransaction = new Transaction({
+      const emptyTransaction = createTransaction({
         mutationFn: async () => {},
       })
       emptyTransaction.commit()
@@ -1464,7 +1465,7 @@ export class CollectionImpl<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction
         return this.config.onUpdate!(params)
@@ -1559,7 +1560,7 @@ export class CollectionImpl<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction
