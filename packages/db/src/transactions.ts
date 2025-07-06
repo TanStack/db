@@ -15,21 +15,8 @@ let transactionStack: Array<Transaction<any>> = []
 export function createTransaction<
   TData extends object = Record<string, unknown>,
 >(config: TransactionConfig<TData>): Transaction<TData> {
-  if (typeof config.mutationFn === `undefined`) {
-    throw `mutationFn is required when creating a transaction`
-  }
-
-  let transactionId = config.id
-  if (!transactionId) {
-    transactionId = crypto.randomUUID()
-  }
-  const newTransaction = new Transaction<TData>({
-    ...config,
-    id: transactionId,
-  })
-
+  const newTransaction = new Transaction<TData>(config)
   transactions.push(newTransaction)
-
   return newTransaction
 }
 
@@ -74,7 +61,10 @@ export class Transaction<
   }
 
   constructor(config: TransactionConfig<T>) {
-    this.id = config.id!
+    if (typeof config.mutationFn === `undefined`) {
+      throw `mutationFn is required when creating a transaction`
+    }
+    this.id = config.id ?? crypto.randomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
