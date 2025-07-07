@@ -11,6 +11,7 @@ import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   ChangeMessage,
   Collection,
+  CollectionStatus,
   Context,
   GetResult,
   InitialQueryBuilder,
@@ -23,7 +24,12 @@ export interface UseLiveQueryReturn<T extends object> {
   state: ComputedRef<Map<string | number, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, string | number, {}>>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
 }
 
 export interface UseLiveQueryReturnWithCollection<
@@ -34,7 +40,12 @@ export interface UseLiveQueryReturnWithCollection<
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
 }
 
 // Overload 1: Accept just the query function
@@ -203,8 +214,13 @@ export function useLiveQuery(
     state: computed(() => state),
     data,
     collection: computed(() => collection.value),
-    isReady: computed(
-      () => status.value === `ready` || status.value === `initialCommit`
+    status: computed(() => status.value),
+    isLoading: computed(
+      () => status.value === `loading` || status.value === `initialCommit`
     ),
+    isReady: computed(() => status.value === `ready`),
+    isIdle: computed(() => status.value === `idle`),
+    isError: computed(() => status.value === `error`),
+    isCleanedUp: computed(() => status.value === `cleaned-up`),
   }
 }

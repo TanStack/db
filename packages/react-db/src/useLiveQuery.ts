@@ -2,6 +2,7 @@ import { useRef, useSyncExternalStore } from "react"
 import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   Collection,
+  CollectionStatus,
   Context,
   GetResult,
   InitialQueryBuilder,
@@ -17,7 +18,12 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  hasLoaded: boolean
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 // Overload 2: Accept config object
@@ -28,7 +34,12 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  hasLoaded: boolean
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 // Overload 3: Accept pre-created live query collection
@@ -42,7 +53,12 @@ export function useLiveQuery<
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
-  hasLoaded: boolean
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 // Implementation - use function overloads to infer the actual collection type
@@ -174,6 +190,13 @@ export function useLiveQuery(
     state: snapshot.state,
     data: snapshot.data,
     collection: snapshot.collection,
-    hasLoaded: snapshot.collection.status === `ready`,
+    status: snapshot.collection.status,
+    isLoading:
+      snapshot.collection.status === `loading` ||
+      snapshot.collection.status === `initialCommit`,
+    isReady: snapshot.collection.status === `ready`,
+    isIdle: snapshot.collection.status === `idle`,
+    isError: snapshot.collection.status === `error`,
+    isCleanedUp: snapshot.collection.status === `cleaned-up`,
   }
 }
