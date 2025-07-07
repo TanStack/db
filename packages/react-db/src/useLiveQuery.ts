@@ -17,6 +17,7 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
+  hasLoaded: boolean
 }
 
 // Overload 2: Accept config object
@@ -27,6 +28,7 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
+  hasLoaded: boolean
 }
 
 // Overload 3: Accept pre-created live query collection
@@ -40,6 +42,7 @@ export function useLiveQuery<
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
+  hasLoaded: boolean
 }
 
 // Implementation - use function overloads to infer the actual collection type
@@ -171,5 +174,6 @@ export function useLiveQuery(
     state: snapshot.state,
     data: snapshot.data,
     collection: snapshot.collection,
+    hasLoaded: snapshot.collection.status === `ready`,
   }
 }

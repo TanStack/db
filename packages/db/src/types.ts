@@ -244,6 +244,8 @@ export type CollectionStatus =
   | `idle`
   /** Sync has started but hasn't received the first commit yet */
   | `loading`
+  /** Collection is in the process of committing its first transaction */
+  | `initialCommit`
   /** Collection has received at least one commit and is ready for use */
   | `ready`
   /** An error occurred during sync initialization */
