@@ -1341,7 +1341,6 @@ export class CollectionImpl<
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(
-            // workaround - types were really wasting time here
             params as unknown as InsertMutationFnParams<T, TInsertInput>
           )
         },
