@@ -1,5 +1,14 @@
 # @tanstack/db-collections
 
+## 0.0.19
+
+### Patch Changes
+
+- Add localOnly collection type for in-memory collections with loopback sync. ([#204](https://github.com/TanStack/db/pull/204))
+
+- Updated dependencies [[`f5cf44b`](https://github.com/TanStack/db/commit/f5cf44b1b181afef89a80cf7b8678337a3d4a065), [`f5cf44b`](https://github.com/TanStack/db/commit/f5cf44b1b181afef89a80cf7b8678337a3d4a065)]:
+  - @tanstack/db@0.0.15
+
 ## 0.0.18
 
 ### Patch Changes
