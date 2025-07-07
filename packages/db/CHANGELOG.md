@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.16
+
+### Patch Changes
+
+- add support for composable queries ([#232](https://github.com/TanStack/db/pull/232))
+
 ## 0.0.15
 
 ### Patch Changes
