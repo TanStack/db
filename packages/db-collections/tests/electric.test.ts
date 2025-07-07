@@ -32,7 +32,6 @@ describe(`Electric Integration`, () => {
     string | number,
     ElectricCollectionUtils,
     StandardSchemaV1<unknown, unknown>,
-    Row,
     Row
   >
   let subscriber: (messages: Array<Message<Row>>) => void
