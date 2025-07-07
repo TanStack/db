@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.0.15
+
+### Patch Changes
+
+- add a sequence number to transactions to when sorting we can ensure that those created in the same ms are sorted in the correct order ([#230](https://github.com/TanStack/db/pull/230))
+
+- Ensure that all transactions are given an id, fixes a potential bug with direct mutations ([#230](https://github.com/TanStack/db/pull/230))
+
 ## 0.0.14
 
 ### Patch Changes
