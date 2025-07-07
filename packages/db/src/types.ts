@@ -48,14 +48,6 @@ export type ResolveInsertInput<
     ? TExplicit
     : Record<string, unknown>
 
-export type CollectionInsertInput<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  | ResolveInsertInput<TExplicit, TSchema, TFallback>
-  | Array<ResolveInsertInput<TExplicit, TSchema, TFallback>>
-
 /**
  * Helper type to determine the final type based on priority:
  * 1. Explicit generic TExplicit (if not 'unknown')
