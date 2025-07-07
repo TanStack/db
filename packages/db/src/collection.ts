@@ -9,6 +9,7 @@ import type {
   CollectionStatus,
   Fn,
   InsertConfig,
+  InsertMutationFnParams,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
@@ -39,8 +40,9 @@ export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
-> extends CollectionImpl<T, TKey, TInsertInput> {
+> extends CollectionImpl<T, TKey, TSchema, TInsertInput> {
   readonly utils: TUtils
 }
 
@@ -87,17 +89,20 @@ export function createCollection<
   options: CollectionConfig<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    TSchema
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
+  TSchema,
   ResolveInsertInput<TExplicit, TSchema, TFallback>
 > {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
+    TSchema,
     ResolveInsertInput<TExplicit, TSchema, TFallback>
   >(options)
 
@@ -112,6 +117,7 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TUtils,
+    TSchema,
     ResolveInsertInput<TExplicit, TSchema, TFallback>
   >
 }
@@ -148,9 +154,10 @@ export class SchemaValidationError extends Error {
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > {
-  public config: CollectionConfig<T, TKey, any>
+  public config: CollectionConfig<T, TKey, TSchema, TInsertInput>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -276,7 +283,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, any>) {
+  constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)
@@ -1333,7 +1340,10 @@ export class CollectionImpl<
       const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
-          return this.config.onInsert!(params)
+          return this.config.onInsert!(
+            // workaround - types were really wasting time here
+            params as unknown as InsertMutationFnParams<T, TInsertInput>
+          )
         },
       })
 
@@ -1474,61 +1484,64 @@ export class CollectionImpl<
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T, `update`>> = keysArray
-      .map((key, index) => {
-        const itemChanges = changesArray[index] // User-provided changes for this specific item
+    const mutations: Array<PendingMutation<T, `update`, TInsertInput, this>> =
+      keysArray
+        .map((key, index) => {
+          const itemChanges = changesArray[index] // User-provided changes for this specific item
 
-        // Skip items with no changes
-        if (!itemChanges || Object.keys(itemChanges).length === 0) {
-          return null
-        }
+          // Skip items with no changes
+          if (!itemChanges || Object.keys(itemChanges).length === 0) {
+            return null
+          }
 
-        const originalItem = currentObjects[index] as unknown as T
-        // Validate the user-provided changes for this item
-        const validatedUpdatePayload = this.validateData(
-          itemChanges,
-          `update`,
-          key
-        )
-
-        // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
-          originalItem,
-          validatedUpdatePayload
-        )
-
-        // Check if the ID of the item is being changed
-        const originalItemId = this.getKeyFromItem(originalItem)
-        const modifiedItemId = this.getKeyFromItem(modifiedItem)
-
-        if (originalItemId !== modifiedItemId) {
-          throw new Error(
-            `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
+          const originalItem = currentObjects[index] as unknown as T
+          // Validate the user-provided changes for this item
+          const validatedUpdatePayload = this.validateData(
+            itemChanges,
+            `update`,
+            key
           )
-        }
 
-        const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
+          // Construct the full modified item by applying the validated update payload to the original item
+          const modifiedItem = Object.assign(
+            {},
+            originalItem,
+            validatedUpdatePayload
+          )
 
-        return {
-          mutationId: crypto.randomUUID(),
-          original: originalItem,
-          modified: modifiedItem,
-          changes: validatedUpdatePayload as Partial<T>,
-          globalKey,
-          key,
-          metadata: config.metadata as unknown,
-          syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
-            string,
-            unknown
-          >,
-          type: `update`,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          collection: this,
-        }
-      })
-      .filter(Boolean) as Array<PendingMutation<T, `update`>>
+          // Check if the ID of the item is being changed
+          const originalItemId = this.getKeyFromItem(originalItem)
+          const modifiedItemId = this.getKeyFromItem(modifiedItem)
+
+          if (originalItemId !== modifiedItemId) {
+            throw new Error(
+              `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
+            )
+          }
+
+          const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
+
+          return {
+            mutationId: crypto.randomUUID(),
+            original: originalItem,
+            modified: modifiedItem,
+            changes: validatedUpdatePayload as Partial<T>,
+            globalKey,
+            key,
+            metadata: config.metadata as unknown,
+            syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
+              string,
+              unknown
+            >,
+            type: `update`,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            collection: this,
+          }
+        })
+        .filter(Boolean) as Array<
+        PendingMutation<T, `update`, TInsertInput, this>
+      >
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
@@ -1606,7 +1619,8 @@ export class CollectionImpl<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T, `delete`>> = []
+    const mutations: Array<PendingMutation<T, `delete`, TInsertInput, this>> =
+      []
 
     for (const key of keysArray) {
       if (!this.has(key)) {
@@ -1615,7 +1629,7 @@ export class CollectionImpl<
         )
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T, `delete`> = {
+      const mutation: PendingMutation<T, `delete`, TInsertInput, this> = {
         mutationId: crypto.randomUUID(),
         original: this.get(key)!,
         modified: this.get(key)!,

@@ -89,7 +89,14 @@ export type UtilsRecord = Record<string, Fn>
 export interface PendingMutation<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
-  TInsertInput = T,
+  TInsertInput extends object = T,
+  TCollection extends Collection<T, any, any, any, TInsertInput> = Collection<
+    T,
+    any,
+    any,
+    any,
+    TInsertInput
+  >,
 > {
   mutationId: string
   // The state of the object before the mutation.
@@ -103,25 +110,30 @@ export interface PendingMutation<
       ? T
       : Partial<T>
   globalKey: string
+
   key: any
   type: OperationType
   metadata: unknown
   syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T, any, any, any>
+  collection: TCollection
 }
 
 /**
  * Configuration options for creating a new transaction
  */
-export type MutationFnParams<T extends object = Record<string, unknown>> = {
-  transaction: TransactionWithMutations<T>
+export type MutationFnParams<
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> = {
+  transaction: TransactionWithMutations<T, OperationType, TInsertInput>
 }
 
-export type MutationFn<T extends object = Record<string, unknown>> = (
-  params: MutationFnParams<T>
-) => Promise<any>
+export type MutationFn<
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> = (params: MutationFnParams<T, TInsertInput>) => Promise<any>
 
 /**
  * Represents a non-empty array (at least one element)
@@ -135,16 +147,20 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
 > = Transaction<T, TOperation> & {
-  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation, TInsertInput>>
 }
 
-export interface TransactionConfig<T extends object = Record<string, unknown>> {
+export interface TransactionConfig<
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> {
   /** Unique identifier for the transaction */
   id?: string
   /* If the transaction should autocommit after a mutate call or should commit be called explicitly */
   autoCommit?: boolean
-  mutationFn: MutationFn<T>
+  mutationFn: MutationFn<T, TInsertInput>
   /** Custom metadata to associate with the transaction */
   metadata?: Record<string, unknown>
 }
@@ -152,12 +168,18 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
 /**
  * Options for the createOptimisticAction helper
  */
-export interface CreateOptimisticActionsOptions<TVars = unknown>
-  extends Omit<TransactionConfig, `mutationFn`> {
+export interface CreateOptimisticActionsOptions<
+  TVars = unknown,
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> extends Omit<TransactionConfig<T, TInsertInput>, `mutationFn`> {
   /** Function to apply optimistic updates locally before the mutation completes */
   onMutate: (vars: TVars) => void
   /** Function to execute the mutation on the server */
-  mutationFn: (vars: TVars, params: MutationFnParams) => Promise<any>
+  mutationFn: (
+    vars: TVars,
+    params: MutationFnParams<T, TInsertInput>
+  ) => Promise<any>
 }
 
 export type { Transaction }
@@ -181,7 +203,7 @@ export interface SyncConfig<
   TKey extends string | number = string | number,
 > {
   sync: (params: {
-    collection: Collection<T, TKey, any, any>
+    collection: Collection<T, TKey, any, any, any>
     begin: () => void
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
@@ -249,22 +271,25 @@ export interface InsertConfig {
 
 export type UpdateMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `update`>
+    transaction: TransactionWithMutations<T, `update`, T>
   }
 
-export type InsertMutationFnParams<T extends object = Record<string, unknown>> =
-  {
-    transaction: TransactionWithMutations<T, `insert`>
-  }
+export type InsertMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> = {
+  transaction: TransactionWithMutations<T, `insert`, TInsertInput>
+}
 
 export type DeleteMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `delete`>
+    transaction: TransactionWithMutations<T, `delete`, T>
   }
 
-export type InsertMutationFn<T extends object = Record<string, unknown>> = (
-  params: InsertMutationFnParams<T>
-) => Promise<any>
+export type InsertMutationFn<
+  T extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
+> = (params: InsertMutationFnParams<T, TInsertInput>) => Promise<any>
 
 export type UpdateMutationFn<T extends object = Record<string, unknown>> = (
   params: UpdateMutationFnParams<T>
@@ -293,6 +318,7 @@ export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TInsertInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -335,7 +361,7 @@ export interface CollectionConfig<
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onInsert?: InsertMutationFn<T>
+  onInsert?: InsertMutationFn<T, TInsertInput>
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and mutation information
