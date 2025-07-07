@@ -112,7 +112,7 @@ describe(`Collection Lifecycle Management`, () => {
       expect(collection.status).toBe(`cleaned-up`)
     })
 
-    it(`should transition when subscribing to changes`, async () => {
+    it(`should transition when subscribing to changes`, () => {
       let beginCallback: (() => void) | undefined
       let commitCallback: (() => void) | undefined
 

@@ -223,8 +223,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.derivedUpserts.has(insertKey)).toBe(true)
-    expect(collection.derivedUpserts.get(insertKey)).toEqual({
+    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -268,7 +268,7 @@ describe(`Collection`, () => {
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
-    expect(collection.derivedUpserts.size).toEqual(0)
+    expect(collection.optimisticUpserts.size).toEqual(0)
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
@@ -490,8 +490,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.derivedUpserts.has(insertKey)).toBe(true)
-    expect(collection.derivedUpserts.get(insertKey)).toEqual({
+    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
