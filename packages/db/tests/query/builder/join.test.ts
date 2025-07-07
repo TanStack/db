@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
-import { BaseQueryBuilder, getQuery } from "../../../src/query/builder/index.js"
+import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { and, eq, gt } from "../../../src/query/builder/functions.js"
 
 // Test schema
@@ -33,7 +33,7 @@ const departmentsCollection = new CollectionImpl<Department>({
 
 describe(`QueryBuilder.join`, () => {
   it(`adds a simple default (left) join`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -42,7 +42,7 @@ describe(`QueryBuilder.join`, () => {
           eq(employees.department_id, departments.id)
       )
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join).toHaveLength(1)
 
@@ -66,7 +66,7 @@ describe(`QueryBuilder.join`, () => {
       sync: { sync: () => {} },
     })
 
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -78,7 +78,7 @@ describe(`QueryBuilder.join`, () => {
         eq(departments.id, projects.department_id)
       )
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join).toHaveLength(2)
 
@@ -90,7 +90,7 @@ describe(`QueryBuilder.join`, () => {
   })
 
   it(`allows accessing joined table in select`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -105,7 +105,7 @@ describe(`QueryBuilder.join`, () => {
         department_budget: departments.budget,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.select).toBeDefined()
     expect(builtQuery.select).toHaveProperty(`id`)
     expect(builtQuery.select).toHaveProperty(`name`)
@@ -114,7 +114,7 @@ describe(`QueryBuilder.join`, () => {
   })
 
   it(`allows accessing joined table in where`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -124,24 +124,24 @@ describe(`QueryBuilder.join`, () => {
       )
       .where(({ departments }) => gt(departments.budget, 1000000))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.where).toBeDefined()
     expect((builtQuery.where as any)[0]?.name).toBe(`gt`)
   })
 
   it(`supports sub-queries in joins`, () => {
-    const subQuery = new BaseQueryBuilder()
+    const subQuery = new Query()
       .from({ departments: departmentsCollection })
       .where(({ departments }) => gt(departments.budget, 500000))
 
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join({ bigDepts: subQuery as any }, ({ employees, bigDepts }) =>
         eq(employees.department_id, (bigDepts as any).id)
       )
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join).toHaveLength(1)
 
@@ -151,7 +151,7 @@ describe(`QueryBuilder.join`, () => {
   })
 
   it(`creates a complex query with multiple joins, select and where`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -169,7 +169,7 @@ describe(`QueryBuilder.join`, () => {
         dept_location: departments.location,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join).toHaveLength(1)
@@ -190,7 +190,7 @@ describe(`QueryBuilder.join`, () => {
       sync: { sync: () => {} },
     })
 
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -202,7 +202,7 @@ describe(`QueryBuilder.join`, () => {
         eq(employees.id, users.employee_id)
       )
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.join).toBeDefined()
     expect(builtQuery.join).toHaveLength(2)
 
@@ -214,7 +214,7 @@ describe(`QueryBuilder.join`, () => {
   })
 
   it(`supports entire joined records in select`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .join(
@@ -227,7 +227,7 @@ describe(`QueryBuilder.join`, () => {
         department: departments,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.select).toBeDefined()
     expect(builtQuery.select).toHaveProperty(`employee`)
     expect(builtQuery.select).toHaveProperty(`department`)

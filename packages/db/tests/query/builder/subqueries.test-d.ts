@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
-import { BaseQueryBuilder } from "../../../src/query/builder/index.js"
+import { Query } from "../../../src/query/builder/index.js"
 import { CollectionImpl } from "../../../src/collection.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
 import type { ExtractContext } from "../../../src/query/builder/index.js"
@@ -38,7 +38,7 @@ const usersCollection = new CollectionImpl<User>({
 describe(`Subquery Types`, () => {
   describe(`Subqueries in FROM clause`, () => {
     test(`BaseQueryBuilder preserves type information`, () => {
-      const _baseQuery = new BaseQueryBuilder()
+      const _baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
@@ -49,12 +49,12 @@ describe(`Subquery Types`, () => {
     })
 
     test(`subquery in from clause without any cast`, () => {
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // This should work WITHOUT any cast
-      new BaseQueryBuilder()
+      new Query()
         .from({ filteredIssues: baseQuery })
         .select(({ filteredIssues }) => ({
           id: filteredIssues.id,
@@ -79,7 +79,7 @@ describe(`Subquery Types`, () => {
     })
 
     test(`subquery with select clause preserves selected type`, () => {
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
         .select(({ issue }) => ({
@@ -88,7 +88,7 @@ describe(`Subquery Types`, () => {
         }))
 
       // This should work WITHOUT any cast
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ filteredIssues: baseQuery })
         .select(({ filteredIssues }) => ({
           id: filteredIssues.id,
@@ -106,12 +106,12 @@ describe(`Subquery Types`, () => {
 
   describe(`Subqueries in JOIN clause`, () => {
     test(`subquery in join clause without any cast`, () => {
-      const activeUsersQuery = new BaseQueryBuilder()
+      const activeUsersQuery = new Query()
         .from({ user: usersCollection })
         .where(({ user }) => eq(user.status, `active`))
 
       // This should work WITHOUT any cast
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
           eq(issue.userId, activeUser.id)
@@ -132,7 +132,7 @@ describe(`Subquery Types`, () => {
     })
 
     test(`subquery with select in join preserves selected type`, () => {
-      const userNamesQuery = new BaseQueryBuilder()
+      const userNamesQuery = new Query()
         .from({ user: usersCollection })
         .where(({ user }) => eq(user.status, `active`))
         .select(({ user }) => ({
@@ -141,7 +141,7 @@ describe(`Subquery Types`, () => {
         }))
 
       // This should work WITHOUT any cast
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: userNamesQuery }, ({ issue, activeUser }) =>
           eq(issue.userId, activeUser.id)
@@ -162,12 +162,12 @@ describe(`Subquery Types`, () => {
 
   describe(`Complex composable queries`, () => {
     test(`aggregate queries with subqueries`, () => {
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Aggregate query using base query - NO CAST!
-      const _allAggregate = new BaseQueryBuilder()
+      const _allAggregate = new Query()
         .from({ issue: baseQuery })
         .select(({ issue }) => ({
           count: count(issue.id),
@@ -183,12 +183,12 @@ describe(`Subquery Types`, () => {
     })
 
     test(`group by queries with subqueries`, () => {
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Group by query using base query - NO CAST!
-      const _byStatusAggregate = new BaseQueryBuilder()
+      const _byStatusAggregate = new Query()
         .from({ issue: baseQuery })
         .groupBy(({ issue }) => issue.status)
         .select(({ issue }) => ({
@@ -210,17 +210,17 @@ describe(`Subquery Types`, () => {
   describe(`Nested subqueries`, () => {
     test(`subquery of subquery`, () => {
       // First level subquery
-      const filteredIssues = new BaseQueryBuilder()
+      const filteredIssues = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Second level subquery using first subquery
-      const highDurationIssues = new BaseQueryBuilder()
+      const highDurationIssues = new Query()
         .from({ issue: filteredIssues })
         .where(({ issue }) => eq(issue.duration, 10))
 
       // Final query using nested subquery - NO CAST!
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ issue: highDurationIssues })
         .select(({ issue }) => ({
           id: issue.id,
@@ -238,12 +238,12 @@ describe(`Subquery Types`, () => {
 
   describe(`Mixed collections and subqueries`, () => {
     test(`join collection with subquery`, () => {
-      const activeUsers = new BaseQueryBuilder()
+      const activeUsers = new Query()
         .from({ user: usersCollection })
         .where(({ user }) => eq(user.status, `active`))
 
       // Join regular collection with subquery - NO CAST!
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsers }, ({ issue, activeUser }) =>
           eq(issue.userId, activeUser.id)
@@ -262,12 +262,12 @@ describe(`Subquery Types`, () => {
     })
 
     test(`join subquery with collection`, () => {
-      const filteredIssues = new BaseQueryBuilder()
+      const filteredIssues = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Join subquery with regular collection - NO CAST!
-      const _query = new BaseQueryBuilder()
+      const _query = new Query()
         .from({ issue: filteredIssues })
         .join({ user: usersCollection }, ({ issue, user }) =>
           eq(issue.userId, user.id)

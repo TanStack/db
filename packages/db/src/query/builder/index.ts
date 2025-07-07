@@ -9,7 +9,7 @@ import type {
   OrderBy,
   OrderByClause,
   OrderByDirection,
-  Query,
+  QueryIR,
 } from "../ir.js"
 import type {
   Context,
@@ -27,17 +27,10 @@ import type {
   WithResult,
 } from "./types.js"
 
-export function buildQuery<TContext extends Context>(
-  fn: (builder: InitialQueryBuilder) => QueryBuilder<TContext>
-): Query {
-  const result = fn(new BaseQueryBuilder())
-  return getQuery(result)
-}
-
 export class BaseQueryBuilder<TContext extends Context = Context> {
-  private readonly query: Partial<Query> = {}
+  private readonly query: Partial<QueryIR> = {}
 
-  constructor(query: Partial<Query> = {}) {
+  constructor(query: Partial<QueryIR> = {}) {
     this.query = { ...query }
   }
 
@@ -64,7 +57,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       ref = new CollectionRef(sourceValue, alias)
     } else if (sourceValue instanceof BaseQueryBuilder) {
       const subQuery = sourceValue._getQuery()
-      if (!(subQuery as Partial<Query>).from) {
+      if (!(subQuery as Partial<QueryIR>).from) {
         throw new Error(
           `A sub query passed to a ${context} must have a from clause itself`
         )
@@ -605,27 +598,43 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
   }
 
-  _getQuery(): Query {
+  _getQuery(): QueryIR {
     if (!this.query.from) {
       throw new Error(`Query must have a from clause`)
     }
-    return this.query as Query
+    return this.query as QueryIR
   }
 }
 
-export function getQuery(
+// Internal function to build a query from a callback
+// used by liveQueryCollectionOptions.query
+export function buildQuery<TContext extends Context>(
+  fn: (builder: InitialQueryBuilder) => QueryBuilder<TContext>
+): QueryIR {
+  const result = fn(new BaseQueryBuilder())
+  return getQueryIR(result)
+}
+
+// Internal function to get the QueryIR from a builder
+export function getQueryIR(
   builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder
-): Query {
+): QueryIR {
   return (builder as unknown as BaseQueryBuilder)._getQuery()
 }
 
 // Type-only exports for the query builder
 export type InitialQueryBuilder = Pick<BaseQueryBuilder<Context>, `from`>
 
+export type InitialQueryBuilderConstructor = new () => InitialQueryBuilder
+
 export type QueryBuilder<TContext extends Context> = Omit<
   BaseQueryBuilder<TContext>,
   `from` | `_getQuery`
 >
+
+// Main query builder class alias with the constructor type modified to hide all
+// but the from method on the initial instance
+export const Query: InitialQueryBuilderConstructor = BaseQueryBuilder
 
 // Helper type to extract context from a QueryBuilder
 export type ExtractContext<T> =

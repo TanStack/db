@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, Func, Ref, Value } from "../../../src/query/ir.js"
-import type { Query } from "../../../src/query/ir.js"
+import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection.js"
 
 // Sample user type for tests
@@ -37,7 +37,7 @@ describe(`Query2 Compiler`, () => {
       } as CollectionImpl
 
       // Create the IR query
-      const query: Query = {
+      const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
       }
 
@@ -79,7 +79,7 @@ describe(`Query2 Compiler`, () => {
         id: `users`,
       } as CollectionImpl
 
-      const query: Query = {
+      const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
           id: new Ref([`users`, `id`]),
@@ -147,7 +147,7 @@ describe(`Query2 Compiler`, () => {
         id: `users`,
       } as CollectionImpl
 
-      const query: Query = {
+      const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
           id: new Ref([`users`, `id`]),
@@ -200,7 +200,7 @@ describe(`Query2 Compiler`, () => {
         id: `users`,
       } as CollectionImpl
 
-      const query: Query = {
+      const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
           id: new Ref([`users`, `id`]),

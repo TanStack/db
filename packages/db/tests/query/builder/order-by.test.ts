@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
-import { BaseQueryBuilder, getQuery } from "../../../src/query/builder/index.js"
+import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { eq, upper } from "../../../src/query/builder/functions.js"
 
 // Test schema
@@ -21,7 +21,7 @@ const employeesCollection = new CollectionImpl<Employee>({
 
 describe(`QueryBuilder.orderBy`, () => {
   it(`sets the order by clause correctly with default ascending`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.name)
@@ -30,7 +30,7 @@ describe(`QueryBuilder.orderBy`, () => {
         name: employees.name,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
     expect(builtQuery.orderBy![0]!.expression.type).toBe(`ref`)
@@ -42,7 +42,7 @@ describe(`QueryBuilder.orderBy`, () => {
   })
 
   it(`supports descending order`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.salary, `desc`)
@@ -51,7 +51,7 @@ describe(`QueryBuilder.orderBy`, () => {
         salary: employees.salary,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
     expect((builtQuery.orderBy![0]!.expression as any).path).toEqual([
@@ -62,18 +62,18 @@ describe(`QueryBuilder.orderBy`, () => {
   })
 
   it(`supports ascending order explicitly`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.hire_date, `asc`)
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
   })
 
   it(`supports simple order by expressions`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.department_id, `asc`)
@@ -83,13 +83,13 @@ describe(`QueryBuilder.orderBy`, () => {
         salary: employees.salary,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
   })
 
   it(`supports function expressions in order by`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => upper(employees.name))
@@ -98,7 +98,7 @@ describe(`QueryBuilder.orderBy`, () => {
         name: employees.name,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
     // The function expression gets wrapped, so we check if it contains the function
@@ -108,7 +108,7 @@ describe(`QueryBuilder.orderBy`, () => {
   })
 
   it(`can be combined with other clauses`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => eq(employees.department_id, 1))
@@ -120,7 +120,7 @@ describe(`QueryBuilder.orderBy`, () => {
         salary: employees.salary,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.where).toBeDefined()
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.limit).toBe(10)
@@ -128,13 +128,13 @@ describe(`QueryBuilder.orderBy`, () => {
   })
 
   it(`supports multiple order by clauses`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.name)
       .orderBy(({ employees }) => employees.salary, `desc`) // This should be added
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(2)
     expect((builtQuery.orderBy![0]!.expression as any).path).toEqual([
@@ -150,7 +150,7 @@ describe(`QueryBuilder.orderBy`, () => {
   })
 
   it(`supports limit and offset with order by`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .orderBy(({ employees }) => employees.hire_date, `desc`)
@@ -162,7 +162,7 @@ describe(`QueryBuilder.orderBy`, () => {
         hire_date: employees.hire_date,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.limit).toBe(20)
     expect(builtQuery.offset).toBe(10)

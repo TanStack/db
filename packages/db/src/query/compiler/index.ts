@@ -4,7 +4,7 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
-import type { CollectionRef, Query, QueryRef } from "../ir.js"
+import type { CollectionRef, QueryIR, QueryRef } from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -14,7 +14,7 @@ import type {
 /**
  * Cache for compiled subqueries to avoid duplicate compilation
  */
-type QueryCache = WeakMap<Query, ResultStream>
+type QueryCache = WeakMap<QueryIR, ResultStream>
 
 /**
  * Compiles a query2 IR into a D2 pipeline
@@ -24,7 +24,7 @@ type QueryCache = WeakMap<Query, ResultStream>
  * @returns A stream builder representing the compiled query
  */
 export function compileQuery(
-  query: Query,
+  query: QueryIR,
   inputs: Record<string, KeyedStream>,
   cache: QueryCache = new WeakMap()
 ): ResultStream {

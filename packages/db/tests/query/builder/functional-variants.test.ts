@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
-import { BaseQueryBuilder, getQuery } from "../../../src/query/builder/index.js"
+import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { eq, gt } from "../../../src/query/builder/functions.js"
 
 // Test schema
@@ -33,33 +33,30 @@ const departmentsCollection = new CollectionImpl<Department>({
 describe(`QueryBuilder functional variants (fn)`, () => {
   describe(`fn.select`, () => {
     it(`sets fnSelect function and removes regular select`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .select(({ employees }) => ({ id: employees.id })) // This should be removed
         .fn.select((row) => ({ customName: row.employees.name.toUpperCase() }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnSelect).toBeDefined()
       expect(typeof builtQuery.fnSelect).toBe(`function`)
       expect(builtQuery.select).toBeUndefined() // Regular select should be removed
     })
 
     it(`works without previous select clause`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .fn.select((row) => row.employees.name)
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnSelect).toBeDefined()
       expect(typeof builtQuery.fnSelect).toBe(`function`)
       expect(builtQuery.select).toBeUndefined()
     })
 
     it(`supports complex transformations`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .fn.select((row) => ({
           displayName: `${row.employees.name} (ID: ${row.employees.id})`,
@@ -68,13 +65,12 @@ describe(`QueryBuilder functional variants (fn)`, () => {
             row.employees.department_id !== null && row.employees.active,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnSelect).toBeDefined()
     })
 
     it(`works with joins`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .join(
           { departments: departmentsCollection },
@@ -86,19 +82,18 @@ describe(`QueryBuilder functional variants (fn)`, () => {
           departmentName: row.departments?.name || `No Department`,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnSelect).toBeDefined()
     })
   })
 
   describe(`fn.where`, () => {
     it(`adds to fnWhere array`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .fn.where((row) => row.employees.active)
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnWhere).toBeDefined()
       expect(Array.isArray(builtQuery.fnWhere)).toBe(true)
       expect(builtQuery.fnWhere).toHaveLength(1)
@@ -106,34 +101,31 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     })
 
     it(`accumulates multiple fn.where calls`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .fn.where((row) => row.employees.active)
         .fn.where((row) => row.employees.salary > 50000)
         .fn.where((row) => row.employees.name.includes(`John`))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnWhere).toBeDefined()
       expect(builtQuery.fnWhere).toHaveLength(3)
     })
 
     it(`works alongside regular where clause`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .where(({ employees }) => gt(employees.id, 0)) // Regular where
         .fn.where((row) => row.employees.active) // Functional where
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.where).toBeDefined() // Regular where still exists
       expect(builtQuery.fnWhere).toBeDefined()
       expect(builtQuery.fnWhere).toHaveLength(1)
     })
 
     it(`supports complex conditions`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .fn.where(
           (row) =>
@@ -143,13 +135,12 @@ describe(`QueryBuilder functional variants (fn)`, () => {
               row.employees.department_id === 2)
         )
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnWhere).toHaveLength(1)
     })
 
     it(`works with joins`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .join(
           { departments: departmentsCollection },
@@ -163,20 +154,19 @@ describe(`QueryBuilder functional variants (fn)`, () => {
             row.departments.name !== `HR`
         )
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnWhere).toHaveLength(1)
     })
   })
 
   describe(`fn.having`, () => {
     it(`adds to fnHaving array`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .groupBy(({ employees }) => employees.department_id)
         .fn.having((row) => row.employees.salary > 50000)
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnHaving).toBeDefined()
       expect(Array.isArray(builtQuery.fnHaving)).toBe(true)
       expect(builtQuery.fnHaving).toHaveLength(1)
@@ -184,36 +174,33 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     })
 
     it(`accumulates multiple fn.having calls`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .groupBy(({ employees }) => employees.department_id)
         .fn.having((row) => row.employees.active)
         .fn.having((row) => row.employees.salary > 50000)
         .fn.having((row) => row.employees.name.length > 3)
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnHaving).toBeDefined()
       expect(builtQuery.fnHaving).toHaveLength(3)
     })
 
     it(`works alongside regular having clause`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .groupBy(({ employees }) => employees.department_id)
         .having(({ employees }) => gt(employees.id, 0)) // Regular having
         .fn.having((row) => row.employees.active) // Functional having
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.having).toBeDefined() // Regular having still exists
       expect(builtQuery.fnHaving).toBeDefined()
       expect(builtQuery.fnHaving).toHaveLength(1)
     })
 
     it(`supports complex aggregation conditions`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .groupBy(({ employees }) => employees.department_id)
         .fn.having((row) => {
@@ -222,13 +209,12 @@ describe(`QueryBuilder functional variants (fn)`, () => {
           return avgSalary > 70000 && row.employees.active
         })
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnHaving).toHaveLength(1)
     })
 
     it(`works with joins and grouping`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .join(
           { departments: departmentsCollection },
@@ -243,15 +229,14 @@ describe(`QueryBuilder functional variants (fn)`, () => {
             row.departments.name !== `Temp`
         )
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnHaving).toHaveLength(1)
     })
   })
 
   describe(`combinations`, () => {
     it(`supports all functional variants together`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .join(
           { departments: departmentsCollection },
@@ -268,7 +253,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
           isHighEarner: row.employees.salary > 80000,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.fnWhere).toHaveLength(2)
       expect(builtQuery.fnHaving).toHaveLength(1)
       expect(builtQuery.fnSelect).toBeDefined()
@@ -276,15 +261,14 @@ describe(`QueryBuilder functional variants (fn)`, () => {
     })
 
     it(`works with regular clauses mixed in`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder
+      const query = new Query()
         .from({ employees: employeesCollection })
         .where(({ employees }) => gt(employees.id, 0)) // Regular where
         .fn.where((row) => row.employees.active) // Functional where
         .select(({ employees }) => ({ id: employees.id })) // Regular select (will be removed)
         .fn.select((row) => ({ name: row.employees.name })) // Functional select
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       expect(builtQuery.where).toBeDefined()
       expect(builtQuery.fnWhere).toHaveLength(1)
       expect(builtQuery.select).toBeUndefined() // Should be removed by fn.select
@@ -294,7 +278,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
 
   describe(`error handling`, () => {
     it(`maintains query validity with functional variants`, () => {
-      const builder = new BaseQueryBuilder()
+      const builder = new Query()
 
       // Should not throw when building query with functional variants
       expect(() => {
@@ -303,15 +287,14 @@ describe(`QueryBuilder functional variants (fn)`, () => {
           .fn.where((row) => row.employees.active)
           .fn.select((row) => row.employees.name)
 
-        getQuery(query)
+        getQueryIR(query)
       }).not.toThrow()
     })
 
     it(`allows empty functional variant arrays`, () => {
-      const builder = new BaseQueryBuilder()
-      const query = builder.from({ employees: employeesCollection })
+      const query = new Query().from({ employees: employeesCollection })
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
       // These should be undefined/empty when no functional variants are used
       expect(builtQuery.fnWhere).toBeUndefined()
       expect(builtQuery.fnHaving).toBeUndefined()

@@ -3,6 +3,12 @@ import { CollectionImpl } from "../../../src/collection.js"
 import { buildQuery } from "../../../src/query/builder/index.js"
 import { and, eq, gt, or } from "../../../src/query/builder/functions.js"
 
+/**
+ * This is a set of tests for the buildQuery function.
+ * This function is not used directly by the user, but is used by the
+ * liveQueryCollectionOptions.query callback or via a useLiveQuery call.
+ */
+
 // Test schema
 interface Employee {
   id: number

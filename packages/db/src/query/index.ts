@@ -3,7 +3,7 @@
 // Query builder exports
 export {
   BaseQueryBuilder,
-  buildQuery,
+  Query,
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
@@ -45,7 +45,7 @@ export { val, toExpression, isRefProxy } from "./builder/ref-proxy.js"
 
 // IR types (for advanced usage)
 export type {
-  Query,
+  QueryIR,
   BasicExpression as Expression,
   Aggregate,
   CollectionRef,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
-import { BaseQueryBuilder, getQuery } from "../../../src/query/builder/index.js"
+import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { eq } from "../../../src/query/builder/functions.js"
 
 // Test schema
@@ -34,9 +34,9 @@ const departmentsCollection = new CollectionImpl<Department>({
 
 describe(`QueryBuilder.from`, () => {
   it(`sets the from clause correctly with collection`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder.from({ employees: employeesCollection })
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
 
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.from.type).toBe(`collectionRef`)
@@ -47,7 +47,7 @@ describe(`QueryBuilder.from`, () => {
   })
 
   it(`allows chaining other methods after from`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) => eq(employees.id, 1))
@@ -56,7 +56,7 @@ describe(`QueryBuilder.from`, () => {
         name: employees.name,
       }))
 
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
 
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.where).toBeDefined()
@@ -64,21 +64,21 @@ describe(`QueryBuilder.from`, () => {
   })
 
   it(`supports different collection aliases`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder.from({ emp: employeesCollection })
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
 
     expect(builtQuery.from.alias).toBe(`emp`)
   })
 
   it(`supports sub-queries in from clause`, () => {
-    const subQuery = new BaseQueryBuilder()
+    const subQuery = new Query()
       .from({ employees: employeesCollection })
       .where(({ employees }) => eq(employees.active, true))
 
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
     const query = builder.from({ activeEmployees: subQuery as any })
-    const builtQuery = getQuery(query)
+    const builtQuery = getQueryIR(query)
 
     expect(builtQuery.from).toBeDefined()
     expect(builtQuery.from.type).toBe(`queryRef`)
@@ -86,8 +86,8 @@ describe(`QueryBuilder.from`, () => {
   })
 
   it(`throws error when sub-query lacks from clause`, () => {
-    const incompleteSubQuery = new BaseQueryBuilder()
-    const builder = new BaseQueryBuilder()
+    const incompleteSubQuery = new Query()
+    const builder = new Query()
 
     expect(() => {
       builder.from({ incomplete: incompleteSubQuery as any })
@@ -95,7 +95,7 @@ describe(`QueryBuilder.from`, () => {
   })
 
   it(`throws error with multiple sources`, () => {
-    const builder = new BaseQueryBuilder()
+    const builder = new Query()
 
     expect(() => {
       builder.from({

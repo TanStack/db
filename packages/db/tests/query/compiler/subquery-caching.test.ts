@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { D2 } from "@electric-sql/d2mini"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, QueryRef, Ref } from "../../../src/query/ir.js"
-import type { Query } from "../../../src/query/ir.js"
+import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection.js"
 
 describe(`Subquery Caching`, () => {
@@ -13,7 +13,7 @@ describe(`Subquery Caching`, () => {
     } as CollectionImpl
 
     // Create a subquery that will be used in multiple places
-    const subquery: Query = {
+    const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
         id: new Ref([`u`, `id`]),
@@ -22,7 +22,7 @@ describe(`Subquery Caching`, () => {
     }
 
     // Create a main query that uses the same subquery object in multiple places
-    const mainQuery: Query = {
+    const mainQuery: QueryIR = {
       from: new QueryRef(subquery, `main_users`),
       join: [
         {
@@ -87,7 +87,7 @@ describe(`Subquery Caching`, () => {
       id: `users`,
     } as CollectionImpl
 
-    const subquery: Query = {
+    const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
         id: new Ref([`u`, `id`]),
@@ -117,7 +117,7 @@ describe(`Subquery Caching`, () => {
     } as CollectionImpl
 
     // Create two structurally identical but different query objects
-    const subquery1: Query = {
+    const subquery1: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
         id: new Ref([`u`, `id`]),
@@ -125,7 +125,7 @@ describe(`Subquery Caching`, () => {
       },
     }
 
-    const subquery: Query = {
+    const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
         id: new Ref([`u`, `id`]),
@@ -160,14 +160,14 @@ describe(`Subquery Caching`, () => {
     } as CollectionImpl
 
     // Create a deeply nested subquery that references the same query multiple times
-    const innerSubquery: Query = {
+    const innerSubquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
         id: new Ref([`u`, `id`]),
       },
     }
 
-    const middleSubquery: Query = {
+    const middleSubquery: QueryIR = {
       from: new QueryRef(innerSubquery, `inner1`),
       join: [
         {
@@ -179,7 +179,7 @@ describe(`Subquery Caching`, () => {
       ],
     }
 
-    const outerQuery: Query = {
+    const outerQuery: QueryIR = {
       from: new QueryRef(middleSubquery, `middle`),
       join: [
         {

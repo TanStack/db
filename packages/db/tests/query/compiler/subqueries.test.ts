@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { D2, MultiSet, output } from "@electric-sql/d2mini"
-import {
-  BaseQueryBuilder,
-  buildQuery,
-  getQuery,
-} from "../../../src/query/builder/index.js"
+import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionImpl } from "../../../src/collection.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
@@ -128,12 +124,12 @@ describe(`Query2 Subqueries`, () => {
   describe(`Subqueries in FROM clause`, () => {
     it(`supports simple subquery in from clause`, () => {
       // Create a base query that filters issues for project 1
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Use the base query as a subquery in the from clause
-      const query = new BaseQueryBuilder()
+      const query = new Query()
         .from({ filteredIssues: baseQuery })
         .select(({ filteredIssues }) => ({
           id: filteredIssues.id,
@@ -141,7 +137,7 @@ describe(`Query2 Subqueries`, () => {
           status: filteredIssues.status,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
 
       // Verify the IR structure
       expect(builtQuery.from.type).toBe(`queryRef`)
@@ -155,12 +151,12 @@ describe(`Query2 Subqueries`, () => {
 
     it(`compiles and executes subquery in from clause`, () => {
       // Create a base query that filters issues for project 1
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Use the base query as a subquery in the from clause
-      const query = new BaseQueryBuilder()
+      const query = new Query()
         .from({ filteredIssues: baseQuery })
         .select(({ filteredIssues }) => ({
           id: filteredIssues.id,
@@ -168,7 +164,7 @@ describe(`Query2 Subqueries`, () => {
           status: filteredIssues.status,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
 
       // Compile and execute the query
       const graph = new D2()
@@ -208,12 +204,12 @@ describe(`Query2 Subqueries`, () => {
   describe(`Subqueries in JOIN clause`, () => {
     it(`supports subquery in join clause`, () => {
       // Create a subquery for active users
-      const activeUsersQuery = new BaseQueryBuilder()
+      const activeUsersQuery = new Query()
         .from({ user: usersCollection })
         .where(({ user }) => eq(user.status, `active`))
 
       // Use the subquery in a join
-      const query = new BaseQueryBuilder()
+      const query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
           eq(issue.userId, activeUser.id)
@@ -224,7 +220,7 @@ describe(`Query2 Subqueries`, () => {
           userName: activeUser.name,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
 
       // Verify the IR structure
       expect(builtQuery.from.type).toBe(`collectionRef`)
@@ -243,12 +239,12 @@ describe(`Query2 Subqueries`, () => {
 
     it(`compiles and executes subquery in join clause`, () => {
       // Create a subquery for active users
-      const activeUsersQuery = new BaseQueryBuilder()
+      const activeUsersQuery = new Query()
         .from({ user: usersCollection })
         .where(({ user }) => eq(user.status, `active`))
 
       // Use the subquery in a join
-      const query = new BaseQueryBuilder()
+      const query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
           eq(issue.userId, activeUser.id)
@@ -259,7 +255,7 @@ describe(`Query2 Subqueries`, () => {
           userName: activeUser.name,
         }))
 
-      const builtQuery = getQuery(query)
+      const builtQuery = getQueryIR(query)
 
       // Compile and execute the query
       const graph = new D2()
@@ -305,63 +301,22 @@ describe(`Query2 Subqueries`, () => {
     })
   })
 
-  describe(`Complex composable queries (README example pattern)`, () => {
-    it(`supports the README example pattern with buildQuery function`, () => {
-      const projectId = 1
-
-      // This simulates the pattern from the README where all queries are defined within a single buildQuery function
-      const queries = buildQuery((q) => {
-        // Base query filters issues for a specific project
-        const baseQuery = q
-          .from({ issue: issuesCollection })
-          .where(({ issue }) => eq(issue.projectId, projectId))
-
-        // Active users subquery
-        const activeUsers = q
-          .from({ user: usersCollection })
-          .where(({ user }) => eq(user.status, `active`))
-
-        // Complex query with both subquery in from and join
-        const firstTenIssues = q
-          .from({ issue: baseQuery })
-          .join({ user: activeUsers }, ({ user, issue }) =>
-            eq(user.id, issue.userId)
-          )
-          .orderBy(({ issue }) => issue.createdAt)
-          .limit(10)
-          .select(({ issue, user }) => ({
-            id: issue.id,
-            title: issue.title,
-            userName: user.name,
-          }))
-
-        // For now, just return one query since the buildQuery function expects a single query
-        return firstTenIssues
-      })
-
-      // Verify the query has correct structure
-      expect(queries.from.type).toBe(`queryRef`)
-      expect(queries.join).toBeDefined()
-      expect(queries.join![0]!.from.type).toBe(`queryRef`)
-      expect(queries.orderBy).toBeDefined()
-      expect(queries.limit).toBe(10)
-    })
-
+  describe(`Complex composable queries`, () => {
     it(`executes simple aggregate subquery`, () => {
       // Create a base query that filters issues for project 1
-      const baseQuery = new BaseQueryBuilder()
+      const baseQuery = new Query()
         .from({ issue: issuesCollection })
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Simple aggregate query using base query
-      const allAggregate = new BaseQueryBuilder()
+      const allAggregate = new Query()
         .from({ issue: baseQuery })
         .select(({ issue }) => ({
           count: count(issue.id),
           avgDuration: avg(issue.duration),
         }))
 
-      const builtQuery = getQuery(allAggregate)
+      const builtQuery = getQueryIR(allAggregate)
 
       // Execute the aggregate query
       const graph = new D2()

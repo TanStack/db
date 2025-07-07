@@ -5,7 +5,7 @@ This is the intermediate representation of the query.
 import type { CollectionImpl } from "../collection"
 import type { NamespacedRow } from "../types"
 
-export interface Query {
+export interface QueryIR {
   from: From
   select?: Select
   join?: Join
@@ -77,7 +77,7 @@ export class CollectionRef extends BaseExpression {
 export class QueryRef extends BaseExpression {
   public type = `queryRef` as const
   constructor(
-    public query: Query,
+    public query: QueryIR,
     public alias: string
   ) {
     super()
