@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import {
+  Query,
   count,
   createCollection,
   createLiveQueryCollection,
@@ -927,5 +928,42 @@ describe(`Query Collections`, () => {
 
     // Verify we no longer have data from the first collection
     expect(result.current.state.get(`3`)).toBeUndefined()
+  })
+
+  it(`should accept a config object with a pre-built QueryBuilder instance`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-config-querybuilder`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Create a QueryBuilder instance beforehand
+    const queryBuilder = new Query()
+      .from({ persons: collection })
+      .where(({ persons }) => gt(persons.age, 30))
+      .select(({ persons }) => ({
+        id: persons.id,
+        name: persons.name,
+        age: persons.age,
+      }))
+
+    const { result } = renderHook(() => {
+      return useLiveQuery({ query: queryBuilder })
+    })
+
+    // Wait for collection to sync and state to update
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1) // Only John Smith (age 35)
+    })
+    expect(result.current.data).toHaveLength(1)
+
+    const johnSmith = result.current.data[0]
+    expect(johnSmith).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+      age: 35,
+    })
   })
 })

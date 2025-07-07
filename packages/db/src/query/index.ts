@@ -41,17 +41,7 @@ export {
 } from "./builder/functions.js"
 
 // Ref proxy utilities
-export { val, toExpression, isRefProxy } from "./builder/ref-proxy.js"
-
-// IR types (for advanced usage)
-export type {
-  QueryIR,
-  BasicExpression as Expression,
-  Aggregate,
-  CollectionRef,
-  QueryRef,
-  JoinClause,
-} from "./ir.js"
+export type { Ref } from "./builder/types.js"
 
 // Compiler
 export { compileQuery } from "./compiler/index.js"

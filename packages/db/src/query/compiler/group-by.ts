@@ -1,5 +1,5 @@
 import { filter, groupBy, groupByOperators, map } from "@electric-sql/d2mini"
-import { Func, Ref } from "../ir.js"
+import { Func, PropRef } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import type {
   Aggregate,
@@ -372,7 +372,7 @@ function transformHavingClause(
       for (const [alias, selectExpr] of Object.entries(selectClause)) {
         if (selectExpr.type === `agg` && aggregatesEqual(aggExpr, selectExpr)) {
           // Replace with a reference to the computed aggregate
-          return new Ref([`result`, alias])
+          return new PropRef([`result`, alias])
         }
       }
       // If no matching aggregate found in SELECT, throw error
@@ -398,7 +398,7 @@ function transformHavingClause(
         const alias = refExpr.path[0]!
         if (selectClause[alias]) {
           // This is a reference to a SELECT alias, convert to result.alias
-          return new Ref([`result`, alias])
+          return new PropRef([`result`, alias])
         }
       }
       // Return as-is for other refs

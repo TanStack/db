@@ -819,4 +819,42 @@ describe(`Query Collections`, () => {
     // Verify we no longer have data from the first collection
     expect(state.value.get(`3`)).toBeUndefined()
   })
+
+  it(`should accept config object with pre-built QueryBuilder instance`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `config-querybuilder-test-vue`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Create a pre-built QueryBuilder instance
+    const { Query } = await import(`@tanstack/db`)
+    const queryBuilder = new Query()
+      .from({ persons: collection })
+      .where(({ persons }) => gt(persons.age, 30))
+      .select(({ persons }) => ({
+        id: persons.id,
+        name: persons.name,
+        age: persons.age,
+      }))
+
+    const { state, data } = useLiveQuery({
+      query: queryBuilder,
+    })
+
+    // Wait for collection to sync and state to update
+    await waitForVueUpdate()
+
+    expect(state.value.size).toBe(1) // Only John Smith (age 35)
+    expect(data.value).toHaveLength(1)
+
+    const johnSmith = data.value[0]
+    expect(johnSmith).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+      age: 35,
+    })
+  })
 })

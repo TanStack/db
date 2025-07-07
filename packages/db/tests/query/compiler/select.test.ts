@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { processArgument } from "../../../src/query/compiler/select.js"
-import { Aggregate, Func, Ref, Value } from "../../../src/query/ir.js"
+import { Aggregate, Func, PropRef, Value } from "../../../src/query/ir.js"
 
 describe(`select compiler`, () => {
   // Note: Most of the select compilation logic is tested through the full integration
@@ -9,7 +9,7 @@ describe(`select compiler`, () => {
 
   describe(`processArgument`, () => {
     it(`processes non-aggregate expressions correctly`, () => {
-      const arg = new Ref([`users`, `name`])
+      const arg = new PropRef([`users`, `name`])
       const namespacedRow = { users: { name: `John` } }
 
       const result = processArgument(arg, namespacedRow)
@@ -33,7 +33,7 @@ describe(`select compiler`, () => {
     })
 
     it(`throws error for aggregate expressions`, () => {
-      const arg = new Aggregate(`count`, [new Ref([`users`, `id`])])
+      const arg = new Aggregate(`count`, [new PropRef([`users`, `id`])])
       const namespacedRow = { users: { id: 1 } }
 
       expect(() => {
@@ -44,7 +44,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes reference expressions from different tables`, () => {
-      const arg = new Ref([`orders`, `amount`])
+      const arg = new PropRef([`orders`, `amount`])
       const namespacedRow = {
         users: { name: `John` },
         orders: { amount: 100.5 },
@@ -55,7 +55,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes nested reference expressions`, () => {
-      const arg = new Ref([`profile`, `address`, `city`])
+      const arg = new PropRef([`profile`, `address`, `city`])
       const namespacedRow = {
         profile: {
           address: {
@@ -69,7 +69,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes function expressions with references`, () => {
-      const arg = new Func(`length`, [new Ref([`users`, `name`])])
+      const arg = new Func(`length`, [new PropRef([`users`, `name`])])
       const namespacedRow = { users: { name: `Alice` } }
 
       const result = processArgument(arg, namespacedRow)
@@ -78,9 +78,9 @@ describe(`select compiler`, () => {
 
     it(`processes function expressions with multiple arguments`, () => {
       const arg = new Func(`concat`, [
-        new Ref([`users`, `firstName`]),
+        new PropRef([`users`, `firstName`]),
         new Value(` `),
-        new Ref([`users`, `lastName`]),
+        new PropRef([`users`, `lastName`]),
       ])
       const namespacedRow = {
         users: {
@@ -94,7 +94,7 @@ describe(`select compiler`, () => {
     })
 
     it(`handles null and undefined values in references`, () => {
-      const arg = new Ref([`users`, `middleName`])
+      const arg = new PropRef([`users`, `middleName`])
       const namespacedRow = { users: { name: `John`, middleName: null } }
 
       const result = processArgument(arg, namespacedRow)
@@ -102,7 +102,7 @@ describe(`select compiler`, () => {
     })
 
     it(`handles missing table references`, () => {
-      const arg = new Ref([`nonexistent`, `field`])
+      const arg = new PropRef([`nonexistent`, `field`])
       const namespacedRow = { users: { name: `John` } }
 
       const result = processArgument(arg, namespacedRow)
@@ -110,7 +110,7 @@ describe(`select compiler`, () => {
     })
 
     it(`handles missing field references`, () => {
-      const arg = new Ref([`users`, `nonexistent`])
+      const arg = new PropRef([`users`, `nonexistent`])
       const namespacedRow = { users: { name: `John` } }
 
       const result = processArgument(arg, namespacedRow)
@@ -134,7 +134,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes comparison function expressions`, () => {
-      const arg = new Func(`gt`, [new Ref([`users`, `age`]), new Value(18)])
+      const arg = new Func(`gt`, [new PropRef([`users`, `age`]), new Value(18)])
       const namespacedRow = { users: { age: 25 } }
 
       const result = processArgument(arg, namespacedRow)
@@ -143,8 +143,8 @@ describe(`select compiler`, () => {
 
     it(`processes mathematical function expressions`, () => {
       const arg = new Func(`add`, [
-        new Ref([`order`, `subtotal`]),
-        new Ref([`order`, `tax`]),
+        new PropRef([`order`, `subtotal`]),
+        new PropRef([`order`, `tax`]),
       ])
       const namespacedRow = {
         order: {
@@ -166,11 +166,11 @@ describe(`select compiler`, () => {
       // through the processArgument function's error handling.
 
       const aggregateExpressions = [
-        new Aggregate(`count`, [new Ref([`users`, `id`])]),
-        new Aggregate(`sum`, [new Ref([`orders`, `amount`])]),
-        new Aggregate(`avg`, [new Ref([`products`, `price`])]),
-        new Aggregate(`min`, [new Ref([`dates`, `created`])]),
-        new Aggregate(`max`, [new Ref([`dates`, `updated`])]),
+        new Aggregate(`count`, [new PropRef([`users`, `id`])]),
+        new Aggregate(`sum`, [new PropRef([`orders`, `amount`])]),
+        new Aggregate(`avg`, [new PropRef([`products`, `price`])]),
+        new Aggregate(`min`, [new PropRef([`dates`, `created`])]),
+        new Aggregate(`max`, [new PropRef([`dates`, `updated`])]),
       ]
 
       const namespacedRow = {
@@ -190,10 +190,10 @@ describe(`select compiler`, () => {
 
     it(`correctly identifies non-aggregate expressions`, () => {
       const nonAggregateExpressions = [
-        new Ref([`users`, `name`]),
+        new PropRef([`users`, `name`]),
         new Value(42),
         new Func(`upper`, [new Value(`hello`)]),
-        new Func(`length`, [new Ref([`users`, `name`])]),
+        new Func(`length`, [new PropRef([`users`, `name`])]),
       ]
 
       const namespacedRow = { users: { name: `John` } }
