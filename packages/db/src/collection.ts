@@ -6,13 +6,13 @@ import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
-  CollectionInsertInput,
   CollectionStatus,
   Fn,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
+  ResolveInsertInput,
   ResolveType,
   StandardSchema,
   Transaction as TransactionType,
@@ -21,10 +21,7 @@ import type {
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Store collections in memory
-export const collectionsStore = new Map<
-  string,
-  CollectionImpl<any, any, any, any, any>
->()
+export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -36,16 +33,14 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
- * @template TSchema - The schema type for validation and type inference
+ * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
  */
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TExplicit = unknown,
-  TFallback extends object = Record<string, unknown>,
-> extends CollectionImpl<T, TKey, TSchema, TExplicit, TFallback> {
+  TInsertInput extends object = T,
+> extends CollectionImpl<T, TKey, TInsertInput> {
   readonly utils: TUtils
 }
 
@@ -98,16 +93,12 @@ export function createCollection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
-  TSchema,
-  TExplicit,
-  TFallback
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
 > {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    TSchema,
-    TExplicit,
-    TFallback
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   >(options)
 
   // Copy utils to both top level and .utils namespace
@@ -121,9 +112,7 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TUtils,
-    TSchema,
-    TExplicit,
-    TFallback
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   >
 }
 
@@ -159,11 +148,9 @@ export class SchemaValidationError extends Error {
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TExplicit = unknown,
-  TFallback extends object = Record<string, unknown>,
+  TInsertInput extends object = T,
 > {
-  public config: CollectionConfig<T, TKey, TSchema>
+  public config: CollectionConfig<T, TKey, any>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -289,7 +276,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, TSchema>) {
+  constructor(config: CollectionConfig<T, TKey, any>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)
@@ -1279,7 +1266,7 @@ export class CollectionImpl<
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
   insert = (
-    data: CollectionInsertInput<TExplicit, TSchema, TFallback>,
+    data: TInsertInput | Array<TInsertInput>,
     config?: InsertConfig
   ) => {
     this.validateCollectionUsable(`insert`)
@@ -1293,13 +1280,7 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<
-      PendingMutation<
-        T,
-        `insert`,
-        CollectionInsertInput<TExplicit, TSchema, TFallback>
-      >
-    > = []
+    const mutations: Array<PendingMutation<T, `insert`, TInsertInput>> = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -1313,11 +1294,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<
-        T,
-        `insert`,
-        CollectionInsertInput<TExplicit, TSchema, TFallback>
-      > = {
+      const mutation: PendingMutation<T, `insert`, TInsertInput> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -1329,7 +1306,7 @@ export class CollectionImpl<
             k,
             validatedData[k as keyof typeof validatedData],
           ])
-        ) as CollectionInsertInput<TExplicit, TSchema, TFallback>,
+        ) as TInsertInput,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
