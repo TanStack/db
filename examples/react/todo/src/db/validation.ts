@@ -1,16 +1,34 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
+import { z } from "zod"
 import { config, todos } from "./schema"
-import type { z } from "zod"
 
-// Auto-generated schemas from Drizzle schema
-export const insertTodoSchema = createInsertSchema(todos)
+// Date transformation schema - handles Date objects, ISO strings, and parseable date strings
+const dateStringToDate = z
+  .union([
+    z.date(), // Already a Date object
+    z
+      .string()
+      .datetime()
+      .transform((str) => new Date(str)), // ISO datetime string
+    z.string().transform((str) => new Date(str)), // Any parseable date string
+  ])
+  .optional()
+
+// Auto-generated schemas from Drizzle schema with date transformation
+export const insertTodoSchema = createInsertSchema(todos, {
+  created_at: dateStringToDate,
+  updated_at: dateStringToDate,
+})
 export const selectTodoSchema = createSelectSchema(todos)
 
 // Partial schema for updates
 export const updateTodoSchema = insertTodoSchema.partial().strict()
 
-// Config schemas
-export const insertConfigSchema = createInsertSchema(config).strict()
+// Config schemas with date transformation
+export const insertConfigSchema = createInsertSchema(config, {
+  created_at: dateStringToDate,
+  updated_at: dateStringToDate,
+}).strict()
 export const selectConfigSchema = createSelectSchema(config)
 export const updateConfigSchema = insertConfigSchema.partial().strict()
 
@@ -25,10 +43,11 @@ export type UpdateConfig = z.infer<typeof updateConfigSchema>
 
 // Validation functions
 export const validateInsertTodo = (data: unknown): InsertTodo => {
-  if (data.text === `really hard todo`) {
+  const parsed = insertTodoSchema.parse(data)
+  if (parsed.text === `really hard todo`) {
     throw new Error(`we don't want to do really hard todos`)
   }
-  return insertTodoSchema.parse(data)
+  return parsed
 }
 
 export const validateSelectTodo = (data: unknown): SelectTodo => {

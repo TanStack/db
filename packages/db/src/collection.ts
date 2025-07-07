@@ -1,7 +1,7 @@
-import { Store } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { Transaction, getActiveTransaction } from "./transactions"
+import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -172,8 +172,8 @@ export class CollectionImpl<
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
-  public derivedUpserts = new Map<TKey, T>()
-  public derivedDeletes = new Set<TKey>()
+  public optimisticUpserts = new Map<TKey, T>()
+  public optimisticDeletes = new Set<TKey>()
 
   // Cached size for performance
   private _size = 0
@@ -195,6 +195,10 @@ export class CollectionImpl<
 
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
+
+  // Event batching for preventing duplicate emissions during transaction flows
+  private batchedEvents: Array<ChangeMessage<T, TKey>> = []
+  private shouldBatchEvents = false
 
   // Lifecycle management
   private _status: CollectionStatus = `idle`
@@ -301,8 +305,8 @@ export class CollectionImpl<
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactions = new SortedMap<string, Transaction<any>>(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
+      a.compareCreatedAt(b)
     )
 
     this.config = config
@@ -401,12 +405,15 @@ export class CollectionImpl<
           }
 
           pendingTransaction.committed = true
-          this.commitPendingTransactions()
 
-          // Update status to ready after first commit
+          // Update status to ready
+          // We do this before committing as we want the events from the changes to
+          // be from a "ready" state.
           if (this._status === `loading`) {
             this.setStatus(`ready`)
           }
+
+          this.commitPendingTransactions()
         },
       })
 
@@ -496,14 +503,16 @@ export class CollectionImpl<
     // Clear data
     this.syncedData.clear()
     this.syncedMetadata.clear()
-    this.derivedUpserts.clear()
-    this.derivedDeletes.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
     this._size = 0
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
     this.hasReceivedFirstCommit = false
     this.onFirstCommitCallbacks = []
     this.preloadPromise = null
+    this.batchedEvents = []
+    this.shouldBatchEvents = false
 
     // Update status
     this.setStatus(`cleaned-up`)
@@ -577,12 +586,12 @@ export class CollectionImpl<
       return
     }
 
-    const previousState = new Map(this.derivedUpserts)
-    const previousDeletes = new Set(this.derivedDeletes)
+    const previousState = new Map(this.optimisticUpserts)
+    const previousDeletes = new Set(this.optimisticDeletes)
 
     // Clear current optimistic state
-    this.derivedUpserts.clear()
-    this.derivedDeletes.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
 
     const activeTransactions: Array<Transaction<any>> = []
     const completedTransactions: Array<Transaction<any>> = []
@@ -602,12 +611,12 @@ export class CollectionImpl<
           switch (mutation.type) {
             case `insert`:
             case `update`:
-              this.derivedUpserts.set(mutation.key, mutation.modified as T)
-              this.derivedDeletes.delete(mutation.key)
+              this.optimisticUpserts.set(mutation.key, mutation.modified as T)
+              this.optimisticDeletes.delete(mutation.key)
               break
             case `delete`:
-              this.derivedUpserts.delete(mutation.key)
-              this.derivedDeletes.add(mutation.key)
+              this.optimisticUpserts.delete(mutation.key)
+              this.optimisticDeletes.add(mutation.key)
               break
           }
         }
@@ -680,10 +689,10 @@ export class CollectionImpl<
    */
   private calculateSize(): number {
     const syncedSize = this.syncedData.size
-    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
+    const deletesFromSynced = Array.from(this.optimisticDeletes).filter(
+      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key)
     ).length
-    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
+    const upsertsNotInSynced = Array.from(this.optimisticUpserts.keys()).filter(
       (key) => !this.syncedData.has(key)
     ).length
 
@@ -700,9 +709,9 @@ export class CollectionImpl<
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
-      ...this.derivedUpserts.keys(),
+      ...this.optimisticUpserts.keys(),
       ...previousDeletes,
-      ...this.derivedDeletes,
+      ...this.optimisticDeletes,
     ])
 
     for (const key of allKeys) {
@@ -750,34 +759,55 @@ export class CollectionImpl<
   }
 
   /**
-   * Emit multiple events at once to all listeners
+   * Emit events either immediately or batch them for later emission
    */
-  private emitEvents(changes: Array<ChangeMessage<T, TKey>>): void {
-    if (changes.length > 0) {
-      // Emit to general listeners
-      for (const listener of this.changeListeners) {
-        listener(changes)
+  private emitEvents(
+    changes: Array<ChangeMessage<T, TKey>>,
+    endBatching = false
+  ): void {
+    if (this.shouldBatchEvents && !endBatching) {
+      // Add events to the batch
+      this.batchedEvents.push(...changes)
+      return
+    }
+
+    // Either we're not batching, or we're ending the batching cycle
+    let eventsToEmit = changes
+
+    if (endBatching) {
+      // End batching: combine any batched events with new events and clean up state
+      if (this.batchedEvents.length > 0) {
+        eventsToEmit = [...this.batchedEvents, ...changes]
+      }
+      this.batchedEvents = []
+      this.shouldBatchEvents = false
+    }
+
+    if (eventsToEmit.length === 0) return
+
+    // Emit to all listeners
+    for (const listener of this.changeListeners) {
+      listener(eventsToEmit)
+    }
+
+    // Emit to key-specific listeners
+    if (this.changeKeyListeners.size > 0) {
+      // Group changes by key, but only for keys that have listeners
+      const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+      for (const change of eventsToEmit) {
+        if (this.changeKeyListeners.has(change.key)) {
+          if (!changesByKey.has(change.key)) {
+            changesByKey.set(change.key, [])
+          }
+          changesByKey.get(change.key)!.push(change)
+        }
       }
 
-      // Emit to key-specific listeners
-      if (this.changeKeyListeners.size > 0) {
-        // Group changes by key, but only for keys that have listeners
-        const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
-        for (const change of changes) {
-          if (this.changeKeyListeners.has(change.key)) {
-            if (!changesByKey.has(change.key)) {
-              changesByKey.set(change.key, [])
-            }
-            changesByKey.get(change.key)!.push(change)
-          }
-        }
-
-        // Emit batched changes to each key's listeners
-        for (const [key, keyChanges] of changesByKey) {
-          const keyListeners = this.changeKeyListeners.get(key)!
-          for (const listener of keyListeners) {
-            listener(keyChanges)
-          }
+      // Emit batched changes to each key's listeners
+      for (const [key, keyChanges] of changesByKey) {
+        const keyListeners = this.changeKeyListeners.get(key)!
+        for (const listener of keyListeners) {
+          listener(keyChanges)
         }
       }
     }
@@ -788,13 +818,13 @@ export class CollectionImpl<
    */
   public get(key: TKey): T | undefined {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return undefined
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
-      return this.derivedUpserts.get(key)
+    if (this.optimisticUpserts.has(key)) {
+      return this.optimisticUpserts.get(key)
     }
 
     // Fall back to synced data
@@ -806,12 +836,12 @@ export class CollectionImpl<
    */
   public has(key: TKey): boolean {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return false
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
+    if (this.optimisticUpserts.has(key)) {
       return true
     }
 
@@ -832,14 +862,14 @@ export class CollectionImpl<
   public *keys(): IterableIterator<TKey> {
     // Yield keys from synced data, skipping any that are deleted.
     for (const key of this.syncedData.keys()) {
-      if (!this.derivedDeletes.has(key)) {
+      if (!this.optimisticDeletes.has(key)) {
         yield key
       }
     }
     // Yield keys from upserts that were not already in synced data.
-    for (const key of this.derivedUpserts.keys()) {
-      if (!this.syncedData.has(key) && !this.derivedDeletes.has(key)) {
-        // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
+    for (const key of this.optimisticUpserts.keys()) {
+      if (!this.syncedData.has(key) && !this.optimisticDeletes.has(key)) {
+        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
         // but it's safer to keep it.
         yield key
       }
@@ -853,10 +883,7 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield copy as T
+        yield value
       }
     }
   }
@@ -868,12 +895,44 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield [key, copy as T]
+        yield [key, value]
       }
     }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *[Symbol.iterator](): IterableIterator<[TKey, T]> {
+    for (const [key, value] of this.entries()) {
+      yield [key, value]
+    }
+  }
+
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  public forEach(
+    callbackfn: (value: T, key: TKey, index: number) => void
+  ): void {
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
+  }
+
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  public map<U>(
+    callbackfn: (value: T, key: TKey, index: number) => U
+  ): Array<U> {
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   /**
@@ -917,6 +976,7 @@ export class CollectionImpl<
       }
 
       const events: Array<ChangeMessage<T, TKey>> = []
+      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
@@ -949,12 +1009,16 @@ export class CollectionImpl<
               this.syncedData.set(key, operation.value)
               break
             case `update`: {
-              const updatedValue = Object.assign(
-                {},
-                this.syncedData.get(key),
-                operation.value
-              )
-              this.syncedData.set(key, updatedValue)
+              if (rowUpdateMode === `partial`) {
+                const updatedValue = Object.assign(
+                  {},
+                  this.syncedData.get(key),
+                  operation.value
+                )
+                this.syncedData.set(key, updatedValue)
+              } else {
+                this.syncedData.set(key, operation.value)
+              }
               break
             }
             case `delete`:
@@ -965,8 +1029,8 @@ export class CollectionImpl<
       }
 
       // Clear optimistic state since sync operations will now provide the authoritative data
-      this.derivedUpserts.clear()
-      this.derivedDeletes.clear()
+      this.optimisticUpserts.clear()
+      this.optimisticDeletes.clear()
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
@@ -977,12 +1041,15 @@ export class CollectionImpl<
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
-                  this.derivedUpserts.set(mutation.key, mutation.modified as T)
-                  this.derivedDeletes.delete(mutation.key)
+                  this.optimisticUpserts.set(
+                    mutation.key,
+                    mutation.modified as T
+                  )
+                  this.optimisticDeletes.delete(mutation.key)
                   break
                 case `delete`:
-                  this.derivedUpserts.delete(mutation.key)
-                  this.derivedDeletes.add(mutation.key)
+                  this.optimisticUpserts.delete(mutation.key)
+                  this.optimisticDeletes.add(mutation.key)
                   break
               }
             }
@@ -1055,8 +1122,8 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
-      // Emit all events at once
-      this.emitEvents(events)
+      // End batching and emit all events (combines any batched events with sync events)
+      this.emitEvents(events, true)
 
       this.pendingSyncedTransactions = []
 
@@ -1286,7 +1353,7 @@ export class CollectionImpl<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = new Transaction<T>({
+      const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(params)
@@ -1488,7 +1555,7 @@ export class CollectionImpl<
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      const emptyTransaction = new Transaction({
+      const emptyTransaction = createTransaction({
         mutationFn: async () => {},
       })
       emptyTransaction.commit()
@@ -1508,7 +1575,7 @@ export class CollectionImpl<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction
         return this.config.onUpdate!(params)
@@ -1603,7 +1670,7 @@ export class CollectionImpl<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction
@@ -1660,19 +1727,7 @@ export class CollectionImpl<
    * @returns An Array containing all items in the collection
    */
   get toArray() {
-    const array = Array.from(this.values())
-
-    // Currently a query with an orderBy will add a _orderByIndex to the items
-    // so for now we need to sort the array by _orderByIndex if it exists
-    // TODO: in the future it would be much better is the keys are sorted - this
-    // should be done by the query engine.
-    if (array[0] && (array[0] as { _orderByIndex?: number })._orderByIndex) {
-      return (array as Array<{ _orderByIndex: number }>).sort(
-        (a, b) => a._orderByIndex - b._orderByIndex
-      ) as Array<T>
-    }
-
-    return array
+    return Array.from(this.values())
   }
 
   /**
@@ -1811,45 +1866,13 @@ export class CollectionImpl<
    * This method should be called by the Transaction class when state changes
    */
   public onTransactionStateChange(): void {
+    // Check if commitPendingTransactions will be called after this
+    // by checking if there are pending sync transactions (same logic as in transactions.ts)
+    this.shouldBatchEvents = this.pendingSyncedTransactions.length > 0
+
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()
 
     this.recomputeOptimisticState()
-  }
-
-  private _storeMap: Store<Map<TKey, T>> | undefined
-
-  /**
-   * Returns a Tanstack Store Map that is updated when the collection changes
-   * This is a temporary solution to enable the existing framework hooks to work
-   * with the new internals of Collection until they are rewritten.
-   * TODO: Remove this once the framework hooks are rewritten.
-   */
-  public asStoreMap(): Store<Map<TKey, T>> {
-    if (!this._storeMap) {
-      this._storeMap = new Store(new Map(this.entries()))
-      this.changeListeners.add(() => {
-        this._storeMap!.setState(() => new Map(this.entries()))
-      })
-    }
-    return this._storeMap
-  }
-
-  private _storeArray: Store<Array<T>> | undefined
-
-  /**
-   * Returns a Tanstack Store Array that is updated when the collection changes
-   * This is a temporary solution to enable the existing framework hooks to work
-   * with the new internals of Collection until they are rewritten.
-   * TODO: Remove this once the framework hooks are rewritten.
-   */
-  public asStoreArray(): Store<Array<T>> {
-    if (!this._storeArray) {
-      this._storeArray = new Store(this.toArray)
-      this.changeListeners.add(() => {
-        this._storeArray!.setState(() => this.toArray)
-      })
-    }
-    return this._storeArray
   }
 }

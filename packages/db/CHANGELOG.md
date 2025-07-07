@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.0.15
+
+### Patch Changes
+
+- add a sequence number to transactions to when sorting we can ensure that those created in the same ms are sorted in the correct order ([#230](https://github.com/TanStack/db/pull/230))
+
+- Ensure that all transactions are given an id, fixes a potential bug with direct mutations ([#230](https://github.com/TanStack/db/pull/230))
+
+## 0.0.14
+
+### Patch Changes
+
+- fixed the types on the onInsert/Update/Delete transactions ([#218](https://github.com/TanStack/db/pull/218))
+
 ## 0.0.13
 
 ### Patch Changes

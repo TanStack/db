@@ -212,7 +212,7 @@ describe(`Collection.subscribeChanges`, () => {
     unsubscribe()
   })
 
-  it(`should emit changes from optimistic operations`, async () => {
+  it(`should emit changes from optimistic operations`, () => {
     const emitter = mitt()
     const callback = vi.fn()
 
@@ -293,8 +293,6 @@ describe(`Collection.subscribeChanges`, () => {
         draft.updated = true
       })
     )
-
-    await waitForChanges()
 
     // Verify that update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
