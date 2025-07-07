@@ -139,6 +139,10 @@ export type RefProxyFor<T> = OmitRefProxy<
         : RefProxy<T>
 >
 
+// This is the public type that is exported from the query builder
+// and is used when constructing reusable query callbacks.
+export type Ref<T> = RefProxyFor<T>
+
 type OmitRefProxy<T> = Omit<T, `__refProxy` | `__path` | `__type`>
 
 // The core RefProxy interface

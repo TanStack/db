@@ -1,11 +1,11 @@
 {
   "name": "@tanstack/db-example-react-todo",
   "private": true,
-  "version": "0.0.20",
+  "version": "0.0.22",
   "dependencies": {
-    "@tanstack/db-collections": "^0.0.18",
+    "@tanstack/db-collections": "^0.0.20",
     "@tanstack/query-core": "^5.75.7",
-    "@tanstack/react-db": "^0.0.14",
+    "@tanstack/react-db": "^0.0.16",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",

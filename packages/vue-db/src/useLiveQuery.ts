@@ -3,7 +3,6 @@ import {
   getCurrentInstance,
   onUnmounted,
   reactive,
-  ref,
   toValue,
   watchEffect,
 } from "vue"
@@ -23,7 +22,6 @@ export interface UseLiveQueryReturn<T extends object> {
   state: ComputedRef<Map<string | number, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, string | number, {}>>
-  isReady: ComputedRef<boolean>
 }
 
 export interface UseLiveQueryReturnWithCollection<
@@ -34,7 +32,6 @@ export interface UseLiveQueryReturnWithCollection<
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
-  isReady: ComputedRef<boolean>
 }
 
 // Overload 1: Accept just the query function
@@ -117,9 +114,6 @@ export function useLiveQuery(
   // Computed wrapper for the data to match expected return type
   const data = computed(() => internalData)
 
-  // Track collection status reactively
-  const status = ref(collection.value.status)
-
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>
@@ -134,9 +128,6 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
-
-    // Update status ref whenever the effect runs
-    status.value = currentCollection.status
 
     // Clean up previous subscription
     if (currentUnsubscribe) {
@@ -170,8 +161,6 @@ export function useLiveQuery(
 
         // Update the data array to maintain sorted order
         syncDataFromCollection(currentCollection)
-        // Update status ref on every change
-        status.value = currentCollection.status
       }
     )
 
@@ -203,8 +192,5 @@ export function useLiveQuery(
     state: computed(() => state),
     data,
     collection: computed(() => collection.value),
-    isReady: computed(
-      () => status.value === `ready` || status.value === `initialCommit`
-    ),
   }
 }

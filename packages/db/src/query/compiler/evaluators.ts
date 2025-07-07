@@ -1,4 +1,4 @@
-import type { BasicExpression, Func, Ref } from "../ir.js"
+import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
 /**
@@ -36,7 +36,7 @@ export function compileExpression(expr: BasicExpression): CompiledExpression {
 /**
  * Compiles a reference expression into an optimized evaluator
  */
-function compileRef(ref: Ref): CompiledExpression {
+function compileRef(ref: PropRef): CompiledExpression {
   const [tableAlias, ...propertyPath] = ref.path
 
   if (!tableAlias) {

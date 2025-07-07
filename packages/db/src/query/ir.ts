@@ -84,7 +84,7 @@ export class QueryRef extends BaseExpression {
   }
 }
 
-export class Ref<T = any> extends BaseExpression<T> {
+export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
   constructor(
     public path: Array<string> // path to the property in the collection, with the alias as the first element
@@ -115,7 +115,7 @@ export class Func<T = any> extends BaseExpression<T> {
 // This is the basic expression type that is used in the majority of expression
 // builder callbacks (select, where, groupBy, having, orderBy, etc.)
 // it doesn't include aggregate functions as those are only used in the select clause
-export type BasicExpression<T = any> = Ref<T> | Value<T> | Func<T>
+export type BasicExpression<T = any> = PropRef<T> | Value<T> | Func<T>
 
 export class Aggregate<T = any> extends BaseExpression<T> {
   public type = `agg` as const

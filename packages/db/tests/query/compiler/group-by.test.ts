@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Aggregate, Func, Ref, Value } from "../../../src/query/ir.js"
+import { Aggregate, Func, PropRef, Value } from "../../../src/query/ir.js"
 
 // Import the validation function that we want to test directly
 // Since we can't easily mock the D2 streams, we'll test the validation logic separately
@@ -56,10 +56,10 @@ describe(`group-by compiler`, () => {
   describe(`validation logic`, () => {
     describe(`validation errors`, () => {
       it(`throws error when non-aggregate SELECT expression is not in GROUP BY`, () => {
-        const groupByClause = [new Ref([`users`, `department`])]
+        const groupByClause = [new PropRef([`users`, `department`])]
         const selectClause = {
-          department: new Ref([`users`, `department`]),
-          invalidField: new Ref([`users`, `name`]), // This is not in GROUP BY
+          department: new PropRef([`users`, `department`]),
+          invalidField: new PropRef([`users`, `name`]), // This is not in GROUP BY
         }
 
         expect(() => {
@@ -70,11 +70,11 @@ describe(`group-by compiler`, () => {
       })
 
       it(`allows aggregate expressions in SELECT without GROUP BY requirement`, () => {
-        const groupByClause = [new Ref([`users`, `department`])]
+        const groupByClause = [new PropRef([`users`, `department`])]
         const selectClause = {
-          department: new Ref([`users`, `department`]),
-          count: new Aggregate(`count`, [new Ref([`users`, `id`])]),
-          avg_salary: new Aggregate(`avg`, [new Ref([`users`, `salary`])]),
+          department: new PropRef([`users`, `department`]),
+          count: new Aggregate(`count`, [new PropRef([`users`, `id`])]),
+          avg_salary: new Aggregate(`avg`, [new PropRef([`users`, `salary`])]),
         }
 
         // Should not throw
@@ -86,15 +86,15 @@ describe(`group-by compiler`, () => {
 
     describe(`expression equality`, () => {
       it(`correctly identifies equal ref expressions`, () => {
-        const expr1 = new Ref([`users`, `department`])
-        const expr2 = new Ref([`users`, `department`])
+        const expr1 = new PropRef([`users`, `department`])
+        const expr2 = new PropRef([`users`, `department`])
 
         expect(expressionsEqual(expr1, expr2)).toBe(true)
       })
 
       it(`correctly identifies different ref expressions`, () => {
-        const expr1 = new Ref([`users`, `department`])
-        const expr2 = new Ref([`users`, `name`])
+        const expr1 = new PropRef([`users`, `department`])
+        const expr2 = new PropRef([`users`, `name`])
 
         expect(expressionsEqual(expr1, expr2)).toBe(false)
       })
@@ -114,21 +114,21 @@ describe(`group-by compiler`, () => {
       })
 
       it(`correctly identifies equal function expressions`, () => {
-        const expr1 = new Func(`upper`, [new Ref([`users`, `name`])])
-        const expr2 = new Func(`upper`, [new Ref([`users`, `name`])])
+        const expr1 = new Func(`upper`, [new PropRef([`users`, `name`])])
+        const expr2 = new Func(`upper`, [new PropRef([`users`, `name`])])
 
         expect(expressionsEqual(expr1, expr2)).toBe(true)
       })
 
       it(`correctly identifies different function expressions`, () => {
-        const expr1 = new Func(`upper`, [new Ref([`users`, `name`])])
-        const expr2 = new Func(`lower`, [new Ref([`users`, `name`])])
+        const expr1 = new Func(`upper`, [new PropRef([`users`, `name`])])
+        const expr2 = new Func(`lower`, [new PropRef([`users`, `name`])])
 
         expect(expressionsEqual(expr1, expr2)).toBe(false)
       })
 
       it(`correctly identifies expressions of different types as not equal`, () => {
-        const expr1 = new Ref([`users`, `name`])
+        const expr1 = new PropRef([`users`, `name`])
         const expr2 = new Value(`name`)
 
         expect(expressionsEqual(expr1, expr2)).toBe(false)

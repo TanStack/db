@@ -1,7 +1,7 @@
 import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQuery } from "./compiler/index.js"
-import { buildQuery } from "./builder/index.js"
+import { buildQuery, getQueryIR } from "./builder/index.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection.js"
 import type {
@@ -55,7 +55,9 @@ export interface LiveQueryCollectionConfig<
   /**
    * Query builder function that defines the live query
    */
-  query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  query:
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | QueryBuilder<TContext>
 
   /**
    * Function to extract the key from result items
@@ -119,8 +121,11 @@ export function liveQueryCollectionOptions<
   // Generate a unique ID if not provided
   const id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
-  // Build the query using the provided query builder function
-  const query = buildQuery<TContext>(config.query)
+  // Build the query using the provided query builder function or instance
+  const query =
+    typeof config.query === `function`
+      ? buildQuery<TContext>(config.query)
+      : getQueryIR(config.query)
 
   // WeakMap to store the keys of the results so that we can retreve them in the
   // getKey function
@@ -157,8 +162,7 @@ export function liveQueryCollectionOptions<
 
   const allCollectionsReady = () => {
     return Object.values(collections).every(
-      (collection) =>
-        collection.status === `ready` || collection.status === `initialCommit`
+      (collection) => collection.status === `ready`
     )
   }
 
@@ -402,11 +406,11 @@ export function createLiveQueryCollection<
   if (typeof configOrQuery === `function`) {
     // Simple query function case
     const config: LiveQueryCollectionConfig<TContext, TResult> = {
-      query: configOrQuery,
+      query: configOrQuery as (
+        q: InitialQueryBuilder
+      ) => QueryBuilder<TContext>,
     }
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
-
-    // Use a bridge function that handles the type compatibility cleanly
     return bridgeToCreateCollection(options)
   } else {
     // Config object case
@@ -415,8 +419,6 @@ export function createLiveQueryCollection<
       TResult
     > & { utils?: TUtils }
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
-
-    // Use a bridge function that handles the type compatibility cleanly
     return bridgeToCreateCollection({
       ...options,
       utils: config.utils,

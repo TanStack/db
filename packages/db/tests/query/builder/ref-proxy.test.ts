@@ -5,7 +5,7 @@ import {
   toExpression,
   val,
 } from "../../../src/query/builder/ref-proxy.js"
-import { Ref, Value } from "../../../src/query/ir.js"
+import { PropRef, Value } from "../../../src/query/ir.js"
 
 describe(`ref-proxy`, () => {
   describe(`createRefProxy`, () => {
@@ -170,9 +170,9 @@ describe(`ref-proxy`, () => {
       const userIdProxy = proxy.users.id
 
       const expr = toExpression(userIdProxy)
-      expect(expr).toBeInstanceOf(Ref)
+      expect(expr).toBeInstanceOf(PropRef)
       expect(expr.type).toBe(`ref`)
-      expect((expr as Ref).path).toEqual([`users`, `id`])
+      expect((expr as PropRef).path).toEqual([`users`, `id`])
     })
 
     it(`converts literal values to Value expression`, () => {
@@ -183,7 +183,7 @@ describe(`ref-proxy`, () => {
     })
 
     it(`returns existing expressions unchanged`, () => {
-      const refExpr = new Ref([`users`, `id`])
+      const refExpr = new PropRef([`users`, `id`])
       const valExpr = new Value(42)
 
       expect(toExpression(refExpr)).toBe(refExpr)
