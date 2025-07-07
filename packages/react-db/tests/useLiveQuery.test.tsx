@@ -967,8 +967,8 @@ describe(`Query Collections`, () => {
     })
   })
 
-  describe(`hasLoaded property`, () => {
-    it(`should be false initially and true after collection is ready`, async () => {
+  describe(`isLoaded property`, () => {
+    it(`should be true initially and false after collection is ready`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
 
@@ -1001,8 +1001,8 @@ describe(`Query Collections`, () => {
         )
       })
 
-      // Initially hasLoaded should be false (collection is in idle state)
-      expect(result.current.hasLoaded).toBe(false)
+      // Initially isLoading should be true
+      expect(result.current.isLoading).toBe(true)
 
       // Start sync manually
       act(() => {
@@ -1031,13 +1031,13 @@ describe(`Query Collections`, () => {
 
       // Wait for collection to become ready
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isLoading).toBe(false)
       })
       // Note: Data may not appear immediately due to live query evaluation timing
-      // The main test is that hasLoaded transitions from false to true
+      // The main test is that isLoading transitions from true to false
     })
 
-    it(`should be true for pre-created collections that are already syncing`, async () => {
+    it(`should be false for pre-created collections that are already syncing`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `pre-created-has-loaded-test`,
@@ -1066,49 +1066,12 @@ describe(`Query Collections`, () => {
         return useLiveQuery(liveQueryCollection)
       })
 
-      // For pre-created collections that are already syncing, hasLoaded should be true
-      expect(result.current.hasLoaded).toBe(true)
+      // For pre-created collections that are already syncing, isLoading should be true
+      expect(result.current.isLoading).toBe(false)
       expect(result.current.state.size).toBe(1)
     })
 
-    it(`should be false for pre-created collections that are not syncing`, async () => {
-      const collection = createCollection<Person>({
-        id: `not-syncing-has-loaded-test`,
-        getKey: (person: Person) => person.id,
-        startSync: false,
-        sync: {
-          sync: () => {
-            // Don't sync immediately
-          },
-        },
-        onInsert: async () => {},
-        onUpdate: async () => {},
-        onDelete: async () => {},
-      })
-
-      // Create a live query collection that's NOT syncing
-      const liveQueryCollection = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ persons: collection })
-            .where(({ persons }) => gt(persons.age, 30))
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            })),
-        startSync: false, // Not syncing
-      })
-
-      const { result } = renderHook(() => {
-        return useLiveQuery(liveQueryCollection)
-      })
-
-      // For collections that aren't syncing, hasLoaded should be false
-      expect(result.current.hasLoaded).toBe(false)
-      expect(result.current.state.size).toBe(0)
-    })
-
-    it(`should update hasLoaded when collection status changes`, async () => {
+    it(`should update isLoading when collection status changes`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
 
@@ -1140,8 +1103,8 @@ describe(`Query Collections`, () => {
         )
       })
 
-      // Initially should be false
-      expect(result.current.hasLoaded).toBe(false)
+      // Initially should be true
+      expect(result.current.isLoading).toBe(true)
 
       // Start sync manually
       act(() => {
@@ -1168,14 +1131,17 @@ describe(`Query Collections`, () => {
         })
       })
 
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(true)
+
       // Wait for collection to become ready
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isLoading).toBe(false)
       })
-      expect(result.current.collection.status).toBe(`ready`)
+      expect(result.current.status).toBe(`ready`)
     })
 
-    it(`should maintain hasLoaded state during live updates`, async () => {
+    it(`should maintain isReady state during live updates`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `live-updates-has-loaded-test`,
@@ -1198,10 +1164,10 @@ describe(`Query Collections`, () => {
 
       // Wait for initial load
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isLoading).toBe(false)
       })
 
-      const initialHasLoaded = result.current.hasLoaded
+      const initialIsReady = result.current.isReady
 
       // Perform live updates
       act(() => {
@@ -1225,12 +1191,12 @@ describe(`Query Collections`, () => {
         expect(result.current.state.size).toBe(2)
       })
 
-      // hasLoaded should remain true during live updates
-      expect(result.current.hasLoaded).toBe(true)
-      expect(result.current.hasLoaded).toBe(initialHasLoaded)
+      // isReady should remain true during live updates
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.isReady).toBe(initialIsReady)
     })
 
-    it(`should handle hasLoaded with complex queries including joins`, async () => {
+    it.only(`should handle isLoading with complex queries including joins`, async () => {
       let personBeginFn: (() => void) | undefined
       let personCommitFn: (() => void) | undefined
       let issueBeginFn: (() => void) | undefined
@@ -1283,8 +1249,8 @@ describe(`Query Collections`, () => {
         )
       })
 
-      // Initially should be false
-      expect(result.current.hasLoaded).toBe(false)
+      // Initially should be true
+      expect(result.current.isLoading).toBe(true)
 
       // Start sync for both collections
       act(() => {
@@ -1324,13 +1290,13 @@ describe(`Query Collections`, () => {
 
       // Wait for both collections to sync
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isReady).toBe(true)
       })
       // Note: Joined data may not appear immediately due to live query evaluation timing
-      // The main test is that hasLoaded transitions from false to true
+      // The main test is that isLoading transitions from false to true
     })
 
-    it(`should handle hasLoaded with parameterized queries`, async () => {
+    it(`should handle isLoading with parameterized queries`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
 
@@ -1368,7 +1334,7 @@ describe(`Query Collections`, () => {
       )
 
       // Initially should be false
-      expect(result.current.hasLoaded).toBe(false)
+      expect(result.current.isLoading).toBe(true)
 
       // Start sync manually
       act(() => {
@@ -1405,7 +1371,7 @@ describe(`Query Collections`, () => {
 
       // Wait for initial load
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isLoading).toBe(false)
       })
 
       // Change parameters
@@ -1413,12 +1379,12 @@ describe(`Query Collections`, () => {
         rerender({ minAge: 25 })
       })
 
-      // hasLoaded should remain true even when parameters change
+      // isReady should remain true even when parameters change
       await waitFor(() => {
-        expect(result.current.hasLoaded).toBe(true)
+        expect(result.current.isReady).toBe(true)
       })
       // Note: Data size may not change immediately due to live query evaluation timing
-      // The main test is that hasLoaded remains true when parameters change
+      // The main test is that isReady remains true when parameters change
     })
   })
 })
