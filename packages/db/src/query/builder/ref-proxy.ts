@@ -1,4 +1,4 @@
-import { Ref, Value } from "../ir.js"
+import { PropRef, Value } from "../ir.js"
 import type { BasicExpression } from "../ir.js"
 
 export interface RefProxy<T = any> {
@@ -124,7 +124,7 @@ export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
-    return new Ref(value.__path)
+    return new PropRef(value.__path)
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (

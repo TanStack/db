@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, Func, Ref, Value } from "../../../src/query/ir.js"
+import { CollectionRef, Func, PropRef, Value } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection.js"
 
@@ -82,9 +82,9 @@ describe(`Query2 Compiler`, () => {
       const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
-          id: new Ref([`users`, `id`]),
-          name: new Ref([`users`, `name`]),
-          age: new Ref([`users`, `age`]),
+          id: new PropRef([`users`, `id`]),
+          name: new PropRef([`users`, `name`]),
+          age: new PropRef([`users`, `age`]),
         },
       }
 
@@ -150,11 +150,11 @@ describe(`Query2 Compiler`, () => {
       const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
-          id: new Ref([`users`, `id`]),
-          name: new Ref([`users`, `name`]),
-          age: new Ref([`users`, `age`]),
+          id: new PropRef([`users`, `id`]),
+          name: new PropRef([`users`, `name`]),
+          age: new PropRef([`users`, `age`]),
         },
-        where: [new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)])],
+        where: [new Func(`gt`, [new PropRef([`users`, `age`]), new Value(20)])],
       }
 
       const graph = new D2()
@@ -203,13 +203,13 @@ describe(`Query2 Compiler`, () => {
       const query: QueryIR = {
         from: new CollectionRef(usersCollection, `users`),
         select: {
-          id: new Ref([`users`, `id`]),
-          name: new Ref([`users`, `name`]),
+          id: new PropRef([`users`, `id`]),
+          name: new PropRef([`users`, `name`]),
         },
         where: [
           new Func(`and`, [
-            new Func(`gt`, [new Ref([`users`, `age`]), new Value(20)]),
-            new Func(`eq`, [new Ref([`users`, `active`]), new Value(true)]),
+            new Func(`gt`, [new PropRef([`users`, `age`]), new Value(20)]),
+            new Func(`eq`, [new PropRef([`users`, `active`]), new Value(true)]),
           ]),
         ],
       }

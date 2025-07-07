@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { compileExpression } from "../../../src/query/compiler/evaluators.js"
-import { Func, Ref, Value } from "../../../src/query/ir.js"
+import { Func, PropRef, Value } from "../../../src/query/ir.js"
 import type { NamespacedRow } from "../../../src/types.js"
 
 describe(`evaluators`, () => {
@@ -14,14 +14,14 @@ describe(`evaluators`, () => {
 
     describe(`ref compilation`, () => {
       it(`throws error for empty reference path`, () => {
-        const emptyRef = new Ref([])
+        const emptyRef = new PropRef([])
         expect(() => compileExpression(emptyRef)).toThrow(
           `Reference path cannot be empty`
         )
       })
 
       it(`handles simple table reference`, () => {
-        const ref = new Ref([`users`])
+        const ref = new PropRef([`users`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = { users: { id: 1, name: `John` } }
 
@@ -29,7 +29,7 @@ describe(`evaluators`, () => {
       })
 
       it(`handles single property access`, () => {
-        const ref = new Ref([`users`, `name`])
+        const ref = new PropRef([`users`, `name`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = { users: { id: 1, name: `John` } }
 
@@ -37,7 +37,7 @@ describe(`evaluators`, () => {
       })
 
       it(`handles single property access with undefined table`, () => {
-        const ref = new Ref([`users`, `name`])
+        const ref = new PropRef([`users`, `name`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = { users: undefined as any }
 
@@ -45,7 +45,7 @@ describe(`evaluators`, () => {
       })
 
       it(`handles multiple property navigation`, () => {
-        const ref = new Ref([`users`, `profile`, `bio`])
+        const ref = new PropRef([`users`, `profile`, `bio`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = {
           users: { profile: { bio: `Hello world` } },
@@ -55,7 +55,7 @@ describe(`evaluators`, () => {
       })
 
       it(`handles multiple property navigation with null value`, () => {
-        const ref = new Ref([`users`, `profile`, `bio`])
+        const ref = new PropRef([`users`, `profile`, `bio`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = { users: { profile: null } }
 
@@ -63,7 +63,7 @@ describe(`evaluators`, () => {
       })
 
       it(`handles multiple property navigation with undefined table`, () => {
-        const ref = new Ref([`users`, `profile`, `bio`])
+        const ref = new PropRef([`users`, `profile`, `bio`])
         const compiled = compileExpression(ref)
         const row: NamespacedRow = { users: undefined as any }
 

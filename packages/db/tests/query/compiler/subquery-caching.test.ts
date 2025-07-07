@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { D2 } from "@electric-sql/d2mini"
 import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, QueryRef, Ref } from "../../../src/query/ir.js"
+import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection.js"
 
@@ -16,8 +16,8 @@ describe(`Subquery Caching`, () => {
     const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
-        id: new Ref([`u`, `id`]),
-        name: new Ref([`u`, `name`]),
+        id: new PropRef([`u`, `id`]),
+        name: new PropRef([`u`, `name`]),
       },
     }
 
@@ -28,13 +28,13 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(subquery, `joined_users`), // Same subquery object reference
-          left: new Ref([`main_users`, `id`]),
-          right: new Ref([`joined_users`, `id`]),
+          left: new PropRef([`main_users`, `id`]),
+          right: new PropRef([`joined_users`, `id`]),
         },
       ],
       select: {
-        mainId: new Ref([`main_users`, `id`]),
-        joinedId: new Ref([`joined_users`, `id`]),
+        mainId: new PropRef([`main_users`, `id`]),
+        joinedId: new PropRef([`joined_users`, `id`]),
       },
     }
 
@@ -90,8 +90,8 @@ describe(`Subquery Caching`, () => {
     const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
-        id: new Ref([`u`, `id`]),
-        name: new Ref([`u`, `name`]),
+        id: new PropRef([`u`, `id`]),
+        name: new PropRef([`u`, `name`]),
       },
     }
 
@@ -120,16 +120,16 @@ describe(`Subquery Caching`, () => {
     const subquery1: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
-        id: new Ref([`u`, `id`]),
-        name: new Ref([`u`, `name`]),
+        id: new PropRef([`u`, `id`]),
+        name: new PropRef([`u`, `name`]),
       },
     }
 
     const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
-        id: new Ref([`u`, `id`]),
-        name: new Ref([`u`, `name`]),
+        id: new PropRef([`u`, `id`]),
+        name: new PropRef([`u`, `name`]),
       },
     }
 
@@ -163,7 +163,7 @@ describe(`Subquery Caching`, () => {
     const innerSubquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
       select: {
-        id: new Ref([`u`, `id`]),
+        id: new PropRef([`u`, `id`]),
       },
     }
 
@@ -173,8 +173,8 @@ describe(`Subquery Caching`, () => {
         {
           type: `left`,
           from: new QueryRef(innerSubquery, `inner2`), // Same innerSubquery
-          left: new Ref([`inner1`, `id`]),
-          right: new Ref([`inner2`, `id`]),
+          left: new PropRef([`inner1`, `id`]),
+          right: new PropRef([`inner2`, `id`]),
         },
       ],
     }
@@ -185,8 +185,8 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(innerSubquery, `direct`), // innerSubquery again at top level
-          left: new Ref([`middle`, `id`]),
-          right: new Ref([`direct`, `id`]),
+          left: new PropRef([`middle`, `id`]),
+          right: new PropRef([`direct`, `id`]),
         },
       ],
     }
