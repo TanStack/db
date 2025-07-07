@@ -381,6 +381,11 @@ function createElectricSync<T extends Row<unknown>>(
           if (transactionStarted) {
             commit()
             transactionStarted = false
+          } else {
+            // If the shape is empty, do an empty commit to move the collection status
+            // to ready.
+            begin()
+            commit()
           }
 
           // Always commit txids when we receive up-to-date, regardless of transaction state

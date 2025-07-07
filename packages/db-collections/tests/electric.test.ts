@@ -62,6 +62,20 @@ describe(`Electric Integration`, () => {
     >(options)
   })
 
+  it(`should commit an empty transaction when there's an up-to-date`, () => {
+    expect(collection.status).toEqual(`loading`)
+    expect(collection.state).toEqual(new Map([]))
+
+    // Send up-to-date control message to commit transaction
+    subscriber([
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+    expect(collection.state).toEqual(new Map([]))
+    expect(collection.status).toEqual(`ready`)
+  })
+
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
     // Simulate incoming insert message
     subscriber([
@@ -71,6 +85,7 @@ describe(`Electric Integration`, () => {
         headers: { operation: `insert` },
       },
     ])
+    expect(collection.state).toEqual(new Map([]))
 
     // Send up-to-date control message to commit transaction
     subscriber([
@@ -103,12 +118,16 @@ describe(`Electric Integration`, () => {
       },
     ])
 
+    expect(collection.state).toEqual(new Map([]))
+    expect(collection.status).toEqual(`loading`)
+
     // Send up-to-date to commit all changes
     subscriber([
       {
         headers: { control: `up-to-date` },
       },
     ])
+    expect(collection.status).toEqual(`ready`)
 
     expect(collection.state).toEqual(
       new Map([
