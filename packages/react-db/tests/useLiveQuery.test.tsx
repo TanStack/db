@@ -1196,7 +1196,7 @@ describe(`Query Collections`, () => {
       expect(result.current.isReady).toBe(initialIsReady)
     })
 
-    it.only(`should handle isLoading with complex queries including joins`, async () => {
+    it(`should handle isLoading with complex queries including joins`, async () => {
       let personBeginFn: (() => void) | undefined
       let personCommitFn: (() => void) | undefined
       let issueBeginFn: (() => void) | undefined
