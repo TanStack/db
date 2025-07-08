@@ -53,12 +53,50 @@ export interface Collection<
  * @returns A new Collection with utilities exposed both at top level and under .utils
  *
  * @example
- * // Using explicit type
+ * // Pattern 1: With operation handlers (direct collection calls)
+ * const todos = createCollection<Todo>({
+ *   id: "todos",
+ *   getKey: (todo) => todo.id,
+ *   onInsert: async ({ transaction, collection }) => {
+ *     // Send to API
+ *     await api.createTodo(transaction.mutations[0].modified)
+ *   },
+ *   onUpdate: async ({ transaction, collection }) => {
+ *     await api.updateTodo(transaction.mutations[0].modified)
+ *   },
+ *   onDelete: async ({ transaction, collection }) => {
+ *     await api.deleteTodo(transaction.mutations[0].key)
+ *   },
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Direct usage (handlers manage transactions)
+ * const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
+ * await tx.isPersisted.promise
+ *
+ * @example
+ * // Pattern 2: Manual transaction management
  * const todos = createCollection<Todo>({
  *   getKey: (todo) => todo.id,
  *   sync: { sync: () => {} }
  * })
  *
+ * // Explicit transaction usage
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Handle all mutations in transaction
+ *     await api.saveChanges(transaction.mutations)
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   todos.insert({ id: "1", text: "Buy milk" })
+ *   todos.update("2", draft => { draft.completed = true })
+ * })
+ *
+ * await tx.isPersisted.promise
+ *
+ * @example
  * // Using schema for type inference (preferred as it also gives you client side validation)
  * const todoSchema = z.object({
  *   id: z.string(),
@@ -138,6 +176,7 @@ export class SchemaValidationError extends Error {
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
 > {
   public config: CollectionConfig<T, TKey, any>
 
@@ -187,6 +226,11 @@ export class CollectionImpl<
    * Register a callback to be executed on the next commit
    * Useful for preloading collections
    * @param callback Function to call after the next commit
+   * @example
+   * collection.onFirstCommit(() => {
+   *   console.log('Collection has received first data')
+   *   // Safe to access collection.state now
+   * })
    */
   public onFirstCommit(callback: () => void): void {
     this.onFirstCommitCallbacks.push(callback)
@@ -1243,21 +1287,38 @@ export class CollectionImpl<
   /**
    * Inserts one or more items into the collection
    * @param items - Single item or array of items to insert
-   * @param config - Optional configuration including metadata and custom keys
-   * @returns A TransactionType object representing the insert operation(s)
+   * @param config - Optional configuration including metadata
+   * @returns A Transaction object representing the insert operation(s)
    * @throws {SchemaValidationError} If the data fails schema validation
    * @example
-   * // Insert a single item
-   * insert({ text: "Buy groceries", completed: false })
+   * // Insert a single todo (requires onInsert handler)
+   * const tx = collection.insert({ id: "1", text: "Buy milk", completed: false })
+   * await tx.isPersisted.promise
    *
-   * // Insert multiple items
-   * insert([
-   *   { text: "Buy groceries", completed: false },
-   *   { text: "Walk dog", completed: false }
+   * @example
+   * // Insert multiple todos at once
+   * const tx = collection.insert([
+   *   { id: "1", text: "Buy milk", completed: false },
+   *   { id: "2", text: "Walk dog", completed: true }
    * ])
+   * await tx.isPersisted.promise
    *
-   * // Insert with custom key
-   * insert({ text: "Buy groceries" }, { key: "grocery-task" })
+   * @example
+   * // Insert with metadata
+   * const tx = collection.insert({ id: "1", text: "Buy groceries" },
+   *   { metadata: { source: "mobile-app" } }
+   * )
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.insert({ id: "1", text: "New item" })
+   *   await tx.isPersisted.promise
+   *   console.log('Insert successful')
+   * } catch (error) {
+   *   console.log('Insert failed:', error)
+   * }
    */
   insert = (data: T | Array<T>, config?: InsertConfig) => {
     this.validateCollectionUsable(`insert`)
@@ -1316,8 +1377,11 @@ export class CollectionImpl<
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
-          // Call the onInsert handler with the transaction
-          return this.config.onInsert!(params)
+          // Call the onInsert handler with the transaction and collection
+          return this.config.onInsert!({
+            ...params,
+            collection: this as unknown as Collection<T, TKey, TUtils>,
+          })
         },
       })
 
@@ -1335,43 +1399,44 @@ export class CollectionImpl<
 
   /**
    * Updates one or more items in the collection using a callback function
-   * @param items - Single item/key or array of items/keys to update
+   * @param keys - Single key or array of keys to update
    * @param configOrCallback - Either update configuration or update callback
    * @param maybeCallback - Update callback if config was provided
    * @returns A Transaction object representing the update operation(s)
    * @throws {SchemaValidationError} If the updated data fails schema validation
    * @example
-   * // Update a single item
-   * update(todo, (draft) => { draft.completed = true })
+   * // Update single item by key
+   * const tx = collection.update("todo-1", (draft) => {
+   *   draft.completed = true
+   * })
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Update multiple items
-   * update([todo1, todo2], (drafts) => {
+   * const tx = collection.update(["todo-1", "todo-2"], (drafts) => {
    *   drafts.forEach(draft => { draft.completed = true })
    * })
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Update with metadata
-   * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
+   * const tx = collection.update("todo-1",
+   *   { metadata: { reason: "user update" } },
+   *   (draft) => { draft.text = "Updated text" }
+   * )
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.update("item-1", draft => { draft.value = "new" })
+   *   await tx.isPersisted.promise
+   *   console.log('Update successful')
+   * } catch (error) {
+   *   console.log('Update failed:', error)
+   * }
    */
 
-  /**
-   * Updates one or more items in the collection using a callback function
-   * @param ids - Single ID or array of IDs to update
-   * @param configOrCallback - Either update configuration or update callback
-   * @param maybeCallback - Update callback if config was provided
-   * @returns A Transaction object representing the update operation(s)
-   * @throws {SchemaValidationError} If the updated data fails schema validation
-   * @example
-   * // Update a single item
-   * update("todo-1", (draft) => { draft.completed = true })
-   *
-   * // Update multiple items
-   * update(["todo-1", "todo-2"], (drafts) => {
-   *   drafts.forEach(draft => { draft.completed = true })
-   * })
-   *
-   * // Update with metadata
-   * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
-   */
   // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
@@ -1538,8 +1603,11 @@ export class CollectionImpl<
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = createTransaction<T>({
       mutationFn: async (params) => {
-        // Call the onUpdate handler with the transaction
-        return this.config.onUpdate!(params)
+        // Call the onUpdate handler with the transaction and collection
+        return this.config.onUpdate!({
+          ...params,
+          collection: this as unknown as Collection<T, TKey, TUtils>,
+        })
       },
     })
 
@@ -1557,18 +1625,33 @@ export class CollectionImpl<
 
   /**
    * Deletes one or more items from the collection
-   * @param ids - Single ID or array of IDs to delete
+   * @param keys - Single key or array of keys to delete
    * @param config - Optional configuration including metadata
-   * @returns A TransactionType object representing the delete operation(s)
+   * @returns A Transaction object representing the delete operation(s)
    * @example
    * // Delete a single item
-   * delete("todo-1")
+   * const tx = collection.delete("todo-1")
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Delete multiple items
-   * delete(["todo-1", "todo-2"])
+   * const tx = collection.delete(["todo-1", "todo-2"])
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Delete with metadata
-   * delete("todo-1", { metadata: { reason: "completed" } })
+   * const tx = collection.delete("todo-1", { metadata: { reason: "completed" } })
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.delete("item-1")
+   *   await tx.isPersisted.promise
+   *   console.log('Delete successful')
+   * } catch (error) {
+   *   console.log('Delete failed:', error)
+   * }
    */
   delete = (
     keys: Array<TKey> | TKey,
@@ -1634,8 +1717,11 @@ export class CollectionImpl<
     const directOpTransaction = createTransaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
-        // Call the onDelete handler with the transaction
-        return this.config.onDelete!(params)
+        // Call the onDelete handler with the transaction and collection
+        return this.config.onDelete!({
+          ...params,
+          collection: this as unknown as Collection<T, TKey, TUtils>,
+        })
       },
     })
 
@@ -1651,8 +1737,19 @@ export class CollectionImpl<
 
   /**
    * Gets the current state of the collection as a Map
+   * @returns Map containing all items in the collection, with keys as identifiers
+   * @example
+   * const itemsMap = collection.state
+   * console.log(`Collection has ${itemsMap.size} items`)
    *
-   * @returns A Map containing all items in the collection, with keys as identifiers
+   * for (const [key, item] of itemsMap) {
+   *   console.log(`${key}: ${item.title}`)
+   * }
+   *
+   * // Check if specific item exists
+   * if (itemsMap.has("todo-1")) {
+   *   console.log("Todo 1 exists:", itemsMap.get("todo-1"))
+   * }
    */
   get state() {
     const result = new Map<TKey, T>()
@@ -1725,8 +1822,24 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
-   * @param callback - A function that will be called with the changes in the collection
-   * @returns A function that can be called to unsubscribe from the changes
+   * @param callback - Function called when items change
+   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @returns Unsubscribe function - Call this to stop listening for changes
+   * @example
+   * // Basic subscription
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   changes.forEach(change => {
+   *     console.log(`${change.type}: ${change.key}`, change.value)
+   *   })
+   * })
+   *
+   * // Later: unsubscribe()
+   *
+   * @example
+   * // Include current state immediately
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, { includeInitialState: true })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,

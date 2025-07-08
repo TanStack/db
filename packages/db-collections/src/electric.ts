@@ -77,33 +77,179 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
-   * Must return an object containing a txid string
+   * Must return an object containing a txid string or array of txids
    * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric insert handler - MUST return { txid: string }
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await electric.db.todos.create({
+   *     data: newItem
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items - return array of txids
+   * onInsert: async ({ transaction, collection }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   const results = await Promise.all(
+   *     items.map(item => electric.db.todos.create({ data: item }))
+   *   )
+   *   return { txid: results.map(r => r.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Insert handler with batch operation - single txid
+   * onInsert: async ({ transaction, collection }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   const result = await electric.db.todos.createMany({
+   *     data: items
+   *   })
+   *   return { txid: result.txid } // Single txid for batch operation
+   * }
+   *
+   * @example
+   * // Insert handler with await for sync confirmation
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await electric.db.todos.create({
+   *     data: newItem
+   *   })
+   *
+   *   // Wait for the txid to be synced from server
+   *   await collection.utils.awaitTxId(result.txid)
+   *
+   *   return { txid: result.txid }
+   * }
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string }>
+  ) => Promise<{ txid: string | Array<string> }>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Must return an object containing a txid string
+   * Must return an object containing a txid string or array of txids
    * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric update handler - MUST return { txid: string }
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await electric.db.todos.update({
+   *     where: { id: mutation.key },
+   *     data: mutation.changes // Only the changed fields
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Update handler with multiple items - return array of txids
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const updates = await Promise.all(
+   *     transaction.mutations.map(m =>
+   *       electric.db.todos.update({
+   *         where: { id: m.key },
+   *         data: m.changes
+   *       })
+   *     )
+   *   )
+   *   return { txid: updates.map(u => u.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Update handler with batch operation - single txid
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const keysToUpdate = transaction.mutations.map(m => m.key)
+   *   const result = await electric.db.todos.updateMany({
+   *     where: { id: { in: keysToUpdate } },
+   *     data: transaction.mutations[0].changes
+   *   })
+   *   return { txid: result.txid } // Single txid for batch
+   * }
+   *
+   * @example
+   * // Update handler with conditional logic
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *
+   *   // Check if item exists before updating
+   *   const existing = await electric.db.todos.findUnique({
+   *     where: { id: mutation.key }
+   *   })
+   *
+   *   if (!existing) {
+   *     throw new Error(`Todo with id ${mutation.key} not found`)
+   *   }
+   *
+   *   const result = await electric.db.todos.update({
+   *     where: { id: mutation.key },
+   *     data: mutation.changes
+   *   })
+   *
+   *   return { txid: result.txid }
+   * }
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string }>
+  ) => Promise<{ txid: string | Array<string> }>
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Must return an object containing a txid string
+   * Must return an object containing a txid string or array of txids
    * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric delete handler - MUST return { txid: string }
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await electric.db.todos.delete({
+   *     where: { id: mutation.key }
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Delete handler with multiple items - return array of txids
+   * onDelete: async ({ transaction, collection }) => {
+   *   const deletes = await Promise.all(
+   *     transaction.mutations.map(m =>
+   *       electric.db.todos.delete({
+   *         where: { id: m.key }
+   *       })
+   *     )
+   *   )
+   *   return { txid: deletes.map(d => d.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Delete handler with batch operation - single txid
+   * onDelete: async ({ transaction, collection }) => {
+   *   const keysToDelete = transaction.mutations.map(m => m.key)
+   *   const result = await electric.db.todos.deleteMany({
+   *     where: { id: { in: keysToDelete } }
+   *   })
+   *   return { txid: result.txid } // Single txid for batch operation
+   * }
+   *
+   * @example
+   * // Soft delete handler (mark as deleted instead of removing)
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await electric.db.todos.update({
+   *     where: { id: mutation.key },
+   *     data: {
+   *       deleted: true,
+   *       deletedAt: new Date()
+   *     }
+   *   })
+   *   return { txid: result.txid }
+   * }
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string }>
+  ) => Promise<{ txid: string | Array<string> }>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -201,15 +347,21 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: string }).txid
+        const txid = (handlerResult as { txid?: string | Array<string> }).txid
 
         if (!txid) {
           throw new Error(
-            `Electric collection onInsert handler must return a txid`
+            `Electric collection onInsert handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(txid)) {
+          await Promise.all(txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(txid)
+        }
+
         return handlerResult
       }
     : undefined
@@ -223,15 +375,21 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: string }).txid
+        const txid = (handlerResult as { txid?: string | Array<string> }).txid
 
         if (!txid) {
           throw new Error(
-            `Electric collection onUpdate handler must return a txid`
+            `Electric collection onUpdate handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(txid)) {
+          await Promise.all(txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(txid)
+        }
+
         return handlerResult
       }
     : undefined
@@ -245,11 +403,17 @@ export function electricCollectionOptions<
         const handlerResult = await config.onDelete!(params)
         if (!handlerResult.txid) {
           throw new Error(
-            `Electric collection onDelete handler must return a txid`
+            `Electric collection onDelete handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(handlerResult.txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(handlerResult.txid)) {
+          await Promise.all(handlerResult.txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(handlerResult.txid)
+        }
+
         return handlerResult
       }
     : undefined

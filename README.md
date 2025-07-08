@@ -62,10 +62,11 @@ Use live queries in your components:
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db"
+import { eq } from "@tanstack/db"
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
-    query.from({ todoCollection }).where("@completed", "=", false)
+    query.from({ todos: todoCollection }).where(({ todos }) => eq(todos.completed, false))
   )
 
   return <List items={todos} />
