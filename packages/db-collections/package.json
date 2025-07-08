@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db-collections",
   "description": "A collection for (aspirationally) every way of loading your data",
-  "version": "0.0.15",
+  "version": "0.0.20",
   "dependencies": {
     "@tanstack/db": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
@@ -31,7 +31,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.5.2",
+  "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
     "@electric-sql/client": ">=1.0.0",
     "typescript": ">=4.7"

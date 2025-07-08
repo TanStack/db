@@ -1,11 +1,12 @@
-import { Store } from "@tanstack/store"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { Transaction, getActiveTransaction } from "./transactions"
+import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
+  CollectionStatus,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -138,15 +139,17 @@ export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > {
-  public transactions: SortedMap<string, Transaction<any>>
+  public config: CollectionConfig<T, TKey, any>
 
   // Core state - make public for testing
+  public transactions: SortedMap<string, Transaction<any>>
+  public pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
   public syncedData: Map<TKey, T> | SortedMap<TKey, T>
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
-  public derivedUpserts = new Map<TKey, T>()
-  public derivedDeletes = new Set<TKey>()
+  public optimisticUpserts = new Map<TKey, T>()
+  public optimisticDeletes = new Set<TKey>()
 
   // Cached size for performance
   private _size = 0
@@ -159,13 +162,26 @@ export class CollectionImpl<
   // This is populated by createCollection
   public utils: Record<string, Fn> = {}
 
-  private pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
+  // State used for computing the change events
   private syncedKeys = new Set<TKey>()
-  public config: CollectionConfig<T, TKey, any>
+  private preSyncVisibleState = new Map<TKey, T>()
+  private recentlySyncedKeys = new Set<TKey>()
   private hasReceivedFirstCommit = false
+  private isCommittingSyncTransactions = false
 
   // Array to store one-time commit listeners
   private onFirstCommitCallbacks: Array<() => void> = []
+
+  // Event batching for preventing duplicate emissions during transaction flows
+  private batchedEvents: Array<ChangeMessage<T, TKey>> = []
+  private shouldBatchEvents = false
+
+  // Lifecycle management
+  private _status: CollectionStatus = `idle`
+  private activeSubscribersCount = 0
+  private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
+  private preloadPromise: Promise<void> | null = null
+  private syncCleanupFn: (() => void) | null = null
 
   /**
    * Register a callback to be executed on the next commit
@@ -177,6 +193,71 @@ export class CollectionImpl<
   }
 
   public id = ``
+
+  /**
+   * Gets the current status of the collection
+   */
+  public get status(): CollectionStatus {
+    return this._status
+  }
+
+  /**
+   * Validates that the collection is in a usable state for data operations
+   * @private
+   */
+  private validateCollectionUsable(operation: string): void {
+    switch (this._status) {
+      case `error`:
+        throw new Error(
+          `Cannot perform ${operation} on collection "${this.id}" - collection is in error state. ` +
+            `Try calling cleanup() and restarting the collection.`
+        )
+      case `cleaned-up`:
+        throw new Error(
+          `Cannot perform ${operation} on collection "${this.id}" - collection has been cleaned up. ` +
+            `The collection will automatically restart on next access.`
+        )
+    }
+  }
+
+  /**
+   * Validates state transitions to prevent invalid status changes
+   * @private
+   */
+  private validateStatusTransition(
+    from: CollectionStatus,
+    to: CollectionStatus
+  ): void {
+    if (from === to) {
+      // Allow same state transitions
+      return
+    }
+    const validTransitions: Record<
+      CollectionStatus,
+      Array<CollectionStatus>
+    > = {
+      idle: [`loading`, `error`, `cleaned-up`],
+      loading: [`ready`, `error`, `cleaned-up`],
+      ready: [`cleaned-up`, `error`],
+      error: [`cleaned-up`, `idle`],
+      "cleaned-up": [`loading`, `error`],
+    }
+
+    if (!validTransitions[from].includes(to)) {
+      throw new Error(
+        `Invalid collection status transition from "${from}" to "${to}" for collection "${this.id}"`
+      )
+    }
+  }
+
+  /**
+   * Safely update the collection status with validation
+   * @private
+   */
+  private setStatus(newStatus: CollectionStatus): void {
+    this.validateStatusTransition(this._status, newStatus)
+    this._status = newStatus
+  }
 
   /**
    * Creates a new Collection instance
@@ -200,110 +281,319 @@ export class CollectionImpl<
       throw new Error(`Collection requires a sync config`)
     }
 
-    this.transactions = new SortedMap<string, Transaction<any>>(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
+      a.compareCreatedAt(b)
     )
 
     this.config = config
 
+    // Store in global collections store
+    collectionsStore.set(this.id, this)
+
+    // Set up data storage with optional comparison function
     if (this.config.compare) {
       this.syncedData = new SortedMap<TKey, T>(this.config.compare)
     } else {
       this.syncedData = new Map<TKey, T>()
     }
 
-    // Start the sync process
-    config.sync.sync({
-      collection: this,
-      begin: () => {
-        this.pendingSyncedTransactions.push({
-          committed: false,
-          operations: [],
-        })
-      },
-      write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
-        const pendingTransaction =
-          this.pendingSyncedTransactions[
-            this.pendingSyncedTransactions.length - 1
-          ]
-        if (!pendingTransaction) {
-          throw new Error(`No pending sync transaction to write to`)
-        }
-        if (pendingTransaction.committed) {
-          throw new Error(
-            `The pending sync transaction is already committed, you can't still write to it.`
-          )
-        }
-        const key = this.getKeyFromItem(messageWithoutKey.value)
+    // Only start sync immediately if explicitly enabled
+    if (config.startSync === true) {
+      this.startSync()
+    }
+  }
 
-        // Check if an item with this key already exists when inserting
-        if (messageWithoutKey.type === `insert`) {
-          if (
-            this.syncedData.has(key) &&
-            !pendingTransaction.operations.some(
-              (op) => op.key === key && op.type === `delete`
-            )
-          ) {
+  /**
+   * Start sync immediately - internal method for compiled queries
+   * This bypasses lazy loading for special cases like live query results
+   */
+  public startSyncImmediate(): void {
+    this.startSync()
+  }
+
+  /**
+   * Start the sync process for this collection
+   * This is called when the collection is first accessed or preloaded
+   */
+  private startSync(): void {
+    if (this._status !== `idle` && this._status !== `cleaned-up`) {
+      return // Already started or in progress
+    }
+
+    this.setStatus(`loading`)
+
+    try {
+      const cleanupFn = this.config.sync.sync({
+        collection: this,
+        begin: () => {
+          this.pendingSyncedTransactions.push({
+            committed: false,
+            operations: [],
+          })
+        },
+        write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
+          const pendingTransaction =
+            this.pendingSyncedTransactions[
+              this.pendingSyncedTransactions.length - 1
+            ]
+          if (!pendingTransaction) {
+            throw new Error(`No pending sync transaction to write to`)
+          }
+          if (pendingTransaction.committed) {
             throw new Error(
-              `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
+              `The pending sync transaction is already committed, you can't still write to it.`
             )
           }
-        }
+          const key = this.getKeyFromItem(messageWithoutKey.value)
 
-        const message: ChangeMessage<T> = {
-          ...messageWithoutKey,
-          key,
+          // Check if an item with this key already exists when inserting
+          if (messageWithoutKey.type === `insert`) {
+            if (
+              this.syncedData.has(key) &&
+              !pendingTransaction.operations.some(
+                (op) => op.key === key && op.type === `delete`
+              )
+            ) {
+              throw new Error(
+                `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
+              )
+            }
+          }
+
+          const message: ChangeMessage<T> = {
+            ...messageWithoutKey,
+            key,
+          }
+          pendingTransaction.operations.push(message)
+        },
+        commit: () => {
+          const pendingTransaction =
+            this.pendingSyncedTransactions[
+              this.pendingSyncedTransactions.length - 1
+            ]
+          if (!pendingTransaction) {
+            throw new Error(`No pending sync transaction to commit`)
+          }
+          if (pendingTransaction.committed) {
+            throw new Error(
+              `The pending sync transaction is already committed, you can't commit it again.`
+            )
+          }
+
+          pendingTransaction.committed = true
+
+          // Update status to ready
+          // We do this before committing as we want the events from the changes to
+          // be from a "ready" state.
+          if (this._status === `loading`) {
+            this.setStatus(`ready`)
+          }
+
+          this.commitPendingTransactions()
+        },
+      })
+
+      // Store cleanup function if provided
+      this.syncCleanupFn = typeof cleanupFn === `function` ? cleanupFn : null
+    } catch (error) {
+      this.setStatus(`error`)
+      throw error
+    }
+  }
+
+  /**
+   * Preload the collection data by starting sync if not already started
+   * Multiple concurrent calls will share the same promise
+   */
+  public preload(): Promise<void> {
+    if (this.preloadPromise) {
+      return this.preloadPromise
+    }
+
+    this.preloadPromise = new Promise<void>((resolve, reject) => {
+      if (this._status === `ready`) {
+        resolve()
+        return
+      }
+
+      if (this._status === `error`) {
+        reject(new Error(`Collection is in error state`))
+        return
+      }
+
+      // Register callback BEFORE starting sync to avoid race condition
+      this.onFirstCommit(() => {
+        resolve()
+      })
+
+      // Start sync if collection hasn't started yet or was cleaned up
+      if (this._status === `idle` || this._status === `cleaned-up`) {
+        try {
+          this.startSync()
+        } catch (error) {
+          reject(error)
+          return
         }
-        pendingTransaction.operations.push(message)
-      },
-      commit: () => {
-        const pendingTransaction =
-          this.pendingSyncedTransactions[
-            this.pendingSyncedTransactions.length - 1
-          ]
-        if (!pendingTransaction) {
-          throw new Error(`No pending sync transaction to commit`)
-        }
-        if (pendingTransaction.committed) {
+      }
+    })
+
+    return this.preloadPromise
+  }
+
+  /**
+   * Clean up the collection by stopping sync and clearing data
+   * This can be called manually or automatically by garbage collection
+   */
+  public async cleanup(): Promise<void> {
+    // Clear GC timeout
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+      this.gcTimeoutId = null
+    }
+
+    // Stop sync - wrap in try/catch since it's user-provided code
+    try {
+      if (this.syncCleanupFn) {
+        this.syncCleanupFn()
+        this.syncCleanupFn = null
+      }
+    } catch (error) {
+      // Re-throw in a microtask to surface the error after cleanup completes
+      queueMicrotask(() => {
+        if (error instanceof Error) {
+          // Preserve the original error and stack trace
+          const wrappedError = new Error(
+            `Collection "${this.id}" sync cleanup function threw an error: ${error.message}`
+          )
+          wrappedError.cause = error
+          wrappedError.stack = error.stack
+          throw wrappedError
+        } else {
           throw new Error(
-            `The pending sync transaction is already committed, you can't commit it again.`
+            `Collection "${this.id}" sync cleanup function threw an error: ${String(error)}`
           )
         }
+      })
+    }
 
-        pendingTransaction.committed = true
-        this.commitPendingTransactions()
-      },
-    })
+    // Clear data
+    this.syncedData.clear()
+    this.syncedMetadata.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
+    this._size = 0
+    this.pendingSyncedTransactions = []
+    this.syncedKeys.clear()
+    this.hasReceivedFirstCommit = false
+    this.onFirstCommitCallbacks = []
+    this.preloadPromise = null
+    this.batchedEvents = []
+    this.shouldBatchEvents = false
+
+    // Update status
+    this.setStatus(`cleaned-up`)
+
+    return Promise.resolve()
+  }
+
+  /**
+   * Start the garbage collection timer
+   * Called when the collection becomes inactive (no subscribers)
+   */
+  private startGCTimer(): void {
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+    }
+
+    const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+    this.gcTimeoutId = setTimeout(() => {
+      if (this.activeSubscribersCount === 0) {
+        this.cleanup()
+      }
+    }, gcTime)
+  }
+
+  /**
+   * Cancel the garbage collection timer
+   * Called when the collection becomes active again
+   */
+  private cancelGCTimer(): void {
+    if (this.gcTimeoutId) {
+      clearTimeout(this.gcTimeoutId)
+      this.gcTimeoutId = null
+    }
+  }
+
+  /**
+   * Increment the active subscribers count and start sync if needed
+   */
+  private addSubscriber(): void {
+    this.activeSubscribersCount++
+    this.cancelGCTimer()
+
+    // Start sync if collection was cleaned up
+    if (this._status === `cleaned-up` || this._status === `idle`) {
+      this.startSync()
+    }
+  }
+
+  /**
+   * Decrement the active subscribers count and start GC timer if needed
+   */
+  private removeSubscriber(): void {
+    this.activeSubscribersCount--
+
+    if (this.activeSubscribersCount === 0) {
+      this.activeSubscribersCount = 0
+      this.startGCTimer()
+    } else if (this.activeSubscribersCount < 0) {
+      throw new Error(
+        `Active subscribers count is negative - this should never happen`
+      )
+    }
   }
 
   /**
    * Recompute optimistic state from active transactions
    */
   private recomputeOptimisticState(): void {
-    const previousState = new Map(this.derivedUpserts)
-    const previousDeletes = new Set(this.derivedDeletes)
+    // Skip redundant recalculations when we're in the middle of committing sync transactions
+    if (this.isCommittingSyncTransactions) {
+      return
+    }
+
+    const previousState = new Map(this.optimisticUpserts)
+    const previousDeletes = new Set(this.optimisticDeletes)
 
     // Clear current optimistic state
-    this.derivedUpserts.clear()
-    this.derivedDeletes.clear()
+    this.optimisticUpserts.clear()
+    this.optimisticDeletes.clear()
 
-    // Apply active transactions
-    const activeTransactions = Array.from(this.transactions.values())
+    const activeTransactions: Array<Transaction<any>> = []
+    const completedTransactions: Array<Transaction<any>> = []
+
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed`) {
+        completedTransactions.push(transaction)
+      } else if (![`completed`, `failed`].includes(transaction.state)) {
+        activeTransactions.push(transaction)
+      }
+    }
+
+    // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
-      if (![`completed`, `failed`].includes(transaction.state)) {
-        for (const mutation of transaction.mutations) {
-          if (mutation.collection === this) {
-            switch (mutation.type) {
-              case `insert`:
-              case `update`:
-                this.derivedUpserts.set(mutation.key, mutation.modified as T)
-                this.derivedDeletes.delete(mutation.key)
-                break
-              case `delete`:
-                this.derivedUpserts.delete(mutation.key)
-                this.derivedDeletes.add(mutation.key)
-                break
-            }
+      for (const mutation of transaction.mutations) {
+        if (mutation.collection === this) {
+          switch (mutation.type) {
+            case `insert`:
+            case `update`:
+              this.optimisticUpserts.set(mutation.key, mutation.modified as T)
+              this.optimisticDeletes.delete(mutation.key)
+              break
+            case `delete`:
+              this.optimisticUpserts.delete(mutation.key)
+              this.optimisticDeletes.add(mutation.key)
+              break
           }
         }
       }
@@ -316,8 +606,58 @@ export class CollectionImpl<
     const events: Array<ChangeMessage<T, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
-    // Emit all events at once
-    this.emitEvents(events)
+    // Filter out events for recently synced keys to prevent duplicates
+    const filteredEventsBySyncStatus = events.filter(
+      (event) => !this.recentlySyncedKeys.has(event.key)
+    )
+
+    // Filter out redundant delete events if there are pending sync transactions
+    // that will immediately restore the same data, but only for completed transactions
+    if (this.pendingSyncedTransactions.length > 0) {
+      const pendingSyncKeys = new Set<TKey>()
+      const completedTransactionMutations = new Set<string>()
+
+      // Collect keys from pending sync operations
+      for (const transaction of this.pendingSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          pendingSyncKeys.add(operation.key as TKey)
+        }
+      }
+
+      // Collect mutation IDs from completed transactions
+      for (const tx of completedTransactions) {
+        for (const mutation of tx.mutations) {
+          if (mutation.collection === this) {
+            completedTransactionMutations.add(mutation.mutationId)
+          }
+        }
+      }
+
+      // Only filter out delete events for keys that:
+      // 1. Have pending sync operations AND
+      // 2. Are from completed transactions (being cleaned up)
+      const filteredEvents = filteredEventsBySyncStatus.filter((event) => {
+        if (event.type === `delete` && pendingSyncKeys.has(event.key)) {
+          // Check if this delete is from clearing optimistic state of completed transactions
+          // We can infer this by checking if we have no remaining optimistic mutations for this key
+          const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
+            tx.mutations.some(
+              (m) => m.collection === this && m.key === event.key
+            )
+          )
+
+          if (!hasActiveOptimisticMutation) {
+            return false // Skip this delete event as sync will restore the data
+          }
+        }
+        return true
+      })
+
+      this.emitEvents(filteredEvents)
+    } else {
+      // Emit all events if no pending sync transactions
+      this.emitEvents(filteredEventsBySyncStatus)
+    }
   }
 
   /**
@@ -325,10 +665,10 @@ export class CollectionImpl<
    */
   private calculateSize(): number {
     const syncedSize = this.syncedData.size
-    const deletesFromSynced = Array.from(this.derivedDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.derivedUpserts.has(key)
+    const deletesFromSynced = Array.from(this.optimisticDeletes).filter(
+      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key)
     ).length
-    const upsertsNotInSynced = Array.from(this.derivedUpserts.keys()).filter(
+    const upsertsNotInSynced = Array.from(this.optimisticUpserts.keys()).filter(
       (key) => !this.syncedData.has(key)
     ).length
 
@@ -345,9 +685,9 @@ export class CollectionImpl<
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
-      ...this.derivedUpserts.keys(),
+      ...this.optimisticUpserts.keys(),
       ...previousDeletes,
-      ...this.derivedDeletes,
+      ...this.optimisticDeletes,
     ])
 
     for (const key of allKeys) {
@@ -395,34 +735,55 @@ export class CollectionImpl<
   }
 
   /**
-   * Emit multiple events at once to all listeners
+   * Emit events either immediately or batch them for later emission
    */
-  private emitEvents(changes: Array<ChangeMessage<T, TKey>>): void {
-    if (changes.length > 0) {
-      // Emit to general listeners
-      for (const listener of this.changeListeners) {
-        listener(changes)
+  private emitEvents(
+    changes: Array<ChangeMessage<T, TKey>>,
+    endBatching = false
+  ): void {
+    if (this.shouldBatchEvents && !endBatching) {
+      // Add events to the batch
+      this.batchedEvents.push(...changes)
+      return
+    }
+
+    // Either we're not batching, or we're ending the batching cycle
+    let eventsToEmit = changes
+
+    if (endBatching) {
+      // End batching: combine any batched events with new events and clean up state
+      if (this.batchedEvents.length > 0) {
+        eventsToEmit = [...this.batchedEvents, ...changes]
+      }
+      this.batchedEvents = []
+      this.shouldBatchEvents = false
+    }
+
+    if (eventsToEmit.length === 0) return
+
+    // Emit to all listeners
+    for (const listener of this.changeListeners) {
+      listener(eventsToEmit)
+    }
+
+    // Emit to key-specific listeners
+    if (this.changeKeyListeners.size > 0) {
+      // Group changes by key, but only for keys that have listeners
+      const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+      for (const change of eventsToEmit) {
+        if (this.changeKeyListeners.has(change.key)) {
+          if (!changesByKey.has(change.key)) {
+            changesByKey.set(change.key, [])
+          }
+          changesByKey.get(change.key)!.push(change)
+        }
       }
 
-      // Emit to key-specific listeners
-      if (this.changeKeyListeners.size > 0) {
-        // Group changes by key, but only for keys that have listeners
-        const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
-        for (const change of changes) {
-          if (this.changeKeyListeners.has(change.key)) {
-            if (!changesByKey.has(change.key)) {
-              changesByKey.set(change.key, [])
-            }
-            changesByKey.get(change.key)!.push(change)
-          }
-        }
-
-        // Emit batched changes to each key's listeners
-        for (const [key, keyChanges] of changesByKey) {
-          const keyListeners = this.changeKeyListeners.get(key)!
-          for (const listener of keyListeners) {
-            listener(keyChanges)
-          }
+      // Emit batched changes to each key's listeners
+      for (const [key, keyChanges] of changesByKey) {
+        const keyListeners = this.changeKeyListeners.get(key)!
+        for (const listener of keyListeners) {
+          listener(keyChanges)
         }
       }
     }
@@ -433,13 +794,13 @@ export class CollectionImpl<
    */
   public get(key: TKey): T | undefined {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return undefined
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
-      return this.derivedUpserts.get(key)
+    if (this.optimisticUpserts.has(key)) {
+      return this.optimisticUpserts.get(key)
     }
 
     // Fall back to synced data
@@ -451,12 +812,12 @@ export class CollectionImpl<
    */
   public has(key: TKey): boolean {
     // Check if optimistically deleted
-    if (this.derivedDeletes.has(key)) {
+    if (this.optimisticDeletes.has(key)) {
       return false
     }
 
     // Check optimistic upserts first
-    if (this.derivedUpserts.has(key)) {
+    if (this.optimisticUpserts.has(key)) {
       return true
     }
 
@@ -477,14 +838,14 @@ export class CollectionImpl<
   public *keys(): IterableIterator<TKey> {
     // Yield keys from synced data, skipping any that are deleted.
     for (const key of this.syncedData.keys()) {
-      if (!this.derivedDeletes.has(key)) {
+      if (!this.optimisticDeletes.has(key)) {
         yield key
       }
     }
     // Yield keys from upserts that were not already in synced data.
-    for (const key of this.derivedUpserts.keys()) {
-      if (!this.syncedData.has(key) && !this.derivedDeletes.has(key)) {
-        // The derivedDeletes check is technically redundant if inserts/updates always remove from deletes,
+    for (const key of this.optimisticUpserts.keys()) {
+      if (!this.syncedData.has(key) && !this.optimisticDeletes.has(key)) {
+        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
         // but it's safer to keep it.
         yield key
       }
@@ -498,10 +859,7 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield copy as T
+        yield value
       }
     }
   }
@@ -513,12 +871,44 @@ export class CollectionImpl<
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
-        const { _orderByIndex, ...copy } = value as T & {
-          _orderByIndex?: number | string
-        }
-        yield [key, copy as T]
+        yield [key, value]
       }
     }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *[Symbol.iterator](): IterableIterator<[TKey, T]> {
+    for (const [key, value] of this.entries()) {
+      yield [key, value]
+    }
+  }
+
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  public forEach(
+    callbackfn: (value: T, key: TKey, index: number) => void
+  ): void {
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
+  }
+
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  public map<U>(
+    callbackfn: (value: T, key: TKey, index: number) => U
+  ): Array<U> {
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   /**
@@ -526,18 +916,47 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    if (
-      !Array.from(this.transactions.values()).some(
-        ({ state }) => state === `persisting`
-      )
-    ) {
+    // Check if there are any persisting transaction
+    let hasPersistingTransaction = false
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `persisting`) {
+        hasPersistingTransaction = true
+        break
+      }
+    }
+
+    if (!hasPersistingTransaction) {
+      // Set flag to prevent redundant optimistic state recalculations
+      this.isCommittingSyncTransactions = true
+
+      // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
+      for (const transaction of this.pendingSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          changedKeys.add(operation.key as TKey)
+        }
+      }
+
+      // Use pre-captured state if available (from optimistic scenarios),
+      // otherwise capture current state (for pure sync scenarios)
+      let currentVisibleState = this.preSyncVisibleState
+      if (currentVisibleState.size === 0) {
+        // No pre-captured state, capture it now for pure sync operations
+        currentVisibleState = new Map<TKey, T>()
+        for (const key of changedKeys) {
+          const currentValue = this.get(key)
+          if (currentValue !== undefined) {
+            currentVisibleState.set(key, currentValue)
+          }
+        }
+      }
+
       const events: Array<ChangeMessage<T, TKey>> = []
+      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
-          changedKeys.add(key)
           this.syncedKeys.add(key)
 
           // Update metadata
@@ -560,58 +979,118 @@ export class CollectionImpl<
               break
           }
 
-          // Update synced data and collect events
-          const previousValue = this.syncedData.get(key)
-
+          // Update synced data
           switch (operation.type) {
             case `insert`:
               this.syncedData.set(key, operation.value)
-              if (
-                !this.derivedDeletes.has(key) &&
-                !this.derivedUpserts.has(key)
-              ) {
-                events.push({
-                  type: `insert`,
-                  key,
-                  value: operation.value,
-                })
-              }
               break
             case `update`: {
-              const updatedValue = Object.assign(
-                {},
-                this.syncedData.get(key),
-                operation.value
-              )
-              this.syncedData.set(key, updatedValue)
-              if (
-                !this.derivedDeletes.has(key) &&
-                !this.derivedUpserts.has(key)
-              ) {
-                events.push({
-                  type: `update`,
-                  key,
-                  value: updatedValue,
-                  previousValue,
-                })
+              if (rowUpdateMode === `partial`) {
+                const updatedValue = Object.assign(
+                  {},
+                  this.syncedData.get(key),
+                  operation.value
+                )
+                this.syncedData.set(key, updatedValue)
+              } else {
+                this.syncedData.set(key, operation.value)
               }
               break
             }
             case `delete`:
               this.syncedData.delete(key)
-              if (
-                !this.derivedDeletes.has(key) &&
-                !this.derivedUpserts.has(key)
-              ) {
-                if (previousValue) {
-                  events.push({
-                    type: `delete`,
-                    key,
-                    value: previousValue,
-                  })
-                }
-              }
               break
+          }
+        }
+      }
+
+      // Clear optimistic state since sync operations will now provide the authoritative data
+      this.optimisticUpserts.clear()
+      this.optimisticDeletes.clear()
+
+      // Reset flag and recompute optimistic state for any remaining active transactions
+      this.isCommittingSyncTransactions = false
+      for (const transaction of this.transactions.values()) {
+        if (![`completed`, `failed`].includes(transaction.state)) {
+          for (const mutation of transaction.mutations) {
+            if (mutation.collection === this) {
+              switch (mutation.type) {
+                case `insert`:
+                case `update`:
+                  this.optimisticUpserts.set(
+                    mutation.key,
+                    mutation.modified as T
+                  )
+                  this.optimisticDeletes.delete(mutation.key)
+                  break
+                case `delete`:
+                  this.optimisticUpserts.delete(mutation.key)
+                  this.optimisticDeletes.add(mutation.key)
+                  break
+              }
+            }
+          }
+        }
+      }
+
+      // Check for redundant sync operations that match completed optimistic operations
+      const completedOptimisticOps = new Map<TKey, any>()
+
+      for (const transaction of this.transactions.values()) {
+        if (transaction.state === `completed`) {
+          for (const mutation of transaction.mutations) {
+            if (mutation.collection === this && changedKeys.has(mutation.key)) {
+              completedOptimisticOps.set(mutation.key, {
+                type: mutation.type,
+                value: mutation.modified,
+              })
+            }
+          }
+        }
+      }
+
+      // Now check what actually changed in the final visible state
+      for (const key of changedKeys) {
+        const previousVisibleValue = currentVisibleState.get(key)
+        const newVisibleValue = this.get(key) // This returns the new derived state
+
+        // Check if this sync operation is redundant with a completed optimistic operation
+        const completedOp = completedOptimisticOps.get(key)
+        const isRedundantSync =
+          completedOp &&
+          newVisibleValue !== undefined &&
+          this.deepEqual(completedOp.value, newVisibleValue)
+
+        if (!isRedundantSync) {
+          if (
+            previousVisibleValue === undefined &&
+            newVisibleValue !== undefined
+          ) {
+            events.push({
+              type: `insert`,
+              key,
+              value: newVisibleValue,
+            })
+          } else if (
+            previousVisibleValue !== undefined &&
+            newVisibleValue === undefined
+          ) {
+            events.push({
+              type: `delete`,
+              key,
+              value: previousVisibleValue,
+            })
+          } else if (
+            previousVisibleValue !== undefined &&
+            newVisibleValue !== undefined &&
+            !this.deepEqual(previousVisibleValue, newVisibleValue)
+          ) {
+            events.push({
+              type: `update`,
+              key,
+              value: newVisibleValue,
+              previousValue: previousVisibleValue,
+            })
           }
         }
       }
@@ -619,10 +1098,18 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
-      // Emit all events at once
-      this.emitEvents(events)
+      // End batching and emit all events (combines any batched events with sync events)
+      this.emitEvents(events, true)
 
       this.pendingSyncedTransactions = []
+
+      // Clear the pre-sync state since sync operations are complete
+      this.preSyncVisibleState.clear()
+
+      // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
+      Promise.resolve().then(() => {
+        this.recentlySyncedKeys.clear()
+      })
 
       // Call any registered one-time commit listeners
       if (!this.hasReceivedFirstCommit) {
@@ -657,6 +1144,29 @@ export class CollectionImpl<
     }
 
     return `KEY::${this.id}/${key}`
+  }
+
+  private deepEqual(a: any, b: any): boolean {
+    if (a === b) return true
+    if (a == null || b == null) return false
+    if (typeof a !== typeof b) return false
+
+    if (typeof a === `object`) {
+      if (Array.isArray(a) !== Array.isArray(b)) return false
+
+      const keysA = Object.keys(a)
+      const keysB = Object.keys(b)
+      if (keysA.length !== keysB.length) return false
+
+      const keysBSet = new Set(keysB)
+      for (const key of keysA) {
+        if (!keysBSet.has(key)) return false
+        if (!this.deepEqual(a[key], b[key])) return false
+      }
+      return true
+    }
+
+    return false
   }
 
   private validateData(
@@ -745,6 +1255,8 @@ export class CollectionImpl<
    * insert({ text: "Buy groceries" }, { key: "grocery-task" })
    */
   insert = (data: T | Array<T>, config?: InsertConfig) => {
+    this.validateCollectionUsable(`insert`)
+
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
@@ -797,7 +1309,7 @@ export class CollectionImpl<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = new Transaction<T>({
+      const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(params)
@@ -889,6 +1401,8 @@ export class CollectionImpl<
     if (typeof keys === `undefined`) {
       throw new Error(`The first argument to update is missing`)
     }
+
+    this.validateCollectionUsable(`update`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -997,7 +1511,7 @@ export class CollectionImpl<
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      const emptyTransaction = new Transaction({
+      const emptyTransaction = createTransaction({
         mutationFn: async () => {},
       })
       emptyTransaction.commit()
@@ -1017,7 +1531,7 @@ export class CollectionImpl<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction
         return this.config.onUpdate!(params)
@@ -1055,6 +1569,8 @@ export class CollectionImpl<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
+    this.validateCollectionUsable(`delete`)
+
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
@@ -1110,7 +1626,7 @@ export class CollectionImpl<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = new Transaction<T>({
+    const directOpTransaction = createTransaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction
@@ -1211,6 +1727,9 @@ export class CollectionImpl<
     callback: (changes: Array<ChangeMessage<T>>) => void,
     { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
+    // Start sync and track subscriber
+    this.addSubscriber()
+
     if (includeInitialState) {
       // First send the current state as changes
       callback(this.currentStateAsChanges())
@@ -1221,6 +1740,7 @@ export class CollectionImpl<
 
     return () => {
       this.changeListeners.delete(callback)
+      this.removeSubscriber()
     }
   }
 
@@ -1232,6 +1752,9 @@ export class CollectionImpl<
     listener: ChangeListener<T, TKey>,
     { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
+    // Start sync and track subscriber
+    this.addSubscriber()
+
     if (!this.changeKeyListeners.has(key)) {
       this.changeKeyListeners.set(key, new Set())
     }
@@ -1257,6 +1780,40 @@ export class CollectionImpl<
           this.changeKeyListeners.delete(key)
         }
       }
+      this.removeSubscriber()
+    }
+  }
+
+  /**
+   * Capture visible state for keys that will be affected by pending sync operations
+   * This must be called BEFORE onTransactionStateChange clears optimistic state
+   */
+  private capturePreSyncVisibleState(): void {
+    if (this.pendingSyncedTransactions.length === 0) return
+
+    // Clear any previous capture
+    this.preSyncVisibleState.clear()
+
+    // Get all keys that will be affected by sync operations
+    const syncedKeys = new Set<TKey>()
+    for (const transaction of this.pendingSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        syncedKeys.add(operation.key as TKey)
+      }
+    }
+
+    // Mark keys as about to be synced to suppress intermediate events from recomputeOptimisticState
+    for (const key of syncedKeys) {
+      this.recentlySyncedKeys.add(key)
+    }
+
+    // Only capture current visible state for keys that will be affected by sync operations
+    // This is much more efficient than capturing the entire collection state
+    for (const key of syncedKeys) {
+      const currentValue = this.get(key)
+      if (currentValue !== undefined) {
+        this.preSyncVisibleState.set(key, currentValue)
+      }
     }
   }
 
@@ -1265,42 +1822,13 @@ export class CollectionImpl<
    * This method should be called by the Transaction class when state changes
    */
   public onTransactionStateChange(): void {
+    // Check if commitPendingTransactions will be called after this
+    // by checking if there are pending sync transactions (same logic as in transactions.ts)
+    this.shouldBatchEvents = this.pendingSyncedTransactions.length > 0
+
+    // CRITICAL: Capture visible state BEFORE clearing optimistic state
+    this.capturePreSyncVisibleState()
+
     this.recomputeOptimisticState()
-  }
-
-  private _storeMap: Store<Map<TKey, T>> | undefined
-
-  /**
-   * Returns a Tanstack Store Map that is updated when the collection changes
-   * This is a temporary solution to enable the existing framework hooks to work
-   * with the new internals of Collection until they are rewritten.
-   * TODO: Remove this once the framework hooks are rewritten.
-   */
-  public asStoreMap(): Store<Map<TKey, T>> {
-    if (!this._storeMap) {
-      this._storeMap = new Store(new Map(this.entries()))
-      this.subscribeChanges(() => {
-        this._storeMap!.setState(() => new Map(this.entries()))
-      })
-    }
-    return this._storeMap
-  }
-
-  private _storeArray: Store<Array<T>> | undefined
-
-  /**
-   * Returns a Tanstack Store Array that is updated when the collection changes
-   * This is a temporary solution to enable the existing framework hooks to work
-   * with the new internals of Collection until they are rewritten.
-   * TODO: Remove this once the framework hooks are rewritten.
-   */
-  public asStoreArray(): Store<Array<T>> {
-    if (!this._storeArray) {
-      this._storeArray = new Store(this.toArray)
-      this.subscribeChanges(() => {
-        this._storeArray!.setState(() => this.toArray)
-      })
-    }
-    return this._storeArray
   }
 }

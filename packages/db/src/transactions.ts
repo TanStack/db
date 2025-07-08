@@ -2,6 +2,7 @@ import { createDeferred } from "./deferred"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
+  OperationType,
   PendingMutation,
   TransactionConfig,
   TransactionState,
@@ -11,24 +12,13 @@ import type {
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
 
+let sequenceNumber = 0
+
 export function createTransaction<
   TData extends object = Record<string, unknown>,
 >(config: TransactionConfig<TData>): Transaction<TData> {
-  if (typeof config.mutationFn === `undefined`) {
-    throw `mutationFn is required when creating a transaction`
-  }
-
-  let transactionId = config.id
-  if (!transactionId) {
-    transactionId = crypto.randomUUID()
-  }
-  const newTransaction = new Transaction<TData>({
-    ...config,
-    id: transactionId,
-  })
-
+  const newTransaction = new Transaction<TData>(config)
   transactions.push(newTransaction)
-
   return newTransaction
 }
 
@@ -55,14 +45,18 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
-export class Transaction<T extends object = Record<string, unknown>> {
+class Transaction<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
-  public mutations: Array<PendingMutation<T>>
-  public isPersisted: Deferred<Transaction<T>>
+  public mutations: Array<PendingMutation<T, TOperation>>
+  public isPersisted: Deferred<Transaction<T, TOperation>>
   public autoCommit: boolean
   public createdAt: Date
+  public sequenceNumber: number
   public metadata: Record<string, unknown>
   public error?: {
     message: string
@@ -70,13 +64,17 @@ export class Transaction<T extends object = Record<string, unknown>> {
   }
 
   constructor(config: TransactionConfig<T>) {
-    this.id = config.id!
+    if (typeof config.mutationFn === `undefined`) {
+      throw `mutationFn is required when creating a transaction`
+    }
+    this.id = config.id ?? crypto.randomUUID()
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T>>()
+    this.isPersisted = createDeferred<Transaction<T, TOperation>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
+    this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
   }
 
@@ -156,7 +154,12 @@ export class Transaction<T extends object = Record<string, unknown>> {
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
         mutation.collection.onTransactionStateChange()
-        mutation.collection.commitPendingTransactions()
+
+        // Only call commitPendingTransactions if there are pending sync transactions
+        if (mutation.collection.pendingSyncedTransactions.length > 0) {
+          mutation.collection.commitPendingTransactions()
+        }
+
         hasCalled.add(mutation.collection.id)
       }
     }
@@ -201,4 +204,21 @@ export class Transaction<T extends object = Record<string, unknown>> {
 
     return this
   }
+
+  /**
+   * Compare two transactions by their createdAt time and sequence number in order
+   * to sort them in the order they were created.
+   * @param other - The other transaction to compare to
+   * @returns -1 if this transaction was created before the other, 1 if it was created after, 0 if they were created at the same time
+   */
+  compareCreatedAt(other: Transaction<any>): number {
+    const createdAtComparison =
+      this.createdAt.getTime() - other.createdAt.getTime()
+    if (createdAtComparison !== 0) {
+      return createdAtComparison
+    }
+    return this.sequenceNumber - other.sequenceNumber
+  }
 }
+
+export type { Transaction }

@@ -33,10 +33,10 @@ const todoCollection = createCollection({
 
 const Todos = () => {
   // Bind data using live queries
-  const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ todoCollection })
-      .where('@completed', '=', false)
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => todo.completed)
   )
 
   const complete = (todo) => {
@@ -66,7 +66,7 @@ Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
 - syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
-- storing local data, for example [in-memory client data or UI state](https://github.com/TanStack/db/issues/79)
+- storing local data, for example [using localStorage for user preferences and settings](#localstoragecollection) or [in-memory client data or UI state](#localonlycollection)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
 Once you have your data in collections, you can query across them using live queries in your components.
@@ -117,12 +117,13 @@ Mutations are based on a `Transaction` primitive.
 
 For simple state changes, directly mutating the collection and persisting with the operator handlers is enough.
 
-But for more complex use cases, you can directly create custom mutators with `useOptimisticMutation`. This lets you do things such as do transactions with multiple mutations across multiple collections, do chained transactions w/ intermediate rollbacks, etc.
+But for more complex use cases, you can directly create custom actions with `createOptimisticAction` or custom transactions with `createTransaction`. This lets you do things such as do transactions with multiple mutations across multiple collections, do chained transactions w/ intermediate rollbacks, etc.
 
 For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.update(updatedTodo)` and then calls `await collection.refetch()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
 
 ```ts
-const updateTodo = useOptimisticMutation({
+const updateTodo = createOptimisticAction<{id: string}>({
+  onMutate,
   mutationFn: async ({ transaction }) => {
     const { collection, modified: updatedTodo } = transaction.mutations[0]
 
@@ -152,7 +153,8 @@ There are a number of built-in collection types implemented in [`@tanstack/db-co
 
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-3. [WIP] [`LocalCollection`](#localcollection) for in-memory client data or UI state
+3. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+4. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -246,9 +248,94 @@ If you need more control over what data syncs into the collection, Electric allo
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
 
-#### `LocalCollection`
+#### `LocalStorageCollection`
 
-This is WIP. Track progress at [#79](https://github.com/TanStack/db/issues/79).
+localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
+
+Use `localStorageCollectionOptions` to create a collection that stores data in localStorage:
+
+```ts
+import { createCollection } from '@tanstack/react-db'
+import { localStorageCollectionOptions } from '@tanstack/db-collections'
+
+export const userPreferencesCollection = createCollection(localStorageCollectionOptions({
+  id: 'user-preferences',
+  storageKey: 'app-user-prefs', // localStorage key
+  getKey: (item) => item.id,
+  schema: userPrefsSchema
+}))
+```
+
+The localStorage collection requires:
+
+- `storageKey` — the localStorage key where all collection data is stored
+- `getKey` — identifies the id for items in the collection
+
+Mutation handlers (`onInsert`, `onUpdate`, `onDelete`) are completely optional. Data will persist to localStorage whether or not you provide handlers. You can provide alternative storage backends like `sessionStorage` or custom implementations that match the localStorage API.
+
+```ts
+export const sessionCollection = createCollection(localStorageCollectionOptions({
+  id: 'session-data',
+  storageKey: 'session-key',
+  storage: sessionStorage, // Use sessionStorage instead
+  getKey: (item) => item.id
+}))
+```
+
+> [!TIP]
+> localStorage collections are perfect for user preferences, UI state, and other data that should persist locally but doesn't need server synchronization. For server-synchronized data, use [`QueryCollection`](#querycollection) or [`ElectricCollection`](#electriccollection) instead.
+
+#### `LocalOnlyCollection`
+
+LocalOnly collections are designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs. They provide a simple way to manage temporary, session-only data with full optimistic mutation support.
+
+Use `localOnlyCollectionOptions` to create a collection that stores data only in memory:
+
+```ts
+import { createCollection } from '@tanstack/react-db'
+import { localOnlyCollectionOptions } from '@tanstack/db-collections'
+
+export const uiStateCollection = createCollection(localOnlyCollectionOptions({
+  id: 'ui-state',
+  getKey: (item) => item.id,
+  schema: uiStateSchema,
+  // Optional initial data to populate the collection
+  initialData: [
+    { id: 'sidebar', isOpen: false },
+    { id: 'theme', mode: 'light' }
+  ]
+}))
+```
+
+The LocalOnly collection requires:
+
+- `getKey` — identifies the id for items in the collection
+
+Optional configuration:
+
+- `initialData` — array of items to populate the collection with on creation
+- `onInsert`, `onUpdate`, `onDelete` — optional mutation handlers for custom logic
+
+Mutation handlers are completely optional. When provided, they are called before the optimistic state is confirmed. The collection automatically manages the transition from optimistic to confirmed state internally.
+
+```ts
+export const tempDataCollection = createCollection(localOnlyCollectionOptions({
+  id: 'temp-data',
+  getKey: (item) => item.id,
+  onInsert: async ({ transaction }) => {
+    // Custom logic before confirming the insert
+    console.log('Inserting:', transaction.mutations[0].modified)
+  },
+  onUpdate: async ({ transaction }) => {
+    // Custom logic before confirming the update
+    const { original, modified } = transaction.mutations[0]
+    console.log('Updating from', original, 'to', modified)
+  }
+}))
+```
+
+> [!TIP]
+> LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
 #### Derived collections
 
@@ -257,22 +344,21 @@ Live queries return collections. This allows you to derive collections from othe
 For example:
 
 ```ts
-import { compileQuery, queryBuilder } from "@tanstack/db"
+import { createLiveQueryCollection, eq } from "@tanstack/db"
 
-// Imagine you have a collections of todos.
+// Imagine you have a collection of todos.
 const todoCollection = createCollection({
   // config
 })
 
 // You can derive a new collection that's a subset of it.
-const query = queryBuilder()
-  .from({ todoCollection })
-  .where('@completed', '=', true)
-
-const compiled = compileQuery(query)
-compiled.start()
-
-const completedTodoCollection = compiledQuery.results()
+const completedTodoCollection = createLiveQueryCollection({
+  startSync: true,
+  query: (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => todo.completed)
+})
 ```
 
 This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
@@ -291,14 +377,18 @@ Use the `useLiveQuery` hook to assign live query results to a state variable in 
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery(query =>
-    query
-      .from({ todoCollection })
-      .where('@completed', '=', false)
-      .orderBy({'@created_at': 'asc'})
-      .select('@id', '@text')
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, false))
+      .orderBy(({ todo }) => todo.created_at, 'asc')
+      .select(({ todo }) => ({
+        id: todo.id,
+        text: todo.text
+      }))
   )
 
   return <List items={ todos } />
@@ -309,18 +399,23 @@ You can also query across collections with joins:
 
 ```ts
 import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery(query =>
-    query
+  const { data: todos } = useLiveQuery((q) =>
+    q
       .from({ todos: todoCollection })
-      .join({
-        type: `inner`,
-        from: { lists: listCollection },
-        on: [`@lists.id`, `=`, `@todos.listId`],
-      })
-      .where('@lists.active', '=', true)
-      .select(`@todos.id`, `@todos.title`, `@lists.name`)
+      .join(
+        { lists: listCollection },
+        ({ todos, lists }) => eq(lists.id, todos.listId),
+        'inner'
+      )
+      .where(({ lists }) => eq(lists.active, true))
+      .select(({ todos, lists }) => ({
+        id: todos.id,
+        title: todos.title,
+        listName: lists.name
+      }))
   )
 
   return <List items={ todos } />
@@ -332,16 +427,16 @@ const Todos = () => {
 You can also build queries directly (outside of the component lifecycle) using the underlying `queryBuilder` API:
 
 ```ts
-import { compileQuery, queryBuilder } from "@tanstack/db"
+import { createLiveQueryCollection, eq } from "@tanstack/db"
 
-const query = queryBuilder()
-  .from({ todoCollection })
-  .where('@completed', '=', true)
+const completedTodos = createLiveQueryCollection({
+  startSync: true,
+  query: (q) =>
+    q.from({ todo: todoCollection })
+     .where(({ todo }) => eq(todo.completed, true))
+})
 
-const compiled = compileQuery(query)
-compiled.start()
-
-const results = compiledQuery.results()
+const results = completedTodos.toArray
 ```
 
 Note also that:
@@ -384,55 +479,83 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 }
 ```
 
-#### `useOptimisticMutation`
+#### `createOptimisticAction`
 
-Use the `useOptimisticMutation` hook with your `mutationFn` to create a mutator that you can use to mutate data in your components:
+Use `createOptimisticAction` with your `mutationFn` and `onMutate` functions to create an action that you can use to mutate data in your components in fully custom ways:
 
 ```tsx
-import { useOptimisticMutation } from '@tanstack/react-db'
+import { createOptimisticAction } from '@tanstack/react-db'
+
+// Create the `addTodo` action, passing in your `mutationFn` and `onMutate`.
+const addTodo = createOptimisticAction<string>({
+  onMutate: (text) => {
+    // Instantly applies the local optimistic state.
+    todoCollection.insert({
+      id: uuid(),
+      text,
+      completed: false
+    })
+  },
+  mutationFn: async (text) => {
+    // Persist the todo to your backend
+    const response = await fetch('/api/todos', {
+      method: 'POST',
+      body: JSON.stringify({ text, completed: false }),
+    })
+    return response.json()
+  }
+})
 
 const Todo = () => {
-  // Create the `addTodo` mutator, passing in your `mutationFn`.
-  const addTodo = useOptimisticMutation({ mutationFn })
-
   const handleClick = () => {
-    // Triggers the mutationFn
-    addTodo.mutate(() =>
-      // Instantly applies the local optimistic state.
-      todoCollection.insert({
-        id: uuid(),
-        text: '🔥 Make app faster',
-        completed: false
-      })
-    )
+    // Triggers the onMutate and then the mutationFn
+    addTodo('🔥 Make app faster')
   }
 
   return <Button onClick={ handleClick } />
 }
 ```
 
-Transaction lifecycles can be manually controlled:
+## Manual Transactions
+
+By manually creating transactions, you can fully control their lifecycles and behaviors. `createOptimisticAction` is a ~25 line
+function which implements a common transaction pattern. Feel free to invent your own patterns!
+
+
+Here's one way you could use transactions.
 
 ```ts
-const addTodo = useOptimisticMutation({ mutationFn })
-const tx = addTodo.createTransaction()
+import { createTransaction } from "@tanstack/react-db"
 
-tx.mutate(() => {}
+const addTodoTx = createTransaction({
+  autoCommit: false,
+  mutationFn: async ({ transaction }) => {
+    // Persist data to backend
+    await Promise.all(transaction.mutations.map(mutation => {
+      return await api.saveTodo(mutation.modified)
+    })
+  },
+})
+
+// Apply first change
+addTodoTx.mutate(() => todoCollection.insert({ id: '1', text: 'First todo', completed: false }))
 
 // user reviews change
 
-// Another mutation
-tx.mutate(() => {}
+// Apply another change
+addTodoTx.mutate(() => todoCollection.insert({ id: '2', text: 'Second todo', completed: false }))
 
-// Mutation is approved
-tx.commit()
+// User decides to save and we call .commit() and the mutations are persisted to the backend.
+addTodoTx.commit()
 ```
+
+## Transaction lifecycle
 
 Transactions progress through the following states:
 
 1. `pending`: Initial state when a transaction is created and optimistic mutations can be applied
 2. `persisting`: Transaction is being persisted to the backend
-3. `completed`: Transaction has been successfully persisted
+3. `completed`: Transaction has been successfully persisted and any backend changes have been synced back.
 4. `failed`: An error was thrown while persisting or syncing back the Transaction
 
 #### Write operations
@@ -546,16 +669,21 @@ const listCollection = createCollection<TodoList>(queryCollectionOptions({
 const Todos = () => {
   // Read the data using live queries. Here we show a live
   // query that joins across two collections.
-  const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ t: todoCollection })
-      .join({
-        type: 'inner',
-        from: { l: listCollection },
-        on: [`@l.id`, `=`, `@t.list_id`]
-      })
-      .where('@l.active', '=', true)
-      .select('@t.id', '@t.text', '@t.status', '@l.name')
+  const { data: todos } = useLiveQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .join(
+        { list: listCollection },
+        ({ todo, list }) => eq(list.id, todo.list_id),
+        'inner'
+      )
+      .where(({ list }) => eq(list.active, true))
+      .select(({ todo, list }) => ({
+        id: todo.id,
+        text: todo.text,
+        status: todo.status,
+        listName: list.name
+      }))
   )
 
   // ...
@@ -569,10 +697,7 @@ This pattern allows you to extend an existing TanStack Query application, or any
 
 One of the most powerful ways of using TanStack DB is with a sync engine, for a fully local-first experience with real-time sync. This allows you to incrementally adopt sync into an existing app, whilst still handling writes with your existing API.
 
-Here, we illustrate this pattern:
-
-- using [ElectricSQL](https://electric-sql.com) as the sync engine; and
-- Instead of sending mutations to unique endpoints, we show an example here of how to POST mutations to a generic `/ingest/mutations` endpoint
+Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
 
 ```tsx
 import type { Collection } from '@tanstack/db'
@@ -592,70 +717,24 @@ export const todoCollection = createCollection(electricCollectionOptions<Todo>({
   },
   getKey: (item) => item.id,
   schema: todoSchema
+  onInsert: ({ transaction }) => {
+    const response = await api.todos.create(transaction.mutations[0].modified)
+
+    return { txid: response.txid}
+  }
+  // You can also implement onUpdate, onDelete as needed.
 }))
 
-// Define a generic `mutationFn` that handles all mutations and
-// POSTs them to a backend ingestion endpoint.
-const mutationFn: MutationFn = async ({ transaction }) => {
-  const payload = transaction.mutations.map((mutation: PendingMutation) => {
-    const { collection: _, ...rest } = mutation
-
-    return rest
-  })
-
-  const response = await fetch('/ingest/mutations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload)
-  })
-
-  if (!response.ok) {
-    // Throwing an error will rollback the optimistic state.
-    throw new Error(`HTTP Error: ${response.status}`)
-  }
-
-  const result = await response.json()
-
-  // Wait for the transaction to be synced back from the server
-  // before discarding the optimistic state.
-  const collection: Collection = transaction.mutations[0].collection
-
-  // Here we use an ElectricSQL feature to monitor the incoming sync
-  // stream for the database transaction ID that the writes we made
-  // were applied under. When this syncs through, we can safely
-  // discard the local optimistic state.
-  await collection.awaitTxId(result.txid)
-}
-
-// We can now use the same mutationFn for any local write operations.
 const AddTodo = () => {
-  const addTodo = useOptimisticMutation({ mutationFn })
-
   return (
     <Button
       onClick={() =>
-        addTodo.mutate(() =>
-          todoCollection.insert({
-            id: uuid(),
-            text: "🔥 Make app faster",
-            completed: false
-          })
-        )
+        todoCollection.insert({ text: "🔥 Make app faster" })
       }
     />
   )
 }
 ```
-
-The key requirements for the server in this case are:
-
-1. to be able to parse and ingest the payload format
-2. to return the database transaction ID that the changes were applied under; this then allows the mutationFn to monitor the replication stream for that `txid`, at which point the local optimistic state is discarded
-
-> [!TIP]
-> One reference implementation of a backend designed to ingest changes from TanStack DB is the [`Phoenix.Sync.Writer`](https://hexdocs.pm/phoenix_sync/Phoenix.Sync.Writer.html) module from the [Phoenix.Sync](https://hexdocs.pm/phoenix_sync) library for the [Phoenix web framework](https://www.phoenixframework.org).
 
 ## More info
 

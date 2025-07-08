@@ -1,5 +1,65 @@
 # @tanstack/db-collections
 
+## 0.0.20
+
+### Patch Changes
+
+- Updated dependencies [[`e478d53`](https://github.com/TanStack/db/commit/e478d5353cc8fc64e3a29dda1f86fba863cf6ce8)]:
+  - @tanstack/db@0.0.16
+
+## 0.0.19
+
+### Patch Changes
+
+- Add localOnly collection type for in-memory collections with loopback sync. ([#204](https://github.com/TanStack/db/pull/204))
+
+- Updated dependencies [[`f5cf44b`](https://github.com/TanStack/db/commit/f5cf44b1b181afef89a80cf7b8678337a3d4a065), [`f5cf44b`](https://github.com/TanStack/db/commit/f5cf44b1b181afef89a80cf7b8678337a3d4a065)]:
+  - @tanstack/db@0.0.15
+
+## 0.0.18
+
+### Patch Changes
+
+- Add localStorage collection with cross-tab sync and configurable storage APIs. ([#203](https://github.com/TanStack/db/pull/203))
+
+## 0.0.17
+
+### Patch Changes
+
+- Updated dependencies [[`74c140d`](https://github.com/TanStack/db/commit/74c140d8744f1f7bd3f9cb940c75719574afc78f)]:
+  - @tanstack/db@0.0.14
+
+## 0.0.16
+
+### Patch Changes
+
+- feat: implement Collection Lifecycle Management ([#198](https://github.com/TanStack/db/pull/198))
+
+  Adds automatic lifecycle management for collections to optimize resource usage.
+
+  **New Features:**
+
+  - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
+  - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
+  - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
+  - Manual `preload()` and `cleanup()` methods for lifecycle control
+
+  **Usage:**
+
+  ```typescript
+  const collection = createCollection({
+    startSync: false, // Enable lazy loading
+    gcTime: 300000, // Cleanup timeout (default: 5 minutes)
+  })
+
+  console.log(collection.status) // Current state
+  await collection.preload() // Ensure ready
+  await collection.cleanup() // Manual cleanup
+  ```
+
+- Updated dependencies [[`945868e`](https://github.com/TanStack/db/commit/945868e95944543ccf5d778409548679a952e249), [`0f8a008`](https://github.com/TanStack/db/commit/0f8a008be8b368f231c8518ad1adfcac08132da2), [`57b5f5d`](https://github.com/TanStack/db/commit/57b5f5de6297326a57ef205a400428af0697b48b)]:
+  - @tanstack/db@0.0.13
+
 ## 0.0.15
 
 ### Patch Changes

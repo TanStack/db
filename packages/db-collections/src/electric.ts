@@ -8,7 +8,6 @@ import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -16,10 +15,31 @@ import type {
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ControlMessage,
+  GetExtensions,
   Message,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
+
+// The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
+// but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
+// This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends Row<unknown>
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+type ResolveType<
+  TExplicit extends Row<unknown> = Row<unknown>,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> =
+  unknown extends GetExtensions<TExplicit>
+    ? [TSchema] extends [never]
+      ? TFallback
+      : InferSchemaOutput<TSchema>
+    : TExplicit
 
 /**
  * Configuration interface for Electric collection options
@@ -36,14 +56,16 @@ import type {
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface ElectricCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  shapeOptions: ShapeStreamOptions
+  shapeOptions: ShapeStreamOptions<
+    GetExtensions<ResolveType<TExplicit, TSchema, TFallback>>
+  >
 
   /**
    * All standard Collection configuration properties
@@ -119,7 +141,7 @@ export interface ElectricCollectionUtils extends UtilsRecord {
  * @returns Collection options with utilities
  */
 export function electricCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 >(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
@@ -248,8 +270,8 @@ export function electricCollectionOptions<
 /**
  * Internal function to create ElectricSQL sync configuration
  */
-function createElectricSync<T extends object>(
-  shapeOptions: ShapeStreamOptions,
+function createElectricSync<T extends Row<unknown>>(
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     seenTxids: Store<Set<string>>
   }
@@ -274,14 +296,30 @@ function createElectricSync<T extends object>(
     }
   }
 
+  // Abort controller for the stream - wraps the signal if provided
+  const abortController = new AbortController()
+  if (shapeOptions.signal) {
+    shapeOptions.signal.addEventListener(`abort`, () => {
+      abortController.abort()
+    })
+    if (shapeOptions.signal.aborted) {
+      abortController.abort()
+    }
+  }
+
+  let unsubscribeStream: () => void
+
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit } = params
-      const stream = new ShapeStream(shapeOptions)
+      const stream = new ShapeStream({
+        ...shapeOptions,
+        signal: abortController.signal,
+      })
       let transactionStarted = false
       const newTxids = new Set<string>()
 
-      stream.subscribe((messages: Array<Message<Row>>) => {
+      unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
 
         for (const message of messages) {
@@ -316,10 +354,19 @@ function createElectricSync<T extends object>(
           }
         }
 
-        if (hasUpToDate && transactionStarted) {
-          transactionStarted = false
+        if (hasUpToDate) {
+          // Commit transaction if one was started
+          if (transactionStarted) {
+            commit()
+            transactionStarted = false
+          } else {
+            // If the shape is empty, do an empty commit to move the collection status
+            // to ready.
+            begin()
+            commit()
+          }
 
-          commit()
+          // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set<string>(currentTxids)
             newTxids.forEach((txid) => clonedSeen.add(txid))
@@ -328,6 +375,14 @@ function createElectricSync<T extends object>(
           })
         }
       })
+
+      // Return the unsubscribe function
+      return () => {
+        // Unsubscribe from the stream
+        unsubscribeStream()
+        // Abort the abort controller to stop the stream
+        abortController.abort()
+      }
     },
     // Expose the getSyncMetadata function
     getSyncMetadata,
