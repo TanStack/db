@@ -382,7 +382,7 @@ export interface CollectionConfig<
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const changes = mutation.changes // Only the changed fields
-   *   await api.updateTodo(mutation.key, changes)
+   *   await api.updateTodo(mutation.original.id, changes)
    * }
    *
    * @example
@@ -400,7 +400,7 @@ export interface CollectionConfig<
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   try {
-   *     await api.updateTodo(mutation.key, mutation.changes)
+   *     await api.updateTodo(mutation.original.id, mutation.changes)
    *   } catch (error) {
    *     // Transaction will automatically rollback optimistic changes
    *     console.error('Update failed, rolling back:', error)
@@ -432,7 +432,7 @@ export interface CollectionConfig<
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const itemToDelete = mutation.original
-   *   await api.updateTodo(mutation.key, {
+   *   await api.updateTodo(mutation.original.id, {
    *     ...itemToDelete,
    *     deleted: true,
    *     deletedAt: new Date()
@@ -447,7 +447,20 @@ export interface CollectionConfig<
    *   if (!shouldDelete) {
    *     throw new Error('Delete cancelled by user')
    *   }
-   *   await api.deleteTodo(mutation.key)
+   *   await api.deleteTodo(mutation.original.id)
+   * }
+   *
+   * @example
+   * // Delete handler with optimistic rollback
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     await api.deleteTodo(mutation.original.id)
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Delete failed, rolling back:', error)
+   *     throw error
+   *   }
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey>

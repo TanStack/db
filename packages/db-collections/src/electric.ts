@@ -101,6 +101,20 @@ export interface ElectricCollectionConfig<
    * }
    *
    * @example
+   * // Insert handler with error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   try {
+   *     const newItem = transaction.mutations[0].modified
+   *     const result = await api.createTodo(newItem)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     console.error('Insert failed:', error)
+   *     throw error // This will cause the transaction to fail
+   *   }
+   * }
+   *
+   *
+   * @example
    * // Insert handler with batch operation - single txid
    * onInsert: async ({ transaction }) => {
    *   const items = transaction.mutations.map(m => m.modified)
@@ -143,6 +157,20 @@ export interface ElectricCollectionConfig<
    *   )
    *   return { txid: updates.map(u => u.txid) } // Array of txids
    * }
+   *
+   * @example
+   * // Update handler with optimistic rollback
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     const result = await api.updateTodo(mutation.original.id, mutation.changes)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Update failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
@@ -158,7 +186,7 @@ export interface ElectricCollectionConfig<
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
-   *     where: { id: mutation.key }
+   *     id: mutation.original.id
    *   })
    *   return { txid: result.txid } // Required for Electric sync matching
    * }
@@ -184,6 +212,20 @@ export interface ElectricCollectionConfig<
    *     ids: idsToDelete
    *   })
    *   return { txid: result.txid } // Single txid for batch operation
+   * }
+   *
+   * @example
+   * // Delete handler with optimistic rollback
+   * onDelete: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     const result = await api.deleteTodo(mutation.original.id)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Delete failed, rolling back:', error)
+   *     throw error
+   *   }
    * }
    *
    */
