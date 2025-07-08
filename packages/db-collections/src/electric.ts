@@ -198,14 +198,18 @@ export function electricCollectionOptions<
           ResolveType<TExplicit, TSchema, TFallback>
         >
       ) => {
-        const handlerResult = await config.onInsert!(params)
-        if (!handlerResult.txid) {
+        // Runtime check (that doesn't follow type)
+        // eslint-disable-next-line
+        const handlerResult = (await config.onInsert!(params)) ?? {}
+        const txid = (handlerResult as { txid?: string }).txid
+
+        if (!txid) {
           throw new Error(
             `Electric collection onInsert handler must return a txid`
           )
         }
 
-        await awaitTxId(handlerResult.txid)
+        await awaitTxId(txid)
         return handlerResult
       }
     : undefined
@@ -216,14 +220,18 @@ export function electricCollectionOptions<
           ResolveType<TExplicit, TSchema, TFallback>
         >
       ) => {
-        const handlerResult = await config.onUpdate!(params)
-        if (!handlerResult.txid) {
+        // Runtime check (that doesn't follow type)
+        // eslint-disable-next-line
+        const handlerResult = (await config.onUpdate!(params)) ?? {}
+        const txid = (handlerResult as { txid?: string }).txid
+
+        if (!txid) {
           throw new Error(
             `Electric collection onUpdate handler must return a txid`
           )
         }
 
-        await awaitTxId(handlerResult.txid)
+        await awaitTxId(txid)
         return handlerResult
       }
     : undefined
@@ -343,7 +351,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             write({
               type: message.headers.operation,
-              value: message.value as T,
+              value: message.value,
               // Include the primary key and relation info in the metadata
               metadata: {
                 ...message.headers,
