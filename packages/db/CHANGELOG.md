@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.17
+
+### Patch Changes
+
+- Upgrade d2mini to 0.1.6 ([#239](https://github.com/TanStack/db/pull/239))
+
 ## 0.0.16
 
 ### Patch Changes
