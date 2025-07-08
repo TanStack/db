@@ -50,7 +50,7 @@ Sync data into collections:
 ```ts
 import { createQueryCollection } from "@tanstack/db-collections"
 
-const todoCollection = createQueryCollection<Todo>({
+const todoCollection = createQueryCollection({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getKey: (item) => item.id,

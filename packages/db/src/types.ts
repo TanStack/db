@@ -510,7 +510,7 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
  * @param changes - Array of change messages describing what happened
  * @example
  * // Basic change listener
- * const listener: ChangeListener<Todo> = (changes) => {
+ * const listener: ChangeListener = (changes) => {
  *   changes.forEach(change => {
  *     console.log(`${change.type}: ${change.key}`, change.value)
  *   })

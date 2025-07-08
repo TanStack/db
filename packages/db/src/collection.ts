@@ -54,9 +54,10 @@ export interface Collection<
  *
  * @example
  * // Pattern 1: With operation handlers (direct collection calls)
- * const todos = createCollection<Todo>({
+ * const todos = createCollection({
  *   id: "todos",
  *   getKey: (todo) => todo.id,
+ *   schema,
  *   onInsert: async ({ transaction, collection }) => {
  *     // Send to API
  *     await api.createTodo(transaction.mutations[0].modified)
@@ -76,8 +77,9 @@ export interface Collection<
  *
  * @example
  * // Pattern 2: Manual transaction management
- * const todos = createCollection<Todo>({
+ * const todos = createCollection({
  *   getKey: (todo) => todo.id,
+ *   schema: todoSchema,
  *   sync: { sync: () => {} }
  * })
  *
