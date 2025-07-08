@@ -112,7 +112,7 @@ export interface PendingMutation<
   globalKey: string
 
   key: any
-  type: OperationType
+  type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
   createdAt: Date
@@ -125,15 +125,17 @@ export interface PendingMutation<
  */
 export type MutationFnParams<
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
   TInsertInput extends object = T,
 > = {
-  transaction: TransactionWithMutations<T, OperationType, TInsertInput>
+  transaction: TransactionWithMutations<T, TOperation, TInsertInput>
 }
 
 export type MutationFn<
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
   TInsertInput extends object = T,
-> = (params: MutationFnParams<T, TInsertInput>) => Promise<any>
+> = (params: MutationFnParams<T, TOperation, TInsertInput>) => Promise<any>
 
 /**
  * Represents a non-empty array (at least one element)
@@ -154,13 +156,14 @@ export type TransactionWithMutations<
 
 export interface TransactionConfig<
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
   TInsertInput extends object = T,
 > {
   /** Unique identifier for the transaction */
   id?: string
   /* If the transaction should autocommit after a mutate call or should commit be called explicitly */
   autoCommit?: boolean
-  mutationFn: MutationFn<T, TInsertInput>
+  mutationFn: MutationFn<T, TOperation, TInsertInput>
   /** Custom metadata to associate with the transaction */
   metadata?: Record<string, unknown>
 }
@@ -171,14 +174,15 @@ export interface TransactionConfig<
 export interface CreateOptimisticActionsOptions<
   TVars = unknown,
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
   TInsertInput extends object = T,
-> extends Omit<TransactionConfig<T, TInsertInput>, `mutationFn`> {
+> extends Omit<TransactionConfig<T, TOperation, TInsertInput>, `mutationFn`> {
   /** Function to apply optimistic updates locally before the mutation completes */
   onMutate: (vars: TVars) => void
   /** Function to execute the mutation on the server */
   mutationFn: (
     vars: TVars,
-    params: MutationFnParams<T, TInsertInput>
+    params: MutationFnParams<T, TOperation, TInsertInput>
   ) => Promise<any>
 }
 

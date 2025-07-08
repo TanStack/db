@@ -845,6 +845,10 @@ describe(`Collection with schema validation`, () => {
       updatedAt: z.coerce.date().default(() => new Date()),
     })
 
+    // Define inferred types for clarity and use in assertions
+    type Todo = z.infer<typeof todoSchema>
+    type TodoInput = z.input<typeof todoSchema>
+
     // NOTE: `createCollection<Todo>` breaks the schema type inference.
     // We have to use only the schema, and not the type generic, like so:
     const collection = createCollection({
@@ -862,14 +866,13 @@ describe(`Collection with schema validation`, () => {
     // Type test: should allow inserting input type (with missing fields that have defaults)
     // Important: Input type is different from the output type (which is inferred using z.infer)
     // For more details, @see https://github.com/colinhacks/zod/issues/4179#issuecomment-2811669261
-    type TodoInput = z.input<typeof todoSchema>
     type InsertParam = Parameters<typeof collection.insert>[0]
     expectTypeOf<InsertParam>().toEqualTypeOf<TodoInput | Array<TodoInput>>()
 
     const mutationFn = async () => {}
 
     // Minimal data
-    const tx1 = createTransaction({ mutationFn })
+    const tx1 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
     tx1.mutate(() => collection.insert({ text: `task-1` }))
 
     // Type assertions on the mutation structure
@@ -877,16 +880,15 @@ describe(`Collection with schema validation`, () => {
     const mutation = tx1.mutations[0]!
 
     // Test the mutation type structure
-    expectTypeOf(mutation).toEqualTypeOf<PendingMutation<any, `insert`, any>>()
+    // By providing the correct generics to `createTransaction`, the type of `mutation` is now correctly inferred.
+    // We also use a more specific type for the assertion itself.
+    expectTypeOf(mutation).toEqualTypeOf<
+      PendingMutation<Todo, `insert`, TodoInput, typeof collection>
+    >()
     expectTypeOf(mutation.type).toEqualTypeOf<`insert`>()
-    expectTypeOf(mutation.changes).toEqualTypeOf<{ text: string }>()
-    expectTypeOf(mutation.modified).toEqualTypeOf<{
-      id: string
-      text: string
-      completed: boolean
-      createdAt: Date
-      updatedAt: Date
-    }>()
+    // The static type of `changes` for an insert is `TInsertInput`, which is `TodoInput` here.
+    expectTypeOf(mutation.changes).toEqualTypeOf<TodoInput>()
+    expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
     expectTypeOf(mutation.original).toEqualTypeOf<{}>()
 
     // Runtime assertions for actual values
@@ -909,7 +911,7 @@ describe(`Collection with schema validation`, () => {
     expect(insertedItem.updatedAt).toBeInstanceOf(Date)
 
     // Partial data
-    const tx2 = createTransaction({ mutationFn })
+    const tx2 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
     tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
 
     insertedItems = Array.from(collection.state.values())
@@ -925,7 +927,7 @@ describe(`Collection with schema validation`, () => {
     expect(secondItem.updatedAt).toBeInstanceOf(Date)
 
     // All fields provided
-    const tx3 = createTransaction({ mutationFn })
+    const tx3 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
 
     tx3.mutate(() =>
       collection.insert({

@@ -9,15 +9,19 @@ import type {
   TransactionWithMutations,
 } from "./types"
 
-const transactions: Array<Transaction<any>> = []
-let transactionStack: Array<Transaction<any>> = []
+const transactions: Array<Transaction<any, any, any>> = []
+let transactionStack: Array<Transaction<any, any, any>> = []
 
 let sequenceNumber = 0
 
 export function createTransaction<
-  TData extends object = Record<string, unknown>,
->(config: TransactionConfig<TData>): Transaction<TData> {
-  const newTransaction = new Transaction<TData>(config)
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
+>(
+  config: TransactionConfig<T, TOperation, TInsertInput>
+): Transaction<T, TOperation, TInsertInput> {
+  const newTransaction = new Transaction<T, TOperation, TInsertInput>(config)
   transactions.push(newTransaction)
   return newTransaction
 }
@@ -48,12 +52,13 @@ function removeFromPendingList(tx: Transaction<any>) {
 class Transaction<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
 > {
   public id: string
   public state: TransactionState
-  public mutationFn: MutationFn<T>
-  public mutations: Array<PendingMutation<T, TOperation>>
-  public isPersisted: Deferred<Transaction<T, TOperation>>
+  public mutationFn: MutationFn<T, TOperation, TInsertInput>
+  public mutations: Array<PendingMutation<T, TOperation, TInsertInput>>
+  public isPersisted: Deferred<Transaction<T, TOperation, TInsertInput>>
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -63,7 +68,7 @@ class Transaction<
     error: Error
   }
 
-  constructor(config: TransactionConfig<T>) {
+  constructor(config: TransactionConfig<T, TOperation, TInsertInput>) {
     if (typeof config.mutationFn === `undefined`) {
       throw `mutationFn is required when creating a transaction`
     }
@@ -71,7 +76,8 @@ class Transaction<
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T, TOperation>>()
+    this.isPersisted =
+      createDeferred<Transaction<T, TOperation, TInsertInput>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
@@ -86,7 +92,7 @@ class Transaction<
     }
   }
 
-  mutate(callback: () => void): Transaction<T> {
+  mutate(callback: () => void): Transaction<T, TOperation, TInsertInput> {
     if (this.state !== `pending`) {
       throw `You can no longer call .mutate() as the transaction is no longer pending`
     }
@@ -105,7 +111,7 @@ class Transaction<
     return this
   }
 
-  applyMutations(mutations: Array<PendingMutation<any>>): void {
+  applyMutations(mutations: Array<PendingMutation<any, any, any>>): void {
     for (const newMutation of mutations) {
       const existingIndex = this.mutations.findIndex(
         (m) => m.globalKey === newMutation.globalKey
@@ -121,7 +127,9 @@ class Transaction<
     }
   }
 
-  rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
+  rollback(config?: {
+    isSecondaryRollback?: boolean
+  }): Transaction<T, TOperation, TInsertInput> {
     const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
       throw `You can no longer call .rollback() as the transaction is already completed`
@@ -165,7 +173,7 @@ class Transaction<
     }
   }
 
-  async commit(): Promise<Transaction<T>> {
+  async commit(): Promise<Transaction<T, TOperation, TInsertInput>> {
     if (this.state !== `pending`) {
       throw `You can no longer call .commit() as the transaction is no longer pending`
     }
@@ -184,7 +192,11 @@ class Transaction<
       // We've already verified mutations is non-empty, so this cast is safe
       // Use a direct type assertion instead of object spreading to preserve the original type
       await this.mutationFn({
-        transaction: this as unknown as TransactionWithMutations<T>,
+        transaction: this as unknown as TransactionWithMutations<
+          T,
+          TOperation,
+          TInsertInput
+        >,
       })
 
       this.setState(`completed`)
@@ -211,7 +223,7 @@ class Transaction<
    * @param other - The other transaction to compare to
    * @returns -1 if this transaction was created before the other, 1 if it was created after, 0 if they were created at the same time
    */
-  compareCreatedAt(other: Transaction<any>): number {
+  compareCreatedAt(other: Transaction<any, any, any>): number {
     const createdAtComparison =
       this.createdAt.getTime() - other.createdAt.getTime()
     if (createdAtComparison !== 0) {
