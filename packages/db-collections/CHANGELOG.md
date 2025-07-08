@@ -1,5 +1,14 @@
 # @tanstack/db-collections
 
+## 0.0.21
+
+### Patch Changes
+
+- Fix bug where Electric collection didn't go to 'ready' on empty shape ([#236](https://github.com/TanStack/db/pull/236))
+
+- Updated dependencies [[`7e63d76`](https://github.com/TanStack/db/commit/7e63d7671f9df9f9fc81240c3818789d4ed0d464)]:
+  - @tanstack/db@0.0.17
+
 ## 0.0.20
 
 ### Patch Changes
