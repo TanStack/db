@@ -162,7 +162,8 @@ export function liveQueryCollectionOptions<
 
   const allCollectionsReady = () => {
     return Object.values(collections).every(
-      (collection) => collection.status === `ready`
+      (collection) =>
+        collection.status === `ready` || collection.status === `initialCommit`
     )
   }
 

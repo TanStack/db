@@ -8,7 +8,6 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     dir: `./tests`,
-    watch: false,
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: { enabled: true },

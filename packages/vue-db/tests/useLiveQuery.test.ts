@@ -82,6 +82,22 @@ async function waitForVueUpdate() {
   await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
+// Helper function to poll for a condition until it passes or times out
+async function waitFor(fn: () => void, timeout = 2000, interval = 20) {
+  const start = Date.now()
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  while (true) {
+    try {
+      fn()
+      return
+    } catch (err) {
+      if (Date.now() - start > timeout) throw err
+      await new Promise((resolve) => setTimeout(resolve, interval))
+    }
+  }
+}
+
 describe(`Query Collections`, () => {
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
@@ -818,6 +834,348 @@ describe(`Query Collections`, () => {
 
     // Verify we no longer have data from the first collection
     expect(state.value.get(`3`)).toBeUndefined()
+  })
+
+  describe(`isReady property`, () => {
+    it(`should be false initially and true after collection is ready`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+
+      // Create a collection that doesn't start sync immediately
+      const collection = createCollection<Person>({
+        id: `is-ready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false, // Don't start sync immediately
+        sync: {
+          sync: ({ begin, commit }) => {
+            beginFn = begin
+            commitFn = commit
+            // Don't call begin/commit immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      // Initially isReady should be false (collection is in idle state)
+      expect(isReady.value).toBe(false)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn) {
+        beginFn()
+        commitFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      await waitFor(() => expect(isReady.value).toBe(true))
+    })
+
+    it(`should be true for pre-created collections that are already syncing`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `pre-created-is-ready-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      // Create a live query collection that's already syncing
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        startSync: true,
+      })
+
+      await waitForVueUpdate()
+      const { isReady } = useLiveQuery(liveQueryCollection)
+      expect(isReady.value).toBe(true)
+    })
+
+    it(`should be false for pre-created collections that are not syncing`, () => {
+      const collection = createCollection<Person>({
+        id: `not-syncing-is-ready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: () => {
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      // Create a live query collection that's NOT syncing
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        startSync: false, // Not syncing
+      })
+
+      const { isReady } = useLiveQuery(liveQueryCollection)
+      expect(isReady.value).toBe(false)
+    })
+
+    it(`should update isReady when collection status changes`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `status-change-is-ready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit }) => {
+            beginFn = begin
+            commitFn = commit
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      expect(isReady.value).toBe(false)
+      collection.preload()
+      if (beginFn && commitFn) {
+        beginFn()
+        commitFn()
+      }
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+      await waitFor(() => expect(isReady.value).toBe(true))
+    })
+
+    it(`should maintain isReady state during live updates`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `live-updates-is-ready-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      await waitForVueUpdate()
+      const initialIsReady = isReady.value
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+      await waitForVueUpdate()
+      expect(isReady.value).toBe(true)
+      expect(isReady.value).toBe(initialIsReady)
+    })
+
+    it(`should handle isReady with complex queries including joins`, async () => {
+      let personBeginFn: (() => void) | undefined
+      let personCommitFn: (() => void) | undefined
+      let issueBeginFn: (() => void) | undefined
+      let issueCommitFn: (() => void) | undefined
+
+      const personCollection = createCollection<Person>({
+        id: `join-is-ready-persons`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit }) => {
+            personBeginFn = begin
+            personCommitFn = commit
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const issueCollection = createCollection<Issue>({
+        id: `join-is-ready-issues`,
+        getKey: (issue: Issue) => issue.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit }) => {
+            issueBeginFn = begin
+            issueCommitFn = commit
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)
+          )
+          .select(({ issues, persons }) => ({
+            id: issues.id,
+            title: issues.title,
+            name: persons.name,
+          }))
+      )
+
+      expect(isReady.value).toBe(false)
+      personCollection.preload()
+      issueCollection.preload()
+      if (personBeginFn && personCommitFn) {
+        personBeginFn()
+        personCommitFn()
+      }
+      if (issueBeginFn && issueCommitFn) {
+        issueBeginFn()
+        issueCommitFn()
+      }
+      personCollection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+      issueCollection.insert({
+        id: `1`,
+        title: `Issue 1`,
+        description: `Issue 1 description`,
+        userId: `1`,
+      })
+      await waitFor(() => expect(isReady.value).toBe(true))
+    })
+
+    it(`should handle isReady with parameterized queries`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `params-is-ready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit }) => {
+            beginFn = begin
+            commitFn = commit
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const minAge = ref(30)
+      const { isReady } = useLiveQuery(
+        (q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, minAge.value))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+            })),
+        [minAge]
+      )
+
+      expect(isReady.value).toBe(false)
+      collection.preload()
+      if (beginFn && commitFn) {
+        beginFn()
+        commitFn()
+      }
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+      collection.insert({
+        id: `2`,
+        name: `Jane Doe`,
+        age: 25,
+        email: `jane.doe@example.com`,
+        isActive: true,
+        team: `team2`,
+      })
+      await waitFor(() => expect(isReady.value).toBe(true))
+      minAge.value = 25
+      await waitFor(() => expect(isReady.value).toBe(true))
+    })
   })
 
   it(`should accept config object with pre-built QueryBuilder instance`, async () => {

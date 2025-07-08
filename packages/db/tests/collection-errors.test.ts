@@ -360,13 +360,24 @@ describe(`Collection Error Handling`, () => {
 
       // Valid transitions from loading
       expect(() =>
-        collectionImpl.validateStatusTransition(`loading`, `ready`)
+        collectionImpl.validateStatusTransition(`loading`, `initialCommit`)
       ).not.toThrow()
       expect(() =>
         collectionImpl.validateStatusTransition(`loading`, `error`)
       ).not.toThrow()
       expect(() =>
         collectionImpl.validateStatusTransition(`loading`, `cleaned-up`)
+      ).not.toThrow()
+
+      // Valid transitions from initialCommit
+      expect(() =>
+        collectionImpl.validateStatusTransition(`initialCommit`, `ready`)
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl.validateStatusTransition(`initialCommit`, `error`)
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl.validateStatusTransition(`initialCommit`, `cleaned-up`)
       ).not.toThrow()
 
       // Valid transitions from ready
@@ -396,6 +407,12 @@ describe(`Collection Error Handling`, () => {
       // Allow same-state transitions (idempotent operations)
       expect(() =>
         collectionImpl.validateStatusTransition(`idle`, `idle`)
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl.validateStatusTransition(
+          `initialCommit`,
+          `initialCommit`
+        )
       ).not.toThrow()
       expect(() =>
         collectionImpl.validateStatusTransition(`ready`, `ready`)
