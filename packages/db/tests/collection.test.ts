@@ -872,6 +872,32 @@ describe(`Collection with schema validation`, () => {
     const tx1 = createTransaction({ mutationFn })
     tx1.mutate(() => collection.insert({ text: `task-1` }))
 
+    // Type assertions on the mutation structure
+    expect(tx1.mutations).toHaveLength(1)
+    const mutation = tx1.mutations[0]!
+
+    // Test the mutation type structure
+    expectTypeOf(mutation).toEqualTypeOf<PendingMutation<any, `insert`, any>>()
+    expectTypeOf(mutation.type).toEqualTypeOf<`insert`>()
+    expectTypeOf(mutation.changes).toEqualTypeOf<{ text: string }>()
+    expectTypeOf(mutation.modified).toEqualTypeOf<{
+      id: string
+      text: string
+      completed: boolean
+      createdAt: Date
+      updatedAt: Date
+    }>()
+    expectTypeOf(mutation.original).toEqualTypeOf<{}>()
+
+    // Runtime assertions for actual values
+    expect(mutation.type).toBe(`insert`)
+    expect(mutation.changes).toEqual({ text: `task-1` })
+    expect(mutation.modified.text).toBe(`task-1`)
+    expect(mutation.modified.completed).toBe(false)
+    expect(mutation.modified.id).toBeDefined()
+    expect(mutation.modified.createdAt).toBeInstanceOf(Date)
+    expect(mutation.modified.updatedAt).toBeInstanceOf(Date)
+
     let insertedItems = Array.from(collection.state.values())
     expect(insertedItems).toHaveLength(1)
     const insertedItem = insertedItems[0]!
