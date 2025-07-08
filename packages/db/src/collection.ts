@@ -1301,7 +1301,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T, `insert`, TInsertInput> = {
+      const mutation: PendingMutation<T, any, any, any> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -1341,7 +1341,7 @@ export class CollectionImpl<
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(
-            params as unknown as InsertMutationFnParams<T, TInsertInput>
+            params as unknown as InsertMutationFnParams<T>
           )
         },
       })

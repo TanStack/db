@@ -70,6 +70,16 @@ export type ResolveType<
     ? TExplicit
     : Record<string, unknown>
 
+export type ResolveTransactionData<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
+> = TOperation extends `insert`
+  ? TInsertInput
+  : TOperation extends `delete`
+    ? T
+    : Partial<T>
+
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -104,11 +114,7 @@ export interface PendingMutation<
   // The result state of the object after all mutations.
   modified: T
   // The actual changes made.
-  changes: TOperation extends `insert`
-    ? TInsertInput
-    : TOperation extends `delete`
-      ? T
-      : Partial<T>
+  changes: ResolveTransactionData<T, TOperation, TInsertInput>
   globalKey: string
 
   key: any
@@ -123,19 +129,13 @@ export interface PendingMutation<
 /**
  * Configuration options for creating a new transaction
  */
-export type MutationFnParams<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> = {
-  transaction: TransactionWithMutations<T, TOperation, TInsertInput>
+export type MutationFnParams<T extends object = Record<string, unknown>> = {
+  transaction: TransactionWithMutations<T>
 }
 
-export type MutationFn<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> = (params: MutationFnParams<T, TOperation, TInsertInput>) => Promise<any>
+export type MutationFn<T extends object = Record<string, unknown>> = (
+  params: MutationFnParams<T>
+) => Promise<any>
 
 /**
  * Represents a non-empty array (at least one element)
@@ -148,22 +148,16 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
  */
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> = Transaction<T, TOperation> & {
-  mutations: NonEmptyArray<PendingMutation<T, TOperation, TInsertInput>>
+> = Transaction<T> & {
+  mutations: NonEmptyArray<PendingMutation<T>>
 }
 
-export interface TransactionConfig<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> {
+export interface TransactionConfig<T extends object = Record<string, unknown>> {
   /** Unique identifier for the transaction */
   id?: string
   /* If the transaction should autocommit after a mutate call or should commit be called explicitly */
   autoCommit?: boolean
-  mutationFn: MutationFn<T, TOperation, TInsertInput>
+  mutationFn: MutationFn<T>
   /** Custom metadata to associate with the transaction */
   metadata?: Record<string, unknown>
 }
@@ -174,16 +168,11 @@ export interface TransactionConfig<
 export interface CreateOptimisticActionsOptions<
   TVars = unknown,
   T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> extends Omit<TransactionConfig<T, TOperation, TInsertInput>, `mutationFn`> {
+> extends Omit<TransactionConfig<T>, `mutationFn`> {
   /** Function to apply optimistic updates locally before the mutation completes */
   onMutate: (vars: TVars) => void
   /** Function to execute the mutation on the server */
-  mutationFn: (
-    vars: TVars,
-    params: MutationFnParams<T, TOperation, TInsertInput>
-  ) => Promise<any>
+  mutationFn: (vars: TVars, params: MutationFnParams<T>) => Promise<any>
 }
 
 export type { Transaction }
@@ -275,25 +264,22 @@ export interface InsertConfig {
 
 export type UpdateMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `update`, T>
+    transaction: TransactionWithMutations<T>
   }
 
-export type InsertMutationFnParams<
-  T extends object = Record<string, unknown>,
-  TInsertInput extends object = T,
-> = {
-  transaction: TransactionWithMutations<T, `insert`, TInsertInput>
-}
+export type InsertMutationFnParams<T extends object = Record<string, unknown>> =
+  {
+    transaction: TransactionWithMutations<T>
+  }
 
 export type DeleteMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `delete`, T>
+    transaction: TransactionWithMutations<T>
   }
 
-export type InsertMutationFn<
-  T extends object = Record<string, unknown>,
-  TInsertInput extends object = T,
-> = (params: InsertMutationFnParams<T, TInsertInput>) => Promise<any>
+export type InsertMutationFn<T extends object = Record<string, unknown>> = (
+  params: InsertMutationFnParams<T>
+) => Promise<any>
 
 export type UpdateMutationFn<T extends object = Record<string, unknown>> = (
   params: UpdateMutationFnParams<T>
@@ -365,7 +351,7 @@ export interface CollectionConfig<
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onInsert?: InsertMutationFn<T, TInsertInput>
+  onInsert?: InsertMutationFn<TInsertInput>
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and mutation information

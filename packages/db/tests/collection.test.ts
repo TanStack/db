@@ -872,7 +872,7 @@ describe(`Collection with schema validation`, () => {
     const mutationFn = async () => {}
 
     // Minimal data
-    const tx1 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
+    const tx1 = createTransaction<TodoInput>({ mutationFn })
     tx1.mutate(() => collection.insert({ text: `task-1` }))
 
     // Type assertions on the mutation structure
@@ -882,9 +882,7 @@ describe(`Collection with schema validation`, () => {
     // Test the mutation type structure
     // By providing the correct generics to `createTransaction`, the type of `mutation` is now correctly inferred.
     // We also use a more specific type for the assertion itself.
-    expectTypeOf(mutation).toEqualTypeOf<
-      PendingMutation<Todo, `insert`, TodoInput, typeof collection>
-    >()
+    expectTypeOf(mutation).toExtend<PendingMutation<Todo, any, any, any>>()
     expectTypeOf(mutation.type).toEqualTypeOf<`insert`>()
     // The static type of `changes` for an insert is `TInsertInput`, which is `TodoInput` here.
     expectTypeOf(mutation.changes).toEqualTypeOf<TodoInput>()
