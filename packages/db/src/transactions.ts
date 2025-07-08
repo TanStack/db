@@ -4,6 +4,7 @@ import type {
   MutationFn,
   OperationType,
   PendingMutation,
+  ResolveTransactionData,
   TransactionConfig,
   TransactionState,
   TransactionWithMutations,
@@ -15,14 +16,20 @@ let transactionStack: Array<Transaction<any>> = []
 let sequenceNumber = 0
 
 export function createTransaction<
-  TData extends object = Record<string, unknown>,
->(config: TransactionConfig<TData>): Transaction<TData> {
-  const newTransaction = new Transaction<TData>(config)
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
+>(
+  config: TransactionConfig<ResolveTransactionData<T, TOperation, TInsertInput>>
+): Transaction<ResolveTransactionData<T, TOperation, TInsertInput>> {
+  const newTransaction = new Transaction<
+    ResolveTransactionData<T, TOperation, TInsertInput>
+  >(config)
   transactions.push(newTransaction)
   return newTransaction
 }
 
-export function getActiveTransaction(): Transaction | undefined {
+export function getActiveTransaction(): Transaction<any> | undefined {
   if (transactionStack.length > 0) {
     return transactionStack.slice(-1)[0]
   } else {
@@ -45,15 +52,12 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
-class Transaction<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-> {
+class Transaction<T extends object = Record<string, unknown>> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
-  public mutations: Array<PendingMutation<T, TOperation>>
-  public isPersisted: Deferred<Transaction<T, TOperation>>
+  public mutations: Array<PendingMutation<T>>
+  public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -71,7 +75,7 @@ class Transaction<
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T, TOperation>>()
+    this.isPersisted = createDeferred<Transaction<T>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection"
-import type { Collection } from "../src/collection"
+import type { CollectionImpl } from "../src/collection"
 import type { ChangeMessage, CollectionConfig } from "../src/types"
 
 describe(`Collection getters`, () => {
-  let collection: Collection
+  let collection: CollectionImpl
   let mockSync: {
     sync: (params: {
-      collection: Collection
+      collection: CollectionImpl
       begin: () => void
       write: (message: ChangeMessage) => void
       commit: () => void

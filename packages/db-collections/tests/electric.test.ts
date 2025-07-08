@@ -10,6 +10,7 @@ import type {
   TransactionWithMutations,
 } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -26,7 +27,13 @@ vi.mock(`@electric-sql/client`, async () => {
 })
 
 describe(`Electric Integration`, () => {
-  let collection: Collection<Row, string | number, ElectricCollectionUtils>
+  let collection: Collection<
+    Row,
+    string | number,
+    ElectricCollectionUtils,
+    StandardSchemaV1<unknown, unknown>,
+    Row
+  >
   let subscriber: (messages: Array<Message<Row>>) => void
 
   beforeEach(() => {
@@ -55,11 +62,7 @@ describe(`Electric Integration`, () => {
     const options = electricCollectionOptions(config)
 
     // Create collection with Electric configuration using the new utility exposure pattern
-    collection = createCollection<
-      Row,
-      string | number,
-      ElectricCollectionUtils
-    >(options)
+    collection = createCollection(options)
   })
 
   it(`should commit an empty transaction when there's an up-to-date`, () => {

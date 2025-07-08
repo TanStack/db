@@ -15,6 +15,40 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
+ * Helper type to extract the input type from a standard schema
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type InferSchemaInput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends object
+    ? StandardSchemaV1.InferInput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * Helper type to determine the insert input type
+ * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
+ *
+ * Priority:
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema input type (if schema provided)
+ * 3. Fallback type TFallback
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type ResolveInsertInput<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaInput<TSchema>
+  : TExplicit extends object
+    ? TExplicit
+    : Record<string, unknown>
+
+/**
  * Helper type to determine the final type based on priority:
  * 1. Explicit generic TExplicit (if not 'unknown')
  * 2. Schema output type (if schema provided)
@@ -36,6 +70,16 @@ export type ResolveType<
     ? TExplicit
     : Record<string, unknown>
 
+export type ResolveTransactionData<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
+> = TOperation extends `insert`
+  ? TInsertInput
+  : TOperation extends `delete`
+    ? T
+    : Partial<T>
+
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -55,23 +99,31 @@ export type UtilsRecord = Record<string, Fn>
 export interface PendingMutation<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TInsertInput extends object = T,
+  TCollection extends Collection<T, any, any, any, TInsertInput> = Collection<
+    T,
+    any,
+    any,
+    any,
+    TInsertInput
+  >,
 > {
   mutationId: string
+  // The state of the object before the mutation.
   original: TOperation extends `insert` ? {} : T
+  // The result state of the object after all mutations.
   modified: T
-  changes: TOperation extends `insert`
-    ? T
-    : TOperation extends `delete`
-      ? T
-      : Partial<T>
+  // The actual changes made.
+  changes: ResolveTransactionData<T, TOperation, TInsertInput>
   globalKey: string
+
   key: any
-  type: OperationType
+  type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T, any>
+  collection: TCollection
 }
 
 /**
@@ -96,9 +148,8 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
  */
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-> = Transaction<T, TOperation> & {
-  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
+> = Transaction<T> & {
+  mutations: NonEmptyArray<PendingMutation<T>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
@@ -114,12 +165,14 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
 /**
  * Options for the createOptimisticAction helper
  */
-export interface CreateOptimisticActionsOptions<TVars = unknown>
-  extends Omit<TransactionConfig, `mutationFn`> {
+export interface CreateOptimisticActionsOptions<
+  TVars = unknown,
+  T extends object = Record<string, unknown>,
+> extends Omit<TransactionConfig<T>, `mutationFn`> {
   /** Function to apply optimistic updates locally before the mutation completes */
   onMutate: (vars: TVars) => void
   /** Function to execute the mutation on the server */
-  mutationFn: (vars: TVars, params: MutationFnParams) => Promise<any>
+  mutationFn: (vars: TVars, params: MutationFnParams<T>) => Promise<any>
 }
 
 export type { Transaction }
@@ -143,7 +196,7 @@ export interface SyncConfig<
   TKey extends string | number = string | number,
 > {
   sync: (params: {
-    collection: Collection<T, TKey>
+    collection: Collection<T, TKey, any, any, any>
     begin: () => void
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
@@ -211,17 +264,17 @@ export interface InsertConfig {
 
 export type UpdateMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `update`>
+    transaction: TransactionWithMutations<T>
   }
 
 export type InsertMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `insert`>
+    transaction: TransactionWithMutations<T>
   }
 
 export type DeleteMutationFnParams<T extends object = Record<string, unknown>> =
   {
-    transaction: TransactionWithMutations<T, `delete`>
+    transaction: TransactionWithMutations<T>
   }
 
 export type InsertMutationFn<T extends object = Record<string, unknown>> = (
@@ -257,6 +310,7 @@ export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TInsertInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -299,7 +353,7 @@ export interface CollectionConfig<
    * @param params Object containing transaction and mutation information
    * @returns Promise resolving to any value
    */
-  onInsert?: InsertMutationFn<T>
+  onInsert?: InsertMutationFn<TInsertInput>
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and mutation information
