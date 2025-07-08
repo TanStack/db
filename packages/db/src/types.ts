@@ -212,7 +212,7 @@ export interface InsertConfig {
 export type UpdateMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
   transaction: TransactionWithMutations<T, `update`>
   collection: Collection<T, TKey, TUtils>
@@ -221,7 +221,7 @@ export type UpdateMutationFnParams<
 export type InsertMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
   transaction: TransactionWithMutations<T, `insert`>
   collection: Collection<T, TKey, TUtils>
@@ -230,7 +230,7 @@ export type InsertMutationFnParams<
 export type DeleteMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
   transaction: TransactionWithMutations<T, `delete`>
   collection: Collection<T, TKey, TUtils>
@@ -239,19 +239,19 @@ export type DeleteMutationFnParams<
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = Record<string, Fn>,
 > = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
 /**

@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection, createTransaction } from "@tanstack/db"
+import {
+  CollectionImpl,
+  createCollection,
+  createTransaction,
+} from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
 import type { ElectricCollectionUtils } from "../src/electric"
 import type {
   Collection,
+  InsertMutationFnParams,
   MutationFnParams,
   PendingMutation,
   Transaction,
@@ -455,7 +460,11 @@ describe(`Electric Integration`, () => {
         id: `test-transaction`,
         mutations: [],
       } as unknown as TransactionWithMutations<Row>
-      const mockParams: MutationFnParams<Row> = { transaction: mockTransaction }
+      const mockParams: InsertMutationFnParams<Row> = {
+        transaction: mockTransaction,
+        // @ts-expect-error not relevant to test
+        collection: CollectionImpl,
+      }
 
       // Create a handler that doesn't return a txid
       const onInsert = vi.fn().mockResolvedValue({})

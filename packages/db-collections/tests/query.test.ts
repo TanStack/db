@@ -3,9 +3,12 @@ import { QueryClient } from "@tanstack/query-core"
 import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
 import type {
-  MutationFnParams,
+  CollectionImpl,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
   Transaction,
   TransactionWithMutations,
+  UpdateMutationFnParams,
 } from "@tanstack/db"
 import type { QueryCollectionConfig } from "../src/query"
 
@@ -436,8 +439,20 @@ describe(`QueryCollection`, () => {
       const mockTransaction = {
         id: `test-transaction`,
       } as Transaction<TestItem>
-      const mockParams: MutationFnParams<TestItem> = {
+      const insertMockParams: InsertMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
+      }
+      const updateMockParams: UpdateMutationFnParams<TestItem> = {
+        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
+      }
+      const deleteMockParams: DeleteMutationFnParams<TestItem> = {
+        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
 
       // Create handlers
@@ -459,14 +474,14 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
 
       // Call the wrapped handlers
-      await options.onInsert!(mockParams)
-      await options.onUpdate!(mockParams)
-      await options.onDelete!(mockParams)
+      await options.onInsert!(insertMockParams)
+      await options.onUpdate!(updateMockParams)
+      await options.onDelete!(deleteMockParams)
 
       // Verify the original handlers were called
-      expect(onInsert).toHaveBeenCalledWith(mockParams)
-      expect(onUpdate).toHaveBeenCalledWith(mockParams)
-      expect(onDelete).toHaveBeenCalledWith(mockParams)
+      expect(onInsert).toHaveBeenCalledWith(insertMockParams)
+      expect(onUpdate).toHaveBeenCalledWith(updateMockParams)
+      expect(onDelete).toHaveBeenCalledWith(deleteMockParams)
     })
 
     it(`should call refetch based on handler return value`, async () => {
@@ -474,8 +489,10 @@ describe(`QueryCollection`, () => {
       const mockTransaction = {
         id: `test-transaction`,
       } as Transaction<TestItem>
-      const mockParams: MutationFnParams<TestItem> = {
+      const insertMockParams: InsertMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
 
       // Create handlers with different return values
@@ -509,10 +526,10 @@ describe(`QueryCollection`, () => {
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
       const optionsDefault = queryCollectionOptions(configDefault)
-      await optionsDefault.onInsert!(mockParams)
+      await optionsDefault.onInsert!(insertMockParams)
 
       // Verify handler was called and refetch was triggered
-      expect(onInsertDefault).toHaveBeenCalledWith(mockParams)
+      expect(onInsertDefault).toHaveBeenCalledWith(insertMockParams)
       expect(refetchSpy).toHaveBeenCalledTimes(1)
 
       // Reset mocks
@@ -520,10 +537,10 @@ describe(`QueryCollection`, () => {
 
       // Test case 2: Explicit { refetch: false } should not trigger refetch
       const optionsFalse = queryCollectionOptions(configFalse)
-      await optionsFalse.onInsert!(mockParams)
+      await optionsFalse.onInsert!(insertMockParams)
 
       // Verify handler was called but refetch was NOT triggered
-      expect(onInsertFalse).toHaveBeenCalledWith(mockParams)
+      expect(onInsertFalse).toHaveBeenCalledWith(insertMockParams)
       expect(refetchSpy).not.toHaveBeenCalled()
 
       // Restore original function

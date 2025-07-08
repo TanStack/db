@@ -49,7 +49,11 @@ export interface LocalOnlyCollectionConfig<
    * @returns Promise resolving to any value
    */
   onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: InsertMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 
   /**
@@ -58,7 +62,11 @@ export interface LocalOnlyCollectionConfig<
    * @returns Promise resolving to any value
    */
   onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: UpdateMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 
   /**
@@ -67,7 +75,11 @@ export interface LocalOnlyCollectionConfig<
    * @returns Promise resolving to any value
    */
   onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: DeleteMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 }
 
@@ -103,7 +115,7 @@ export function localOnlyCollectionOptions<
 
   // Create wrapper handlers that call user handlers first, then confirm transactions
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<ResolvedType>
+    params: InsertMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -118,7 +130,7 @@ export function localOnlyCollectionOptions<
   }
 
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<ResolvedType>
+    params: UpdateMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -133,7 +145,7 @@ export function localOnlyCollectionOptions<
   }
 
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<ResolvedType>
+    params: DeleteMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
