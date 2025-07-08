@@ -102,7 +102,7 @@ export interface ElectricCollectionConfig<
    *
    * @example
    * // Insert handler with error handling
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   try {
    *     const newItem = transaction.mutations[0].modified
    *     const result = await api.createTodo(newItem)
@@ -160,7 +160,7 @@ export interface ElectricCollectionConfig<
    *
    * @example
    * // Update handler with optimistic rollback
-   * onUpdate: async ({ transaction, collection }) => {
+   * onUpdate: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   try {
    *     const result = await api.updateTodo(mutation.original.id, mutation.changes)
@@ -183,7 +183,7 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric delete handler - MUST return { txid: string }
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
@@ -193,7 +193,7 @@ export interface ElectricCollectionConfig<
    *
    * @example
    * // Delete handler with multiple items - return array of txids
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const deletes = await Promise.all(
    *     transaction.mutations.map(m =>
    *       api.todos.delete({
@@ -206,7 +206,7 @@ export interface ElectricCollectionConfig<
    *
    * @example
    * // Delete handler with batch operation - single txid
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const idsToDelete = transaction.mutations.map(m => m.original.id)
    *   const result = await api.todos.deleteMany({
    *     ids: idsToDelete

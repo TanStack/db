@@ -275,7 +275,6 @@ export function localStorageCollectionOptions<
   }
 
   /**
-   * Clear all data from the storage key
    * Removes all collection data from the configured storage
    */
   const clearStorage: ClearStorageFn = (): void => {
