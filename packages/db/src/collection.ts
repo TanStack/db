@@ -110,7 +110,7 @@ export interface Collection<
  *   sync: { sync: () => {} }
  * })
  *
- * // Note: You must provide either an explicit type or a schema, but not both
+ * // Note: You must provide either an explicit type or a schema, but not both.
  */
 export function createCollection<
   TExplicit = unknown,

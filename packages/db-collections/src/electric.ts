@@ -82,9 +82,9 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric insert handler - MUST return { txid: string }
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   const newItem = transaction.mutations[0].modified
-   *   const result = await electric.db.todos.create({
+   *   const result = await api.todos.create({
    *     data: newItem
    *   })
    *   return { txid: result.txid } // Required for Electric sync matching
@@ -92,36 +92,22 @@ export interface ElectricCollectionConfig<
    *
    * @example
    * // Insert handler with multiple items - return array of txids
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   const results = await Promise.all(
-   *     items.map(item => electric.db.todos.create({ data: item }))
+   *     items.map(item => api.todos.create({ data: item }))
    *   )
    *   return { txid: results.map(r => r.txid) } // Array of txids
    * }
    *
    * @example
    * // Insert handler with batch operation - single txid
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   const items = transaction.mutations.map(m => m.modified)
-   *   const result = await electric.db.todos.createMany({
+   *   const result = await api.todos.createMany({
    *     data: items
    *   })
    *   return { txid: result.txid } // Single txid for batch operation
-   * }
-   *
-   * @example
-   * // Insert handler with await for sync confirmation
-   * onInsert: async ({ transaction, collection }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   const result = await electric.db.todos.create({
-   *     data: newItem
-   *   })
-   *
-   *   // Wait for the txid to be synced from server
-   *   await collection.utils.awaitTxId(result.txid)
-   *
-   *   return { txid: result.txid }
    * }
    */
   onInsert?: (
@@ -135,60 +121,27 @@ export interface ElectricCollectionConfig<
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric update handler - MUST return { txid: string }
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   const result = await electric.db.todos.update({
-   *     where: { id: mutation.key },
-   *     data: mutation.changes // Only the changed fields
+   * onUpdate: async ({ transaction }) => {
+   *   const { original, changes } = transaction.mutations[0]
+   *   const result = await api.todos.update({
+   *     where: { id: original.id },
+   *     data: changes // Only the changed fields
    *   })
    *   return { txid: result.txid } // Required for Electric sync matching
    * }
    *
    * @example
    * // Update handler with multiple items - return array of txids
-   * onUpdate: async ({ transaction, collection }) => {
+   * onUpdate: async ({ transaction }) => {
    *   const updates = await Promise.all(
    *     transaction.mutations.map(m =>
-   *       electric.db.todos.update({
-   *         where: { id: m.key },
+   *       api.todos.update({
+   *         where: { id: m.original.id },
    *         data: m.changes
    *       })
    *     )
    *   )
    *   return { txid: updates.map(u => u.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Update handler with batch operation - single txid
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const keysToUpdate = transaction.mutations.map(m => m.key)
-   *   const result = await electric.db.todos.updateMany({
-   *     where: { id: { in: keysToUpdate } },
-   *     data: transaction.mutations[0].changes
-   *   })
-   *   return { txid: result.txid } // Single txid for batch
-   * }
-   *
-   * @example
-   * // Update handler with conditional logic
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *
-   *   // Check if item exists before updating
-   *   const existing = await electric.db.todos.findUnique({
-   *     where: { id: mutation.key }
-   *   })
-   *
-   *   if (!existing) {
-   *     throw new Error(`Todo with id ${mutation.key} not found`)
-   *   }
-   *
-   *   const result = await electric.db.todos.update({
-   *     where: { id: mutation.key },
-   *     data: mutation.changes
-   *   })
-   *
-   *   return { txid: result.txid }
    * }
    */
   onUpdate?: (
@@ -204,7 +157,7 @@ export interface ElectricCollectionConfig<
    * // Basic Electric delete handler - MUST return { txid: string }
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
-   *   const result = await electric.db.todos.delete({
+   *   const result = await api.todos.delete({
    *     where: { id: mutation.key }
    *   })
    *   return { txid: result.txid } // Required for Electric sync matching
@@ -215,7 +168,7 @@ export interface ElectricCollectionConfig<
    * onDelete: async ({ transaction, collection }) => {
    *   const deletes = await Promise.all(
    *     transaction.mutations.map(m =>
-   *       electric.db.todos.delete({
+   *       api.todos.delete({
    *         where: { id: m.key }
    *       })
    *     )
@@ -226,26 +179,13 @@ export interface ElectricCollectionConfig<
    * @example
    * // Delete handler with batch operation - single txid
    * onDelete: async ({ transaction, collection }) => {
-   *   const keysToDelete = transaction.mutations.map(m => m.key)
-   *   const result = await electric.db.todos.deleteMany({
-   *     where: { id: { in: keysToDelete } }
+   *   const idsToDelete = transaction.mutations.map(m => m.original.id)
+   *   const result = await api.todos.deleteMany({
+   *     ids: idsToDelete
    *   })
    *   return { txid: result.txid } // Single txid for batch operation
    * }
    *
-   * @example
-   * // Soft delete handler (mark as deleted instead of removing)
-   * onDelete: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   const result = await electric.db.todos.update({
-   *     where: { id: mutation.key },
-   *     data: {
-   *       deleted: true,
-   *       deletedAt: new Date()
-   *     }
-   *   })
-   *   return { txid: result.txid }
-   * }
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>

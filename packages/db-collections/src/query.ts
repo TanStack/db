@@ -79,7 +79,7 @@ export interface QueryCollectionConfig<
    *
    * @example
    * // Insert handler with refetch control
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   const newItem = transaction.mutations[0].modified
    *   await api.createTodo(newItem)
    *   return { refetch: false } // Skip automatic refetch
@@ -87,7 +87,7 @@ export interface QueryCollectionConfig<
    *
    * @example
    * // Insert handler with multiple items
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   await api.createTodos(items)
    *   // Will refetch query to get updated data
@@ -95,7 +95,7 @@ export interface QueryCollectionConfig<
    *
    * @example
    * // Insert handler with error handling
-   * onInsert: async ({ transaction, collection }) => {
+   * onInsert: async ({ transaction }) => {
    *   try {
    *     const newItem = transaction.mutations[0].modified
    *     await api.createTodo(newItem)
@@ -113,23 +113,15 @@ export interface QueryCollectionConfig<
    * @returns Promise resolving to void or { refetch?: boolean } to control refetching
    * @example
    * // Basic query collection update handler
-   * onUpdate: async ({ transaction, collection }) => {
+   * onUpdate: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.key, mutation.changes)
+   *   await api.updateTodo(mutation.original.id, mutation.changes)
    *   // Automatically refetches query after update
    * }
    *
    * @example
-   * // Update handler with refetch control
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.key, mutation.changes)
-   *   return { refetch: false } // Skip automatic refetch
-   * }
-   *
-   * @example
    * // Update handler with multiple items
-   * onUpdate: async ({ transaction, collection }) => {
+   * onUpdate: async ({ transaction }) => {
    *   const updates = transaction.mutations.map(m => ({
    *     id: m.key,
    *     changes: m.changes
@@ -142,7 +134,7 @@ export interface QueryCollectionConfig<
    * // Update handler with manual refetch
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.key, mutation.changes)
+   *   await api.updateTodo(mutation.original.id, mutation.changes)
    *
    *   // Manually trigger refetch
    *   await collection.utils.refetch()
@@ -154,13 +146,13 @@ export interface QueryCollectionConfig<
    * // Update handler with related collection refetch
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.key, mutation.changes)
+   *   await api.updateTodo(mutation.original.id, mutation.changes)
    *
    *   // Refetch related collections when this item changes
    *   await Promise.all([
    *     collection.utils.refetch(), // Refetch this collection
-   *     usersCollection.utils.refetch(), // Refetch users if todo assignment changed
-   *     tagsCollection.utils.refetch() // Refetch tags if todo tags changed
+   *     usersCollection.utils.refetch(), // Refetch users
+   *     tagsCollection.utils.refetch() // Refetch tags
    *   ])
    *
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
@@ -174,23 +166,23 @@ export interface QueryCollectionConfig<
    * @returns Promise resolving to void or { refetch?: boolean } to control refetching
    * @example
    * // Basic query collection delete handler
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.key)
+   *   await api.deleteTodo(mutation.original.id)
    *   // Automatically refetches query after delete
    * }
    *
    * @example
    * // Delete handler with refetch control
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.key)
+   *   await api.deleteTodo(mutation.original.id)
    *   return { refetch: false } // Skip automatic refetch
    * }
    *
    * @example
    * // Delete handler with multiple items
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
    *   // Will refetch query to get updated data
@@ -198,9 +190,9 @@ export interface QueryCollectionConfig<
    *
    * @example
    * // Soft delete handler
-   * onDelete: async ({ transaction, collection }) => {
+   * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.key, {
+   *   await api.updateTodo(mutation.original.id, {
    *     deleted: true,
    *     deletedAt: new Date()
    *   })
@@ -211,13 +203,13 @@ export interface QueryCollectionConfig<
    * // Delete handler with related collection refetch
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.key)
+   *   await api.deleteTodo(mutation.original.id)
    *
    *   // Refetch related collections when this item is deleted
    *   await Promise.all([
    *     collection.utils.refetch(), // Refetch this collection
-   *     usersCollection.utils.refetch(), // Refetch users if todo assignment changed
-   *     projectsCollection.utils.refetch() // Refetch projects if todo was part of a project
+   *     usersCollection.utils.refetch(), // Refetch users
+   *     projectsCollection.utils.refetch() // Refetch projects
    *   ])
    *
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
