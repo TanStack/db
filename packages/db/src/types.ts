@@ -326,7 +326,7 @@ export interface CollectionConfig<
   compare?: (x: T, y: T) => number
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    * @example
    * // Basic insert handler
@@ -368,7 +368,7 @@ export interface CollectionConfig<
   onInsert?: InsertMutationFn<T, TKey>
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    * @example
    * // Basic update handler
@@ -411,7 +411,7 @@ export interface CollectionConfig<
   onUpdate?: UpdateMutationFn<T, TKey>
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    * @example
    * // Basic delete handler
@@ -425,18 +425,6 @@ export interface CollectionConfig<
    * onDelete: async ({ transaction, collection }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
-   * }
-   *
-   * @example
-   * // Delete handler with soft delete
-   * onDelete: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   const itemToDelete = mutation.original
-   *   await api.updateTodo(mutation.original.id, {
-   *     ...itemToDelete,
-   *     deleted: true,
-   *     deletedAt: new Date()
-   *   })
    * }
    *
    * @example

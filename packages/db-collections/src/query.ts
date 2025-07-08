@@ -109,7 +109,7 @@ export interface QueryCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to void or { refetch?: boolean } to control refetching
    * @example
    * // Basic query collection update handler
@@ -162,7 +162,7 @@ export interface QueryCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to void or { refetch?: boolean } to control refetching
    * @example
    * // Basic query collection delete handler
@@ -186,17 +186,6 @@ export interface QueryCollectionConfig<
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
    *   // Will refetch query to get updated data
-   * }
-   *
-   * @example
-   * // Soft delete handler
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.original.id, {
-   *     deleted: true,
-   *     deletedAt: new Date()
-   *   })
-   *   // Refetch will show updated data with deleted flag
    * }
    *
    * @example

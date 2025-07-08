@@ -78,7 +78,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an insert operation
    * Must return an object containing a txid string or array of txids
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric insert handler - MUST return { txid: string }
@@ -113,7 +113,6 @@ export interface ElectricCollectionConfig<
    *   }
    * }
    *
-   *
    * @example
    * // Insert handler with batch operation - single txid
    * onInsert: async ({ transaction }) => {
@@ -131,7 +130,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an update operation
    * Must return an object containing a txid string or array of txids
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric update handler - MUST return { txid: string }
@@ -179,7 +178,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before a delete operation
    * Must return an object containing a txid string or array of txids
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
    * // Basic Electric delete handler - MUST return { txid: string }

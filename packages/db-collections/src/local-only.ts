@@ -45,7 +45,7 @@ export interface LocalOnlyCollectionConfig<
 
   /**
    * Optional asynchronous handler function called after an insert operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onInsert?: (
@@ -58,7 +58,7 @@ export interface LocalOnlyCollectionConfig<
 
   /**
    * Optional asynchronous handler function called after an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onUpdate?: (
@@ -71,7 +71,7 @@ export interface LocalOnlyCollectionConfig<
 
   /**
    * Optional asynchronous handler function called after a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onDelete?: (

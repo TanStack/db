@@ -82,7 +82,7 @@ export interface LocalStorageCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onInsert?: (
@@ -91,7 +91,7 @@ export interface LocalStorageCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onUpdate?: (
@@ -100,7 +100,7 @@ export interface LocalStorageCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onDelete?: (
