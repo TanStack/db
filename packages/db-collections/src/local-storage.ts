@@ -128,6 +128,9 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
 
 /**
  * Validates that a value can be JSON serialized
+ * @param value - The value to validate for JSON serialization
+ * @param operation - The operation type being performed (for error messages)
+ * @throws Error if the value cannot be JSON serialized
  */
 function validateJsonSerializable(value: any, operation: string): void {
   try {
@@ -143,6 +146,7 @@ function validateJsonSerializable(value: any, operation: string): void {
 
 /**
  * Generate a UUID for version tracking
+ * @returns A unique identifier string for tracking data versions
  */
 function generateUuid(): string {
   return crypto.randomUUID()
@@ -151,11 +155,45 @@ function generateUuid(): string {
 /**
  * Creates localStorage collection options for use with a standard Collection
  *
+ * This function creates a collection that persists data to localStorage/sessionStorage
+ * and synchronizes changes across browser tabs using storage events.
+ *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the localStorage collection
- * @returns Collection options with utilities
+ * @returns Collection options with utilities including clearStorage and getStorageSize
+ *
+ * @example
+ * // Basic localStorage collection
+ * const collection = createCollection(
+ *   localStorageCollectionOptions({
+ *     storageKey: 'todos',
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * @example
+ * // localStorage collection with custom storage
+ * const collection = createCollection(
+ *   localStorageCollectionOptions({
+ *     storageKey: 'todos',
+ *     storage: window.sessionStorage, // Use sessionStorage instead
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * @example
+ * // localStorage collection with mutation handlers
+ * const collection = createCollection(
+ *   localStorageCollectionOptions({
+ *     storageKey: 'todos',
+ *     getKey: (item) => item.id,
+ *     onInsert: async ({ transaction }) => {
+ *       console.log('Item inserted:', transaction.mutations[0].modified)
+ *     },
+ *   })
+ * )
  */
 export function localStorageCollectionOptions<
   TExplicit = unknown,
@@ -202,7 +240,10 @@ export function localStorageCollectionOptions<
     lastKnownData
   )
 
-  // Manual trigger function for local sync updates
+  /**
+   * Manual trigger function for local sync updates
+   * Forces a check for storage changes and updates the collection if needed
+   */
   const triggerLocalSync = () => {
     if (sync.manualTrigger) {
       sync.manualTrigger()
@@ -211,6 +252,7 @@ export function localStorageCollectionOptions<
 
   /**
    * Save data to storage
+   * @param dataMap - Map of items with version tracking to save to storage
    */
   const saveToStorage = (
     dataMap: Map<string | number, StoredItem<ResolvedType>>
@@ -234,6 +276,7 @@ export function localStorageCollectionOptions<
 
   /**
    * Clear all data from the storage key
+   * Removes all collection data from the configured storage
    */
   const clearStorage: ClearStorageFn = (): void => {
     storage.removeItem(config.storageKey)
@@ -241,13 +284,17 @@ export function localStorageCollectionOptions<
 
   /**
    * Get the size of the stored data in bytes (approximate)
+   * @returns The approximate size in bytes of the stored collection data
    */
   const getStorageSize: GetStorageSizeFn = (): number => {
     const data = storage.getItem(config.storageKey)
     return data ? new Blob([data]).size : 0
   }
 
-  // Create wrapper handlers for direct persistence operations that perform actual storage operations
+  /*
+   * Create wrapper handlers for direct persistence operations that perform actual storage operations
+   * Wraps the user's onInsert handler to also save changes to localStorage
+   */
   const wrappedOnInsert = async (
     params: InsertMutationFnParams<ResolvedType>
   ) => {
@@ -391,6 +438,9 @@ export function localStorageCollectionOptions<
 
 /**
  * Load data from storage and return as a Map
+ * @param storageKey - The key used to store data in the storage API
+ * @param storage - The storage API to load from (localStorage, sessionStorage, etc.)
+ * @returns Map of stored items with version tracking, or empty Map if loading fails
  */
 function loadFromStorage<T extends object>(
   storageKey: string,
@@ -445,6 +495,13 @@ function loadFromStorage<T extends object>(
 
 /**
  * Internal function to create localStorage sync configuration
+ * Creates a sync configuration that handles localStorage persistence and cross-tab synchronization
+ * @param storageKey - The key used for storing data in localStorage
+ * @param storage - The storage API to use (localStorage, sessionStorage, etc.)
+ * @param storageEventApi - The event API for listening to storage changes
+ * @param getKey - Function to extract the key from an item
+ * @param lastKnownData - Map tracking the last known state for change detection
+ * @returns Sync configuration with manual trigger capability
  */
 function createLocalStorageSync<T extends object>(
   storageKey: string,
@@ -457,6 +514,9 @@ function createLocalStorageSync<T extends object>(
 
   /**
    * Compare two Maps to find differences using version keys
+   * @param oldData - The previous state of stored items
+   * @param newData - The current state of stored items
+   * @returns Array of changes with type, key, and value information
    */
   const findChanges = (
     oldData: Map<string | number, StoredItem<T>>,
@@ -494,6 +554,7 @@ function createLocalStorageSync<T extends object>(
 
   /**
    * Process storage changes and update collection
+   * Loads new data from storage, compares with last known state, and applies changes
    */
   const processStorageChanges = () => {
     if (!syncParams) return
@@ -566,6 +627,7 @@ function createLocalStorageSync<T extends object>(
 
     /**
      * Get sync metadata - returns storage key information
+     * @returns Object containing storage key and storage type metadata
      */
     getSyncMetadata: () => ({
       storageKey,
