@@ -265,6 +265,8 @@ const specialUsers = createLiveQueryCollection((q) =>
 The query system provides several comparison operators:
 
 ```ts
+import { eq, gt, gte, lt, lte, like, ilike, inArray, and, or, not } from '@tanstack/db'
+
 // Equality
 eq(user.id, 1)
 
@@ -347,16 +349,19 @@ const userStats = createLiveQueryCollection((q) =>
 Transform your data using built-in functions:
 
 ```ts
-const formattedUsers = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .select(({ user }) => ({
-      id: user.id,
-      name: upper(user.name),
-      email: lower(user.email),
-      displayName: concat(user.firstName, ' ', user.lastName),
-    }))
-)
+import { upper, lower, concat } from '@tanstack/db'
+
+const formattedUsers = createCollection(liveQueryCollectionOptions({
+  query: (q) =>
+    q
+      .from({ user: usersCollection })
+      .select(({ user }) => ({
+        id: user.id,
+        name: upper(user.name),
+        email: lower(user.email),
+        displayName: concat(user.firstName, ' ', user.lastName),
+      }))
+}))
 ```
 
 ### Including All Fields
@@ -661,19 +666,22 @@ const userStats = createCollection(liveQueryCollectionOptions({
 Use various aggregate functions to summarize your data:
 
 ```ts
-const orderStats = createLiveQueryCollection((q) =>
-  q
-    .from({ order: ordersCollection })
-    .groupBy(({ order }) => order.customerId)
-    .select(({ order }) => ({
-      customerId: order.customerId,
-      totalOrders: count(order.id),
-      totalAmount: sum(order.amount),
-      avgOrderValue: avg(order.amount),
-      minOrder: min(order.amount),
-      maxOrder: max(order.amount),
-    }))
-)
+import { count, sum, avg, min, max } from '@tanstack/db'
+
+const orderStats = createCollection(liveQueryCollectionOptions({
+  query: (q) =>
+    q
+      .from({ order: ordersCollection })
+      .groupBy(({ order }) => order.customerId)
+      .select(({ order }) => ({
+        customerId: order.customerId,
+        totalOrders: count(order.id),
+        totalAmount: sum(order.amount),
+        avgOrderValue: avg(order.amount),
+        minOrder: min(order.amount),
+        maxOrder: max(order.amount),
+      }))
+}))
 ```
 
 ### Having Clauses
@@ -913,7 +921,7 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 Create reusable query builder instances:
 
 ```ts
-import { Query } from '@tanstack/db'
+import { Query, eq } from '@tanstack/db'
 
 // Create a reusable query builder
 const userQuery = new Query()
@@ -943,7 +951,7 @@ const userPosts = createLiveQueryCollection((q) =>
 Use `Ref<MyType>` to create reusable callback functions:
 
 ```ts
-import { Ref } from '@tanstack/db'
+import { Ref, eq, gt } from '@tanstack/db'
 
 // Create reusable callbacks
 const isActiveUser = (user: Ref<User>) => eq(user.active, true)
