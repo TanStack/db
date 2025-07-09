@@ -50,7 +50,7 @@ Sync data into collections:
 ```ts
 import { createQueryCollection } from "@tanstack/db-collections"
 
-const todoCollection = createQueryCollection<Todo>({
+const todoCollection = createQueryCollection({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getKey: (item) => item.id,
@@ -62,10 +62,13 @@ Use live queries in your components:
 
 ```tsx
 import { useLiveQuery } from "@tanstack/react-db"
+import { eq } from "@tanstack/db"
 
 const Todos = () => {
   const { data: todos } = useLiveQuery((query) =>
-    query.from({ todoCollection }).where("@completed", "=", false)
+    query
+      .from({ todos: todoCollection })
+      .where(({ todos }) => eq(todos.completed, false))
   )
 
   return <List items={todos} />

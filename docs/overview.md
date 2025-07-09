@@ -163,9 +163,11 @@ You can also use:
 
 #### Collection schemas
 
-All collections optionally support a `schema`.
+All collections optionally (though strongly recommended) support adding a `schema`.
 
 If provided, this must be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as a [Zod](https://zod.dev) or [Effect](https://effect.website/docs/schema/introduction/) schema.
+
+The collection will use the schema to do client-side validation of optimistic mutations.
 
 The collection will use the schema for its type so if you provide a schema, you can't also pass in an explicit
 type (e.g. `createCollection<Todo>()`).
@@ -639,7 +641,7 @@ import { queryCollectionOptions } from "@tanstack/db-collections"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createCollection<Todo>(queryCollectionOptions({
+const todoCollection = createCollection(queryCollectionOptions({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getKey: (item) => item.id,
@@ -652,7 +654,7 @@ const todoCollection = createCollection<Todo>(queryCollectionOptions({
   }
   // also add onUpdate, onDelete as needed.
 }))
-const listCollection = createCollection<TodoList>(queryCollectionOptions({
+const listCollection = createCollection(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
   getKey: (item) => item.id,
@@ -704,7 +706,7 @@ import type { Collection } from '@tanstack/db'
 import type { MutationFn, PendingMutation, createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/db-collections'
 
-export const todoCollection = createCollection(electricCollectionOptions<Todo>({
+export const todoCollection = createCollection(electricCollectionOptions({
   id: 'todos',
   schema: todoSchema,
   // Electric syncs data using "shapes". These are filtered views

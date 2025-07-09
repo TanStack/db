@@ -4,17 +4,16 @@
   "version": "0.0.23",
   "dependencies": {
     "@tanstack/db-collections": "^0.0.21",
-    "@tanstack/query-core": "^5.75.7",
+    "@tanstack/query-core": "^5.81.5",
     "@tanstack/react-db": "^0.0.17",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",
     "express": "^4.19.2",
-    "postgres": "^3.4.5",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwindcss": "^4.0.17",
-    "zod": "^3.24.2"
+    "postgres": "^3.4.7",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.11"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
@@ -27,8 +26,8 @@
     "@types/react-dom": "^19.0.0",
     "@typescript-eslint/eslint-plugin": "^8.26.1",
     "@typescript-eslint/parser": "^8.26.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.2",
+    "@vitejs/plugin-react": "^4.6.0",
+    "concurrently": "^9.2.0",
     "dotenv": "^16.3.1",
     "drizzle-kit": "^0.30.5",
     "eslint": "^9.22.0",
