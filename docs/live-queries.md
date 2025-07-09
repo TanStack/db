@@ -839,39 +839,13 @@ const page2Users = createLiveQueryCollection((q) =>
 
 Build complex queries by composing smaller, reusable parts. This approach makes your queries more maintainable and allows for better performance through caching.
 
-### Building Queries Incrementally
-
-Create query parts and combine them:
-
-```ts
-// Base query for active users
-const activeUsers = q
-  .from({ user: usersCollection })
-  .where(({ user }) => eq(user.active, true))
-
-// Query for users with posts
-const activeUsersWithPosts = q
-  .from({ user: activeUsers })
-  .join({ post: postsCollection }, ({ user, post }) => 
-    eq(user.id, post.userId)
-  )
-
-// Final query with selection
-const result = createLiveQueryCollection(activeUsersWithPosts
-  .select(({ user, post }) => ({
-    userName: user.name,
-    postTitle: post.title,
-  }))
-)
-```
-
 ### Conditional Query Building
 
 Build queries based on runtime conditions:
 
 ```ts
 function buildUserQuery(options: { activeOnly?: boolean; limit?: number }) {
-  let query = q.from({ user: usersCollection })
+  let query = new Query().from({ user: usersCollection })
   
   if (options.activeOnly) {
     query = query.where(({ user }) => eq(user.active, true))
