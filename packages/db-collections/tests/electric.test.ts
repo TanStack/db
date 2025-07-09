@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection, createTransaction } from "@tanstack/db"
+import {
+  CollectionImpl,
+  createCollection,
+  createTransaction,
+} from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
 import type { ElectricCollectionUtils } from "../src/electric"
 import type {
   Collection,
+  InsertMutationFnParams,
   MutationFnParams,
   PendingMutation,
   Transaction,
@@ -220,7 +225,7 @@ describe(`Electric Integration`, () => {
   // Tests for txid tracking functionality
   describe(`txid tracking`, () => {
     it(`should track txids from incoming messages`, async () => {
-      const testTxid = `123`
+      const testTxid = 123
 
       // Send a message with a txid
       subscriber([
@@ -237,13 +242,12 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // awaitTxId throws if you pass it a number
-      // @ts-expect-error
-      await expect(collection.utils.awaitTxId(123)).rejects.toThrow(
-        `Expected string in awaitTxId, received number`
-      )
-      await expect(collection.utils.awaitTxId(`123ab`)).rejects.toThrow(
-        `txId must contain only numbers`
+      // awaitTxId throws if you pass it a string
+      await expect(
+        // @ts-expect-error
+        collection.utils.awaitTxId(`123`)
+      ).rejects.toThrowErrorMatchingInlineSnapshot(
+        `[TypeError: Expected number in awaitTxId, received string]`
       )
 
       // The txid should be tracked and awaitTxId should resolve immediately
@@ -251,8 +255,8 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should track multiple txids`, async () => {
-      const txid1 = `100`
-      const txid2 = `200`
+      const txid1 = 100
+      const txid2 = 200
 
       // Send a message with multiple txids
       subscriber([
@@ -276,7 +280,7 @@ describe(`Electric Integration`, () => {
 
     it(`should reject with timeout when waiting for unknown txid`, async () => {
       // Set a short timeout for the test
-      const unknownTxid = `0`
+      const unknownTxid = 0
       const shortTimeout = 100
 
       // Attempt to await a txid that hasn't been seen with a short timeout
@@ -289,7 +293,7 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should resolve when a txid arrives after awaitTxId is called`, async () => {
-      const laterTxid = `1000`
+      const laterTxid = 1000
 
       // Start waiting for a txid that hasn't arrived yet
       const promise = collection.utils.awaitTxId(laterTxid, 1000)
@@ -326,10 +330,10 @@ describe(`Electric Integration`, () => {
     it(`should simulate the complete flow`, async () => {
       // Create a fake backend store to simulate server-side storage
       const fakeBackend = {
-        data: new Map<number, { txid: string; value: unknown }>(),
+        data: new Map<number, { txid: number; value: unknown }>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: (mutations: Array<PendingMutation<Row>>): Promise<string> => {
-          const txid = String(Date.now())
+        persist: (mutations: Array<PendingMutation<Row>>): Promise<number> => {
+          const txid = Math.floor(Math.random() * 10000)
 
           // Store the changes with the txid
           mutations.forEach((mutation) => {
@@ -342,7 +346,7 @@ describe(`Electric Integration`, () => {
           return Promise.resolve(txid)
         },
         // Simulates the server sending sync messages with txids
-        simulateSyncMessage: (txid: string) => {
+        simulateSyncMessage: (txid: number) => {
           // Create messages for each item in the store that has this txid
           const messages: Array<Message<Row>> = []
 
@@ -423,9 +427,9 @@ describe(`Electric Integration`, () => {
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       // Create mock handlers
-      const onInsert = vi.fn().mockResolvedValue({ txid: `123` })
-      const onUpdate = vi.fn().mockResolvedValue({ txid: `456` })
-      const onDelete = vi.fn().mockResolvedValue({ txid: `789` })
+      const onInsert = vi.fn().mockResolvedValue({ txid: 123 })
+      const onUpdate = vi.fn().mockResolvedValue({ txid: 456 })
+      const onDelete = vi.fn().mockResolvedValue({ txid: 789 })
 
       const config = {
         id: `test-handlers`,
@@ -455,7 +459,11 @@ describe(`Electric Integration`, () => {
         id: `test-transaction`,
         mutations: [],
       } as unknown as TransactionWithMutations<Row>
-      const mockParams: MutationFnParams<Row> = { transaction: mockTransaction }
+      const mockParams: InsertMutationFnParams<Row> = {
+        transaction: mockTransaction,
+        // @ts-expect-error missing type args but we don't care.
+        collection: CollectionImpl,
+      }
 
       // Create a handler that doesn't return a txid
       const onInsert = vi.fn().mockResolvedValue({})
@@ -480,15 +488,13 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    // We no longer need to test for invalid txid format since we're using strings directly
-
     it(`should simulate complete flow with direct persistence handlers`, async () => {
       // Create a fake backend store to simulate server-side storage
       const fakeBackend = {
-        data: new Map<string, { txid: string; value: unknown }>(),
+        data: new Map<string, { txid: number; value: unknown }>(),
         // Simulates persisting data to a backend and returning a txid
-        persist: (mutations: Array<PendingMutation<Row>>): Promise<string> => {
-          const txid = String(Date.now())
+        persist: (mutations: Array<PendingMutation<Row>>): Promise<number> => {
+          const txid = Math.floor(Math.random() * 10000)
 
           // Store the changes with the txid
           mutations.forEach((mutation) => {
@@ -499,7 +505,7 @@ describe(`Electric Integration`, () => {
           return Promise.resolve(txid)
         },
         // Simulates the server sending sync messages with txids
-        simulateSyncMessage: (txid: string) => {
+        simulateSyncMessage: (txid: number) => {
           // Create messages for each item in the store that has this txid
           const messages: Array<Message<Row>> = []
 
@@ -662,7 +668,7 @@ describe(`Electric Integration`, () => {
           value: { id: 1, name: `Test` },
           headers: {
             operation: `insert`,
-            txids: [`100`, `200`],
+            txids: [100, 200],
           },
         },
         {
@@ -671,7 +677,7 @@ describe(`Electric Integration`, () => {
       ])
 
       // Verify txids are tracked
-      await expect(testCollection.utils.awaitTxId(`100`)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(100)).resolves.toBe(true)
 
       // Cleanup collection
       await testCollection.cleanup()
@@ -959,14 +965,14 @@ describe(`Electric Integration`, () => {
         {
           headers: {
             control: `up-to-date`,
-            txids: [`300`, `400`],
+            txids: [300, 400],
           },
         },
       ])
 
       // Txids should be tracked (converted to strings internally)
-      await expect(testCollection.utils.awaitTxId(`300`)).resolves.toBe(true)
-      await expect(testCollection.utils.awaitTxId(`400`)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(300)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(400)).resolves.toBe(true)
     })
   })
 })

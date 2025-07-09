@@ -415,7 +415,7 @@ describe(`LocalOnly Collection`, () => {
     it(`should allow adding more items after initial data`, () => {
       const initialItems: Array<TestItem> = [{ id: 100, name: `Initial Item` }]
 
-      const testCollection = createCollection(
+      const testCollection = createCollection<TestItem>(
         localOnlyCollectionOptions({
           id: `test-initial-plus-more`,
           getKey: (item: TestItem) => item.id,
