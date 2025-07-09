@@ -224,10 +224,9 @@ export function localOnlyCollectionOptions<
  * @param initialData - Optional array of initial items to populate the collection
  * @returns Object with sync configuration and confirmOperationsSync function
  */
-function createLocalOnlySync<
-  T extends object,
-  TKey extends string | number = string | number,
->(initialData?: Array<T>) {
+function createLocalOnlySync<T extends object, TKey extends string | number>(
+  initialData?: Array<T>
+) {
   // Capture sync functions for transaction confirmation
   let syncBegin: (() => void) | null = null
   let syncWrite: ((message: { type: OperationType; value: T }) => void) | null =
