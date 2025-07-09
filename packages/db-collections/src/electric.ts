@@ -4,6 +4,7 @@ import {
   isControlMessage,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
+import DebugModule from "debug"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
@@ -20,6 +21,8 @@ import type {
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
+
+const debug = DebugModule.debug(`ts/db:electric`)
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -163,6 +166,7 @@ export function electricCollectionOptions<
     txId: string,
     timeout: number = 30000
   ): Promise<boolean> => {
+    debug(`awaitTxId called with txid %o`, txId)
     if (typeof txId !== `string`) {
       throw new TypeError(
         `Expected string in awaitTxId, received ${typeof txId}`
@@ -183,6 +187,7 @@ export function electricCollectionOptions<
 
       const unsubscribe = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
+          debug(`awaitTxId found match for txid %o`, txId)
           clearTimeout(timeoutId)
           unsubscribe()
           resolve(true)
@@ -377,6 +382,7 @@ function createElectricSync<T extends Row<unknown>>(
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set<string>(currentTxids)
+            debug(`new txids synced from pg %O`, newTxids)
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
             return clonedSeen

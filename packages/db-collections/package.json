@@ -3,13 +3,15 @@
   "description": "A collection for (aspirationally) every way of loading your data",
   "version": "0.0.21",
   "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/store": "^0.7.0"
+    "@tanstack/store": "^0.7.0",
+    "debug": "^4.4.1"
   },
   "devDependencies": {
     "@electric-sql/client": "1.0.0",
+    "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
