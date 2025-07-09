@@ -4,4 +4,5 @@
 "@tanstack/db": patch
 ---
 
-Use numbers for txid & misc type fixes
+- [Breaking change for the Electric Collection]: Use numbers for txid
+- misc type fixes
