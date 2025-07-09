@@ -382,7 +382,9 @@ function createElectricSync<T extends Row<unknown>>(
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set<string>(currentTxids)
-            debug(`new txids synced from pg %O`, newTxids)
+            if (newTxids.size > 0) {
+              debug(`new txids synced from pg %O`, Array.from(newTxids))
+            }
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
             return clonedSeen
