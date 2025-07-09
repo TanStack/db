@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
-import { CollectionImpl, createCollection } from "@tanstack/db"
+import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
 import type {
+  CollectionImpl,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   Transaction,
@@ -440,18 +441,18 @@ describe(`QueryCollection`, () => {
       } as Transaction<TestItem>
       const insertMockParams: InsertMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
-        // @ts-expect-error not correct but we don't care
-        collection: CollectionImpl,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
       const updateMockParams: UpdateMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
-        // @ts-expect-error not correct but we don't care
-        collection: CollectionImpl,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
       const deleteMockParams: DeleteMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
-        // @ts-expect-error not correct but we don't care
-        collection: CollectionImpl,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
 
       // Create handlers
@@ -490,8 +491,8 @@ describe(`QueryCollection`, () => {
       } as Transaction<TestItem>
       const insertMockParams: InsertMutationFnParams<TestItem> = {
         transaction: mockTransaction as TransactionWithMutations<TestItem>,
-        // @ts-expect-error not correct but we don't care
-        collection: CollectionImpl,
+        // @ts-ignore not testing this
+        collection: {} as CollectionImpl,
       }
 
       // Create handlers with different return values

@@ -166,11 +166,11 @@ const createTodoCollection = (type: CollectionType) => {
                 const { original, changes } = mutation
                 const response = await api.todos.update(original.id, changes)
 
-                return { txid: response.txid }
+                return response.txid
               })
             )
 
-            return { txid: txids[0]!.txid }
+            return { txid: txids }
           },
           onDelete: async ({ transaction }) => {
             const txids = await Promise.all(
@@ -178,11 +178,11 @@ const createTodoCollection = (type: CollectionType) => {
                 const { original } = mutation
                 const response = await api.todos.delete(original.id)
 
-                return { txid: response.txid }
+                return response.txid
               })
             )
 
-            return { txid: txids[0]!.txid }
+            return { txid: txids }
           },
         })
       )
@@ -272,11 +272,11 @@ const createConfigCollection = (type: CollectionType) => {
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
                 const response = await api.config.update(original.id, changes)
-                return { txid: response.txid }
+                return response.txid
               })
             )
 
-            return { txid: txids[0] }
+            return { txid: txids }
           },
         })
       )
@@ -309,11 +309,11 @@ const createConfigCollection = (type: CollectionType) => {
               transaction.mutations.map(async (mutation) => {
                 const { original, changes } = mutation
                 const response = await api.config.update(original.id, changes)
-                return { txid: response.txid }
+                return response.txid
               })
             )
 
-            return { txid: txids[0] }
+            return { txid: txids }
           },
         })
       )

@@ -80,33 +80,160 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
-   * Must return an object containing a txid number
-   * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * Must return an object containing a txid number or array of txids
+   * @param params Object containing transaction and collection information
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric insert handler - MUST return { txid: number }
+   * onInsert: async ({ transaction }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items - return array of txids
+   * onInsert: async ({ transaction }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   const results = await Promise.all(
+   *     items.map(item => api.todos.create({ data: item }))
+   *   )
+   *   return { txid: results.map(r => r.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Insert handler with error handling
+   * onInsert: async ({ transaction }) => {
+   *   try {
+   *     const newItem = transaction.mutations[0].modified
+   *     const result = await api.createTodo(newItem)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     console.error('Insert failed:', error)
+   *     throw error // This will cause the transaction to fail
+   *   }
+   * }
+   *
+   * @example
+   * // Insert handler with batch operation - single txid
+   * onInsert: async ({ transaction }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   const result = await api.todos.createMany({
+   *     data: items
+   *   })
+   *   return { txid: result.txid } // Single txid for batch operation
+   * }
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number }>
+  ) => Promise<{ txid: number | Array<number> }>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Must return an object containing a txid number
-   * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * Must return an object containing a txid number or array of txids
+   * @param params Object containing transaction and collection information
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric update handler - MUST return { txid: number }
+   * onUpdate: async ({ transaction }) => {
+   *   const { original, changes } = transaction.mutations[0]
+   *   const result = await api.todos.update({
+   *     where: { id: original.id },
+   *     data: changes // Only the changed fields
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Update handler with multiple items - return array of txids
+   * onUpdate: async ({ transaction }) => {
+   *   const updates = await Promise.all(
+   *     transaction.mutations.map(m =>
+   *       api.todos.update({
+   *         where: { id: m.original.id },
+   *         data: m.changes
+   *       })
+   *     )
+   *   )
+   *   return { txid: updates.map(u => u.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Update handler with optimistic rollback
+   * onUpdate: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     const result = await api.updateTodo(mutation.original.id, mutation.changes)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Update failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number }>
+  ) => Promise<{ txid: number | Array<number> }>
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Must return an object containing a txid number
-   * @param params Object containing transaction and mutation information
-   * @returns Promise resolving to an object with txid
+   * Must return an object containing a txid number or array of txids
+   * @param params Object containing transaction and collection information
+   * @returns Promise resolving to an object with txid or txids
+   * @example
+   * // Basic Electric delete handler - MUST return { txid: number }
+   * onDelete: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.todos.delete({
+   *     id: mutation.original.id
+   *   })
+   *   return { txid: result.txid } // Required for Electric sync matching
+   * }
+   *
+   * @example
+   * // Delete handler with multiple items - return array of txids
+   * onDelete: async ({ transaction }) => {
+   *   const deletes = await Promise.all(
+   *     transaction.mutations.map(m =>
+   *       api.todos.delete({
+   *         where: { id: m.key }
+   *       })
+   *     )
+   *   )
+   *   return { txid: deletes.map(d => d.txid) } // Array of txids
+   * }
+   *
+   * @example
+   * // Delete handler with batch operation - single txid
+   * onDelete: async ({ transaction }) => {
+   *   const idsToDelete = transaction.mutations.map(m => m.original.id)
+   *   const result = await api.todos.deleteMany({
+   *     ids: idsToDelete
+   *   })
+   *   return { txid: result.txid } // Single txid for batch operation
+   * }
+   *
+   * @example
+   * // Delete handler with optimistic rollback
+   * onDelete: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     const result = await api.deleteTodo(mutation.original.id)
+   *     return { txid: result.txid }
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Delete failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
+   *
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number }>
+  ) => Promise<{ txid: number | Array<number> }>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -203,15 +330,21 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: number }).txid
+        const txid = (handlerResult as { txid?: number | Array<number> }).txid
 
         if (!txid) {
           throw new Error(
-            `Electric collection onInsert handler must return a txid`
+            `Electric collection onInsert handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(txid)) {
+          await Promise.all(txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(txid)
+        }
+
         return handlerResult
       }
     : undefined
@@ -225,15 +358,21 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: number }).txid
+        const txid = (handlerResult as { txid?: number | Array<number> }).txid
 
         if (!txid) {
           throw new Error(
-            `Electric collection onUpdate handler must return a txid`
+            `Electric collection onUpdate handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(txid)) {
+          await Promise.all(txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(txid)
+        }
+
         return handlerResult
       }
     : undefined
@@ -247,11 +386,17 @@ export function electricCollectionOptions<
         const handlerResult = await config.onDelete!(params)
         if (!handlerResult.txid) {
           throw new Error(
-            `Electric collection onDelete handler must return a txid`
+            `Electric collection onDelete handler must return a txid or array of txids`
           )
         }
 
-        await awaitTxId(handlerResult.txid)
+        // Handle both single txid and array of txids
+        if (Array.isArray(handlerResult.txid)) {
+          await Promise.all(handlerResult.txid.map((id) => awaitTxId(id)))
+        } else {
+          await awaitTxId(handlerResult.txid)
+        }
+
         return handlerResult
       }
     : undefined

@@ -45,29 +45,41 @@ export interface LocalOnlyCollectionConfig<
 
   /**
    * Optional asynchronous handler function called after an insert operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: InsertMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 
   /**
    * Optional asynchronous handler function called after an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: UpdateMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 
   /**
    * Optional asynchronous handler function called after a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
   onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: DeleteMutationFnParams<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      LocalOnlyCollectionUtils
+    >
   ) => Promise<any>
 }
 
@@ -78,15 +90,49 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
 
 /**
  * Creates Local-only collection options for use with a standard Collection
- * This is an in-memory collection that doesn't sync but uses a loopback sync config
- * that immediately "syncs" all optimistic changes to the collection.
+ *
+ * This is an in-memory collection that doesn't sync with external sources but uses a loopback sync config
+ * that immediately "syncs" all optimistic changes to the collection, making them permanent.
+ * Perfect for local-only data that doesn't need persistence or external synchronization.
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
- * @returns Collection options with utilities
+ * @returns Collection options with utilities (currently empty but follows the pattern)
+ *
+ * @example
+ * // Basic local-only collection
+ * const collection = createCollection(
+ *   localOnlyCollectionOptions({
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * @example
+ * // Local-only collection with initial data
+ * const collection = createCollection(
+ *   localOnlyCollectionOptions({
+ *     getKey: (item) => item.id,
+ *     initialData: [
+ *       { id: 1, name: 'Item 1' },
+ *       { id: 2, name: 'Item 2' },
+ *     ],
+ *   })
+ * )
+ *
+ * @example
+ * // Local-only collection with mutation handlers
+ * const collection = createCollection(
+ *   localOnlyCollectionOptions({
+ *     getKey: (item) => item.id,
+ *     onInsert: async ({ transaction }) => {
+ *       console.log('Item inserted:', transaction.mutations[0].modified)
+ *       // Custom logic after insert
+ *     },
+ *   })
+ * )
  */
 export function localOnlyCollectionOptions<
   TExplicit = unknown,
@@ -101,9 +147,12 @@ export function localOnlyCollectionOptions<
   // Create the sync configuration with transaction confirmation capability
   const syncResult = createLocalOnlySync<ResolvedType, TKey>(initialData)
 
-  // Create wrapper handlers that call user handlers first, then confirm transactions
+  /**
+   * Create wrapper handlers that call user handlers first, then confirm transactions
+   * Wraps the user's onInsert handler to also confirm the transaction immediately
+   */
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<ResolvedType>
+    params: InsertMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -117,8 +166,11 @@ export function localOnlyCollectionOptions<
     return handlerResult
   }
 
+  /**
+   * Wrapper for onUpdate handler that also confirms the transaction immediately
+   */
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<ResolvedType>
+    params: UpdateMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -132,8 +184,11 @@ export function localOnlyCollectionOptions<
     return handlerResult
   }
 
+  /**
+   * Wrapper for onDelete handler that also confirms the transaction immediately
+   */
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<ResolvedType>
+    params: DeleteMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -161,11 +216,18 @@ export function localOnlyCollectionOptions<
 
 /**
  * Internal function to create Local-only sync configuration with transaction confirmation
- * This captures the sync functions and provides synchronous confirmation of operations
+ *
+ * This captures the sync functions and provides synchronous confirmation of operations.
+ * It creates a loopback sync that immediately confirms all optimistic operations,
+ * making them permanent in the collection.
+ *
+ * @param initialData - Optional array of initial items to populate the collection
+ * @returns Object with sync configuration and confirmOperationsSync function
  */
-function createLocalOnlySync<T extends object, TKey extends string | number>(
-  initialData?: Array<T>
-) {
+function createLocalOnlySync<
+  T extends object,
+  TKey extends string | number = string | number,
+>(initialData?: Array<T>) {
   // Capture sync functions for transaction confirmation
   let syncBegin: (() => void) | null = null
   let syncWrite: ((message: { type: OperationType; value: T }) => void) | null =
@@ -173,6 +235,11 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   let syncCommit: (() => void) | null = null
 
   const sync: SyncConfig<T, TKey> = {
+    /**
+     * Sync function that captures sync parameters and applies initial data
+     * @param params - Sync parameters containing begin, write, and commit functions
+     * @returns Unsubscribe function (empty since no ongoing sync is needed)
+     */
     sync: (params) => {
       const { begin, write, commit } = params
 
@@ -196,12 +263,20 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       // Return empty unsubscribe function - no ongoing sync needed
       return () => {}
     },
+    /**
+     * Get sync metadata - returns empty object for local-only collections
+     * @returns Empty metadata object
+     */
     getSyncMetadata: () => ({}),
   }
 
   /**
    * Synchronously confirms optimistic operations by immediately writing through sync
-   * This loops through transaction mutations and applies them to move from optimistic to synced state
+   *
+   * This loops through transaction mutations and applies them to move from optimistic to synced state.
+   * It's called after user handlers to make optimistic changes permanent.
+   *
+   * @param mutations - Array of mutation objects from the transaction
    */
   const confirmOperationsSync = (mutations: Array<any>) => {
     if (!syncBegin || !syncWrite || !syncCommit) {

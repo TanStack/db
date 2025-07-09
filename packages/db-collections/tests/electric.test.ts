@@ -461,7 +461,7 @@ describe(`Electric Integration`, () => {
       } as unknown as TransactionWithMutations<Row>
       const mockParams: InsertMutationFnParams<Row> = {
         transaction: mockTransaction,
-        // @ts-expect-error missing type args but we don't care.
+        // @ts-expect-error not relevant to test
         collection: CollectionImpl,
       }
 
