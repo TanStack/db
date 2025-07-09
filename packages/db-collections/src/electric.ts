@@ -338,7 +338,7 @@ function createElectricSync<T extends Row<unknown>>(
         for (const message of messages) {
           // Check for txids in the message and add them to our store
           if (hasTxids(message)) {
-            message.headers.txids?.forEach((txid) => newTxids.add(txid))
+            message.headers.txids?.forEach((txid) => newTxids.add(String(txid)))
           }
 
           if (isChangeMessage(message)) {
