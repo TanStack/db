@@ -23,7 +23,7 @@ app.get(`/api/health`, (req, res) => {
 })
 
 // Generate a transaction ID
-async function generateTxId(tx: any): Promise<string> {
+async function generateTxId(tx: any): Promise<number> {
   const result = await tx`SELECT txid_current() as txid`
   const txid = result[0]?.txid
 
@@ -31,7 +31,7 @@ async function generateTxId(tx: any): Promise<string> {
     throw new Error(`Failed to get transaction ID`)
   }
 
-  return String(txid)
+  return parseInt(txid, 10)
 }
 
 // ===== TODOS API =====
@@ -75,7 +75,7 @@ app.post(`/api/todos`, async (req, res) => {
   try {
     const todoData = validateInsertTodo(req.body)
 
-    let txid!: string
+    let txid!: number
     const newTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -102,7 +102,7 @@ app.put(`/api/todos/:id`, async (req, res) => {
     const { id } = req.params
     const todoData = validateUpdateTodo(req.body)
 
-    let txid!: string
+    let txid!: number
     const updatedTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -139,7 +139,7 @@ app.delete(`/api/todos/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid!: string
+    let txid!: number
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -210,7 +210,7 @@ app.post(`/api/config`, async (req, res) => {
     console.log(`POST /api/config`, req.body)
     const configData = validateInsertConfig(req.body)
 
-    let txid!: string
+    let txid!: number
     const newConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -237,7 +237,7 @@ app.put(`/api/config/:id`, async (req, res) => {
     const { id } = req.params
     const configData = validateUpdateConfig(req.body)
 
-    let txid!: string
+    let txid!: number
     const updatedConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -274,7 +274,7 @@ app.delete(`/api/config/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid!: string
+    let txid!: number
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
