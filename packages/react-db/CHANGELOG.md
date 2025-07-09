@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.0.18
+
+### Patch Changes
+
+- Improve jsdocs ([#243](https://github.com/TanStack/db/pull/243))
+
+- Updated dependencies [[`266bd29`](https://github.com/TanStack/db/commit/266bd29514c6c0fa9e903986ca11c5e22f4d2361)]:
+  - @tanstack/db@0.0.18
+
 ## 0.0.17
 
 ### Patch Changes
