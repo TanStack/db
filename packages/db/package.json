@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "dependencies": {
     "@electric-sql/d2mini": "^0.1.6",
     "@standard-schema/spec": "^1.0.0"

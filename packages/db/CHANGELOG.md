@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.18
+
+### Patch Changes
+
+- Improve jsdocs ([#243](https://github.com/TanStack/db/pull/243))
+
 ## 0.0.17
 
 ### Patch Changes
