@@ -24,6 +24,11 @@ import type {
 
 const debug = DebugModule.debug(`ts/db:electric`)
 
+/**
+ * Type representing a transaction ID in Electric SQL
+ */
+export type Txid = number
+
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
 // This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
@@ -128,7 +133,7 @@ export interface ElectricCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number | Array<number> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -176,7 +181,7 @@ export interface ElectricCollectionConfig<
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number | Array<number> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -233,7 +238,7 @@ export interface ElectricCollectionConfig<
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: number | Array<number> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -245,14 +250,14 @@ function isUpToDateMessage<T extends Row<unknown>>(
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
   message: Message<T>
-): message is Message<T> & { headers: { txids?: Array<number> } } {
+): message is Message<T> & { headers: { txids?: Array<Txid> } } {
   return `txids` in message.headers && Array.isArray(message.headers.txids)
 }
 
 /**
  * Type for the awaitTxId utility function
  */
-export type AwaitTxIdFn = (txId: number, timeout?: number) => Promise<boolean>
+export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
 /**
  * Electric collection utilities type
@@ -275,7 +280,7 @@ export function electricCollectionOptions<
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 >(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
-  const seenTxids = new Store<Set<number>>(new Set([]))
+  const seenTxids = new Store<Set<Txid>>(new Set([]))
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
     config.shapeOptions,
     {
@@ -290,7 +295,7 @@ export function electricCollectionOptions<
    * @returns Promise that resolves when the txId is synced
    */
   const awaitTxId: AwaitTxIdFn = async (
-    txId: number,
+    txId: Txid,
     timeout: number = 30000
   ): Promise<boolean> => {
     debug(`awaitTxId called with txid %d`, txId)
@@ -330,7 +335,7 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: number | Array<number> }).txid
+        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
           throw new Error(
@@ -358,7 +363,7 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: number | Array<number> }).txid
+        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
           throw new Error(
@@ -428,7 +433,7 @@ export function electricCollectionOptions<
 function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
-    seenTxids: Store<Set<number>>
+    seenTxids: Store<Set<Txid>>
   }
 ): SyncConfig<T> {
   const { seenTxids } = options
@@ -472,7 +477,7 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
       })
       let transactionStarted = false
-      const newTxids = new Set<number>()
+      const newTxids = new Set<Txid>()
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
@@ -523,7 +528,7 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
-            const clonedSeen = new Set<number>(currentTxids)
+            const clonedSeen = new Set<Txid>(currentTxids)
             if (newTxids.size > 0) {
               debug(`new txids synced from pg %O`, Array.from(newTxids))
             }
