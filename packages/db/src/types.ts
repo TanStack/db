@@ -69,6 +69,8 @@ export interface PendingMutation<
   type: OperationType
   metadata: unknown
   syncMetadata: Record<string, unknown>
+  /** Whether this mutation should be applied optimistically (defaults to true) */
+  optimistic: boolean
   createdAt: Date
   updatedAt: Date
   collection: Collection<T, any, any>
@@ -203,10 +205,14 @@ export type StandardSchemaAlias<T = unknown> = StandardSchema<T>
 
 export interface OperationConfig {
   metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
 }
 
 export interface InsertConfig {
   metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
 }
 
 export type UpdateMutationFnParams<
