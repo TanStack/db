@@ -13,7 +13,7 @@ import type {
   InsertMutationFnParams,
   ResolveType,
   UpdateMutationFnParams,
-} from "@tanstack/db"
+} from "../src/types"
 
 describe(`LocalStorage collection type resolution tests`, () => {
   // Define test types
