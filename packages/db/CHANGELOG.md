@@ -1,5 +1,12 @@
 # @tanstack/db
 
+## 0.0.19
+
+### Patch Changes
+
+- - [Breaking change for the Electric Collection]: Use numbers for txid ([#245](https://github.com/TanStack/db/pull/245))
+  - misc type fixes
+
 ## 0.0.18
 
 ### Patch Changes
