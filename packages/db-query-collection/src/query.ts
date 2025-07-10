@@ -250,6 +250,7 @@ export function queryCollectionOptions<
   } = config
 
   // Validate required parameters
+
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryKey) {
     throw new Error(`[QueryCollection] queryKey must be provided.`)
@@ -258,10 +259,12 @@ export function queryCollectionOptions<
   if (!queryFn) {
     throw new Error(`[QueryCollection] queryFn must be provided.`)
   }
+
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryClient) {
     throw new Error(`[QueryCollection] queryClient must be provided.`)
   }
+
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
     throw new Error(`[QueryCollection] getKey must be provided.`)

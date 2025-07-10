@@ -1,9 +1,7 @@
 import React, { useState } from "react"
 import { createCollection, useLiveQuery } from "@tanstack/react-db"
-import {
-  electricCollectionOptions,
-  queryCollectionOptions,
-} from "@tanstack/db-collections"
+import { electricCollectionOptions } from "@tanstack/db-electric-collection"
+import { queryCollectionOptions } from "@tanstack/db-query-collection"
 // import { DevTools } from "./DevTools"
 import { QueryClient } from "@tanstack/query-core"
 import { selectConfigSchema, selectTodoSchema } from "./db/validation"

@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db-monorepo",
   "private": true,
-  "description": "Optimistic UI library for sync engines",
+  "description": "Reactive client queryable store for sync-first applications",
   "version": "0.0.0",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
-import { createCollection } from "@tanstack/db"
+import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import type {
   LocalStorageCollectionConfig,
@@ -13,7 +13,7 @@ import type {
   InsertMutationFnParams,
   ResolveType,
   UpdateMutationFnParams,
-} from "@tanstack/db"
+} from "../src/types"
 
 describe(`LocalStorage collection type resolution tests`, () => {
   // Define test types
