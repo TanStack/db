@@ -4,6 +4,7 @@ import {
   isControlMessage,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
+import DebugModule from "debug"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
@@ -20,6 +21,13 @@ import type {
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
+
+const debug = DebugModule.debug(`ts/db:electric`)
+
+/**
+ * Type representing a transaction ID in Electric SQL
+ */
+export type Txid = number
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -77,11 +85,11 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
-   * Must return an object containing a txid string or array of txids
+   * Must return an object containing a txid number or array of txids
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
-   * // Basic Electric insert handler - MUST return { txid: string }
+   * // Basic Electric insert handler - MUST return { txid: number }
    * onInsert: async ({ transaction }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
@@ -125,15 +133,15 @@ export interface ElectricCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string | Array<string> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Must return an object containing a txid string or array of txids
+   * Must return an object containing a txid number or array of txids
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
-   * // Basic Electric update handler - MUST return { txid: string }
+   * // Basic Electric update handler - MUST return { txid: number }
    * onUpdate: async ({ transaction }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
@@ -173,15 +181,15 @@ export interface ElectricCollectionConfig<
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string | Array<string> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Must return an object containing a txid string or array of txids
+   * Must return an object containing a txid number or array of txids
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to an object with txid or txids
    * @example
-   * // Basic Electric delete handler - MUST return { txid: string }
+   * // Basic Electric delete handler - MUST return { txid: number }
    * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
@@ -230,7 +238,7 @@ export interface ElectricCollectionConfig<
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: string | Array<string> }>
+  ) => Promise<{ txid: Txid | Array<Txid> }>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -242,14 +250,14 @@ function isUpToDateMessage<T extends Row<unknown>>(
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
   message: Message<T>
-): message is Message<T> & { headers: { txids?: Array<string> } } {
+): message is Message<T> & { headers: { txids?: Array<Txid> } } {
   return `txids` in message.headers && Array.isArray(message.headers.txids)
 }
 
 /**
  * Type for the awaitTxId utility function
  */
-export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
+export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
 /**
  * Electric collection utilities type
@@ -272,7 +280,7 @@ export function electricCollectionOptions<
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
 >(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
-  const seenTxids = new Store<Set<string>>(new Set([]))
+  const seenTxids = new Store<Set<Txid>>(new Set([]))
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
     config.shapeOptions,
     {
@@ -282,21 +290,19 @@ export function electricCollectionOptions<
 
   /**
    * Wait for a specific transaction ID to be synced
-   * @param txId The transaction ID to wait for as a string
+   * @param txId The transaction ID to wait for as a number
    * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
    * @returns Promise that resolves when the txId is synced
    */
   const awaitTxId: AwaitTxIdFn = async (
-    txId: string,
+    txId: Txid,
     timeout: number = 30000
   ): Promise<boolean> => {
-    if (typeof txId !== `string`) {
+    debug(`awaitTxId called with txid %d`, txId)
+    if (typeof txId !== `number`) {
       throw new TypeError(
-        `Expected string in awaitTxId, received ${typeof txId}`
+        `Expected number in awaitTxId, received ${typeof txId}`
       )
-    }
-    if (!/^\d+$/.test(txId)) {
-      throw new Error(`txId must contain only numbers`)
     }
 
     const hasTxid = seenTxids.state.has(txId)
@@ -310,6 +316,7 @@ export function electricCollectionOptions<
 
       const unsubscribe = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
+          debug(`awaitTxId found match for txid %o`, txId)
           clearTimeout(timeoutId)
           unsubscribe()
           resolve(true)
@@ -328,7 +335,7 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: string | Array<string> }).txid
+        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
           throw new Error(
@@ -356,7 +363,7 @@ export function electricCollectionOptions<
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: string | Array<string> }).txid
+        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
           throw new Error(
@@ -426,7 +433,7 @@ export function electricCollectionOptions<
 function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
-    seenTxids: Store<Set<string>>
+    seenTxids: Store<Set<Txid>>
   }
 ): SyncConfig<T> {
   const { seenTxids } = options
@@ -470,7 +477,7 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
       })
       let transactionStarted = false
-      const newTxids = new Set<string>()
+      const newTxids = new Set<Txid>()
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
@@ -521,7 +528,10 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
-            const clonedSeen = new Set<string>(currentTxids)
+            const clonedSeen = new Set<Txid>(currentTxids)
+            if (newTxids.size > 0) {
+              debug(`new txids synced from pg %O`, Array.from(newTxids))
+            }
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
             return clonedSeen

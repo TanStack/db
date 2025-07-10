@@ -575,9 +575,6 @@ insert([
   { text: "Buy groceries", completed: false },
   { text: "Walk dog", completed: false },
 ])
-
-// Insert with custom key
-insert({ text: "Buy groceries" }, { key: "grocery-task" })
 ```
 
 ##### `update`

@@ -71,7 +71,7 @@ export interface PendingMutation<
   syncMetadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T, any>
+  collection: Collection<T, any, any>
 }
 
 /**
