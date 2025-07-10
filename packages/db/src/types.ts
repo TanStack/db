@@ -70,16 +70,6 @@ export type ResolveType<
     ? TExplicit
     : Record<string, unknown>
 
-export type ResolveTransactionData<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-> = TOperation extends `insert`
-  ? TInsertInput
-  : TOperation extends `delete`
-    ? T
-    : Partial<T>
-
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -93,19 +83,29 @@ export type Fn = (...args: Array<any>) => any
 export type UtilsRecord = Record<string, Fn>
 
 /**
+ *
+ * @remarks `update` and `insert` are both represented as `Partial<T>`, but changes for `insert` could me made more precise by inferring the schema input type. In practice, this has almost 0 real world impact so it's not worth the added type complexity.
+ *
+ * @see  https://github.com/TanStack/db/pull/209#issuecomment-3053001206
+ */
+export type ResolveTransactionChanges<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> = TOperation extends `delete` ? T : Partial<T>
+
+/**
  * Represents a pending mutation within a transaction
  * Contains information about the original and modified data, as well as metadata
  */
 export interface PendingMutation<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
-  TCollection extends Collection<T, any, any, any, TInsertInput> = Collection<
+  TCollection extends Collection<T, any, any, any, any> = Collection<
     T,
     any,
     any,
     any,
-    TInsertInput
+    any
   >,
 > {
   mutationId: string
@@ -113,8 +113,7 @@ export interface PendingMutation<
   original: TOperation extends `insert` ? {} : T
   // The result state of the object after all mutations.
   modified: T
-  // The actual changes made.
-  changes: ResolveTransactionData<T, TOperation, TInsertInput>
+  changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
 
   key: any

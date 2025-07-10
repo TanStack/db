@@ -2,9 +2,7 @@ import { createDeferred } from "./deferred"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
-  OperationType,
   PendingMutation,
-  ResolveTransactionData,
   TransactionConfig,
   TransactionState,
   TransactionWithMutations,
@@ -15,16 +13,10 @@ let transactionStack: Array<Transaction<any>> = []
 
 let sequenceNumber = 0
 
-export function createTransaction<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-  TInsertInput extends object = T,
->(
-  config: TransactionConfig<ResolveTransactionData<T, TOperation, TInsertInput>>
-): Transaction<ResolveTransactionData<T, TOperation, TInsertInput>> {
-  const newTransaction = new Transaction<
-    ResolveTransactionData<T, TOperation, TInsertInput>
-  >(config)
+export function createTransaction<T extends object = Record<string, unknown>>(
+  config: TransactionConfig<T>
+): Transaction<T> {
+  const newTransaction = new Transaction<T>(config)
   transactions.push(newTransaction)
   return newTransaction
 }

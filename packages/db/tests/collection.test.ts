@@ -3,7 +3,13 @@ import mitt from "mitt"
 import { z } from "zod"
 import { SchemaValidationError, createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
-import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
+import type {
+  ChangeMessage,
+  MutationFn,
+  OperationType,
+  PendingMutation,
+  ResolveTransactionChanges,
+} from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -872,22 +878,24 @@ describe(`Collection with schema validation`, () => {
     const mutationFn = async () => {}
 
     // Minimal data
-    const tx1 = createTransaction<TodoInput>({ mutationFn })
+    const tx1 = createTransaction<Todo>({ mutationFn })
     tx1.mutate(() => collection.insert({ text: `task-1` }))
 
     // Type assertions on the mutation structure
     expect(tx1.mutations).toHaveLength(1)
     const mutation = tx1.mutations[0]!
 
+    mutation.collection.forEach((item) => {
+      console.log(item)
+    })
+
     // Test the mutation type structure
-    // By providing the correct generics to `createTransaction`, the type of `mutation` is now correctly inferred.
-    // We also use a more specific type for the assertion itself.
-    expectTypeOf(mutation).toExtend<PendingMutation<Todo, any, any, any>>()
-    expectTypeOf(mutation.type).toEqualTypeOf<`insert`>()
-    // The static type of `changes` for an insert is `TInsertInput`, which is `TodoInput` here.
-    expectTypeOf(mutation.changes).toEqualTypeOf<TodoInput>()
+    expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
+    expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
+    expectTypeOf(mutation.changes).toEqualTypeOf<
+      ResolveTransactionChanges<Todo>
+    >()
     expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
-    expectTypeOf(mutation.original).toEqualTypeOf<{}>()
 
     // Runtime assertions for actual values
     expect(mutation.type).toBe(`insert`)
@@ -909,7 +917,7 @@ describe(`Collection with schema validation`, () => {
     expect(insertedItem.updatedAt).toBeInstanceOf(Date)
 
     // Partial data
-    const tx2 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
+    const tx2 = createTransaction<Todo>({ mutationFn })
     tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
 
     insertedItems = Array.from(collection.state.values())
@@ -925,7 +933,7 @@ describe(`Collection with schema validation`, () => {
     expect(secondItem.updatedAt).toBeInstanceOf(Date)
 
     // All fields provided
-    const tx3 = createTransaction<Todo, `insert`, TodoInput>({ mutationFn })
+    const tx3 = createTransaction<Todo>({ mutationFn })
 
     tx3.mutate(() =>
       collection.insert({

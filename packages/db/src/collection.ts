@@ -1287,7 +1287,7 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T, `insert`, TInsertInput>> = []
+    const mutations: Array<PendingMutation<T>> = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -1301,7 +1301,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T, any, any, any> = {
+      const mutation: PendingMutation<T> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -1341,7 +1341,7 @@ export class CollectionImpl<
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction
           return this.config.onInsert!(
-            params as unknown as InsertMutationFnParams<T>
+            params as unknown as InsertMutationFnParams<TInsertInput>
           )
         },
       })
@@ -1483,64 +1483,61 @@ export class CollectionImpl<
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T, `update`, TInsertInput, this>> =
-      keysArray
-        .map((key, index) => {
-          const itemChanges = changesArray[index] // User-provided changes for this specific item
+    const mutations: Array<PendingMutation<T, `update`, this>> = keysArray
+      .map((key, index) => {
+        const itemChanges = changesArray[index] // User-provided changes for this specific item
 
-          // Skip items with no changes
-          if (!itemChanges || Object.keys(itemChanges).length === 0) {
-            return null
-          }
+        // Skip items with no changes
+        if (!itemChanges || Object.keys(itemChanges).length === 0) {
+          return null
+        }
 
-          const originalItem = currentObjects[index] as unknown as T
-          // Validate the user-provided changes for this item
-          const validatedUpdatePayload = this.validateData(
-            itemChanges,
-            `update`,
-            key
+        const originalItem = currentObjects[index] as unknown as T
+        // Validate the user-provided changes for this item
+        const validatedUpdatePayload = this.validateData(
+          itemChanges,
+          `update`,
+          key
+        )
+
+        // Construct the full modified item by applying the validated update payload to the original item
+        const modifiedItem = Object.assign(
+          {},
+          originalItem,
+          validatedUpdatePayload
+        )
+
+        // Check if the ID of the item is being changed
+        const originalItemId = this.getKeyFromItem(originalItem)
+        const modifiedItemId = this.getKeyFromItem(modifiedItem)
+
+        if (originalItemId !== modifiedItemId) {
+          throw new Error(
+            `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
           )
+        }
 
-          // Construct the full modified item by applying the validated update payload to the original item
-          const modifiedItem = Object.assign(
-            {},
-            originalItem,
-            validatedUpdatePayload
-          )
+        const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
-          // Check if the ID of the item is being changed
-          const originalItemId = this.getKeyFromItem(originalItem)
-          const modifiedItemId = this.getKeyFromItem(modifiedItem)
-
-          if (originalItemId !== modifiedItemId) {
-            throw new Error(
-              `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
-            )
-          }
-
-          const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
-
-          return {
-            mutationId: crypto.randomUUID(),
-            original: originalItem,
-            modified: modifiedItem,
-            changes: validatedUpdatePayload as Partial<T>,
-            globalKey,
-            key,
-            metadata: config.metadata as unknown,
-            syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
-              string,
-              unknown
-            >,
-            type: `update`,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            collection: this,
-          }
-        })
-        .filter(Boolean) as Array<
-        PendingMutation<T, `update`, TInsertInput, this>
-      >
+        return {
+          mutationId: crypto.randomUUID(),
+          original: originalItem,
+          modified: modifiedItem,
+          changes: validatedUpdatePayload as Partial<T>,
+          globalKey,
+          key,
+          metadata: config.metadata as unknown,
+          syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
+            string,
+            unknown
+          >,
+          type: `update`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          collection: this,
+        }
+      })
+      .filter(Boolean) as Array<PendingMutation<T, `update`, this>>
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
@@ -1618,8 +1615,7 @@ export class CollectionImpl<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T, `delete`, TInsertInput, this>> =
-      []
+    const mutations: Array<PendingMutation<T, `delete`, this>> = []
 
     for (const key of keysArray) {
       if (!this.has(key)) {
@@ -1628,7 +1624,7 @@ export class CollectionImpl<
         )
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T, `delete`, TInsertInput, this> = {
+      const mutation: PendingMutation<T, `delete`, this> = {
         mutationId: crypto.randomUUID(),
         original: this.get(key)!,
         modified: this.get(key)!,
