@@ -575,6 +575,21 @@ insert([
   { text: "Buy groceries", completed: false },
   { text: "Walk dog", completed: false },
 ])
+
+// Insert with optimistic updates disabled
+myCollection.insert(
+  { text: "Server-validated item", completed: false },
+  { optimistic: false }
+)
+
+// Insert with metadata and optimistic control
+myCollection.insert(
+  { text: "Custom item", completed: false },
+  { 
+    metadata: { source: "import" },
+    optimistic: true  // default behavior
+  }
+)
 ```
 
 ##### `update`
@@ -598,6 +613,27 @@ update([todo1.id, todo2.id], (drafts) => {
 update(todo.id, { metadata: { reason: "user update" } }, (draft) => {
   draft.text = "Updated text"
 })
+
+// Update without optimistic updates
+update(
+  todo.id, 
+  { optimistic: false }, 
+  (draft) => {
+    draft.status = "server-validated"
+  }
+)
+
+// Update with both metadata and optimistic control
+update(
+  todo.id,
+  { 
+    metadata: { reason: "admin update" },
+    optimistic: false 
+  },
+  (draft) => {
+    draft.priority = "high"
+  }
+)
 ```
 
 ##### `delete`
@@ -611,6 +647,67 @@ delete([todo1.id, todo2.id])
 
 // Delete with metadata
 delete(todo.id, { metadata: { reason: "completed" } })
+
+// Delete without optimistic updates (waits for server confirmation)
+delete(todo.id, { optimistic: false })
+
+// Delete with metadata and optimistic control
+delete(todo.id, { 
+  metadata: { reason: "admin deletion" },
+  optimistic: false 
+})
+```
+
+#### Controlling optimistic behavior
+
+By default, all mutations (`insert`, `update`, `delete`) apply optimistic updates immediately to provide instant feedback in your UI. However, there are cases where you may want to disable this behavior and wait for server confirmation before applying changes locally.
+
+##### When to use `optimistic: false`
+
+Consider disabling optimistic updates when:
+
+- **Complex server-side processing**: Inserts that depend on server-side generation (e.g., cascading foreign keys, computed fields)
+- **Validation requirements**: Operations where backend validation might reject the change
+- **Confirmation workflows**: Deletes where UX should wait for confirmation before removing data
+- **Batch operations**: Large operations where optimistic rollback would be disruptive
+
+##### Behavior differences
+
+**`optimistic: true` (default)**:
+- Immediately applies mutation to the local store
+- Provides instant UI feedback  
+- Requires rollback if server rejects the mutation
+- Best for simple, predictable operations
+
+**`optimistic: false`**:
+- Does not modify local store until server confirms
+- No immediate UI feedback, but no rollback needed
+- UI updates only after successful server response
+- Best for complex or validation-heavy operations
+
+```typescript
+// Example: Critical deletion that needs confirmation
+const handleDeleteAccount = () => {
+  // Don't remove from UI until server confirms
+  userCollection.delete(userId, { optimistic: false })
+}
+
+// Example: Server-generated data
+const handleCreateInvoice = () => {
+  // Server generates invoice number, tax calculations, etc.
+  invoiceCollection.insert(invoiceData, { optimistic: false })
+}
+
+// Example: Mixed approach in same transaction
+tx.mutate(() => {
+  // Instant UI feedback for simple change
+  todoCollection.update(todoId, (draft) => {
+    draft.completed = true
+  })
+  
+  // Wait for server confirmation for complex change
+  auditCollection.insert(auditRecord, { optimistic: false })
+})
 ```
 
 ## Usage examples

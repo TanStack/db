@@ -634,7 +634,7 @@ export class CollectionImpl<
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
       for (const mutation of transaction.mutations) {
-        if (mutation.collection === this) {
+        if (mutation.collection === this && mutation.optimistic) {
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -1064,7 +1064,7 @@ export class CollectionImpl<
       for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
           for (const mutation of transaction.mutations) {
-            if (mutation.collection === this) {
+            if (mutation.collection === this && mutation.optimistic) {
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1358,6 +1358,7 @@ export class CollectionImpl<
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
+        optimistic: config?.optimistic ?? true,
         type: `insert`,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -1573,6 +1574,7 @@ export class CollectionImpl<
             string,
             unknown
           >,
+          optimistic: config.optimistic ?? true,
           type: `update`,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -1696,6 +1698,7 @@ export class CollectionImpl<
           string,
           unknown
         >,
+        optimistic: config?.optimistic ?? true,
         type: `delete`,
         createdAt: new Date(),
         updatedAt: new Date(),
