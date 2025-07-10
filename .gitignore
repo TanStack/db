@@ -145,3 +145,9 @@ dev-debug.log
 # Task files
 tasks.json
 tasks/ 
+
+## Tanstack Start
+.nitro
+.output
+.tanstack
+.claude

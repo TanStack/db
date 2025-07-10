@@ -6,3 +6,4 @@
 **/docs
 **/snap
 pnpm-lock.yaml
+**/routeTree.gen.ts

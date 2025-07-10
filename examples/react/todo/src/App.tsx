@@ -12,7 +12,7 @@ import type { SelectConfig, SelectTodo } from "./db/validation"
 import type { FormEvent } from "react"
 
 // API helper for todos and config
-const API_BASE_URL = `http://localhost:3001/api`
+const API_BASE_URL = `/api`
 
 const api = {
   // Todo API methods
