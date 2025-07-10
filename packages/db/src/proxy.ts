@@ -505,7 +505,6 @@ export function createChangeProxy<
                   if (typeof callback === `function`) {
                     // Replace the original callback with our wrapped version
                     const wrappedCallback = function (
-                      // eslint-disable-next-line
                       this: unknown,
                       // eslint-disable-next-line
                       value: unknown,

@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
-import { createCollection } from "@tanstack/db"
+import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import type {
   LocalStorageCollectionConfig,
