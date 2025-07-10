@@ -57,3 +57,17 @@ jobs:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           pattern: "./packages/react-db/dist/**/*.{js,mjs}"
           comment-key: "react-db-package-size"
+  build-example:
+    name: Build Example Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@main
+      - name: Build Packages
+        run: pnpm run build
+      - name: Build Example Site
+        run: |
+          cd examples/react/todo
+          pnpm build
