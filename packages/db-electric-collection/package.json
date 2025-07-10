@@ -3,13 +3,13 @@
   "description": "Electric SQL collection for TanStack DB",
   "version": "0.0.1",
   "dependencies": {
+    "@electric-sql/client": "1.0.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.7.0",
     "debug": "^4.4.1"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.0.0",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
@@ -61,3 +61,4 @@
   "type": "module",
   "types": "dist/esm/index.d.ts"
 }
+
