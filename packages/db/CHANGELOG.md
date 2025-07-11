@@ -1,5 +1,15 @@
 # @tanstack/db
 
+## 0.0.20
+
+### Patch Changes
+
+- Add non-optimistic mutations support ([#250](https://github.com/TanStack/db/pull/250))
+  - Add `optimistic` option to insert, update, and delete operations
+  - Default `optimistic: true` maintains backward compatibility
+  - When `optimistic: false`, mutations only apply after server confirmation
+  - Enables better control for server-validated operations and confirmation workflows
+
 ## 0.0.19
 
 ### Patch Changes
