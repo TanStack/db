@@ -58,20 +58,21 @@ Successfully implemented a comprehensive devtools architecture for TanStack DB w
 ## Architecture Overview
 
 ### React Integration Solution
-To resolve the SolidJS/React type conflicts, we implemented a layered architecture:
+Following TanStack Query and Router patterns, we implemented a mount/unmount class approach:
 
 **Core Package (`@tanstack/db-devtools`)**
-- `core.ts` - Framework-agnostic devtools functionality (registry, types, core functions)
-- `solid.ts` - SolidJS UI components (for direct SolidJS usage)
-- Separate build outputs: `dist/core.js` and `dist/solid.js`
+- `TanstackDbDevtools` class with `.mount()` and `.unmount()` methods
+- Uses SolidJS `render()` to mount components into provided DOM elements
+- Registry, types, and SolidJS components all in one package
+- Clean separation between class API and UI implementation
 
 **React Package (`@tanstack/react-db-devtools`)**
-- Pure React implementation using only core functionality
-- No SolidJS dependencies or JSX conflicts
-- Custom React components that replicate devtools UI
-- Imports from `@tanstack/db-devtools/core` only
+- Simple React wrapper that creates `TanstackDbDevtools` instance
+- Uses `useRef` to get DOM element and calls `devtools.mount(ref.current)`
+- Handles prop updates via class setter methods
+- No component duplication - reuses original SolidJS components
 
-This approach eliminates JSX transpilation conflicts while maintaining full functionality.
+This approach eliminates JSX conflicts by using DOM mounting instead of component transpilation.
 
 ### Global Registry System
 ```typescript
@@ -121,9 +122,9 @@ interface DbDevtoolsRegistry {
 - Vue wrapper component basic structure
 
 ### ✅ Recently Fixed
-- **React Integration Type Conflicts**: Successfully resolved SolidJS/React conflicts by separating core functionality
-- **Package Architecture**: Restructured to have clean separation between core and UI components
-- **Build System**: Updated to support multiple entry points and proper module exports
+- **React Integration Type Conflicts**: Successfully resolved using TanStack mount/unmount pattern
+- **Component Duplication**: Eliminated by reusing SolidJS components via DOM mounting
+- **Architecture**: Implemented consistent TanStack Query/Router patterns for framework integration
 
 ### ⚠️ Partial/In Progress  
 - TypeScript type declarations need to be generated for better developer experience
@@ -145,7 +146,7 @@ interface DbDevtoolsRegistry {
 3. **Real-time Updates**: Built polling system for live collection metadata
 4. **Type Safety**: Comprehensive TypeScript definitions throughout
 5. **Build System**: Set up proper package compilation with external dependencies
-6. **SolidJS/React Type Conflicts**: Resolved by separating core functionality from UI components, allowing pure React implementation
+6. **SolidJS/React Type Conflicts**: Resolved using TanStack mount/unmount pattern, eliminating JSX transpilation conflicts while reusing SolidJS components
 
 ## Package Versions and Dependencies
 - Core: `@tanstack/db-devtools@0.0.1`
