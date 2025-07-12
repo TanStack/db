@@ -17,14 +17,12 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "import": "./dist/solid.js",
+      "require": "./dist/solid.cjs"
+    },
+    "./core": {
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
     }
   },
   "sideEffects": false,
