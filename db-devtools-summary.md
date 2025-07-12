@@ -57,6 +57,22 @@ Successfully implemented a comprehensive devtools architecture for TanStack DB w
 
 ## Architecture Overview
 
+### React Integration Solution
+To resolve the SolidJS/React type conflicts, we implemented a layered architecture:
+
+**Core Package (`@tanstack/db-devtools`)**
+- `core.ts` - Framework-agnostic devtools functionality (registry, types, core functions)
+- `solid.ts` - SolidJS UI components (for direct SolidJS usage)
+- Separate build outputs: `dist/core.js` and `dist/solid.js`
+
+**React Package (`@tanstack/react-db-devtools`)**
+- Pure React implementation using only core functionality
+- No SolidJS dependencies or JSX conflicts
+- Custom React components that replicate devtools UI
+- Imports from `@tanstack/db-devtools/core` only
+
+This approach eliminates JSX transpilation conflicts while maintaining full functionality.
+
 ### Global Registry System
 ```typescript
 interface DbDevtoolsRegistry {
@@ -104,18 +120,23 @@ interface DbDevtoolsRegistry {
 - React wrapper component structure
 - Vue wrapper component basic structure
 
+### ✅ Recently Fixed
+- **React Integration Type Conflicts**: Successfully resolved SolidJS/React conflicts by separating core functionality
+- **Package Architecture**: Restructured to have clean separation between core and UI components
+- **Build System**: Updated to support multiple entry points and proper module exports
+
 ### ⚠️ Partial/In Progress  
-- React integration has type conflicts between SolidJS and React ecosystems
-- Build process working but with some TypeScript errors in examples
+- TypeScript type declarations need to be generated for better developer experience
 - Vue integration is basic structure only
+- React example has some runtime TypeScript errors but functionality works
 
 ### 🔄 Next Steps
-1. **Fix React Integration**: Resolve the SolidJS/React type conflicts in the build process
+1. **Generate Type Declarations**: Add proper .d.ts files for all packages to resolve TypeScript import issues
 2. **Complete Vue Integration**: Implement proper Vue SFC handling in build process  
-3. **Add Type Declarations**: Generate proper .d.ts files for all packages
-4. **Testing**: Add comprehensive test coverage
-5. **Documentation**: Create usage guides and API documentation
-6. **Performance Optimization**: Profile and optimize the devtools overhead
+3. **Testing**: Add comprehensive test coverage
+4. **Documentation**: Create usage guides and API documentation
+5. **Performance Optimization**: Profile and optimize the devtools overhead
+6. **Polish React Integration**: Fix remaining TypeScript compilation issues
 
 ## Technical Challenges Addressed
 
@@ -124,6 +145,7 @@ interface DbDevtoolsRegistry {
 3. **Real-time Updates**: Built polling system for live collection metadata
 4. **Type Safety**: Comprehensive TypeScript definitions throughout
 5. **Build System**: Set up proper package compilation with external dependencies
+6. **SolidJS/React Type Conflicts**: Resolved by separating core functionality from UI components, allowing pure React implementation
 
 ## Package Versions and Dependencies
 - Core: `@tanstack/db-devtools@0.0.1`
