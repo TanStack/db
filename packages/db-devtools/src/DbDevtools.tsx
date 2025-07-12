@@ -5,15 +5,17 @@ import type { CollectionMetadata, DbDevtoolsConfig } from "./types"
 
 interface DbDevtoolsProps extends DbDevtoolsConfig {
   // Additional component props
+  registry?: import('./types').DbDevtoolsRegistry
+  shadowDOMTarget?: ShadowRoot
 }
 
-export function DbDevtools(props: DbDevtoolsProps = {}) {
+function DbDevtools(props: DbDevtoolsProps = {}) {
   const [isOpen, setIsOpen] = createSignal(props.initialIsOpen ?? false)
   const [collections, setCollections] = createSignal<Array<CollectionMetadata>>(
     []
   )
 
-  const registry = initializeDevtoolsRegistry()
+  const registry = props.registry || initializeDevtoolsRegistry()
 
   let intervalId: number | undefined
 
@@ -102,3 +104,5 @@ export function DbDevtools(props: DbDevtoolsProps = {}) {
     </>
   )
 }
+
+export default DbDevtools

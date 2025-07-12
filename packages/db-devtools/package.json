@@ -17,12 +17,8 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/solid.js",
-      "require": "./dist/solid.cjs"
-    },
-    "./core": {
-      "import": "./dist/core.js",
-      "require": "./dist/core.cjs"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "sideEffects": false,
