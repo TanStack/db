@@ -5,7 +5,9 @@
     "declaration": true,
     "declarationMap": true,
     "jsx": "preserve",
-    "jsxImportSource": "solid-js"
+    "jsxImportSource": "solid-js",
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"]
