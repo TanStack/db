@@ -22,6 +22,23 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 
+// Check for devtools registry and register collection if available
+function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
+  if (typeof window !== 'undefined' && window.__TANSTACK_DB_DEVTOOLS__) {
+    window.__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
+  }
+}
+
+// Declare the devtools registry on window
+declare global {
+  interface Window {
+    __TANSTACK_DB_DEVTOOLS__?: {
+      registerCollection: (collection: CollectionImpl<any, any, any>) => void
+      unregisterCollection: (id: string) => void
+    }
+  }
+}
+
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
@@ -344,6 +361,9 @@ export class CollectionImpl<
       this.syncedData = new Map<TKey, T>()
     }
 
+    // Register with devtools if available
+    registerWithDevtools(this)
+
     // Only start sync immediately if explicitly enabled
     if (config.startSync === true) {
       this.startSync()
@@ -525,6 +545,11 @@ export class CollectionImpl<
           )
         }
       })
+    }
+
+    // Unregister from devtools if available
+    if (typeof window !== 'undefined' && window.__TANSTACK_DB_DEVTOOLS__) {
+      window.__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
     }
 
     // Clear data

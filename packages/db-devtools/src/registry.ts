@@ -235,13 +235,17 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   private detectCollectionType = (collection: CollectionImpl<any, any, any>): 'collection' | 'live-query' => {
+    // Check the devtools type marker first
+    if (collection.config.__devtoolsType) {
+      return collection.config.__devtoolsType
+    }
+    
     // Check if the collection ID suggests it's a live query
     if (collection.id.startsWith('live-query-')) {
       return 'live-query'
     }
     
-    // We'll need to add a more robust way to detect this
-    // For now, check if it has specific patterns that suggest live query
+    // Default to regular collection
     return 'collection'
   }
 
