@@ -1,10 +1,10 @@
-import type { CollectionImpl } from '@tanstack/db'
-import type { 
-  DbDevtoolsRegistry, 
-  CollectionRegistryEntry, 
+import type { CollectionImpl } from "@tanstack/db"
+import type {
   CollectionMetadata,
-  TransactionDetails 
-} from './types'
+  CollectionRegistryEntry,
+  DbDevtoolsRegistry,
+  TransactionDetails,
+} from "./types"
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   public collections = new Map<string, CollectionRegistryEntry>()
@@ -27,19 +27,21 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
       createdAt: new Date(),
       lastUpdated: new Date(),
       gcTime: collection.config.gcTime,
-      timings: this.isLiveQuery(collection) ? {
-        totalIncrementalRuns: 0
-      } : undefined
+      timings: this.isLiveQuery(collection)
+        ? {
+            totalIncrementalRuns: 0,
+          }
+        : undefined,
     }
 
     const entry: CollectionRegistryEntry = {
       weakRef: new WeakRef(collection),
       metadata,
-      isActive: false
+      isActive: false,
     }
 
     this.collections.set(collection.id, entry)
-    
+
     // Track performance for live queries
     if (this.isLiveQuery(collection)) {
       this.instrumentLiveQuery(collection, entry)
@@ -76,8 +78,8 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   getAllCollectionMetadata = (): Array<CollectionMetadata> => {
     const results: Array<CollectionMetadata> = []
-    
-    for (const [id, entry] of this.collections) {
+
+    for (const [_id, entry] of this.collections) {
       const collection = entry.weakRef.deref()
       if (collection) {
         // Collection is still alive, update metadata
@@ -89,7 +91,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
         results.push({ ...entry.metadata })
       } else {
         // Collection was garbage collected, mark it
-        entry.metadata.status = 'cleaned-up'
+        entry.metadata.status = `cleaned-up`
         entry.metadata.lastUpdated = new Date()
         results.push({ ...entry.metadata })
       }
@@ -135,7 +137,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
           id: txId,
           collectionId: id,
           state: transaction.state,
-          mutations: transaction.mutations.map(m => ({
+          mutations: transaction.mutations.map((m) => ({
             id: m.mutationId,
             type: m.type,
             key: m.key,
@@ -143,16 +145,18 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
             createdAt: m.createdAt,
             original: m.original,
             modified: m.modified,
-            changes: m.changes
+            changes: m.changes,
           })),
           createdAt: transaction.createdAt,
           updatedAt: transaction.updatedAt,
-          isPersisted: transaction.state === 'completed'
+          isPersisted: transaction.state === `completed`,
         })
       }
     }
 
-    return transactions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    return transactions.sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    )
   }
 
   getTransaction = (id: string): TransactionDetails | undefined => {
@@ -166,7 +170,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
           id,
           collectionId,
           state: transaction.state,
-          mutations: transaction.mutations.map(m => ({
+          mutations: transaction.mutations.map((m) => ({
             id: m.mutationId,
             type: m.type,
             key: m.key,
@@ -174,11 +178,11 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
             createdAt: m.createdAt,
             original: m.original,
             modified: m.modified,
-            changes: m.changes
+            changes: m.changes,
           })),
           createdAt: transaction.createdAt,
           updatedAt: transaction.updatedAt,
-          isPersisted: transaction.state === 'completed'
+          isPersisted: transaction.state === `completed`,
         }
       }
     }
@@ -193,7 +197,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     }
 
     // Release all hard references
-    for (const [id, entry] of this.collections) {
+    for (const [_id, entry] of this.collections) {
       if (entry.isActive) {
         entry.hardRef = undefined
         entry.isActive = false
@@ -217,11 +221,11 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     this.pollingInterval = window.setInterval(() => {
       // Garbage collect dead references
       this.garbageCollect()
-      
+
       // Update metadata for active collections
-      for (const [id, entry] of this.collections) {
+      for (const [_id, entry] of this.collections) {
         if (!entry.isActive) continue // Only update metadata for inactive collections to avoid holding refs
-        
+
         const collection = entry.weakRef.deref()
         if (collection) {
           entry.metadata.status = collection.status
@@ -234,32 +238,39 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     }, this.POLLING_INTERVAL_MS)
   }
 
-  private detectCollectionType = (collection: CollectionImpl<any, any, any>): 'collection' | 'live-query' => {
+  private detectCollectionType = (
+    collection: CollectionImpl<any, any, any>
+  ): `collection` | `live-query` => {
     // Check the devtools type marker first
     if (collection.config.__devtoolsType) {
       return collection.config.__devtoolsType
     }
-    
+
     // Check if the collection ID suggests it's a live query
-    if (collection.id.startsWith('live-query-')) {
-      return 'live-query'
+    if (collection.id.startsWith(`live-query-`)) {
+      return `live-query`
     }
-    
+
     // Default to regular collection
-    return 'collection'
+    return `collection`
   }
 
-  private isLiveQuery = (collection: CollectionImpl<any, any, any>): boolean => {
-    return this.detectCollectionType(collection) === 'live-query'
+  private isLiveQuery = (
+    collection: CollectionImpl<any, any, any>
+  ): boolean => {
+    return this.detectCollectionType(collection) === `live-query`
   }
 
-  private instrumentLiveQuery = (collection: CollectionImpl<any, any, any>, entry: CollectionRegistryEntry): void => {
+  private instrumentLiveQuery = (
+    collection: CollectionImpl<any, any, any>,
+    entry: CollectionRegistryEntry
+  ): void => {
     // This is where we would add performance tracking for live queries
     // We'll need to hook into the query execution pipeline to track timings
     // For now, this is a placeholder
     if (!entry.metadata.timings) {
       entry.metadata.timings = {
-        totalIncrementalRuns: 0
+        totalIncrementalRuns: 0,
       }
     }
   }

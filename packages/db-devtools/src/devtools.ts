@@ -1,5 +1,5 @@
-import type { CollectionImpl } from '@tanstack/db'
-import { initializeDevtoolsRegistry } from './registry'
+import { initializeDevtoolsRegistry } from "./registry"
+import type { CollectionImpl } from "@tanstack/db"
 
 /**
  * Initialize the DB devtools registry.
@@ -14,7 +14,9 @@ export function initializeDbDevtools(): void {
  * Manually register a collection with the devtools.
  * This is automatically called by collections when they are created if devtools are enabled.
  */
-export function registerCollection(collection: CollectionImpl<any, any, any>): void {
+export function registerCollection(
+  collection: CollectionImpl<any, any, any>
+): void {
   const registry = window.__TANSTACK_DB_DEVTOOLS__
   if (registry) {
     registry.registerCollection(collection)

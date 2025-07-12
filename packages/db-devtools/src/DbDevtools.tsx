@@ -1,7 +1,7 @@
-import { createSignal, createEffect, onCleanup, For } from 'solid-js'
-import type { DbDevtoolsConfig, CollectionMetadata } from './types'
-import { DbDevtoolsPanel } from './DbDevtoolsPanel'
-import { initializeDevtoolsRegistry } from './registry'
+import { createEffect, createSignal, onCleanup } from "solid-js"
+import { DbDevtoolsPanel } from "./DbDevtoolsPanel"
+import { initializeDevtoolsRegistry } from "./registry"
+import type { CollectionMetadata, DbDevtoolsConfig } from "./types"
 
 interface DbDevtoolsProps extends DbDevtoolsConfig {
   // Additional component props
@@ -9,10 +9,12 @@ interface DbDevtoolsProps extends DbDevtoolsConfig {
 
 export function DbDevtools(props: DbDevtoolsProps = {}) {
   const [isOpen, setIsOpen] = createSignal(props.initialIsOpen ?? false)
-  const [collections, setCollections] = createSignal<CollectionMetadata[]>([])
-  
+  const [collections, setCollections] = createSignal<Array<CollectionMetadata>>(
+    []
+  )
+
   const registry = initializeDevtoolsRegistry()
-  
+
   let intervalId: number | undefined
 
   // Update collections metadata periodically
@@ -44,47 +46,46 @@ export function DbDevtools(props: DbDevtoolsProps = {}) {
   // Handle controlled state
   createEffect(() => {
     if (props.panelState) {
-      setIsOpen(props.panelState === 'open')
+      setIsOpen(props.panelState === `open`)
     }
   })
 
-  const position = props.position ?? 'bottom-right'
-  const storageKey = props.storageKey ?? 'tanstackDbDevtools'
+  const position = props.position ?? `bottom-right`
 
   return (
     <>
       {/* Toggle Button */}
       <div
         style={{
-          position: position === 'relative' ? 'relative' : 'fixed',
-          ...(position.includes('top') ? { top: '12px' } : { bottom: '12px' }),
-          ...(position.includes('left') ? { left: '12px' } : { right: '12px' }),
-          'z-index': 999999,
+          position: position === `relative` ? `relative` : `fixed`,
+          ...(position.includes(`top`) ? { top: `12px` } : { bottom: `12px` }),
+          ...(position.includes(`left`) ? { left: `12px` } : { right: `12px` }),
+          "z-index": 999999,
         }}
       >
         <button
           type="button"
           onClick={toggleOpen}
           style={{
-            display: 'flex',
-            'align-items': 'center',
-            'justify-content': 'center',
-            'background-color': '#0088ff',
-            border: 'none',
-            'border-radius': '8px',
-            padding: '8px 12px',
-            color: 'white',
-            'font-family': 'system-ui, sans-serif',
-            'font-size': '14px',
-            'font-weight': '600',
-            cursor: 'pointer',
-            'box-shadow': '0 4px 12px rgba(0, 136, 255, 0.3)',
-            transition: 'all 0.2s ease',
+            display: `flex`,
+            "align-items": `center`,
+            "justify-content": `center`,
+            "background-color": `#0088ff`,
+            border: `none`,
+            "border-radius": `8px`,
+            padding: `8px 12px`,
+            color: `white`,
+            "font-family": `system-ui, sans-serif`,
+            "font-size": `14px`,
+            "font-weight": `600`,
+            cursor: `pointer`,
+            "box-shadow": `0 4px 12px rgba(0, 136, 255, 0.3)`,
+            transition: `all 0.2s ease`,
             ...props.toggleButtonProps?.style,
           }}
           {...props.toggleButtonProps}
         >
-          <span style={{ 'margin-right': '8px' }}>🗄️</span>
+          <span style={{ "margin-right": `8px` }}>🗄️</span>
           DB ({collections().length})
         </button>
       </div>

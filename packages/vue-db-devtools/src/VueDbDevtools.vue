@@ -3,8 +3,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { initializeDbDevtools, type DbDevtoolsConfig } from '@tanstack/db-devtools'
+import { onMounted, ref, watch } from "vue"
+import { initializeDbDevtools } from "@tanstack/db-devtools"
+import type { DbDevtoolsConfig } from "@tanstack/db-devtools"
 
 export interface VueDbDevtoolsProps extends DbDevtoolsConfig {
   // Vue-specific props can be added here
@@ -12,8 +13,8 @@ export interface VueDbDevtoolsProps extends DbDevtoolsConfig {
 
 const props = withDefaults(defineProps<VueDbDevtoolsProps>(), {
   initialIsOpen: false,
-  position: 'bottom-right',
-  storageKey: 'tanstackDbDevtools',
+  position: `bottom-right`,
+  storageKey: `tanstackDbDevtools`,
 })
 
 const containerRef = ref<HTMLDivElement>()
@@ -24,9 +25,9 @@ onMounted(() => {
 
   if (containerRef.value) {
     // Import the core devtools dynamically to avoid SSR issues
-    import('@tanstack/db-devtools').then(({ DbDevtools }) => {
-      import('solid-js/web').then(({ render }) => {
-        render(() => DbDevtools(props), containerRef.value!)
+    import(`@tanstack/db-devtools`).then(({ DbDevtools }) => {
+      import(`solid-js/web`).then(({ render }) => {
+        render(() => DbDevtools(props), containerRef.value)
       })
     })
   }
@@ -38,9 +39,9 @@ watch(
   (newProps) => {
     if (containerRef.value) {
       // Re-render with new props
-      import('@tanstack/db-devtools').then(({ DbDevtools }) => {
-        import('solid-js/web').then(({ render }) => {
-          render(() => DbDevtools(newProps), containerRef.value!)
+      import(`@tanstack/db-devtools`).then(({ DbDevtools }) => {
+        import(`solid-js/web`).then(({ render }) => {
+          render(() => DbDevtools(newProps), containerRef.value)
         })
       })
     }

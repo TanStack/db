@@ -6,6 +6,7 @@
     "@tanstack/db-collections": "^0.0.24",
     "@tanstack/query-core": "^5.81.5",
     "@tanstack/react-db": "^0.0.20",
+    "@tanstack/react-db-devtools": "workspace:*",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",

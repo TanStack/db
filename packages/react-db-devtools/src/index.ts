@@ -1,4 +1,4 @@
-export * from './ReactDbDevtools'
+export * from "./ReactDbDevtools"
 
 // Export development utilities
-export { ReactDbDevtools, ReactDbDevtoolsPanel } from './ReactDbDevtools'
+export { ReactDbDevtools, ReactDbDevtoolsPanel } from "./ReactDbDevtools"
