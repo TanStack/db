@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist-ts",
+    "rootDir": ".",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js"
+  },
+  "include": ["src", "*.config.js", "*.config.ts", "package.json"],
+  "references": [{ "path": "../query-core" }]
+}
