@@ -5,9 +5,10 @@
   "dependencies": {
     "@tanstack/db-collections": "^0.0.23",
     "@tanstack/query-core": "^5.81.5",
-    "@tanstack/react-db": "^0.0.19",
     "@tanstack/react-router": "^1.125.6",
     "@tanstack/react-start": "^1.126.1",
+    "@tanstack/react-db": "^0.0.20",
+    "@tanstack/react-db-devtools": "workspace:*",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",
