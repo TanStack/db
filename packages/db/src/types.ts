@@ -4,6 +4,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
+import type { BasicExpression } from "./query/ir.js"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -567,6 +568,8 @@ export interface SubscribeChangesOptions<
   includeInitialState?: boolean
   /** Filter changes using a where expression */
   where?: (row: SingleRowRefProxy<T>) => any
+  /** Pre-compiled expression for filtering changes */
+  whereExpression?: BasicExpression<boolean>
 }
 
 /**
@@ -577,6 +580,8 @@ export interface CurrentStateAsChangesOptions<
 > {
   /** Filter the current state using a where expression */
   where?: (row: SingleRowRefProxy<T>) => any
+  /** Pre-compiled expression for filtering the current state */
+  whereExpression?: BasicExpression<boolean>
 }
 
 /**

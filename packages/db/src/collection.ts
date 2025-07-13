@@ -4,13 +4,13 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from "./query/builder/ref-proxy"
-import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
 import { OrderedIndex } from "./indexes/ordered-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
-import { optimizeExpressionWithIndexes } from "./utils/index-optimization.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
+import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -32,7 +32,6 @@ import type {
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
-import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -2103,116 +2102,16 @@ export class CollectionImpl<
    * const activeChanges = collection.currentStateAsChanges({
    *   where: (row) => row.status === 'active'
    * })
+   *
+   * // Get only items using a pre-compiled expression
+   * const activeChanges = collection.currentStateAsChanges({
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions<T> = {}
   ): Array<ChangeMessage<T>> {
-    // Helper function to collect filtered results
-    const collectFilteredResults = (
-      filterFn?: (value: T) => boolean
-    ): Array<ChangeMessage<T>> => {
-      const result: Array<ChangeMessage<T>> = []
-      for (const [key, value] of this.entries()) {
-        // If no filter function is provided, include all items
-        if (filterFn?.(value) ?? true) {
-          result.push({
-            type: `insert`,
-            key,
-            value,
-          })
-        }
-      }
-      return result
-    }
-
-    if (!options.where) {
-      // No filtering, return all items
-      return collectFilteredResults()
-    }
-
-    // There's a where clause, let's see if we can use an index
-    try {
-      // Create the single-row refProxy for the callback
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
-
-      // Execute the callback to get the expression
-      const whereExpression = options.where(singleRowRefProxy)
-
-      // Convert the result to a BasicExpression
-      const expression = toExpression(whereExpression)
-
-      // Try to optimize the query using indexes
-      const optimizationResult = optimizeExpressionWithIndexes(
-        expression,
-        this.indexes
-      )
-
-      if (optimizationResult.canOptimize) {
-        // Use index optimization
-        const result: Array<ChangeMessage<T>> = []
-        for (const key of optimizationResult.matchingKeys) {
-          const value = this.get(key)
-          if (value !== undefined) {
-            result.push({
-              type: `insert`,
-              key,
-              value,
-            })
-          }
-        }
-        return result
-      } else {
-        // No index found or complex expression, fall back to full scan with filter
-        const filterFn = this.createFilterFunction(options.where)
-        return collectFilteredResults(filterFn)
-      }
-    } catch (error) {
-      // If anything goes wrong with the where clause, fall back to full scan
-      console.warn(
-        `Error processing where clause, falling back to full scan:`,
-        error
-      )
-
-      const filterFn = this.createFilterFunction(options.where)
-      return collectFilteredResults(filterFn)
-    }
-  }
-
-  /**
-   * Creates a filter function from a where callback
-   * @private
-   */
-  private createFilterFunction(
-    whereCallback: (row: SingleRowRefProxy<T>) => any
-  ): (item: T) => boolean {
-    return (item: T): boolean => {
-      try {
-        // First try the RefProxy approach for query builder functions
-        const singleRowRefProxy = createSingleRowRefProxy<T>()
-        const whereExpression = whereCallback(singleRowRefProxy)
-        const expression = toExpression(whereExpression)
-        const evaluator = compileSingleRowExpression(expression)
-        const result = evaluator(item as Record<string, unknown>)
-        // WHERE clauses should always evaluate to boolean predicates
-        return result
-      } catch {
-        // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
-        try {
-          // Create a simple proxy that returns actual values for arithmetic operations
-          const simpleProxy = new Proxy(item as any, {
-            get(target, prop) {
-              return target[prop]
-            },
-          }) as SingleRowRefProxy<T>
-
-          const result = whereCallback(simpleProxy)
-          return result
-        } catch {
-          // If both approaches fail, exclude the item
-          return false
-        }
-      }
-    }
+    return currentStateAsChanges(this, options)
   }
 
   /**
@@ -2244,6 +2143,15 @@ export class CollectionImpl<
    *   includeInitialState: true,
    *   where: (row) => row.status === 'active'
    * })
+   *
+   * @example
+   * // Subscribe using a pre-compiled expression
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
@@ -2253,14 +2161,16 @@ export class CollectionImpl<
     this.addSubscriber()
 
     // Create a filtered callback if where clause is provided
-    const filteredCallback = options.where
-      ? this.createFilteredCallback(callback, options.where)
-      : callback
+    const filteredCallback =
+      options.where || options.whereExpression
+        ? createFilteredCallback(callback, options)
+        : callback
 
     if (options.includeInitialState) {
       // First send the current state as changes (filtered if needed)
       const initialChanges = this.currentStateAsChanges({
         where: options.where,
+        whereExpression: options.whereExpression,
       })
       filteredCallback(initialChanges)
     }
@@ -2271,64 +2181,6 @@ export class CollectionImpl<
     return () => {
       this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
-    }
-  }
-
-  /**
-   * Creates a filtered callback that only calls the original callback with changes that match the where clause
-   * @private
-   */
-  private createFilteredCallback(
-    originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-    whereCallback: (row: SingleRowRefProxy<T>) => any
-  ): (changes: Array<ChangeMessage<T>>) => void {
-    const filterFn = this.createFilterFunction(whereCallback)
-
-    return (changes: Array<ChangeMessage<T>>) => {
-      const filteredChanges: Array<ChangeMessage<T>> = []
-
-      for (const change of changes) {
-        if (change.type === `insert`) {
-          // For inserts, check if the new value matches the filter
-          if (filterFn(change.value)) {
-            filteredChanges.push(change)
-          }
-        } else if (change.type === `update`) {
-          // For updates, we need to check both old and new values
-          const newValueMatches = filterFn(change.value)
-          const oldValueMatches =
-            change.previousValue && filterFn(change.previousValue)
-
-          if (newValueMatches && oldValueMatches) {
-            // Both old and new match: emit update
-            filteredChanges.push(change)
-          } else if (newValueMatches && !oldValueMatches) {
-            // New matches but old didn't: emit insert
-            filteredChanges.push({
-              ...change,
-              type: `insert`,
-            })
-          } else if (!newValueMatches && oldValueMatches) {
-            // Old matched but new doesn't: emit delete
-            filteredChanges.push({
-              ...change,
-              type: `delete`,
-              value: change.previousValue!, // Use the previous value for the delete
-            })
-          }
-          // If neither matches, don't emit anything
-        } else {
-          // For deletes, include if the previous value would have matched
-          // (so subscribers know something they were tracking was deleted)
-          if (filterFn(change.value)) {
-            filteredChanges.push(change)
-          }
-        }
-      }
-
-      if (filteredChanges.length > 0) {
-        originalCallback(filteredChanges)
-      }
     }
   }
 

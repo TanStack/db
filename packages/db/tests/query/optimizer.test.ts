@@ -55,7 +55,7 @@ describe(`Query Optimizer`, () => {
         from: new CollectionRef(mockCollection, `u`),
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
       expect(optimized).toEqual(query)
     })
 
@@ -65,7 +65,7 @@ describe(`Query Optimizer`, () => {
         where: [],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
       expect(optimized).toEqual(query)
     })
 
@@ -75,7 +75,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
       // Query should remain unchanged since there are no joins to optimize
       expect(optimized).toEqual(query)
     })
@@ -96,7 +96,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -128,7 +128,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -163,7 +163,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -209,7 +209,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have the multi-source where clause
       expect(optimized.where).toHaveLength(1)
@@ -248,7 +248,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -283,7 +283,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -321,7 +321,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The main query should have no where clauses
       expect(optimized.where).toEqual([])
@@ -371,7 +371,7 @@ describe(`Query Optimizer`, () => {
         fnHaving: [() => true],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // All fields should be preserved
       expect(optimized.select).toEqual(query.select)
@@ -406,7 +406,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The constant expression should be ignored, single-source clause should be optimized
       expect(optimized.where).toEqual([])
@@ -438,7 +438,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The aggregate expression should be optimized to the posts subquery
       expect(optimized.where).toEqual([])
@@ -478,7 +478,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Both multi-source clauses should be combined with AND in the main query
       expect(optimized.where).toHaveLength(1)
@@ -507,7 +507,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The existing subquery should have both WHERE clauses
       expect(optimized.from.type).toBe(`queryRef`)
@@ -547,7 +547,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The deeply nested structure should be preserved and new WHERE clause added
       expect(optimized.from.type).toBe(`queryRef`)
@@ -572,7 +572,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(emptyPathPropRef, createValue(1))],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The empty path PropRef should be treated as a constant (no sources)
       expect(optimized.where).toEqual([])
@@ -598,7 +598,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Multi-source clause should remain in main query
       expect(optimized.where).toHaveLength(1)
@@ -643,7 +643,7 @@ describe(`Query Optimizer`, () => {
         where: [malformedExpression],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Should not crash and should handle the malformed expression gracefully
       expect(optimized).toBeDefined()
@@ -668,7 +668,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // PropRef with empty first element should be ignored, other clause should be optimized
       expect(optimized.where).toEqual([])
@@ -699,7 +699,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // PropRef with undefined first element should be ignored, other clause should be optimized
       expect(optimized.where).toEqual([])
@@ -735,7 +735,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(nestedQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(nestedQuery)
 
       // The new WHERE clause should be pushed to the nested level
       expect(optimized.where).toEqual([])
@@ -779,7 +779,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(deeplyNestedQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(deeplyNestedQuery)
 
       // Should at least push the top-level WHERE clause down one level
       expect(optimized.where).toEqual([])
@@ -823,7 +823,9 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(queryWithRedundantSubqueries)
+      const { optimizedQuery: optimized } = optimizeQuery(
+        queryWithRedundantSubqueries
+      )
 
       // Redundant nested subqueries should be removed, leaving a direct reference to the collection
       expect(optimized.from.type).toBe(`queryRef`)
@@ -866,7 +868,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(nestedQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(nestedQuery)
 
       // Multi-source clause should remain in main query
       expect(optimized.where).toHaveLength(1)
@@ -928,7 +930,9 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(queryWithMeaningfulSubqueries)
+      const { optimizedQuery: optimized } = optimizeQuery(
+        queryWithMeaningfulSubqueries
+      )
 
       // Should preserve the subquery with SELECT clause and push WHERE clause down at least one level
       expect(optimized.where).toEqual([])
@@ -957,7 +961,7 @@ describe(`Query Optimizer`, () => {
         where: [createEq(createPropRef(`u`, `department_id`), createValue(1))],
       }
 
-      const optimized = optimizeQuery(simpleQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(simpleQuery)
 
       // Should optimize without infinite recursion
       expect(optimized).toBeDefined()
@@ -992,7 +996,7 @@ describe(`Query Optimizer`, () => {
         createEq(createPropRef(`u`, `department_id`), createValue(1)),
       ]
 
-      const optimized = optimizeQuery(deepQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(deepQuery)
 
       // Should not crash and should produce a valid result
       expect(optimized).toBeDefined()
@@ -1026,7 +1030,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(complexQuery)
+      const { optimizedQuery: optimized } = optimizeQuery(complexQuery)
 
       // AND clause should be split and single-source parts pushed down
       expect(optimized.where).toEqual([])
@@ -1078,7 +1082,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Verify that both contexts get their appropriate filters without cross-contamination
       expect(optimized.where).toEqual([])
@@ -1132,7 +1136,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query since pushing it down
       // would change the aggregation results
@@ -1166,7 +1170,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query since pushing it down
       // would change which users are in the "top 10"
@@ -1204,7 +1208,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // This should be optimized since SELECT without aggregates/limits is safe
       expect(optimized.where).toEqual([])
@@ -1253,7 +1257,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Should not optimize due to HAVING clause
       expect(optimized.where).toHaveLength(1)
@@ -1286,7 +1290,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Should not optimize due to functional operations that might have side effects
       expect(optimized.where).toHaveLength(1)
@@ -1323,7 +1327,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Should optimize since ORDER BY without LIMIT/OFFSET is safe
       expect(optimized.where).toEqual([])
@@ -1374,7 +1378,7 @@ describe(`Query Optimizer`, () => {
         ],
       }
 
-      const optimized = optimizeQuery(query)
+      const { optimizedQuery: optimized } = optimizeQuery(query)
 
       // Only the unsafe clause should remain
       expect(optimized.where).toHaveLength(1)
