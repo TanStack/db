@@ -1,5 +1,5 @@
 "use client"
-import React, { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { TanstackDbDevtools } from "@tanstack/db-devtools"
 import type { TanstackDbDevtoolsConfig } from "@tanstack/db-devtools"
 
