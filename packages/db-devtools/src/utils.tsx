@@ -1,156 +1,109 @@
-import { tokens } from './theme'
+import { createSignal, onMount } from 'solid-js'
+import type { Accessor } from 'solid-js'
 
-export const convertRemToPixels = (rem: number) => {
-  return rem * parseFloat(getComputedStyle(document.documentElement).fontSize)
+export function useIsMounted(): Accessor<boolean> {
+  const [isMounted, setIsMounted] = createSignal(false)
+  
+  onMount(() => {
+    setIsMounted(true)
+  })
+  
+  return isMounted
 }
 
-export const displayValue = (value: any, truncate: boolean = false) => {
-  if (value === null) return 'null'
-  if (value === undefined) return 'undefined'
+export function multiSortBy<T>(
+  items: T[],
+  sorters: ((item: T) => any)[],
+): T[] {
+  return items.sort((a, b) => {
+    for (let i = 0; i < sorters.length; i++) {
+      const sorter = sorters[i]
+      if (!sorter) continue
+      
+      const aVal = sorter(a)
+      const bVal = sorter(b)
+      
+      if (aVal < bVal) return -1
+      if (aVal > bVal) return 1
+    }
+    return 0
+  })
+}
+
+export function getStatusColor(status: string): string {
+  switch (status) {
+    case 'active':
+    case 'success':
+      return 'green'
+    case 'error':
+    case 'failed':
+      return 'red'
+    case 'pending':
+    case 'loading':
+      return 'yellow'
+    case 'idle':
+    default:
+      return 'gray'
+  }
+}
+
+export function displayValue(value: any, space?: number): string {
   if (typeof value === 'string') {
-    return truncate && value.length > 100 ? value.substring(0, 100) + '...' : value
+    return JSON.stringify(value)
   }
-  if (typeof value === 'number') return value.toString()
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  if (Array.isArray(value)) {
-    return truncate && value.length > 10 ? `Array(${value.length})` : JSON.stringify(value)
+  
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
   }
+  
+  if (value === null) {
+    return 'null'
+  }
+  
+  if (value === undefined) {
+    return 'undefined'
+  }
+  
   if (typeof value === 'object') {
-    const keys = Object.keys(value)
-    return truncate && keys.length > 5 ? `Object(${keys.length})` : JSON.stringify(value)
+    return JSON.stringify(value, null, space)
   }
+  
   return String(value)
 }
 
-export const getStatusColor = (status: string): 'green' | 'yellow' | 'red' | 'gray' | 'blue' | 'purple' => {
-  switch (status) {
-    case 'ready':
-      return 'green'
-    case 'loading':
-      return 'yellow'
-    case 'error':
-      return 'red'
-    case 'idle':
-      return 'gray'
-    case 'pending':
-      return 'blue'
-    default:
-      return 'gray'
-  }
-}
-
-export const getStatusLabel = (status: string): string => {
-  switch (status) {
-    case 'ready':
-      return 'Ready'
-    case 'loading':
-      return 'Loading'
-    case 'error':
-      return 'Error'
-    case 'idle':
-      return 'Idle'
-    case 'pending':
-      return 'Pending'
-    default:
-      return 'Unknown'
-  }
-}
-
-export const getSidedProp = (
-  position: 'top' | 'bottom' | 'left' | 'right',
-  side: 'top' | 'right' | 'bottom' | 'left',
-  value: string | number
-): string => {
-  return position === side ? String(value) : '0'
-}
-
-export const sortFns = {
-  'Status > Last Updated': (a: any, b: any) => {
-    if (a.status === b.status) {
-      return (b.updatedAt || 0) - (a.updatedAt || 0)
-    }
-    const statusOrder = ['error', 'loading', 'ready', 'idle']
-    return statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)
-  },
-  'Last Updated': (a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0),
-  'Created': (a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0),
-}
-
-export const mutationSortFns = {
-  'Status > Last Updated': (a: any, b: any) => {
-    if (a.state === b.state) {
-      return (b.updatedAt || 0) - (a.updatedAt || 0)
-    }
-    const stateOrder = ['error', 'loading', 'success', 'idle']
-    return stateOrder.indexOf(a.state) - stateOrder.indexOf(b.state)
-  },
-  'Last Updated': (a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0),
-  'Created': (a: any, b: any) => (b.submittedAt || 0) - (a.submittedAt || 0),
-}
-
-export const formatTime = (date: Date) => {
+export function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp)
   return date.toLocaleTimeString()
 }
 
-export const formatDate = (date: Date) => {
-  return date.toLocaleDateString()
+export function truncate(str: string, length: number): string {
+  if (str.length <= length) return str
+  return str.slice(0, length) + '...'
 }
 
-export const formatDateTime = (date: Date) => {
-  return date.toLocaleString()
+export function isObject(value: any): value is object {
+  return value !== null && typeof value === 'object'
 }
 
-export const formatDuration = (ms: number) => {
-  if (ms < 1000) {
-    return `${ms}ms`
-  }
-  if (ms < 60000) {
-    return `${(ms / 1000).toFixed(1)}s`
-  }
-  return `${(ms / 60000).toFixed(1)}m`
+export function isArray(value: any): value is any[] {
+  return Array.isArray(value)
 }
 
-export const copyToClipboard = (text: string) => {
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text)
-  } else {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-  }
+export function getKeys(obj: any): string[] {
+  if (!isObject(obj)) return []
+  return Object.keys(obj)
 }
 
-export const getCollectionStatusColor = (status: string) => {
-  const { colors } = tokens
-  switch (status) {
-    case 'ready':
-      return colors.green[500]
-    case 'loading':
-      return colors.yellow[500]
-    case 'error':
-      return colors.red[500]
-    case 'cleaned-up':
-      return colors.gray[500]
-    default:
-      return colors.gray[500]
-  }
-}
-
-export const getTransactionStatusColor = (state: string) => {
-  const { colors } = tokens
-  switch (state) {
-    case 'pending':
-      return colors.blue[500]
-    case 'success':
-      return colors.green[500]
-    case 'error':
-      return colors.red[500]
-    case 'idle':
-      return colors.gray[500]
-    default:
-      return colors.gray[500]
-  }
+export function sortBy<T>(
+  items: T[],
+  sorter: (item: T) => any,
+): T[] {
+  return items.sort((a, b) => {
+    const aVal = sorter(a)
+    const bVal = sorter(b)
+    
+    if (aVal < bVal) return -1
+    if (aVal > bVal) return 1
+    return 0
+  })
 }

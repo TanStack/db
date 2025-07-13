@@ -24,18 +24,16 @@ export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
-  if (typeof window !== `undefined` && window.__TANSTACK_DB_DEVTOOLS__) {
-    window.__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
+  if (typeof window !== `undefined` && (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
+    (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
   }
 }
 
 // Declare the devtools registry on window
 declare global {
   interface Window {
-    __TANSTACK_DB_DEVTOOLS__?: {
-      registerCollection: (collection: CollectionImpl<any, any, any>) => void
-      unregisterCollection: (id: string) => void
-    }
+    __TANSTACK_DB_DEVTOOLS_REGISTER__?: (collection: CollectionImpl<any, any, any>) => void
+    __TANSTACK_DB_DEVTOOLS_UNREGISTER__?: (id: string) => void
   }
 }
 
@@ -548,8 +546,8 @@ export class CollectionImpl<
     }
 
     // Unregister from devtools if available
-    if (typeof window !== `undefined` && window.__TANSTACK_DB_DEVTOOLS__) {
-      window.__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
+    if (typeof window !== `undefined` && (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__) {
+      (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__(this.id)
     }
 
     // Clear data

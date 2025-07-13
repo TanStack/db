@@ -1,5 +1,5 @@
 import { createContext, useContext, createSignal, onMount, onCleanup } from 'solid-js'
-import { createStore } from '@solid-primitives/storage'
+import { createStorage } from '@solid-primitives/storage'
 import type { JSX, Accessor } from 'solid-js'
 import type { DevtoolsPosition, DevtoolsButtonPosition } from '../constants'
 
@@ -25,6 +25,16 @@ const DbDevtoolsContext = createContext<DbDevtoolsContext>({})
 
 export const useDbDevtoolsContext = () => useContext(DbDevtoolsContext)
 
+// Shadow DOM Target Context - matches Router devtools pattern
+export const ShadowDomTargetContext = createContext<ShadowRoot | undefined>(undefined)
+
+// Devtools On Close Context - matches Router devtools pattern
+export const DevtoolsOnCloseContext = createContext<{ onCloseClick: (e: any) => void }>({
+  onCloseClick: () => {},
+})
+
+export const useDevtoolsOnClose = () => useContext(DevtoolsOnCloseContext)
+
 export const DbDevtoolsProvider = (props: DbDevtoolsProps) => {
   const value = {
     initialIsOpen: props.initialIsOpen,
@@ -42,14 +52,13 @@ export const DbDevtoolsProvider = (props: DbDevtoolsProps) => {
   )
 }
 
-// Theme Context
 export type Theme = 'light' | 'dark'
 
 const ThemeContext = createContext<{
   theme: Accessor<Theme>
   setTheme: (theme: Theme) => void
 }>({
-  theme: () => 'dark',
+  theme: () => 'dark' as Theme,
   setTheme: () => {},
 })
 
@@ -60,6 +69,9 @@ export const ThemeProvider = (props: { children: JSX.Element }) => {
   const [theme, setTheme] = createSignal<Theme>('dark')
 
   onMount(() => {
+    // SSR safety check
+    if (typeof window === 'undefined') return
+
     // Check system preference
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
     setTheme(prefersDark.matches ? 'dark' : 'light')
@@ -85,7 +97,7 @@ export const ThemeProvider = (props: { children: JSX.Element }) => {
   )
 }
 
-// PiP Context
+// Picture-in-Picture Context
 const PiPContext = createContext<{
   pipWindow: Accessor<Window | null>
   openPiP: () => void
@@ -102,26 +114,28 @@ export const PiPProvider = (props: { children: JSX.Element }) => {
   const [pipWindow, setPiPWindow] = createSignal<Window | null>(null)
 
   const openPiP = () => {
-    if (typeof window !== 'undefined' && 'documentPictureInPicture' in window) {
-      // @ts-ignore documentPictureInPicture API is not yet in TypeScript DOM types
-      window.documentPictureInPicture.requestWindow({
-        width: 800,
-        height: 600,
-      }).then((win: Window) => {
-        setPiPWindow(win)
-        win.addEventListener('pagehide', () => {
-          setPiPWindow(null)
-        })
-      })
-    }
+    if (typeof window === 'undefined') return
+    
+    const features = [
+      'width=500',
+      'height=300',
+      'toolbar=no',
+      'location=no',
+      'directories=no',
+      'status=no',
+      'menubar=no',
+      'scrollbars=no',
+      'resizable=yes',
+      'copyhistory=no',
+    ].join(',')
+    
+    const pip = window.open('', 'devtools', features)
+    setPiPWindow(pip)
   }
 
   const closePiP = () => {
-    const win = pipWindow()
-    if (win) {
-      win.close()
-      setPiPWindow(null)
-    }
+    pipWindow()?.close()
+    setPiPWindow(null)
   }
 
   const value = {
@@ -137,15 +151,16 @@ export const PiPProvider = (props: { children: JSX.Element }) => {
   )
 }
 
-// Storage hook for devtools state
+// Storage hooks
 export const useDevtoolsStorage = () => {
-  const [store, setStore] = createStore('tsdb-devtools', {
-    open: 'false',
-    position: 'bottom-right',
-    height: '500',
-    width: '500',
-    pip_open: 'false',
+  const [store, setStore] = createStorage({
+    prefix: 'tanstack-db-devtools',
+    api: localStorage,
+    serializer: {
+      read: (value: string) => JSON.parse(value),
+      write: (value: any) => JSON.stringify(value),
+    },
   })
 
-  return [store, setStore] as const
+  return { store, setStore }
 }

@@ -1,4 +1,3 @@
-import type { CollectionImpl } from "@tanstack/db"
 import type {
   CollectionMetadata,
   CollectionRegistryEntry,
@@ -16,7 +15,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     this.startPolling()
   }
 
-  registerCollection = (collection: CollectionImpl<any, any, any>): void => {
+  registerCollection = (collection: any): void => {
     const metadata: CollectionMetadata = {
       id: collection.id,
       type: this.detectCollectionType(collection),
@@ -100,7 +99,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     return results
   }
 
-  getCollection = (id: string): CollectionImpl<any, any, any> | undefined => {
+  getCollection = (id: string): any => {
     const entry = this.collections.get(id)
     if (!entry) return undefined
 
@@ -239,7 +238,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   private detectCollectionType = (
-    collection: CollectionImpl<any, any, any>
+    collection: any
   ): `collection` | `live-query` => {
     // Check the devtools type marker first
     if (collection.config.__devtoolsType) {
@@ -256,13 +255,13 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   private isLiveQuery = (
-    collection: CollectionImpl<any, any, any>
+    collection: any
   ): boolean => {
     return this.detectCollectionType(collection) === `live-query`
   }
 
   private instrumentLiveQuery = (
-    collection: CollectionImpl<any, any, any>,
+    collection: any,
     entry: CollectionRegistryEntry
   ): void => {
     // This is where we would add performance tracking for live queries
@@ -283,8 +282,51 @@ export function createDbDevtoolsRegistry(): DbDevtoolsRegistry {
 
 // Initialize the global registry if not already present
 export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
-  if (!window.__TANSTACK_DB_DEVTOOLS__) {
-    window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
+  // SSR safety check
+  if (typeof window === 'undefined') {
+    // Return a no-op registry for server-side rendering
+    return {
+      collections: new Map(),
+      registerCollection: () => {},
+      unregisterCollection: () => {},
+      getCollection: () => undefined,
+      releaseCollection: () => {},
+      getAllCollectionMetadata: () => [],
+      getCollectionMetadata: () => undefined,
+      getTransactions: () => [],
+      getTransaction: () => undefined,
+      getTransactionDetails: () => undefined,
+      clearTransactionHistory: () => {},
+      onTransactionStart: () => {},
+      onTransactionEnd: () => {},
+      cleanup: () => {},
+      garbageCollect: () => {},
+    } as DbDevtoolsRegistry
   }
-  return window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry
+  
+  if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
+    (window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
+  }
+  return (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry
+}
+
+// Initialize devtools and set up automatic collection registration
+export function initializeDbDevtools(): void {
+  // SSR safety check
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  // Initialize the registry
+  const registry = initializeDevtoolsRegistry()
+
+  // Set up global registration function that collections can call
+  ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
+    registry.registerCollection(collection)
+  }
+
+  // Set up global unregistration function
+  ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__ = (id: string) => {
+    registry.unregisterCollection(id)
+  }
 }

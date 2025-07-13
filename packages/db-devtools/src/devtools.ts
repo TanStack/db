@@ -1,5 +1,5 @@
 import { initializeDevtoolsRegistry } from "./registry"
-import type { CollectionImpl } from "@tanstack/db"
+import type { CollectionImpl } from "../../db/src/collection"
 import type { DbDevtoolsRegistry } from "./types"
 
 /**
@@ -18,7 +18,9 @@ export function initializeDbDevtools(): void {
 export function registerCollection(
   collection: CollectionImpl<any, any, any>
 ): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === 'undefined') return
+  
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.registerCollection(collection)
   }
@@ -29,7 +31,9 @@ export function registerCollection(
  * This is automatically called when collections are garbage collected.
  */
 export function unregisterCollection(id: string): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === 'undefined') return
+  
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.unregisterCollection(id)
   }
@@ -39,14 +43,16 @@ export function unregisterCollection(id: string): void {
  * Check if devtools are currently enabled (registry is present).
  */
 export function isDevtoolsEnabled(): boolean {
-  return !!window.__TANSTACK_DB_DEVTOOLS__
+  if (typeof window === 'undefined') return false
+  return !!(window as any).__TANSTACK_DB_DEVTOOLS__
 }
 
 /**
  * Get the current devtools registry instance.
  */
 export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
-  return window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === 'undefined') return undefined
+  return (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
 }
 
 /**
@@ -54,9 +60,11 @@ export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
  * This is useful for testing or when you want to completely reset the devtools state.
  */
 export function cleanupDevtools(): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === 'undefined') return
+  
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.cleanup()
-    delete window.__TANSTACK_DB_DEVTOOLS__
+    delete (window as any).__TANSTACK_DB_DEVTOOLS__
   }
 }

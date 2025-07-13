@@ -4,6 +4,8 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router"
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { TanStackReactDbDevtools } from "@tanstack/react-db-devtools"
 
 import appCss from "../styles.css?url"
 
@@ -32,6 +34,8 @@ export const Route = createRootRoute({
   component: () => (
     <RootDocument>
       <Outlet />
+      <TanStackRouterDevtools />
+      <TanStackReactDbDevtools position="bottom-right" />
     </RootDocument>
   ),
 })

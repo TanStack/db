@@ -4,7 +4,7 @@ import {
   electricCollectionOptions,
   queryCollectionOptions,
 } from "@tanstack/db-collections"
-import { ReactDbDevtools } from "@tanstack/react-db-devtools"
+import { TanStackReactDbDevtools } from "@tanstack/react-db-devtools"
 import { QueryClient } from "@tanstack/query-core"
 import { selectConfigSchema, selectTodoSchema } from "./db/validation"
 import type { Collection } from "@tanstack/react-db"
@@ -641,7 +641,6 @@ export default function App() {
           </div>
         </div>
       </div>
-      <ReactDbDevtools />
     </>
   )
 }

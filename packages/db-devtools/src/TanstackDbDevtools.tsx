@@ -1,7 +1,8 @@
 /** @jsxImportSource solid-js */
 import { render } from "solid-js/web"
-import { createSignal, lazy } from "solid-js"
+import { createSignal } from "solid-js"
 import { initializeDevtoolsRegistry } from "./registry"
+import { FloatingTanStackDbDevtools } from "./FloatingTanStackDbDevtools"
 import type { DbDevtoolsConfig } from "./types"
 import type { DbDevtoolsRegistry } from "./types"
 import type { Signal } from "solid-js"
@@ -23,7 +24,6 @@ class TanstackDbDevtools {
   #storageKey: Signal<string | undefined>
   #panelState: Signal<DbDevtoolsConfig["panelState"] | undefined>
   #onPanelStateChange: Signal<((isOpen: boolean) => void) | undefined>
-  #Component: any
   #dispose?: () => void
 
   constructor(config: TanstackDbDevtoolsConfig) {
@@ -89,58 +89,24 @@ class TanstackDbDevtools {
       throw new Error("DB Devtools is already mounted")
     }
 
-    const dispose = render(() => {
-      const [initialIsOpen] = this.#initialIsOpen
-      const [position] = this.#position
-      const [panelProps] = this.#panelProps
-      const [toggleButtonProps] = this.#toggleButtonProps
-      const [closeButtonProps] = this.#closeButtonProps
-      const [storageKey] = this.#storageKey
-      const [panelState] = this.#panelState
-      const [onPanelStateChange] = this.#onPanelStateChange
-
-      let DbDevtools: any
-
-      if (this.#Component) {
-        DbDevtools = this.#Component
-      } else {
-        DbDevtools = lazy(() => import("./DbDevtools"))
-        this.#Component = DbDevtools
+    const getValidPosition = (pos: DbDevtoolsConfig["position"]) => {
+      if (pos === 'relative' || pos === undefined) {
+        return 'bottom-left' as const
       }
+      return pos as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+    }
 
-      return (
-        <DbDevtools
-          registry={this.#registry}
-          shadowDOMTarget={this.#shadowDOMTarget}
-          {...{
-            get initialIsOpen() {
-              return initialIsOpen()
-            },
-            get position() {
-              return position()
-            },
-            get panelProps() {
-              return panelProps()
-            },
-            get toggleButtonProps() {
-              return toggleButtonProps()
-            },
-            get closeButtonProps() {
-              return closeButtonProps()
-            },
-            get storageKey() {
-              return storageKey()
-            },
-            get panelState() {
-              return panelState()
-            },
-            get onPanelStateChange() {
-              return onPanelStateChange()
-            },
-          }}
-        />
-      )
-    }, el)
+    const dispose = render(() => (
+      <FloatingTanStackDbDevtools
+        initialIsOpen={this.#initialIsOpen[0]()}
+        position={getValidPosition(this.#position[0]())}
+        panelProps={this.#panelProps[0]()}
+        toggleButtonProps={this.#toggleButtonProps[0]()}
+        closeButtonProps={this.#closeButtonProps[0]()}
+        registry={() => this.#registry}
+        shadowDOMTarget={this.#shadowDOMTarget}
+      />
+    ), el)
 
     this.#isMounted = true
     this.#dispose = dispose

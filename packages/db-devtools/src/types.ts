@@ -1,4 +1,5 @@
-import type { CollectionImpl, CollectionStatus } from "@tanstack/db"
+import type { CollectionImpl } from "../../db/src/collection"
+import type { CollectionStatus } from "../../db/src/types"
 
 export interface DbDevtoolsConfig {
   /**
