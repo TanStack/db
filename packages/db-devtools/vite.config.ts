@@ -1,8 +1,16 @@
 import { defineConfig } from 'vite'
 import solid from 'vite-plugin-solid'
+import dts from 'vite-plugin-dts'
 
 export default defineConfig({
-  plugins: [solid()],
+  plugins: [
+    solid(), 
+    dts({
+      insertTypesEntry: true,
+      include: ['src/**/*'],
+      exclude: ['src/**/*.test.*', 'src/__tests__/**/*']
+    })
+  ],
   build: {
     target: 'esnext',
     lib: {
@@ -13,10 +21,5 @@ export default defineConfig({
     rollupOptions: {
       external: ['solid-js', 'solid-js/web', '@tanstack/db'],
     },
-  },
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./src/__tests__/setup.ts'],
   },
 })
