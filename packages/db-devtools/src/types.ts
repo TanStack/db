@@ -119,9 +119,5 @@ export interface DbDevtoolsRegistry {
   garbageCollect: () => void
 }
 
-// Window global interface
-declare global {
-  interface Window {
-    __TANSTACK_DB_DEVTOOLS__?: DbDevtoolsRegistry
-  }
-}
+// Window global interface is already declared in @tanstack/db
+// The DbDevtoolsRegistry interface extends the base interface used there

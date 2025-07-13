@@ -289,14 +289,14 @@ export function DbDevtoolsPanel(props: DbDevtoolsPanelProps) {
                   }
                 >
                   <TransactionDetails
-                    transactionId={selectedTransaction()}
+                    transactionId={selectedTransaction()!}
                     registry={props.registry}
                   />
                 </Show>
               }
             >
               <CollectionDetails
-                collectionId={selectedCollection()}
+                collectionId={selectedCollection()!}
                 registry={props.registry}
               />
             </Show>

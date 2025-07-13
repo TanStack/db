@@ -1,5 +1,6 @@
 import { initializeDevtoolsRegistry } from "./registry"
 import type { CollectionImpl } from "@tanstack/db"
+import type { DbDevtoolsRegistry } from "./types"
 
 /**
  * Initialize the DB devtools registry.
@@ -17,7 +18,7 @@ export function initializeDbDevtools(): void {
 export function registerCollection(
   collection: CollectionImpl<any, any, any>
 ): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__
+  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.registerCollection(collection)
   }
@@ -28,7 +29,7 @@ export function registerCollection(
  * This is automatically called when collections are garbage collected.
  */
 export function unregisterCollection(id: string): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__
+  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.unregisterCollection(id)
   }
@@ -44,8 +45,8 @@ export function isDevtoolsEnabled(): boolean {
 /**
  * Get the current devtools registry instance.
  */
-export function getDevtoolsRegistry() {
-  return window.__TANSTACK_DB_DEVTOOLS__
+export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
+  return window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
 }
 
 /**
@@ -53,7 +54,7 @@ export function getDevtoolsRegistry() {
  * This is useful for testing or when you want to completely reset the devtools state.
  */
 export function cleanupDevtools(): void {
-  const registry = window.__TANSTACK_DB_DEVTOOLS__
+  const registry = window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
   if (registry) {
     registry.cleanup()
     delete window.__TANSTACK_DB_DEVTOOLS__

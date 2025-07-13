@@ -137,7 +137,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
           id: txId,
           collectionId: id,
           state: transaction.state,
-          mutations: transaction.mutations.map((m) => ({
+          mutations: transaction.mutations.map((m: any) => ({
             id: m.mutationId,
             type: m.type,
             key: m.key,
@@ -148,7 +148,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
             changes: m.changes,
           })),
           createdAt: transaction.createdAt,
-          updatedAt: transaction.updatedAt,
+          updatedAt: transaction.createdAt, // Transaction doesn't have updatedAt, using createdAt
           isPersisted: transaction.state === `completed`,
         })
       }
@@ -170,7 +170,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
           id,
           collectionId,
           state: transaction.state,
-          mutations: transaction.mutations.map((m) => ({
+          mutations: transaction.mutations.map((m: any) => ({
             id: m.mutationId,
             type: m.type,
             key: m.key,
@@ -181,7 +181,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
             changes: m.changes,
           })),
           createdAt: transaction.createdAt,
-          updatedAt: transaction.updatedAt,
+          updatedAt: transaction.createdAt, // Transaction doesn't have updatedAt, using createdAt
           isPersisted: transaction.state === `completed`,
         }
       }
@@ -286,5 +286,5 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
   if (!window.__TANSTACK_DB_DEVTOOLS__) {
     window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
   }
-  return window.__TANSTACK_DB_DEVTOOLS__
+  return window.__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry
 }
