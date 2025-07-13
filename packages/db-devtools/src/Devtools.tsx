@@ -431,13 +431,30 @@ const ContentView: Component<ContentViewProps> = (props) => {
 
   const [selectedView, setSelectedView] = createSignal<'collections' | 'transactions'>('collections')
 
-  const liveQueries = createMemo(() => 
-    props.collections.filter(c => c.type === 'live-query')
+  // Create stable collection IDs that only change when collections are added/removed
+  const collectionIds = createMemo(() => {
+    const currentIds = new Set(props.collections.map(c => c.id))
+    return Array.from(currentIds)
+  })
+
+  const liveQueryIds = createMemo(() => 
+    collectionIds().filter(id => {
+      const collection = props.collections.find(c => c.id === id)
+      return collection?.type === 'live-query'
+    })
   )
   
-  const regularCollections = createMemo(() => 
-    props.collections.filter(c => c.type === 'collection')
+  const regularCollectionIds = createMemo(() => 
+    collectionIds().filter(id => {
+      const collection = props.collections.find(c => c.id === id)
+      return collection?.type === 'collection'
+    })
   )
+
+  // Helper to get latest metadata for a collection ID
+  const getCollectionMetadata = (id: string) => {
+    return props.collections.find(c => c.id === id)
+  }
 
   const allTransactions = createMemo(() => 
     props.registry.getTransactions()
@@ -502,37 +519,43 @@ const ContentView: Component<ContentViewProps> = (props) => {
           {/* Content based on selected view */}
           <div class={styles().sidebarContent}>
             <Show when={selectedView() === 'collections'}>
-              <Show when={liveQueries().length > 0}>
+              <Show when={liveQueryIds().length > 0}>
                 <div class={styles().sectionHeader}>
-                  <h3>Live Queries ({liveQueries().length})</h3>
+                  <h3>Live Queries ({liveQueryIds().length})</h3>
                 </div>
-                <For each={liveQueries()}>
-                  {(collection) => (
-                    <CollectionItem 
-                      collection={collection} 
-                      isSelected={selectedCollectionId() === collection.id}
-                      onClick={() => handleCollectionSelect(collection.id)}
-                    />
-                  )}
+                <For each={liveQueryIds()}>
+                  {(collectionId) => {
+                    const collection = getCollectionMetadata(collectionId)
+                    return collection ? (
+                      <CollectionItem 
+                        collection={collection} 
+                        isSelected={selectedCollectionId() === collectionId}
+                        onClick={() => handleCollectionSelect(collectionId)}
+                      />
+                    ) : null
+                  }}
                 </For>
               </Show>
 
-              <Show when={regularCollections().length > 0}>
+              <Show when={regularCollectionIds().length > 0}>
                 <div class={styles().sectionHeader}>
-                  <h3>Collections ({regularCollections().length})</h3>
+                  <h3>Collections ({regularCollectionIds().length})</h3>
                 </div>
-                <For each={regularCollections()}>
-                  {(collection) => (
-                    <CollectionItem 
-                      collection={collection} 
-                      isSelected={selectedCollectionId() === collection.id}
-                      onClick={() => handleCollectionSelect(collection.id)}
-                    />
-                  )}
+                <For each={regularCollectionIds()}>
+                  {(collectionId) => {
+                    const collection = getCollectionMetadata(collectionId)
+                    return collection ? (
+                      <CollectionItem 
+                        collection={collection} 
+                        isSelected={selectedCollectionId() === collectionId}
+                        onClick={() => handleCollectionSelect(collectionId)}
+                      />
+                    ) : null
+                  }}
                 </For>
               </Show>
 
-              <Show when={props.collections.length === 0}>
+              <Show when={collectionIds().length === 0}>
                 <div class={styles().emptyState}>
                   No collections found. Create a collection to see it here.
                 </div>

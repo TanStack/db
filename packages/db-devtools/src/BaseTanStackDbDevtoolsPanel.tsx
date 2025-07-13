@@ -4,6 +4,7 @@ import { useDevtoolsOnClose } from './contexts'
 import { useStyles } from './useStyles'
 import { useLocalStorage } from './useLocalStorage'
 import { multiSortBy } from './utils'
+import { POLLING_INTERVAL_MS } from './constants'
 import type { Accessor, JSX } from 'solid-js'
 import type { DbDevtoolsRegistry, CollectionMetadata } from './types'
 
@@ -117,7 +118,7 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
     }
 
     updateCollections()
-    const intervalId = setInterval(updateCollections, 1000)
+    const intervalId = setInterval(updateCollections, POLLING_INTERVAL_MS)
 
     return () => clearInterval(intervalId)
   })

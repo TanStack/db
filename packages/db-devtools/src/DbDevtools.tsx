@@ -2,6 +2,7 @@
 import { createEffect, createSignal, onCleanup } from "solid-js"
 import { DbDevtoolsPanel } from "./DbDevtoolsPanel"
 import { initializeDevtoolsRegistry } from "./registry"
+import { POLLING_INTERVAL_MS } from "./constants"
 import type { CollectionMetadata, DbDevtoolsConfig } from "./types"
 
 import type { DbDevtoolsRegistry } from './types'
@@ -33,7 +34,7 @@ function DbDevtools(props: DbDevtoolsProps = {}) {
     updateCollections()
 
     // Set up polling
-    intervalId = window.setInterval(updateCollections, 1000)
+    intervalId = window.setInterval(updateCollections, POLLING_INTERVAL_MS)
 
     onCleanup(() => {
       if (intervalId) {

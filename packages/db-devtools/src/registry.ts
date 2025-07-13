@@ -4,11 +4,11 @@ import type {
   DbDevtoolsRegistry,
   TransactionDetails,
 } from "./types"
+import { POLLING_INTERVAL_MS } from "./constants"
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   public collections = new Map<string, CollectionRegistryEntry>()
   private pollingInterval: number | null = null
-  private readonly POLLING_INTERVAL_MS = 1000 // Poll every second for metadata updates
 
   constructor() {
     // Start polling for metadata updates
@@ -259,7 +259,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
           entry.metadata.lastUpdated = new Date()
         }
       }
-    }, this.POLLING_INTERVAL_MS)
+    }, POLLING_INTERVAL_MS)
   }
 
   private detectCollectionType = (

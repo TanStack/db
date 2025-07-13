@@ -6,6 +6,7 @@ export const INITIAL_IS_OPEN = false
 export const DEFAULT_SORT_ORDER = 1
 export const DEFAULT_SORT_FN_NAME = 'Status > Last Updated'
 export const DEFAULT_MUTATION_SORT_FN_NAME = 'Status > Last Updated'
+export const POLLING_INTERVAL_MS = 1000 // Poll every second for metadata updates
 
 export const firstBreakpoint = 1024
 export const secondBreakpoint = 796

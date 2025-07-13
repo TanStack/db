@@ -26,13 +26,30 @@ export function DbDevtoolsPanel(props: DbDevtoolsPanelProps) {
     string | null
   >(null)
 
-  const liveQueries = createMemo(() =>
-    props.collections.filter((c) => c.type === `live-query`)
+  // Create stable collection IDs that only change when collections are added/removed
+  const collectionIds = createMemo(() => {
+    const currentIds = new Set(props.collections.map(c => c.id))
+    return Array.from(currentIds)
+  })
+
+  const liveQueryIds = createMemo(() => 
+    collectionIds().filter(id => {
+      const collection = props.collections.find(c => c.id === id)
+      return collection?.type === `live-query`
+    })
   )
 
-  const regularCollections = createMemo(() =>
-    props.collections.filter((c) => c.type === `collection`)
+  const regularCollectionIds = createMemo(() => 
+    collectionIds().filter(id => {
+      const collection = props.collections.find(c => c.id === id)
+      return collection?.type === `collection`
+    })
   )
+
+  // Helper to get latest metadata for a collection ID
+  const getCollectionMetadata = (id: string) => {
+    return props.collections.find(c => c.id === id)
+  }
 
   const allTransactions = createMemo(() => props.registry.getTransactions())
 
@@ -187,7 +204,7 @@ export function DbDevtoolsPanel(props: DbDevtoolsPanelProps) {
             <div style={{ flex: `1`, overflow: `auto` }}>
               <Show when={selectedView() === `collections`}>
                 {/* Live Queries Section */}
-                <Show when={liveQueries().length > 0}>
+                <Show when={liveQueryIds().length > 0}>
                   <div style={{ padding: `16px 0 8px 16px` }}>
                     <h3
                       style={{
@@ -199,22 +216,25 @@ export function DbDevtoolsPanel(props: DbDevtoolsPanelProps) {
                         "letter-spacing": `0.5px`,
                       }}
                     >
-                      Live Queries ({liveQueries().length})
+                      Live Queries ({liveQueryIds().length})
                     </h3>
                   </div>
-                  <For each={liveQueries()}>
-                    {(collection) => (
-                      <CollectionItem
-                        collection={collection}
-                        isSelected={selectedCollection() === collection.id}
-                        onClick={() => handleCollectionSelect(collection.id)}
-                      />
-                    )}
+                  <For each={liveQueryIds()}>
+                    {(collectionId) => {
+                      const collection = getCollectionMetadata(collectionId)
+                      return collection ? (
+                        <CollectionItem
+                          collection={collection}
+                          isSelected={selectedCollection() === collectionId}
+                          onClick={() => handleCollectionSelect(collectionId)}
+                        />
+                      ) : null
+                    }}
                   </For>
                 </Show>
 
                 {/* Regular Collections Section */}
-                <Show when={regularCollections().length > 0}>
+                <Show when={regularCollectionIds().length > 0}>
                   <div style={{ padding: `16px 0 8px 16px` }}>
                     <h3
                       style={{
@@ -226,21 +246,24 @@ export function DbDevtoolsPanel(props: DbDevtoolsPanelProps) {
                         "letter-spacing": `0.5px`,
                       }}
                     >
-                      Collections ({regularCollections().length})
+                      Collections ({regularCollectionIds().length})
                     </h3>
                   </div>
-                  <For each={regularCollections()}>
-                    {(collection) => (
-                      <CollectionItem
-                        collection={collection}
-                        isSelected={selectedCollection() === collection.id}
-                        onClick={() => handleCollectionSelect(collection.id)}
-                      />
-                    )}
+                  <For each={regularCollectionIds()}>
+                    {(collectionId) => {
+                      const collection = getCollectionMetadata(collectionId)
+                      return collection ? (
+                        <CollectionItem
+                          collection={collection}
+                          isSelected={selectedCollection() === collectionId}
+                          onClick={() => handleCollectionSelect(collectionId)}
+                        />
+                      ) : null
+                    }}
                   </For>
                 </Show>
 
-                <Show when={props.collections.length === 0}>
+                <Show when={collectionIds().length === 0}>
                   <div
                     style={{
                       padding: `40px 20px`,
