@@ -13,35 +13,22 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
   const [devtools, setDevtools] = useState<TanstackDbDevtools | null>(null)
   const initializingRef = useRef(false)
 
-  console.log('ReactDbDevtools: Component rendered with props:', props)
-
   // Initialize devtools only on client side
   useEffect(() => {
-    console.log('ReactDbDevtools: useEffect triggered')
-    console.log('ReactDbDevtools: window exists:', typeof window !== 'undefined')
-    console.log('ReactDbDevtools: ref.current exists:', !!ref.current)
-    console.log('ReactDbDevtools: already initializing:', initializingRef.current)
-    
     if (typeof window === 'undefined' || !ref.current || initializingRef.current) {
-      console.log('ReactDbDevtools: Early return - no window, ref, or already initializing')
       return
     }
     
     // Set flag to prevent multiple initializations
     initializingRef.current = true
     
-          // Note: Devtools registry is now initialized in collections.ts before collections are created
-      console.log('ReactDbDevtools: Calling initializeDbDevtools as backup (also called in collections.ts)')
-      initializeDbDevtools()
-
-      console.log('ReactDbDevtools: Creating TanstackDbDevtools instance')
+    // Note: Devtools registry is now initialized in collections.ts before collections are created
+    initializeDbDevtools()
     const devtoolsInstance = new TanstackDbDevtools(props)
     
     try {
-      console.log('ReactDbDevtools: Attempting to mount devtools')
       // Mount the devtools to the DOM element
       devtoolsInstance.mount(ref.current)
-      console.log('ReactDbDevtools: Devtools mounted successfully')
       setDevtools(devtoolsInstance)
     } catch (error) {
       console.error('ReactDbDevtools: Failed to mount DB devtools:', error)
@@ -49,12 +36,10 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
     }
     
     return () => {
-      console.log('ReactDbDevtools: Cleanup - unmounting devtools')
       try {
         // Only unmount if the devtools were successfully mounted
         if (devtoolsInstance) {
           devtoolsInstance.unmount()
-          console.log('ReactDbDevtools: Devtools unmounted successfully')
         }
       } catch (error) {
         // Ignore unmount errors if devtools weren't mounted

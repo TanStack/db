@@ -71,25 +71,20 @@ export function initializeDbDevtools(): void {
   // Create the registry directly without importing SolidJS code to avoid SSR issues
   try {
     // Import and call the core initialization asynchronously, but ensure registry exists first
-    const registryPromise = import('@tanstack/db-devtools').then((module) => {
-      console.log('DbDevtools: Core devtools module loaded')
+    import('@tanstack/db-devtools').then((module) => {
       module.initializeDbDevtools()
-      console.log('DbDevtools: Core initialization complete')
     }).catch((error) => {
       console.warn('DbDevtools: Failed to load core devtools module:', error)
     })
     
     // Create immediate registry that works with the SolidJS UI while core loads
     if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
-      console.log('DbDevtools: Creating immediate registry...')
       
       const collections = new Map()
       
       const registry = {
         collections,
         registerCollection: (collection: any) => {
-          console.log('DbDevtools: Registering collection:', collection.id)
-          
           const metadata = {
             id: collection.id,
             type: collection.id.startsWith('live-query-') ? 'live-query' : 'collection',
@@ -112,8 +107,6 @@ export function initializeDbDevtools(): void {
           }
           
           collections.set(collection.id, entry)
-          console.log('DbDevtools: Collection registered successfully:', collection.id)
-          console.log('DbDevtools: Total collections now:', collections.size)
         },
         unregisterCollection: (id: string) => {
           collections.delete(id)
@@ -135,10 +128,8 @@ export function initializeDbDevtools(): void {
           return { ...entry.metadata }
         },
         getAllCollectionMetadata: () => {
-          console.log('DbDevtools: getAllCollectionMetadata called, total collections:', collections.size)
-          
           const results = []
-          for (const [id, entry] of collections) {
+          for (const [, entry] of collections) {
             const collection = entry.weakRef.deref()
             if (collection) {
               // Collection is still alive, update metadata
@@ -148,22 +139,14 @@ export function initializeDbDevtools(): void {
               entry.metadata.transactionCount = collection.transactions?.size || 0
               entry.metadata.lastUpdated = new Date()
               results.push({ ...entry.metadata })
-              console.log('DbDevtools: Found live collection:', {
-                id,
-                status: collection.status,
-                size: collection.size,
-                type: entry.metadata.type
-              })
             } else {
               // Collection was garbage collected
               entry.metadata.status = 'cleaned-up'
               entry.metadata.lastUpdated = new Date()
               results.push({ ...entry.metadata })
-              console.log('DbDevtools: Found GC\'d collection:', id)
             }
           }
           
-          console.log('DbDevtools: Returning metadata for', results.length, 'collections')
           return results
         },
         getCollection: (id: string) => {
@@ -209,7 +192,6 @@ export function initializeDbDevtools(): void {
       
       // Set up the registry on window
       ;(window as any).__TANSTACK_DB_DEVTOOLS__ = registry
-      console.log('DbDevtools: Registry created successfully')
     }
     
     // Set up automatic collection registration
@@ -221,16 +203,13 @@ export function initializeDbDevtools(): void {
         }
       }
     }
-    
-    console.log('DbDevtools: Initialization complete')
   } catch (error) {
     console.warn('DbDevtools: Failed to initialize devtools:', error)
     
     // Final fallback: set up a basic registration function so collections don't fail
     if (!(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
-      console.log('DbDevtools: Setting up fallback registration function...')
       ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
-        console.log('DbDevtools: Fallback - collection registered:', collection.id)
+        // Silent fallback registration
       }
     }
   }

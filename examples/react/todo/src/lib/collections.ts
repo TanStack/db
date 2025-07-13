@@ -12,7 +12,6 @@ import { api } from "./api"
 const queryClient = new QueryClient()
 
 // Initialize DB devtools early (idempotent - safe to call multiple times)
-console.log('🏗️ Collections.ts: Initializing devtools before creating collections...')
 initializeDbDevtools()
 
 // Electric Todo Collection
