@@ -15,46 +15,82 @@
     "url": "https://github.com/sponsors/tannerlinsley"
   },
   "type": "module",
+  "types": "build/legacy/index.d.ts",
+  "main": "build/legacy/index.cjs",
+  "module": "build/legacy/index.js",
   "exports": {
     ".": {
+      "@tanstack/custom-condition": "./src/index.ts",
       "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
+        "types": "./build/modern/index.d.ts",
+        "default": "./build/modern/index.js"
       },
       "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
+        "types": "./build/modern/index.d.cts",
+        "default": "./build/modern/index.cjs"
       }
-    }
+    },
+    "./production": {
+      "import": {
+        "types": "./build/modern/production.d.ts",
+        "default": "./build/modern/production.js"
+      },
+      "require": {
+        "types": "./build/modern/production.d.cts",
+        "default": "./build/modern/production.cjs"
+      }
+    },
+    "./build/modern/production.js": {
+      "import": {
+        "types": "./build/modern/production.d.ts",
+        "default": "./build/modern/production.js"
+      },
+      "require": {
+        "types": "./build/modern/production.d.cts",
+        "default": "./build/modern/production.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "sideEffects": false,
   "files": [
-    "dist"
+    "build",
+    "src",
+    "!src/__tests__"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest",
-    "test:ci": "vitest run",
-    "lint": "eslint src",
-    "clean": "rm -rf dist"
+    "clean": "premove ./build ./coverage ./dist-ts",
+    "compile": "tsc --build",
+    "test:eslint": "eslint ./src",
+    "test:types": "npm-run-all --serial test:types:*",
+    "test:types:ts53": "node ../../node_modules/typescript53/lib/tsc.js --build tsconfig.legacy.json",
+    "test:types:ts54": "node ../../node_modules/typescript54/lib/tsc.js --build tsconfig.legacy.json",
+    "test:types:ts55": "node ../../node_modules/typescript55/lib/tsc.js --build tsconfig.legacy.json",
+    "test:types:ts56": "node ../../node_modules/typescript56/lib/tsc.js --build tsconfig.legacy.json",
+    "test:types:ts57": "node ../../node_modules/typescript57/lib/tsc.js --build tsconfig.legacy.json",
+    "test:types:tscurrent": "tsc --build",
+    "test:lib": "vitest",
+    "test:lib:dev": "pnpm run test:lib --watch",
+    "test:build": "publint --strict && attw --pack",
+    "build": "tsup --tsconfig tsconfig.prod.json",
+    "build:dev": "tsup --watch"
   },
   "dependencies": {
     "@tanstack/db-devtools": "workspace:*"
   },
-  "peerDependencies": {
-    "@tanstack/react-db": "workspace:*",
-    "react": ">=18"
-  },
   "devDependencies": {
-    "@types/react": "^18.0.0",
-    "@types/node": "^20.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^5.0.0",
-    "vitest": "^1.0.0"
+    "@tanstack/react-db": "workspace:*",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "npm-run-all2": "^5.0.0",
+    "react": "^19.0.0"
+  },
+  "peerDependencies": {
+    "@tanstack/react-db": "workspace:^",
+    "react": "^18 || ^19"
   }
 }

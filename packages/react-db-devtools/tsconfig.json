@@ -6,6 +6,6 @@
     "declarationMap": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "*.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

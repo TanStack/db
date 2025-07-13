@@ -15,38 +15,69 @@
     "url": "https://github.com/sponsors/tannerlinsley"
   },
   "type": "module",
+  "main": "./build/index.cjs",
+  "module": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "browser": {},
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
+    "@tanstack/custom-condition": "./src/index.ts",
+    "solid": {
+      "development": "./build/index.js",
+      "import": "./build/index.js"
+    },
+    "development": {
+      "import": {
+        "types": "./build/index.d.ts",
+        "default": "./build/dev.js"
+      },
+      "require": "./build/dev.cjs"
+    },
+    "import": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    },
+    "require": "./build/index.cjs"
   },
   "sideEffects": false,
   "files": [
-    "dist"
+    "build",
+    "src",
+    "!src/__tests__"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest",
-    "test:ci": "vitest run",
-    "lint": "eslint src",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "solid-js": "^1.8.11"
-  },
-  "peerDependencies": {
-    "@tanstack/db": "workspace:*"
+    "clean": "premove ./build ./coverage ./dist-ts",
+    "compile": "tsc --build",
+    "test:eslint": "eslint ./src",
+    "test:types": "npm-run-all --serial test:types:*",
+    "test:types:ts53": "node ../../node_modules/typescript53/lib/tsc.js --build",
+    "test:types:ts54": "node ../../node_modules/typescript54/lib/tsc.js --build",
+    "test:types:ts55": "node ../../node_modules/typescript55/lib/tsc.js --build",
+    "test:types:ts56": "node ../../node_modules/typescript56/lib/tsc.js --build",
+    "test:types:ts57": "node ../../node_modules/typescript57/lib/tsc.js --build",
+    "test:types:tscurrent": "tsc --build",
+    "test:lib": "vitest",
+    "test:lib:dev": "pnpm run test:lib --watch",
+    "test:build": "publint --strict && attw --pack",
+    "build": "tsup --tsconfig tsconfig.prod.json",
+    "build:dev": "tsup --watch"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^5.0.0",
-    "vitest": "^1.0.0"
+    "@kobalte/core": "^0.13.4",
+    "@solid-primitives/keyed": "^1.2.2",
+    "@solid-primitives/resize-observer": "^2.0.26",
+    "@solid-primitives/storage": "^1.3.11",
+    "@tanstack/match-sorter-utils": "^8.19.4",
+    "@tanstack/query-core": "workspace:*",
+    "clsx": "^2.1.1",
+    "goober": "^2.1.16",
+    "npm-run-all2": "^5.0.0",
+    "solid-js": "^1.9.5",
+    "solid-transition-group": "^0.2.3",
+    "superjson": "^2.2.1",
+    "tsup-preset-solid": "^2.2.0",
+    "vite-plugin-solid": "^2.11.6"
   }
 }

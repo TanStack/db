@@ -1,7 +1,8 @@
+/** @jsxImportSource solid-js */
 import { render } from "solid-js/web"
 import { createSignal, lazy } from "solid-js"
 import { initializeDevtoolsRegistry } from "./registry"
-import type { DbDevtoolsConfig, CollectionMetadata } from "./types"
+import type { DbDevtoolsConfig } from "./types"
 import type { DbDevtoolsRegistry } from "./types"
 import type { Signal } from "solid-js"
 
@@ -13,7 +14,6 @@ export interface TanstackDbDevtoolsConfig extends DbDevtoolsConfig {
 class TanstackDbDevtools {
   #registry: DbDevtoolsRegistry
   #isMounted = false
-  #styleNonce?: string
   #shadowDOMTarget?: ShadowRoot
   #initialIsOpen: Signal<boolean | undefined>
   #position: Signal<DbDevtoolsConfig["position"] | undefined>
@@ -36,12 +36,11 @@ class TanstackDbDevtools {
       storageKey,
       panelState,
       onPanelStateChange,
-      styleNonce,
+      styleNonce: _styleNonce,
       shadowDOMTarget,
     } = config
 
     this.#registry = initializeDevtoolsRegistry()
-    this.#styleNonce = styleNonce
     this.#shadowDOMTarget = shadowDOMTarget
     this.#initialIsOpen = createSignal(initialIsOpen)
     this.#position = createSignal(position)

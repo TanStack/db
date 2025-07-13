@@ -340,7 +340,7 @@ export function liveQueryCollectionOptions<
     onDelete: config.onDelete,
     startSync: config.startSync,
     // Mark as live query for devtools
-    __devtoolsType: 'live-query' as const,
+    __devtoolsType: `live-query` as const,
   }
 }
 

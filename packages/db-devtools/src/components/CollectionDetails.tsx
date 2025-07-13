@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js"
 import type { DbDevtoolsRegistry } from "../types"
 

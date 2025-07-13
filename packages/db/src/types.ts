@@ -334,7 +334,7 @@ export interface CollectionConfig<
    * Internal field used by devtools to identify collection type
    * @internal
    */
-  __devtoolsType?: 'live-query' | 'collection'
+  __devtoolsType?: `live-query` | `collection`
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information

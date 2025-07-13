@@ -1,3 +1,4 @@
+/** @jsxImportSource solid-js */
 import { For, Show, createMemo, createSignal } from "solid-js"
 import { CollectionDetails } from "./components/CollectionDetails"
 import { TransactionList } from "./components/TransactionList"

@@ -1,11 +1,14 @@
+/** @jsxImportSource solid-js */
 import { createEffect, createSignal, onCleanup } from "solid-js"
 import { DbDevtoolsPanel } from "./DbDevtoolsPanel"
 import { initializeDevtoolsRegistry } from "./registry"
 import type { CollectionMetadata, DbDevtoolsConfig } from "./types"
 
+import type { DbDevtoolsRegistry } from './types'
+
 interface DbDevtoolsProps extends DbDevtoolsConfig {
   // Additional component props
-  registry?: import('./types').DbDevtoolsRegistry
+  registry?: DbDevtoolsRegistry
   shadowDOMTarget?: ShadowRoot
 }
 
