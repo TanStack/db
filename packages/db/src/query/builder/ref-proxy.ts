@@ -11,6 +11,71 @@ export interface RefProxy<T = any> {
 }
 
 /**
+ * Type for creating a RefProxy for a single row/type without namespacing
+ * Used in collection indexes and where clauses
+ */
+export type SingleRowRefProxy<T> =
+  T extends Record<string, any>
+    ? {
+        [K in keyof T]: T[K] extends Record<string, any>
+          ? SingleRowRefProxy<T[K]> & RefProxy<T[K]>
+          : RefProxy<T[K]>
+      } & RefProxy<T>
+    : RefProxy<T>
+
+/**
+ * Creates a proxy object that records property access paths for a single row
+ * Used in collection indexes and where clauses
+ */
+export function createSingleRowRefProxy<
+  T extends Record<string, any>,
+>(): SingleRowRefProxy<T> {
+  const cache = new Map<string, any>()
+
+  function createProxy(path: Array<string>): any {
+    const pathKey = path.join(`.`)
+    if (cache.has(pathKey)) {
+      return cache.get(pathKey)
+    }
+
+    const proxy = new Proxy({} as any, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true
+        if (prop === `__path`) return path
+        if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+
+        const newPath = [...path, String(prop)]
+        return createProxy(newPath)
+      },
+
+      has(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+          return true
+        return Reflect.has(target, prop)
+      },
+
+      ownKeys(target) {
+        return Reflect.ownKeys(target)
+      },
+
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+          return { enumerable: false, configurable: true }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop)
+      },
+    })
+
+    cache.set(pathKey, proxy)
+    return proxy
+  }
+
+  // Return the root proxy that starts with an empty path
+  return createProxy([]) as SingleRowRefProxy<T>
+}
+
+/**
  * Creates a proxy object that records property access paths
  * Used in callbacks like where, select, etc. to create type-safe references
  */

@@ -1,13 +1,23 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from "./query/builder/ref-proxy"
+import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
+
+import { ascComparator } from "./utils/comparison.js"
 import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
+  CollectionIndex,
   CollectionStatus,
+  CurrentStateAsChangesOptions,
   Fn,
+  IndexOptions,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
@@ -15,11 +25,14 @@ import type {
   ResolveInsertInput,
   ResolveType,
   StandardSchema,
+  SubscribeChangesOptions,
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
+import type { BasicExpression } from "./query/ir"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -213,6 +226,10 @@ export class CollectionImpl<
 
   // Cached size for performance
   private _size = 0
+
+  // Index storage
+  private indexes = new Map<string, CollectionIndex<TKey>>()
+  private indexCounter = 0
 
   // Event system
   private changeListeners = new Set<ChangeListener<T, TKey>>()
@@ -723,8 +740,16 @@ export class CollectionImpl<
         return true
       })
 
+      // Update indexes for the filtered events
+      if (filteredEvents.length > 0) {
+        this.updateIndexes(filteredEvents)
+      }
       this.emitEvents(filteredEvents)
     } else {
+      // Update indexes for all events
+      if (filteredEventsBySyncStatus.length > 0) {
+        this.updateIndexes(filteredEventsBySyncStatus)
+      }
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus)
     }
@@ -1168,6 +1193,11 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
+      // Update indexes for all events before emitting
+      if (events.length > 0) {
+        this.updateIndexes(events)
+      }
+
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
@@ -1214,6 +1244,335 @@ export class CollectionImpl<
     }
 
     return `KEY::${this.id}/${key}`
+  }
+
+  /**
+   * Creates an index on the collection for faster lookups
+   * All indexes are ordered to support range queries
+   * @param indexCallback - Function that extracts the value to index from each row
+   * @param options - Optional configuration including index name
+   * @returns The created index object
+   * @example
+   * // Create an index on a field
+   * const nameIndex = collection.createIndex((row) => row.name)
+   *
+   * // Create a named index
+   * const statusIndex = collection.createIndex((row) => row.status, {
+   *   name: 'statusIndex'
+   * })
+   *
+   * // Create an index on a computed value
+   * const fullNameIndex = collection.createIndex((row) => `${row.firstName} ${row.lastName}`)
+   */
+  public createIndex(
+    indexCallback: (row: SingleRowRefProxy<T>) => any,
+    options: IndexOptions = {}
+  ): CollectionIndex<TKey> {
+    this.validateCollectionUsable(`createIndex`)
+
+    // Generate unique ID for this index
+    const indexId = `index_${++this.indexCounter}`
+
+    // Create the single-row refProxy for the callback
+    const singleRowRefProxy = createSingleRowRefProxy<T>()
+
+    // Execute the callback to get the expression
+    const indexExpression = indexCallback(singleRowRefProxy)
+
+    // Convert the result to a BasicExpression
+    const expression = toExpression(indexExpression)
+
+    // Create a comparison function for ordering
+    const compareFn = this.createComparisonFunction()
+
+    // Create the index
+    const index: CollectionIndex<TKey> = {
+      id: indexId,
+      name: options.name,
+      expression,
+      orderedEntries: [],
+      valueMap: new Map<any, Set<TKey>>(),
+      indexedKeys: new Set<TKey>(),
+      compareFn,
+    }
+
+    // Build the index with current data
+    this.buildIndex(index)
+
+    // Store the index
+    this.indexes.set(indexId, index)
+
+    return index
+  }
+
+  /**
+   * Creates a comparison function for ordering index values
+   * Uses the exact same logic as the orderBy compiler for consistency
+   * @private
+   */
+  private createComparisonFunction(): (a: any, b: any) => number {
+    return ascComparator
+  }
+
+  /**
+   * Evaluates an index expression for a given item
+   * @private
+   */
+  private evaluateIndexExpression(index: CollectionIndex<TKey>, item: T): any {
+    // Use the single-row evaluator for direct property access without table aliases
+    const evaluator = compileSingleRowExpression(index.expression)
+
+    return evaluator(item as Record<string, unknown>)
+  }
+
+  /**
+   * Builds an index by iterating through all current items
+   * @private
+   */
+  private buildIndex(index: CollectionIndex<TKey>): void {
+    // Clear existing index data
+    index.orderedEntries.length = 0
+    index.valueMap.clear()
+    index.indexedKeys.clear()
+
+    // Collect all values first
+    const valueEntries = new Map<any, Set<TKey>>()
+
+    // Index all current items
+    for (const [key, item] of this.entries()) {
+      try {
+        const indexedValue = this.evaluateIndexExpression(index, item)
+
+        if (!valueEntries.has(indexedValue)) {
+          valueEntries.set(indexedValue, new Set<TKey>())
+        }
+
+        valueEntries.get(indexedValue)!.add(key)
+        index.indexedKeys.add(key)
+      } catch (error) {
+        // If indexing fails for this item, skip it but don't break the whole index
+        console.warn(`Failed to index item with key ${key}:`, error)
+      }
+    }
+
+    // Sort the values and create ordered entries
+    // Note: JavaScript's Array.sort() always moves undefined to the end, regardless of comparison function
+    // So we need to manually handle undefined/null values to match the orderBy compiler behavior
+    const allValues = Array.from(valueEntries.keys())
+    const undefinedValues: Array<any> = []
+    const definedValues: Array<any> = []
+
+    for (const value of allValues) {
+      if (value == null) {
+        // null or undefined
+        undefinedValues.push(value)
+      } else {
+        definedValues.push(value)
+      }
+    }
+
+    // Sort defined values normally
+    definedValues.sort(index.compareFn)
+
+    // Sort undefined values (they should all be equal, but just in case)
+    undefinedValues.sort(index.compareFn)
+
+    // Combine with undefined/null first (to match orderBy compiler behavior)
+    const sortedValues = [...undefinedValues, ...definedValues]
+
+    for (const value of sortedValues) {
+      const keys = valueEntries.get(value)!
+      index.orderedEntries.push([value, keys])
+      index.valueMap.set(value, keys)
+    }
+  }
+
+  /**
+   * Adds an item to an index, maintaining order
+   * @private
+   */
+  private addToIndex(index: CollectionIndex<TKey>, key: TKey, item: T): void {
+    try {
+      const indexedValue = this.evaluateIndexExpression(index, item)
+
+      // Check if this value already exists
+      if (index.valueMap.has(indexedValue)) {
+        // Add to existing set
+        index.valueMap.get(indexedValue)!.add(key)
+      } else {
+        // Create new set for this value
+        const keySet = new Set<TKey>([key])
+        index.valueMap.set(indexedValue, keySet)
+
+        // Find correct position in ordered entries using binary search
+        const insertIndex = this.findInsertPosition(
+          index.orderedEntries,
+          indexedValue,
+          index.compareFn
+        )
+        index.orderedEntries.splice(insertIndex, 0, [indexedValue, keySet])
+      }
+
+      index.indexedKeys.add(key)
+    } catch (error) {
+      // If indexing fails for this item, skip it but don't break the whole index
+      console.warn(`Failed to index item with key ${key}:`, error)
+    }
+  }
+
+  /**
+   * Removes an item from an index, maintaining order
+   * @private
+   */
+  private removeFromIndex(
+    index: CollectionIndex<TKey>,
+    key: TKey,
+    item: T
+  ): void {
+    try {
+      const indexedValue = this.evaluateIndexExpression(index, item)
+
+      const keysForValue = index.valueMap.get(indexedValue)
+      if (keysForValue) {
+        keysForValue.delete(key)
+        if (keysForValue.size === 0) {
+          // Remove from valueMap
+          index.valueMap.delete(indexedValue)
+
+          // Remove from orderedEntries
+          const entryIndex = index.orderedEntries.findIndex(
+            ([value]) => index.compareFn(value, indexedValue) === 0
+          )
+          if (entryIndex >= 0) {
+            index.orderedEntries.splice(entryIndex, 1)
+          }
+        }
+      }
+
+      index.indexedKeys.delete(key)
+    } catch (error) {
+      // If removing from index fails, skip it but don't break
+      console.warn(`Failed to remove item with key ${key} from index:`, error)
+    }
+  }
+
+  /**
+   * Updates an item in an index (removes old, adds new)
+   * @private
+   */
+  private updateInIndex(
+    index: CollectionIndex<TKey>,
+    key: TKey,
+    oldItem: T,
+    newItem: T
+  ): void {
+    this.removeFromIndex(index, key, oldItem)
+    this.addToIndex(index, key, newItem)
+  }
+
+  /**
+   * Finds the correct insert position for a value in the ordered entries array
+   * @private
+   */
+  private findInsertPosition<V>(
+    orderedEntries: Array<[V, any]>,
+    value: V,
+    compareFn: (a: V, b: V) => number
+  ): number {
+    let left = 0
+    let right = orderedEntries.length
+
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2)
+      const comparison = compareFn(orderedEntries[mid]![0], value)
+
+      if (comparison < 0) {
+        left = mid + 1
+      } else {
+        right = mid
+      }
+    }
+
+    return left
+  }
+
+  /**
+   * Performs a range query on an ordered index
+   * @private
+   */
+  private rangeQuery(
+    index: CollectionIndex<TKey>,
+    operation: `gt` | `gte` | `lt` | `lte` | `eq`,
+    value: any
+  ): Set<TKey> {
+    const result = new Set<TKey>()
+
+    if (operation === `eq`) {
+      // Fast equality lookup
+      const keys = index.valueMap.get(value)
+      if (keys) {
+        keys.forEach((key) => result.add(key))
+      }
+      return result
+    }
+
+    // Range operations - iterate through ordered entries
+    for (const [indexValue, keys] of index.orderedEntries) {
+      const comparison = index.compareFn(indexValue, value)
+
+      let matches = false
+      switch (operation) {
+        case `gt`:
+          matches = comparison > 0
+          break
+        case `gte`:
+          matches = comparison >= 0
+          break
+        case `lt`:
+          matches = comparison < 0
+          break
+        case `lte`:
+          matches = comparison <= 0
+          break
+      }
+
+      if (matches) {
+        keys.forEach((key) => result.add(key))
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Updates all indexes when the collection changes
+   * @private
+   */
+  private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
+    for (const index of this.indexes.values()) {
+      for (const change of changes) {
+        switch (change.type) {
+          case `insert`:
+            this.addToIndex(index, change.key, change.value)
+            break
+          case `update`:
+            if (change.previousValue) {
+              this.updateInIndex(
+                index,
+                change.key,
+                change.previousValue,
+                change.value
+              )
+            } else {
+              this.addToIndex(index, change.key, change.value)
+            }
+            break
+          case `delete`:
+            this.removeFromIndex(index, change.key, change.value)
+            break
+        }
+      }
+    }
   }
 
   private deepEqual(a: any, b: any): boolean {
@@ -1813,7 +2172,7 @@ export class CollectionImpl<
    */
   stateWhenReady(): Promise<Map<TKey, T>> {
     // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    if (this.size > 0 || this.hasReceivedFirstCommit) {
       return Promise.resolve(this.state)
     }
 
@@ -1842,7 +2201,7 @@ export class CollectionImpl<
    */
   toArrayWhenReady(): Promise<Array<T>> {
     // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    if (this.size > 0 || this.hasReceivedFirstCommit) {
       return Promise.resolve(this.toArray)
     }
 
@@ -1856,20 +2215,487 @@ export class CollectionImpl<
 
   /**
    * Returns the current state of the collection as an array of changes
+   * @param options - Options including optional where filter
    * @returns An array of changes
+   * @example
+   * // Get all items as changes
+   * const allChanges = collection.currentStateAsChanges()
+   *
+   * // Get only items matching a condition
+   * const activeChanges = collection.currentStateAsChanges({
+   *   where: (row) => row.status === 'active'
+   * })
    */
-  public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    return Array.from(this.entries()).map(([key, value]) => ({
-      type: `insert`,
-      key,
-      value,
-    }))
+  public currentStateAsChanges(
+    options: CurrentStateAsChangesOptions<T> = {}
+  ): Array<ChangeMessage<T>> {
+    if (!options.where) {
+      // No filtering, return all items
+      const result: Array<ChangeMessage<T>> = []
+      for (const [key, value] of this.entries()) {
+        result.push({
+          type: `insert`,
+          key,
+          value,
+        })
+      }
+      return result
+    }
+
+    // There's a where clause, let's see if we can use an index
+    const result: Array<ChangeMessage<T>> = []
+
+    try {
+      // Create the single-row refProxy for the callback
+      const singleRowRefProxy = createSingleRowRefProxy<T>()
+
+      // Execute the callback to get the expression
+      const whereExpression = options.where(singleRowRefProxy)
+
+      // Convert the result to a BasicExpression
+      const expression = toExpression(whereExpression)
+
+      // Try to optimize the query using indexes
+      const optimizationResult = this.optimizeQuery(expression)
+
+      if (optimizationResult.canOptimize) {
+        // Use index optimization
+        for (const key of optimizationResult.matchingKeys) {
+          const value = this.get(key)
+          if (value !== undefined) {
+            result.push({
+              type: `insert`,
+              key,
+              value,
+            })
+          }
+        }
+      } else {
+        // No index found or complex expression, fall back to full scan with filter
+        const filterFn = this.createFilterFunction(options.where)
+
+        for (const [key, value] of this.entries()) {
+          if (filterFn(value)) {
+            result.push({
+              type: `insert`,
+              key,
+              value,
+            })
+          }
+        }
+      }
+    } catch (error) {
+      // If anything goes wrong with the where clause, fall back to full scan
+      console.warn(
+        `Error processing where clause, falling back to full scan:`,
+        error
+      )
+
+      const filterFn = this.createFilterFunction(options.where)
+
+      for (const [key, value] of this.entries()) {
+        if (filterFn(value)) {
+          result.push({
+            type: `insert`,
+            key,
+            value,
+          })
+        }
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Optimizes a query expression using available indexes
+   * @private
+   */
+  private optimizeQuery(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    return this.optimizeQueryRecursive(expression)
+  }
+
+  /**
+   * Recursively optimizes query expressions
+   * @private
+   */
+  private optimizeQueryRecursive(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    if (expression.type === `func`) {
+      switch (expression.name) {
+        case `eq`:
+        case `gt`:
+        case `gte`:
+        case `lt`:
+        case `lte`:
+          return this.optimizeSimpleComparison(expression)
+
+        case `and`:
+          return this.optimizeAndExpression(expression)
+
+        case `or`:
+          return this.optimizeOrExpression(expression)
+
+        case `in`:
+          return this.optimizeInArrayExpression(expression)
+
+        default:
+          return { canOptimize: false, matchingKeys: new Set() }
+      }
+    }
+
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  /**
+   * Checks if an expression can be optimized without actually performing the optimization
+   * This is used to avoid making index calls when we know we'll fall back to full scan
+   * @private
+   */
+  private canOptimizeExpression(expression: BasicExpression): boolean {
+    if (expression.type === `func`) {
+      switch (expression.name) {
+        case `eq`:
+        case `gt`:
+        case `gte`:
+        case `lt`:
+        case `lte`:
+          return this.canOptimizeSimpleComparison(expression)
+
+        case `and`:
+          return this.canOptimizeAndExpression(expression)
+
+        case `or`:
+          return this.canOptimizeOrExpression(expression)
+
+        case `in`:
+          return this.canOptimizeInArrayExpression(expression)
+
+        default:
+          return false
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Checks if a simple comparison can be optimized
+   * @private
+   */
+  private canOptimizeSimpleComparison(expression: BasicExpression): boolean {
+    if (expression.type !== `func` || expression.args.length !== 2) {
+      return false
+    }
+
+    const leftArg = expression.args[0]!
+    const rightArg = expression.args[1]!
+
+    // Check if this is a simple field comparison: field op value
+
+    if (leftArg.type === `ref` && rightArg.type === `val`) {
+      const fieldPath = leftArg.path
+
+      // Find an index that matches this field
+      for (const index of this.indexes.values()) {
+        if (
+          index.expression.type === `ref` &&
+          index.expression.path.length === fieldPath.length &&
+          index.expression.path.every((part, i) => part === fieldPath[i])
+        ) {
+          return true
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Checks if an AND expression can be optimized
+   * @private
+   */
+  private canOptimizeAndExpression(expression: BasicExpression): boolean {
+    if (expression.type !== `func` || expression.args.length < 2) {
+      return false
+    }
+
+    // All arguments must be optimizable
+    return expression.args.every((arg) => this.canOptimizeExpression(arg))
+  }
+
+  /**
+   * Checks if an OR expression can be optimized
+   * @private
+   */
+  private canOptimizeOrExpression(expression: BasicExpression): boolean {
+    if (expression.type !== `func` || expression.args.length < 2) {
+      return false
+    }
+
+    // All arguments must be optimizable
+    return expression.args.every((arg) => this.canOptimizeExpression(arg))
+  }
+
+  /**
+   * Checks if an inArray expression can be optimized
+   * @private
+   */
+  private canOptimizeInArrayExpression(expression: BasicExpression): boolean {
+    if (expression.type !== `func` || expression.args.length !== 2) {
+      return false
+    }
+
+    const fieldArg = expression.args[0]!
+    const arrayArg = expression.args[1]!
+
+    // Check if this is a field IN array comparison
+
+    if (
+      fieldArg.type === `ref` &&
+      arrayArg.type === `val` &&
+      Array.isArray(arrayArg.value)
+    ) {
+      const fieldPath = fieldArg.path
+
+      // Find an index that matches this field
+      for (const index of this.indexes.values()) {
+        if (
+          index.expression.type === `ref` &&
+          index.expression.path.length === fieldPath.length &&
+          index.expression.path.every((part, i) => part === fieldPath[i])
+        ) {
+          return true
+        }
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
+   * @private
+   */
+  private optimizeSimpleComparison(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    if (expression.type !== `func` || expression.args.length !== 2) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    const leftArg = expression.args[0]!
+    const rightArg = expression.args[1]!
+
+    // Check if this is a simple field comparison: field op value
+
+    if (leftArg.type === `ref` && rightArg.type === `val`) {
+      const fieldPath = leftArg.path
+      const operation = expression.name as `eq` | `gt` | `gte` | `lt` | `lte`
+
+      // Find an index that matches this field
+      for (const index of this.indexes.values()) {
+        if (
+          index.expression.type === `ref` &&
+          index.expression.path.length === fieldPath.length &&
+          index.expression.path.every((part, i) => part === fieldPath[i])
+        ) {
+          // Found a matching index! Use it for fast lookup
+          const queryValue = rightArg.value
+          const matchingKeys = this.rangeQuery(index, operation, queryValue)
+          return { canOptimize: true, matchingKeys }
+        }
+      }
+    }
+
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  /**
+   * Optimizes AND expressions by intersecting results from multiple conditions
+   * @private
+   */
+  private optimizeAndExpression(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    if (expression.type !== `func` || expression.args.length < 2) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    // First, check if all arguments CAN be optimized without actually doing the optimization
+    // This avoids making index calls if we're going to fall back to full scan anyway
+    const canOptimizeAll = expression.args.every((arg) =>
+      this.canOptimizeExpression(arg)
+    )
+
+    if (!canOptimizeAll) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    // Now that we know all can be optimized, actually do the optimization
+    const results: Array<{ canOptimize: boolean; matchingKeys: Set<TKey> }> = []
+
+    for (const arg of expression.args) {
+      const result = this.optimizeQueryRecursive(arg)
+      results.push(result)
+    }
+
+    if (results.length > 0) {
+      // Intersect all matching keys (AND logic)
+      let intersectedKeys = results[0]!.matchingKeys
+      for (let i = 1; i < results.length; i++) {
+        const newIntersection = new Set<TKey>()
+        for (const key of intersectedKeys) {
+          if (results[i]!.matchingKeys.has(key)) {
+            newIntersection.add(key)
+          }
+        }
+        intersectedKeys = newIntersection
+      }
+
+      return { canOptimize: true, matchingKeys: intersectedKeys }
+    }
+
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  /**
+   * Optimizes OR expressions by unioning results from multiple conditions
+   * @private
+   */
+  private optimizeOrExpression(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    if (expression.type !== `func` || expression.args.length < 2) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    // First, check if all arguments CAN be optimized without actually doing the optimization
+    const canOptimizeAll = expression.args.every((arg) =>
+      this.canOptimizeExpression(arg)
+    )
+
+    if (!canOptimizeAll) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    // Now that we know all can be optimized, actually do the optimization
+    const results: Array<{ canOptimize: boolean; matchingKeys: Set<TKey> }> = []
+
+    for (const arg of expression.args) {
+      const result = this.optimizeQueryRecursive(arg)
+      results.push(result)
+    }
+
+    // Union all matching keys (OR logic)
+    const unionedKeys = new Set<TKey>()
+    for (const result of results) {
+      for (const key of result.matchingKeys) {
+        unionedKeys.add(key)
+      }
+    }
+
+    return { canOptimize: true, matchingKeys: unionedKeys }
+  }
+
+  /**
+   * Optimizes inArray expressions
+   * @private
+   */
+  private optimizeInArrayExpression(expression: BasicExpression): {
+    canOptimize: boolean
+    matchingKeys: Set<TKey>
+  } {
+    if (expression.type !== `func` || expression.args.length !== 2) {
+      return { canOptimize: false, matchingKeys: new Set() }
+    }
+
+    const fieldArg = expression.args[0]!
+    const arrayArg = expression.args[1]!
+
+    // Check if this is a field IN array comparison
+
+    if (
+      fieldArg.type === `ref` &&
+      arrayArg.type === `val` &&
+      Array.isArray(arrayArg.value)
+    ) {
+      const fieldPath = fieldArg.path
+      const values = arrayArg.value
+
+      // Find an index that matches this field
+      for (const index of this.indexes.values()) {
+        if (
+          index.expression.type === `ref` &&
+          index.expression.path.length === fieldPath.length &&
+          index.expression.path.every((part, i) => part === fieldPath[i])
+        ) {
+          // Found a matching index! Use it for fast lookup of each value
+          const matchingKeys = new Set<TKey>()
+
+          for (const value of values) {
+            const keysForValue = this.rangeQuery(index, `eq`, value)
+            for (const key of keysForValue) {
+              matchingKeys.add(key)
+            }
+          }
+
+          return { canOptimize: true, matchingKeys }
+        }
+      }
+    }
+
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  /**
+   * Creates a filter function from a where callback
+   * @private
+   */
+  private createFilterFunction(
+    whereCallback: (row: SingleRowRefProxy<T>) => any
+  ): (item: T) => boolean {
+    return (item: T): boolean => {
+      try {
+        // First try the RefProxy approach for query builder functions
+        const singleRowRefProxy = createSingleRowRefProxy<T>()
+        const whereExpression = whereCallback(singleRowRefProxy)
+        const expression = toExpression(whereExpression)
+        const evaluator = compileSingleRowExpression(expression)
+        const result = evaluator(item as Record<string, unknown>)
+        return Boolean(result)
+      } catch {
+        // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
+        try {
+          // Create a simple proxy that returns actual values for arithmetic operations
+          const simpleProxy = new Proxy(item as any, {
+            get(target, prop) {
+              return target[prop]
+            },
+          }) as SingleRowRefProxy<T>
+
+          const result = whereCallback(simpleProxy)
+          return Boolean(result)
+        } catch {
+          // If both approaches fail, exclude the item
+          return false
+        }
+      }
+    }
   }
 
   /**
    * Subscribe to changes in the collection
    * @param callback - Function called when items change
-   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
@@ -1886,25 +2712,77 @@ export class CollectionImpl<
    * const unsubscribe = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
+   *
+   * @example
+   * // Subscribe only to changes matching a condition
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   where: (row) => row.status === 'active'
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
+    options: SubscribeChangesOptions<T> = {}
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
 
-    if (includeInitialState) {
-      // First send the current state as changes
-      callback(this.currentStateAsChanges())
+    // Create a filtered callback if where clause is provided
+    const filteredCallback = options.where
+      ? this.createFilteredCallback(callback, options.where)
+      : callback
+
+    if (options.includeInitialState) {
+      // First send the current state as changes (filtered if needed)
+      const initialChanges = this.currentStateAsChanges({
+        where: options.where,
+      })
+      filteredCallback(initialChanges)
     }
 
     // Add to batched listeners
-    this.changeListeners.add(callback)
+    this.changeListeners.add(filteredCallback)
 
     return () => {
-      this.changeListeners.delete(callback)
+      this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
+    }
+  }
+
+  /**
+   * Creates a filtered callback that only calls the original callback with changes that match the where clause
+   * @private
+   */
+  private createFilteredCallback(
+    originalCallback: (changes: Array<ChangeMessage<T>>) => void,
+    whereCallback: (row: SingleRowRefProxy<T>) => any
+  ): (changes: Array<ChangeMessage<T>>) => void {
+    const filterFn = this.createFilterFunction(whereCallback)
+
+    return (changes: Array<ChangeMessage<T>>) => {
+      const filteredChanges: Array<ChangeMessage<T>> = []
+
+      for (const change of changes) {
+        // For inserts and updates, check if the new value matches the filter
+        if (change.type === `insert` || change.type === `update`) {
+          if (filterFn(change.value)) {
+            filteredChanges.push(change)
+          }
+        }
+        // For deletes, include if the previous value would have matched
+        // (so subscribers know something they were tracking was deleted)
+        else {
+          if (filterFn(change.value)) {
+            filteredChanges.push(change)
+          }
+        }
+      }
+
+      if (filteredChanges.length > 0) {
+        originalCallback(filteredChanges)
+      }
     }
   }
 
