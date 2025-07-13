@@ -33,6 +33,7 @@ import type {
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
+import type { BasicExpression } from "./query/ir.js"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -2104,11 +2105,16 @@ export class CollectionImpl<
    * const activeChanges = collection.currentStateAsChanges({
    *   where: (row) => row.status === 'active'
    * })
+   *
+   * // Get only items using a pre-compiled expression
+   * const activeChanges = collection.currentStateAsChanges({
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions<T> = {}
   ): Array<ChangeMessage<T>> {
-    if (!options.where) {
+    if (!options.where && !options.whereExpression) {
       // No filtering, return all items
       const result: Array<ChangeMessage<T>> = []
       for (const [key, value] of this.entries()) {
@@ -2125,14 +2131,24 @@ export class CollectionImpl<
     const result: Array<ChangeMessage<T>> = []
 
     try {
-      // Create the single-row refProxy for the callback
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
+      let expression: BasicExpression<boolean>
 
-      // Execute the callback to get the expression
-      const whereExpression = options.where(singleRowRefProxy)
+      if (options.whereExpression) {
+        // Use the pre-compiled expression directly
+        expression = options.whereExpression
+      } else if (options.where) {
+        // Create the single-row refProxy for the callback
+        const singleRowRefProxy = createSingleRowRefProxy<T>()
 
-      // Convert the result to a BasicExpression
-      const expression = toExpression(whereExpression)
+        // Execute the callback to get the expression
+        const whereExpression = options.where(singleRowRefProxy)
+
+        // Convert the result to a BasicExpression
+        expression = toExpression(whereExpression)
+      } else {
+        // This should never happen due to the check above, but TypeScript needs it
+        return result
+      }
 
       // Try to optimize the query using indexes
       const optimizationResult = optimizeExpressionWithIndexes(
@@ -2154,7 +2170,9 @@ export class CollectionImpl<
         }
       } else {
         // No index found or complex expression, fall back to full scan with filter
-        const filterFn = this.createFilterFunction(options.where)
+        const filterFn = options.where
+          ? this.createFilterFunction(options.where)
+          : this.createFilterFunctionFromExpression(expression)
 
         for (const [key, value] of this.entries()) {
           if (filterFn(value)) {
@@ -2173,7 +2191,9 @@ export class CollectionImpl<
         error
       )
 
-      const filterFn = this.createFilterFunction(options.where)
+      const filterFn = options.where
+        ? this.createFilterFunction(options.where)
+        : this.createFilterFunctionFromExpression(options.whereExpression!)
 
       for (const [key, value] of this.entries()) {
         if (filterFn(value)) {
@@ -2227,6 +2247,25 @@ export class CollectionImpl<
   }
 
   /**
+   * Creates a filter function from a pre-compiled expression
+   * @private
+   */
+  private createFilterFunctionFromExpression(
+    expression: BasicExpression<boolean>
+  ): (item: T) => boolean {
+    return (item: T): boolean => {
+      try {
+        const evaluator = compileSingleRowExpression(expression)
+        const result = evaluator(item as Record<string, unknown>)
+        return Boolean(result)
+      } catch {
+        // If evaluation fails, exclude the item
+        return false
+      }
+    }
+  }
+
+  /**
    * Subscribe to changes in the collection
    * @param callback - Function called when items change
    * @param options - Subscription options including includeInitialState and where filter
@@ -2255,6 +2294,15 @@ export class CollectionImpl<
    *   includeInitialState: true,
    *   where: (row) => row.status === 'active'
    * })
+   *
+   * @example
+   * // Subscribe using a pre-compiled expression
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
@@ -2264,14 +2312,16 @@ export class CollectionImpl<
     this.addSubscriber()
 
     // Create a filtered callback if where clause is provided
-    const filteredCallback = options.where
-      ? this.createFilteredCallback(callback, options.where)
-      : callback
+    const filteredCallback =
+      options.where || options.whereExpression
+        ? this.createFilteredCallback(callback, options)
+        : callback
 
     if (options.includeInitialState) {
       // First send the current state as changes (filtered if needed)
       const initialChanges = this.currentStateAsChanges({
         where: options.where,
+        whereExpression: options.whereExpression,
       })
       filteredCallback(initialChanges)
     }
@@ -2291,9 +2341,11 @@ export class CollectionImpl<
    */
   private createFilteredCallback(
     originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-    whereCallback: (row: SingleRowRefProxy<T>) => any
+    options: SubscribeChangesOptions<T>
   ): (changes: Array<ChangeMessage<T>>) => void {
-    const filterFn = this.createFilterFunction(whereCallback)
+    const filterFn = options.whereExpression
+      ? this.createFilterFunctionFromExpression(options.whereExpression)
+      : this.createFilterFunction(options.where!)
 
     return (changes: Array<ChangeMessage<T>>) => {
       const filteredChanges: Array<ChangeMessage<T>> = []
