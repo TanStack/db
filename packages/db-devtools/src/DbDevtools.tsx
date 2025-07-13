@@ -58,7 +58,7 @@ function DbDevtools(props: DbDevtoolsProps = {}) {
   const position = props.position ?? `bottom-right`
 
   return (
-    <>
+    <div style={{ all: "initial" }}>
       {/* Toggle Button */}
       <div
         style={{
@@ -104,7 +104,7 @@ function DbDevtools(props: DbDevtoolsProps = {}) {
           {...props.panelProps}
         />
       )}
-    </>
+    </div>
   )
 }
 
