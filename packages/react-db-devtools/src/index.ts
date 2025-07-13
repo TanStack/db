@@ -60,74 +60,179 @@ export type { TanStackReactDbDevtoolsProps } from './ReactDbDevtools'
 export function initializeDbDevtools(): void {
   // SSR safety check
   if (typeof window === 'undefined') {
-    console.log('DbDevtools: SSR environment detected, skipping initialization')
     return
   }
 
-  console.log('DbDevtools: Initializing devtools...')
-
-  // Initialize the registry directly without importing SolidJS code
-  if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
-    console.log('DbDevtools: Creating registry...')
+  // Idempotent check - if already initialized, skip
+  if ((window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
+    return
+  }
+  
+  // Create the registry directly without importing SolidJS code to avoid SSR issues
+  try {
+    // Import and call the core initialization asynchronously, but ensure registry exists first
+    const registryPromise = import('@tanstack/db-devtools').then((module) => {
+      console.log('DbDevtools: Core devtools module loaded')
+      module.initializeDbDevtools()
+      console.log('DbDevtools: Core initialization complete')
+    }).catch((error) => {
+      console.warn('DbDevtools: Failed to load core devtools module:', error)
+    })
     
-    const registry = {
-      collections: new Map(),
-      registerCollection: () => {},
-      unregisterCollection: () => {},
-      getCollection: () => undefined,
-      releaseCollection: () => {},
-      getAllCollectionMetadata: () => [],
-      getCollectionMetadata: () => undefined,
-      getTransactions: () => [],
-      getTransaction: () => undefined,
-      cleanup: () => {},
-      isInitialized: true,
-    }
-
-    // Set up the registry on window
-    ;(window as any).__TANSTACK_DB_DEVTOOLS__ = registry
-
-    // Set up automatic collection registration
-    ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
-      console.log('DbDevtools: Registering collection:', collection.id)
-      console.log('DbDevtools: Collection details:', {
-        id: collection.id,
-        size: collection.size || 0,
-        status: collection.status || 'idle',
-        constructor: collection.constructor.name
-      })
+    // Create immediate registry that works with the SolidJS UI while core loads
+    if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
+      console.log('DbDevtools: Creating immediate registry...')
       
-      if (registry && registry.collections) {
-        registry.collections.set(collection.id, {
-          collection,
-          metadata: {
+      const collections = new Map()
+      
+      const registry = {
+        collections,
+        registerCollection: (collection: any) => {
+          console.log('DbDevtools: Registering collection:', collection.id)
+          
+          const metadata = {
             id: collection.id,
-            size: collection.size || 0,
-            type: 'unknown',
+            type: collection.id.startsWith('live-query-') ? 'live-query' : 'collection',
             status: collection.status || 'idle',
-            hasTransactions: false,
-            transactionCount: 0,
+            size: collection.size || 0,
+            hasTransactions: collection.transactions?.size > 0 || false,
+            transactionCount: collection.transactions?.size || 0,
+            createdAt: new Date(),
+            lastUpdated: new Date(),
+            gcTime: collection.config?.gcTime,
+            timings: collection.id.startsWith('live-query-') ? {
+              totalIncrementalRuns: 0,
+            } : undefined,
           }
-        })
-        console.log('DbDevtools: Collection registered successfully:', collection.id)
-        console.log('DbDevtools: Total collections now:', registry.collections.size)
-        console.log('DbDevtools: Registry collections:', Array.from(registry.collections.keys()))
-      } else {
-        console.warn('DbDevtools: Registry or collections not available')
+          
+          const entry = {
+            weakRef: new WeakRef(collection),
+            metadata,
+            isActive: false,
+          }
+          
+          collections.set(collection.id, entry)
+          console.log('DbDevtools: Collection registered successfully:', collection.id)
+          console.log('DbDevtools: Total collections now:', collections.size)
+        },
+        unregisterCollection: (id: string) => {
+          collections.delete(id)
+        },
+        getCollectionMetadata: (id: string) => {
+          const entry = collections.get(id)
+          if (!entry) return undefined
+          
+          // Try to get fresh data from the collection if it's still alive
+          const collection = entry.weakRef.deref()
+          if (collection) {
+            entry.metadata.status = collection.status
+            entry.metadata.size = collection.size
+            entry.metadata.hasTransactions = collection.transactions?.size > 0 || false
+            entry.metadata.transactionCount = collection.transactions?.size || 0
+            entry.metadata.lastUpdated = new Date()
+          }
+          
+          return { ...entry.metadata }
+        },
+        getAllCollectionMetadata: () => {
+          console.log('DbDevtools: getAllCollectionMetadata called, total collections:', collections.size)
+          
+          const results = []
+          for (const [id, entry] of collections) {
+            const collection = entry.weakRef.deref()
+            if (collection) {
+              // Collection is still alive, update metadata
+              entry.metadata.status = collection.status
+              entry.metadata.size = collection.size
+              entry.metadata.hasTransactions = collection.transactions?.size > 0 || false
+              entry.metadata.transactionCount = collection.transactions?.size || 0
+              entry.metadata.lastUpdated = new Date()
+              results.push({ ...entry.metadata })
+              console.log('DbDevtools: Found live collection:', {
+                id,
+                status: collection.status,
+                size: collection.size,
+                type: entry.metadata.type
+              })
+            } else {
+              // Collection was garbage collected
+              entry.metadata.status = 'cleaned-up'
+              entry.metadata.lastUpdated = new Date()
+              results.push({ ...entry.metadata })
+              console.log('DbDevtools: Found GC\'d collection:', id)
+            }
+          }
+          
+          console.log('DbDevtools: Returning metadata for', results.length, 'collections')
+          return results
+        },
+        getCollection: (id: string) => {
+          const entry = collections.get(id)
+          if (!entry) return undefined
+          
+          const collection = entry.weakRef.deref()
+          if (collection && !entry.isActive) {
+            // Create hard reference
+            entry.hardRef = collection
+            entry.isActive = true
+          }
+          
+          return collection
+        },
+        releaseCollection: (id: string) => {
+          const entry = collections.get(id)
+          if (entry && entry.isActive) {
+            // Release hard reference
+            entry.hardRef = undefined
+            entry.isActive = false
+          }
+        },
+        getTransactions: () => [],
+        getTransaction: () => undefined,
+        cleanup: () => {
+          for (const [_id, entry] of collections) {
+            if (entry.isActive) {
+              entry.hardRef = undefined
+              entry.isActive = false
+            }
+          }
+        },
+        garbageCollect: () => {
+          for (const [id, entry] of collections) {
+            const collection = entry.weakRef.deref()
+            if (!collection) {
+              collections.delete(id)
+            }
+          }
+        },
+      }
+      
+      // Set up the registry on window
+      ;(window as any).__TANSTACK_DB_DEVTOOLS__ = registry
+      console.log('DbDevtools: Registry created successfully')
+    }
+    
+    // Set up automatic collection registration
+    if (!(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
+      ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
+        const registry = (window as any).__TANSTACK_DB_DEVTOOLS__
+        if (registry) {
+          registry.registerCollection(collection)
+        }
       }
     }
-
-    ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__ = (id: string) => {
-      console.log('DbDevtools: Unregistering collection:', id)
-      if (registry.collections) {
-        registry.collections.delete(id)
-        console.log('DbDevtools: Collection unregistered successfully:', id)
+    
+    console.log('DbDevtools: Initialization complete')
+  } catch (error) {
+    console.warn('DbDevtools: Failed to initialize devtools:', error)
+    
+    // Final fallback: set up a basic registration function so collections don't fail
+    if (!(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
+      console.log('DbDevtools: Setting up fallback registration function...')
+      ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
+        console.log('DbDevtools: Fallback - collection registered:', collection.id)
       }
     }
-
-    console.log('DbDevtools: Registry created successfully')
-  } else {
-    console.log('DbDevtools: Registry already exists')
   }
   
   console.log('DbDevtools: Initialization complete')

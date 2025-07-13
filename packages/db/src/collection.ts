@@ -24,8 +24,21 @@ export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
-  if (typeof window !== `undefined` && (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
-    (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
+  if (typeof window !== `undefined`) {
+    console.log('Collection created, checking for devtools registration:', {
+      collectionId: collection.id,
+      registryAvailable: !!(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__,
+      registryExists: !!(window as any).__TANSTACK_DB_DEVTOOLS__
+    })
+    
+    if ((window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
+      (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
+      ;(collection as any).isRegisteredWithDevtools = true
+      console.log('Collection registered with devtools:', collection.id)
+    } else {
+      ;(collection as any).isRegisteredWithDevtools = false
+      console.warn('Devtools registry not available for collection:', collection.id)
+    }
   }
 }
 
@@ -238,6 +251,7 @@ export class CollectionImpl<
   private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private preloadPromise: Promise<void> | null = null
   private syncCleanupFn: (() => void) | null = null
+  private isRegisteredWithDevtools = false
 
   /**
    * Register a callback to be executed on the next commit
@@ -548,6 +562,7 @@ export class CollectionImpl<
     // Unregister from devtools if available
     if (typeof window !== `undefined` && (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__) {
       (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__(this.id)
+      this.isRegisteredWithDevtools = false
     }
 
     // Clear data
@@ -604,6 +619,11 @@ export class CollectionImpl<
   private addSubscriber(): void {
     this.activeSubscribersCount++
     this.cancelGCTimer()
+
+    // Re-register with devtools if not already registered (handles timing issues)
+    if (!this.isRegisteredWithDevtools) {
+      registerWithDevtools(this)
+    }
 
     // Start sync if collection was cleaned up
     if (this._status === `cleaned-up` || this._status === `idle`) {

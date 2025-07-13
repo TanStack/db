@@ -20,4 +20,4 @@ export type { TanstackDbDevtoolsConfig } from "./TanstackDbDevtools"
 // export { DbDevtoolsPanel } from "./DbDevtoolsPanel"
 
 // Export the initialization function
-export { initializeDbDevtools } from "./registry"
+export { initializeDbDevtools } from "./devtools"

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react"
 import { TanstackDbDevtools } from "@tanstack/db-devtools"
 import type { TanstackDbDevtoolsConfig } from "@tanstack/db-devtools"
+import { initializeDbDevtools } from "./index"
 
 export interface TanStackReactDbDevtoolsProps extends TanstackDbDevtoolsConfig {
   // Additional React-specific props if needed
@@ -29,10 +30,11 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
     // Set flag to prevent multiple initializations
     initializingRef.current = true
     
-    // Note: Devtools registry is now initialized in main.tsx before collections are created
-    console.log('ReactDbDevtools: Skipping devtools initialization (done in main.tsx)')
-    
-    console.log('ReactDbDevtools: Creating TanstackDbDevtools instance')
+          // Note: Devtools registry is now initialized in collections.ts before collections are created
+      console.log('ReactDbDevtools: Calling initializeDbDevtools as backup (also called in collections.ts)')
+      initializeDbDevtools()
+
+      console.log('ReactDbDevtools: Creating TanstackDbDevtools instance')
     const devtoolsInstance = new TanstackDbDevtools(props)
     
     try {

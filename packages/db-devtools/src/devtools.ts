@@ -8,7 +8,23 @@ import type { DbDevtoolsRegistry } from "./types"
  * Collections will automatically register themselves if this registry is present.
  */
 export function initializeDbDevtools(): void {
-  initializeDevtoolsRegistry()
+  // SSR safety check
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  // Initialize the registry
+  const registry = initializeDevtoolsRegistry()
+
+  // Set up global registration function that collections can call
+  ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
+    registry.registerCollection(collection)
+  }
+
+  // Set up global unregistration function
+  ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__ = (id: string) => {
+    registry.unregisterCollection(id)
+  }
 }
 
 /**

@@ -1,4 +1,5 @@
 import { createCollection } from "@tanstack/react-db"
+import { initializeDbDevtools } from "@tanstack/react-db-devtools"
 import {
   electricCollectionOptions,
   queryCollectionOptions,
@@ -9,6 +10,10 @@ import { api } from "./api"
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
+
+// Initialize DB devtools early (idempotent - safe to call multiple times)
+console.log('🏗️ Collections.ts: Initializing devtools before creating collections...')
+initializeDbDevtools()
 
 // Electric Todo Collection
 export const electricTodoCollection = createCollection(
@@ -170,3 +175,5 @@ export const queryConfigCollection = createCollection(
     },
   })
 )
+
+
