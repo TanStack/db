@@ -1,8 +1,6 @@
 import { createCollection } from "@tanstack/react-db"
-import {
-  electricCollectionOptions,
-  queryCollectionOptions,
-} from "@tanstack/db-collections"
+import { electricCollectionOptions } from "@tanstack/electric-db-collection"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { QueryClient } from "@tanstack/query-core"
 import { selectConfigSchema, selectTodoSchema } from "../db/validation"
 import { api } from "./api"

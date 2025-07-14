@@ -2,7 +2,7 @@ import { createServerFileRoute } from "@tanstack/react-start/server"
 import { json } from "@tanstack/react-start"
 import { sql } from "../../db/postgres"
 import { validateUpdateConfig } from "../../db/validation"
-import type { Txid } from "@tanstack/db-collections"
+import type { Txid } from "@tanstack/electric-db-collection"
 
 // Generate a transaction ID
 async function generateTxId(tx: any): Promise<Txid> {
