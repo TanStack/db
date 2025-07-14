@@ -98,12 +98,12 @@ importers:
 
   examples/react/todo:
     dependencies:
-      '@tanstack/db-collections':
-        specifier: ^0.0.24
-        version: 0.0.24(@electric-sql/client@1.0.0)(typescript@5.8.3)
-      '@tanstack/query-core':
-        specifier: ^5.81.5
-        version: 5.81.5
+      '@tanstack/electric-db-collection':
+        specifier: ^0.0.2
+        version: link:../../../packages/electric-db-collection
+      '@tanstack/query-db-collection':
+        specifier: ^0.0.2
+        version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.0.19
         version: 0.0.19(react@19.1.0)(typescript@5.8.3)
@@ -221,7 +221,7 @@ importers:
         specifier: ^3.0.9
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.0.11)(happy-dom@18.0.1)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(terser@5.43.1)(tsx@4.20.3)(yaml@2.8.0))
 
-  packages/db-electric-collection:
+  packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
         specifier: 1.0.0
@@ -249,7 +249,7 @@ importers:
         specifier: ^3.0.9
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.0.11)(happy-dom@18.0.1)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(terser@5.43.1)(tsx@4.20.3)(yaml@2.8.0))
 
-  packages/db-query-collection:
+  packages/query-db-collection:
     dependencies:
       '@tanstack/db':
         specifier: workspace:*
@@ -2302,19 +2302,8 @@ packages:
     resolution: {integrity: sha512-kUqfsU5qO/kiptgkjumdKuu/W4i1iYKPW6pUujEH1I+rzZLGIqD6noq9LDVZRh78ArAiZj+VYrdC5jbrtmsI8A==}
     engines: {node: '>=18'}
 
-  '@tanstack/db-collections@0.0.24':
-    resolution: {integrity: sha512-/Fmyw/KW8uvRpQ+b9YS3/CNASLCmBKgCleDcvs/YrLuEFupCb8a5XSpPhs2evESr228OOHTxO5L77yY15TanmQ==}
-    peerDependencies:
-      '@electric-sql/client': '>=1.0.0'
-      typescript: '>=4.7'
-
   '@tanstack/db@0.0.19':
     resolution: {integrity: sha512-Qb6s/O2ymxpKSy5LtFJGTRUmcOhNL4FLDyznbkBL/woIxVS99ZUI6kNyoc3okTa0Cv2A+Ji7LUpvlpCJDUWq7w==}
-    peerDependencies:
-      typescript: '>=4.7'
-
-  '@tanstack/db@0.0.20':
-    resolution: {integrity: sha512-bh/VggsuV/N5LmNgQiTFuVOATs+c1DRC3D36vRPNWw79V3O4HHptod8hKQdgEQtAbgjXvXrIFJOnlOpc5VOiEQ==}
     peerDependencies:
       typescript: '>=4.7'
 
@@ -8821,25 +8810,7 @@ snapshots:
       - typescript
       - vite
 
-  '@tanstack/db-collections@0.0.24(@electric-sql/client@1.0.0)(typescript@5.8.3)':
-    dependencies:
-      '@electric-sql/client': 1.0.0
-      '@standard-schema/spec': 1.0.0
-      '@tanstack/db': 0.0.20(typescript@5.8.3)
-      '@tanstack/query-core': 5.81.5
-      '@tanstack/store': 0.7.2
-      debug: 4.4.1
-      typescript: 5.8.3
-    transitivePeerDependencies:
-      - supports-color
-
   '@tanstack/db@0.0.19(typescript@5.8.3)':
-    dependencies:
-      '@electric-sql/d2mini': 0.1.6
-      '@standard-schema/spec': 1.0.0
-      typescript: 5.8.3
-
-  '@tanstack/db@0.0.20(typescript@5.8.3)':
     dependencies:
       '@electric-sql/d2mini': 0.1.6
       '@standard-schema/spec': 1.0.0
