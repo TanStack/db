@@ -108,8 +108,8 @@ importers:
         specifier: ^0.0.2
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.0.19
-        version: 0.0.19(react@19.1.0)(typescript@5.8.3)
+        specifier: ^0.0.20
+        version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.125.6
         version: 1.127.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -2305,11 +2305,6 @@ packages:
     resolution: {integrity: sha512-kUqfsU5qO/kiptgkjumdKuu/W4i1iYKPW6pUujEH1I+rzZLGIqD6noq9LDVZRh78ArAiZj+VYrdC5jbrtmsI8A==}
     engines: {node: '>=18'}
 
-  '@tanstack/db@0.0.19':
-    resolution: {integrity: sha512-Qb6s/O2ymxpKSy5LtFJGTRUmcOhNL4FLDyznbkBL/woIxVS99ZUI6kNyoc3okTa0Cv2A+Ji7LUpvlpCJDUWq7w==}
-    peerDependencies:
-      typescript: '>=4.7'
-
   '@tanstack/directive-functions-plugin@1.124.1':
     resolution: {integrity: sha512-eZdsPCZz+7VIKiXAF5dNdLJBerAo4t79w/OQTWaKuqPLX1E9GQOKHsmTZChWeQbxPx+y+cOV3/0U/yKxtHsm0Q==}
     engines: {node: '>=12'}
@@ -2330,11 +2325,6 @@ packages:
 
   '@tanstack/query-core@5.81.5':
     resolution: {integrity: sha512-ZJOgCy/z2qpZXWaj/oxvodDx07XcQa9BF92c0oINjHkoqUPsmm3uG08HpTaviviZ/N9eP1f9CM7mKSEkIo7O1Q==}
-
-  '@tanstack/react-db@0.0.19':
-    resolution: {integrity: sha512-VMp7gt9D5PxZCRKfLhkKJzjC7U0t/SowLjwLc2ffvXOJ+mOaujIxoypzvkyRIotnowCPLQKZUsklK6Xn5XzkZw==}
-    peerDependencies:
-      react: '>=16.8.0'
 
   '@tanstack/react-router@1.127.3':
     resolution: {integrity: sha512-QprmWHJrGbEKXJiP7WZ+dilTJRc7nMbsFCUnfAUw8PsOYanhgvBkBwAU05YEo8WTIZ9atCc1R90hyzqbiBFkdA==}
@@ -8813,12 +8803,6 @@ snapshots:
       - typescript
       - vite
 
-  '@tanstack/db@0.0.19(typescript@5.8.3)':
-    dependencies:
-      '@electric-sql/d2mini': 0.1.6
-      '@standard-schema/spec': 1.0.0
-      typescript: 5.8.3
-
   '@tanstack/directive-functions-plugin@1.124.1(vite@6.3.5(@types/node@22.16.1)(jiti@2.4.2)(lightningcss@1.30.1)(terser@5.43.1)(tsx@4.20.3)(yaml@2.8.0))':
     dependencies:
       '@babel/code-frame': 7.27.1
@@ -8860,14 +8844,6 @@ snapshots:
       - supports-color
 
   '@tanstack/query-core@5.81.5': {}
-
-  '@tanstack/react-db@0.0.19(react@19.1.0)(typescript@5.8.3)':
-    dependencies:
-      '@tanstack/db': 0.0.19(typescript@5.8.3)
-      react: 19.1.0
-      use-sync-external-store: 1.5.0(react@19.1.0)
-    transitivePeerDependencies:
-      - typescript
 
   '@tanstack/react-router@1.127.3(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
     dependencies:
