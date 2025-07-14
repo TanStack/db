@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db-monorepo",
   "private": true,
-  "description": "Optimistic UI library for sync engines",
+  "description": "Reactive client queryable store for sync-first applications",
   "version": "0.0.0",
   "repository": {
     "type": "git",
@@ -21,9 +21,6 @@
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test"
-  },
-  "dependencies": {
-    "diff": "^7.0.0"
   },
   "devDependencies": {
     "@changesets/cli": "^2.28.1",

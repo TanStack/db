@@ -1,5 +1,51 @@
 # @tanstack/vue-db
 
+## 0.0.20
+
+### Patch Changes
+
+- Updated dependencies [[`8e23322`](https://github.com/TanStack/db/commit/8e233229b25eabed07cdaf12948ba913786bf4f9)]:
+  - @tanstack/db@0.0.21
+
+## 0.0.19
+
+### Patch Changes
+
+- Updated dependencies [[`f13c11e`](https://github.com/TanStack/db/commit/f13c11ed0ab27cd88b03d789b0cd953e86bd1333)]:
+  - @tanstack/db@0.0.20
+
+## 0.0.18
+
+### Patch Changes
+
+- Updated dependencies [[`9f0b0c2`](https://github.com/TanStack/db/commit/9f0b0c28ede99273eb5914be28aff55b91c50778)]:
+  - @tanstack/db@0.0.19
+
+## 0.0.17
+
+### Patch Changes
+
+- Improve jsdocs ([#243](https://github.com/TanStack/db/pull/243))
+
+- Updated dependencies [[`266bd29`](https://github.com/TanStack/db/commit/266bd29514c6c0fa9e903986ca11c5e22f4d2361)]:
+  - @tanstack/db@0.0.18
+
+## 0.0.16
+
+### Patch Changes
+
+- Updated dependencies [[`7e63d76`](https://github.com/TanStack/db/commit/7e63d7671f9df9f9fc81240c3818789d4ed0d464)]:
+  - @tanstack/db@0.0.17
+
+## 0.0.15
+
+### Patch Changes
+
+- add support for composable queries ([#232](https://github.com/TanStack/db/pull/232))
+
+- Updated dependencies [[`e478d53`](https://github.com/TanStack/db/commit/e478d5353cc8fc64e3a29dda1f86fba863cf6ce8)]:
+  - @tanstack/db@0.0.16
+
 ## 0.0.14
 
 ### Patch Changes
@@ -23,7 +69,6 @@
   Adds automatic lifecycle management for collections to optimize resource usage.
 
   **New Features:**
-
   - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
   - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
   - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
@@ -130,7 +175,6 @@
 ### Patch Changes
 
 - A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
-
   - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
   - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
   - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
@@ -145,7 +189,6 @@
 - Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
 
   Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
-
   - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
   - Added `utils` property to CollectionImpl
   - Added TypeScript types for utility functions and utility records

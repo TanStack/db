@@ -744,6 +744,215 @@ describe(`Collection`, () => {
       `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
     )
   })
+
+  it(`should not apply optimistic updates when optimistic: false`, async () => {
+    const emitter = mitt()
+    const pendingMutations: Array<() => void> = []
+
+    const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
+      // Don't sync immediately - return a promise that can be resolved later
+      return new Promise<void>((resolve) => {
+        pendingMutations.push(() => {
+          emitter.emit(`sync`, transaction.mutations)
+          resolve()
+        })
+      })
+    })
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `non-optimistic-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+
+          // @ts-expect-error don't trust mitt's typing
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+        },
+      },
+      onInsert: mutationFn,
+      onUpdate: mutationFn,
+      onDelete: mutationFn,
+    })
+
+    await collection.stateWhenReady()
+
+    // Test non-optimistic insert
+    const nonOptimisticInsertTx = collection.insert(
+      { id: 2, value: `non-optimistic insert` },
+      { optimistic: false }
+    )
+
+    // Debug: Check the mutation was created with optimistic: false
+    expect(nonOptimisticInsertTx.mutations[0]?.optimistic).toBe(false)
+
+    // The item should NOT appear in the collection state immediately
+    expect(collection.state.has(2)).toBe(false)
+    expect(collection.optimisticUpserts.has(2)).toBe(false)
+    expect(collection.state.size).toBe(1) // Only the initial item
+
+    // Now resolve the mutation and wait for completion
+    pendingMutations[0]?.()
+    await nonOptimisticInsertTx.isPersisted.promise
+
+    // Now the item should appear after server confirmation
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `non-optimistic insert`,
+    })
+
+    // Test non-optimistic update
+    const nonOptimisticUpdateTx = collection.update(
+      1,
+      { optimistic: false },
+      (draft) => {
+        draft.value = `non-optimistic update`
+      }
+    )
+
+    // The original value should still be there immediately
+    expect(collection.state.get(1)?.value).toBe(`initial value`)
+    expect(collection.optimisticUpserts.has(1)).toBe(false)
+
+    // Now resolve the update mutation and wait for completion
+    pendingMutations[1]?.()
+    await nonOptimisticUpdateTx.isPersisted.promise
+
+    // Now the update should be reflected
+    expect(collection.state.get(1)?.value).toBe(`non-optimistic update`)
+
+    // Test non-optimistic delete
+    const nonOptimisticDeleteTx = collection.delete(2, { optimistic: false })
+
+    // The item should still be there immediately
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.optimisticDeletes.has(2)).toBe(false)
+
+    // Now resolve the delete mutation and wait for completion
+    pendingMutations[2]?.()
+    await nonOptimisticDeleteTx.isPersisted.promise
+
+    // Now the item should be gone
+    expect(collection.state.has(2)).toBe(false)
+  })
+
+  it(`should apply optimistic updates by default and with explicit optimistic: true`, async () => {
+    const emitter = mitt()
+    const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
+      // Simulate server persistence
+      emitter.emit(`sync`, transaction.mutations)
+      return Promise.resolve()
+    })
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `optimistic-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+
+          // @ts-expect-error don't trust mitt's typing
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+        },
+      },
+      onInsert: mutationFn,
+      onUpdate: mutationFn,
+      onDelete: mutationFn,
+    })
+
+    await collection.stateWhenReady()
+
+    // Test default optimistic behavior (should be true)
+    const defaultOptimisticTx = collection.insert({
+      id: 2,
+      value: `default optimistic`,
+    })
+
+    // The item should appear immediately
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.optimisticUpserts.has(2)).toBe(true)
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `default optimistic`,
+    })
+
+    await defaultOptimisticTx.isPersisted.promise
+
+    // Test explicit optimistic: true
+    const explicitOptimisticTx = collection.insert(
+      { id: 3, value: `explicit optimistic` },
+      { optimistic: true }
+    )
+
+    // The item should appear immediately
+    expect(collection.state.has(3)).toBe(true)
+    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `explicit optimistic`,
+    })
+
+    await explicitOptimisticTx.isPersisted.promise
+
+    // Test optimistic update
+    const optimisticUpdateTx = collection.update(
+      1,
+      { optimistic: true },
+      (draft) => {
+        draft.value = `optimistic update`
+      }
+    )
+
+    // The update should be reflected immediately
+    expect(collection.state.get(1)?.value).toBe(`optimistic update`)
+    expect(collection.optimisticUpserts.has(1)).toBe(true)
+
+    await optimisticUpdateTx.isPersisted.promise
+
+    // Test optimistic delete
+    const optimisticDeleteTx = collection.delete(3, { optimistic: true })
+
+    // The item should be gone immediately
+    expect(collection.state.has(3)).toBe(false)
+    expect(collection.optimisticDeletes.has(3)).toBe(true)
+
+    await optimisticDeleteTx.isPersisted.promise
+  })
 })
 
 describe(`Collection with schema validation`, () => {

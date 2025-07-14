@@ -13,6 +13,58 @@ let transactionStack: Array<Transaction<any>> = []
 
 let sequenceNumber = 0
 
+/**
+ * Creates a new transaction for grouping multiple collection operations
+ * @param config - Transaction configuration with mutation function
+ * @returns A new Transaction instance
+ * @example
+ * // Basic transaction usage
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Send all mutations to API
+ *     await api.saveChanges(transaction.mutations)
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   collection.insert({ id: "1", text: "Buy milk" })
+ *   collection.update("2", draft => { draft.completed = true })
+ * })
+ *
+ * await tx.isPersisted.promise
+ *
+ * @example
+ * // Handle transaction errors
+ * try {
+ *   const tx = createTransaction({
+ *     mutationFn: async () => { throw new Error("API failed") }
+ *   })
+ *
+ *   tx.mutate(() => {
+ *     collection.insert({ id: "1", text: "New item" })
+ *   })
+ *
+ *   await tx.isPersisted.promise
+ * } catch (error) {
+ *   console.log('Transaction failed:', error)
+ * }
+ *
+ * @example
+ * // Manual commit control
+ * const tx = createTransaction({
+ *   autoCommit: false,
+ *   mutationFn: async () => {
+ *     // API call
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   collection.insert({ id: "1", text: "Item" })
+ * })
+ *
+ * // Commit later
+ * await tx.commit()
+ */
 export function createTransaction<T extends object = Record<string, unknown>>(
   config: TransactionConfig<T>
 ): Transaction<T> {
@@ -21,6 +73,17 @@ export function createTransaction<T extends object = Record<string, unknown>>(
   return newTransaction
 }
 
+/**
+ * Gets the currently active ambient transaction, if any
+ * Used internally by collection operations to join existing transactions
+ * @returns The active transaction or undefined if none is active
+ * @example
+ * // Check if operations will join an ambient transaction
+ * const ambientTx = getActiveTransaction()
+ * if (ambientTx) {
+ *   console.log('Operations will join transaction:', ambientTx.id)
+ * }
+ */
 export function getActiveTransaction(): Transaction<any> | undefined {
   if (transactionStack.length > 0) {
     return transactionStack.slice(-1)[0]
@@ -82,6 +145,45 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
   }
 
+  /**
+   * Execute collection operations within this transaction
+   * @param callback - Function containing collection operations to group together
+   * @returns This transaction for chaining
+   * @example
+   * // Group multiple operations
+   * const tx = createTransaction({ mutationFn: async () => {
+   *   // Send to API
+   * }})
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   *   collection.update("2", draft => { draft.completed = true })
+   *   collection.delete("3")
+   * })
+   *
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle mutate errors
+   * try {
+   *   tx.mutate(() => {
+   *     collection.insert({ id: "invalid" }) // This might throw
+   *   })
+   * } catch (error) {
+   *   console.log('Mutation failed:', error)
+   * }
+   *
+   * @example
+   * // Manual commit control
+   * const tx = createTransaction({ autoCommit: false, mutationFn: async () => {} })
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Item" })
+   * })
+   *
+   * // Commit later when ready
+   * await tx.commit()
+   */
   mutate(callback: () => void): Transaction<T> {
     if (this.state !== `pending`) {
       throw `You can no longer call .mutate() as the transaction is no longer pending`
@@ -117,6 +219,44 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
   }
 
+  /**
+   * Rollback the transaction and any conflicting transactions
+   * @param config - Configuration for rollback behavior
+   * @returns This transaction for chaining
+   * @example
+   * // Manual rollback
+   * const tx = createTransaction({ mutationFn: async () => {
+   *   // Send to API
+   * }})
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   * })
+   *
+   * // Rollback if needed
+   * if (shouldCancel) {
+   *   tx.rollback()
+   * }
+   *
+   * @example
+   * // Handle rollback cascade (automatic)
+   * const tx1 = createTransaction({ mutationFn: async () => {} })
+   * const tx2 = createTransaction({ mutationFn: async () => {} })
+   *
+   * tx1.mutate(() => collection.update("1", draft => { draft.value = "A" }))
+   * tx2.mutate(() => collection.update("1", draft => { draft.value = "B" })) // Same item
+   *
+   * tx1.rollback() // This will also rollback tx2 due to conflict
+   *
+   * @example
+   * // Handle rollback in error scenarios
+   * try {
+   *   await tx.isPersisted.promise
+   * } catch (error) {
+   *   console.log('Transaction was rolled back:', error)
+   *   // Transaction automatically rolled back on mutation function failure
+   * }
+   */
   rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
     const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
@@ -161,6 +301,45 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
   }
 
+  /**
+   * Commit the transaction and execute the mutation function
+   * @returns Promise that resolves to this transaction when complete
+   * @example
+   * // Manual commit (when autoCommit is false)
+   * const tx = createTransaction({
+   *   autoCommit: false,
+   *   mutationFn: async ({ transaction }) => {
+   *     await api.saveChanges(transaction.mutations)
+   *   }
+   * })
+   *
+   * tx.mutate(() => {
+   *   collection.insert({ id: "1", text: "Buy milk" })
+   * })
+   *
+   * await tx.commit() // Manually commit
+   *
+   * @example
+   * // Handle commit errors
+   * try {
+   *   const tx = createTransaction({
+   *     mutationFn: async () => { throw new Error("API failed") }
+   *   })
+   *
+   *   tx.mutate(() => {
+   *     collection.insert({ id: "1", text: "Item" })
+   *   })
+   *
+   *   await tx.commit()
+   * } catch (error) {
+   *   console.log('Commit failed, transaction rolled back:', error)
+   * }
+   *
+   * @example
+   * // Check transaction state after commit
+   * await tx.commit()
+   * console.log(tx.state) // "completed" or "failed"
+   */
   async commit(): Promise<Transaction<T>> {
     if (this.state !== `pending`) {
       throw `You can no longer call .commit() as the transaction is no longer pending`

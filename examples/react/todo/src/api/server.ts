@@ -8,6 +8,7 @@ import {
   validateUpdateTodo,
 } from "../db/validation"
 import type { Express } from "express"
+import type { Txid } from "@tanstack/electric-db-collection"
 
 // Create Express app
 const app: Express = express()
@@ -23,15 +24,19 @@ app.get(`/api/health`, (req, res) => {
 })
 
 // Generate a transaction ID
-async function generateTxId(tx: any): Promise<string> {
-  const result = await tx`SELECT txid_current() as txid`
+async function generateTxId(tx: any): Promise<Txid> {
+  // The ::xid cast strips off the epoch, giving you the raw 32-bit value
+  // that matches what PostgreSQL sends in logical replication streams
+  // (and then exposed through Electric which we'll match against
+  // in the client).
+  const result = await tx`SELECT pg_current_xact_id()::xid::text as txid`
   const txid = result[0]?.txid
 
   if (txid === undefined) {
     throw new Error(`Failed to get transaction ID`)
   }
 
-  return String(txid)
+  return parseInt(txid, 10)
 }
 
 // ===== TODOS API =====
@@ -75,7 +80,7 @@ app.post(`/api/todos`, async (req, res) => {
   try {
     const todoData = validateInsertTodo(req.body)
 
-    let txid!: string
+    let txid!: Txid
     const newTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -102,7 +107,7 @@ app.put(`/api/todos/:id`, async (req, res) => {
     const { id } = req.params
     const todoData = validateUpdateTodo(req.body)
 
-    let txid!: string
+    let txid!: Txid
     const updatedTodo = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -139,7 +144,7 @@ app.delete(`/api/todos/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid!: string
+    let txid!: Txid
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -210,7 +215,7 @@ app.post(`/api/config`, async (req, res) => {
     console.log(`POST /api/config`, req.body)
     const configData = validateInsertConfig(req.body)
 
-    let txid!: string
+    let txid!: Txid
     const newConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -237,7 +242,7 @@ app.put(`/api/config/:id`, async (req, res) => {
     const { id } = req.params
     const configData = validateUpdateConfig(req.body)
 
-    let txid!: string
+    let txid!: Txid
     const updatedConfig = await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 
@@ -274,7 +279,7 @@ app.delete(`/api/config/:id`, async (req, res) => {
   try {
     const { id } = req.params
 
-    let txid!: string
+    let txid!: Txid
     await sql.begin(async (tx) => {
       txid = await generateTxId(tx)
 

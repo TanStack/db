@@ -3,7 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "module": "ES2022",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "paths": {
       "@/*": ["./src/*"]
     }
@@ -13,7 +13,8 @@
     "src/**/*.tsx",
     "scripts/**/*.ts",
     "vite.config.ts",
-    "drizzle.config.ts"
+    "drizzle.config.ts",
+    "app.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
