@@ -23,6 +23,7 @@ describe(`Transaction Types`, () => {
       type: `update`,
       metadata: null,
       syncMetadata: {},
+      optimistic: true,
       createdAt: new Date(),
       updatedAt: new Date(),
       collection: mockCollection,
