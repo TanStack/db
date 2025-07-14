@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
+import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import type { StorageEventApi } from "../src/local-storage"
 

@@ -48,14 +48,18 @@ TanStack DB is **backend agnostic** and **incrementally adoptable**:
 Sync data into collections:
 
 ```ts
-import { createQueryCollection } from "@tanstack/db-collections"
+import { createCollection, QueryClient } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
-const todoCollection = createQueryCollection({
-  queryKey: ["todos"],
-  queryFn: async () => fetch("/api/todos"),
-  getKey: (item) => item.id,
-  schema: todoSchema, // any standard schema
-})
+const todoCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async () => fetch("/api/todos"),
+    queryClient: new QueryClient(),
+    getKey: (item) => item.id,
+    schema: todoSchema, // any standard schema
+  })
+)
 ```
 
 Use live queries in your components:
@@ -135,7 +139,9 @@ There's also an example [React todo app](./examples/react/todo) and usage exampl
 ## 🔧 Install
 
 ```bash
-npm install @tanstack/react-db @tanstack/db-collections
+npm install @tanstack/react-db
+# Optional: for specific collection types
+npm install @tanstack/electric-db-collection @tanstack/query-db-collection
 ```
 
 Other framework integrations are in progress.

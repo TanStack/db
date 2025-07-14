@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
+import { createCollection } from "../src/index"
 import { localOnlyCollectionOptions } from "../src/local-only"
 import type { LocalOnlyCollectionUtils } from "../src/local-only"
-import type { Collection } from "@tanstack/db"
+import type { Collection } from "../src/index"
 
 interface TestItem extends Record<string, unknown> {
   id: number
