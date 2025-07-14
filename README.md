@@ -49,7 +49,7 @@ Sync data into collections:
 
 ```ts
 import { createCollection, QueryClient } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/db-query-collection"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 const todoCollection = createCollection(
   queryCollectionOptions({
@@ -141,7 +141,7 @@ There's also an example [React todo app](./examples/react/todo) and usage exampl
 ```bash
 npm install @tanstack/react-db
 # Optional: for specific collection types
-npm install @tanstack/db-electric-collection @tanstack/db-query-collection
+npm install @tanstack/electric-db-collection @tanstack/query-db-collection
 ```
 
 Other framework integrations are in progress.
