@@ -6,7 +6,7 @@
     "@tanstack/electric-db-collection": "^0.0.2",
     "@tanstack/query-core": "^5.75.7",
     "@tanstack/query-db-collection": "^0.0.2",
-    "@tanstack/react-db": "^0.0.19",
+    "@tanstack/react-db": "^0.0.20",
     "@tanstack/react-router": "^1.125.6",
     "@tanstack/react-start": "^1.126.1",
     "cors": "^2.8.5",

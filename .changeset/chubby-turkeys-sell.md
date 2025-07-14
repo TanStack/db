@@ -1,6 +1,6 @@
 ---
-"@tanstack/db-electric-collection": patch
-"@tanstack/db-query-collection": patch
+"@tanstack/electric-db-collection": patch
+"@tanstack/query-db-collection": patch
 "@tanstack/db-example-react-todo": patch
 "@tanstack/db": patch
 ---
