@@ -1,12 +1,18 @@
 import { createCollection } from "@tanstack/react-db"
 import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
 import { QueryClient } from "@tanstack/query-core"
+import { initClient } from "trailbase"
 import { selectConfigSchema, selectTodoSchema } from "../db/validation"
 import { api } from "./api"
+import type { SelectConfig, SelectTodo } from "../db/validation"
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
+
+// Create a TrailBase client.
+const trailBaseClient = initClient(`http://localhost:4000`)
 
 // Electric Todo Collection
 export const electricTodoCollection = createCollection(
@@ -101,6 +107,16 @@ export const queryTodoCollection = createCollection(
   })
 )
 
+// TrailBase Todo Collection
+export const trailBaseTodoCollection = createCollection<SelectTodo>(
+  trailBaseCollectionOptions({
+    id: `todos`,
+    getKey: (item) => item.id,
+    schema: selectTodoSchema,
+    recordApi: trailBaseClient.records(`todos`),
+  })
+)
+
 // Electric Config Collection
 export const electricConfigCollection = createCollection(
   electricCollectionOptions({
@@ -166,5 +182,15 @@ export const queryConfigCollection = createCollection(
       )
       return { txid: txids }
     },
+  })
+)
+
+// TrailBase Config Collection
+export const trailBaseConfigCollection = createCollection<SelectConfig>(
+  trailBaseCollectionOptions({
+    id: `config`,
+    getKey: (item) => item.id,
+    schema: selectConfigSchema,
+    recordApi: trailBaseClient.records(`config`),
   })
 )
