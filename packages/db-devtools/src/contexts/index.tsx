@@ -9,3 +9,6 @@ export const useDevtoolsOnClose = () => useContext(DevtoolsOnCloseContext)
 
 // Shadow DOM Target Context - matches Router devtools pattern
 export const ShadowDomTargetContext = createContext<ShadowRoot | undefined>(undefined)
+
+// Navigation Context
+export * from './NavigationContext'

@@ -300,6 +300,9 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       font-weight: ${font.weight.medium};
       color: ${colors.gray[200]};
       flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     `,
     collectionStatus: css`
       font-size: ${fontSize.xs};
