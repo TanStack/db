@@ -728,9 +728,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array without the last element
+      // Call pop() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = proxies[0].items.slice(0, -1)
+      proxies[0].items.pop()
 
       expect(getChanges()).toEqual([
         {
@@ -745,10 +745,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array without the first element
-
+      // Call shift() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = proxies[0].items.slice(1)
+      proxies[0].items.shift()
 
       expect(getChanges()).toEqual([
         {
@@ -763,10 +762,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array with an element added at the beginning
+      // Call unshift() method directly
       // @ts-expect-error ok possibly undefined
-
-      proxies[0].items = [`apple`, ...proxies[0].items]
+      proxies[0].items.unshift(`apple`)
 
       expect(getChanges()).toEqual([
         {
@@ -774,22 +772,28 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-
       expect(objs[0].items).toEqual([`banana`, `cherry`])
+    })
+
+    it(`should track array push() operations`, () => {
+      const obj = { items: [`apple`, `banana`] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.push(`cherry`)
+
+      expect(getChanges()).toEqual({
+        items: [`apple`, `banana`, `cherry`],
+      })
+      expect(obj.items).toEqual([`apple`, `banana`])
     })
 
     it(`should track array splice() operations`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`, `date`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array with elements replaced in the middle
+      // Call splice() method directly
       // @ts-expect-error ok possibly undefined
-
-      const newItems = [...proxies[0].items]
-      newItems.splice(1, 2, `blueberry`, `cranberry`)
-      // @ts-expect-error ok possibly undefined
-
-      proxies[0].items = newItems
+      proxies[0].items.splice(1, 2, `blueberry`, `cranberry`)
 
       expect(getChanges()).toEqual([
         {
@@ -804,9 +808,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`cherry`, `apple`, `banana`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new sorted array
+      // Call sort() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = [...proxies[0].items].sort()
+      proxies[0].items.sort()
 
       expect(getChanges()).toEqual([
         {
@@ -815,6 +819,65 @@ describe(`Proxy Library`, () => {
       ])
       // @ts-expect-error ok possibly undefined
       expect(objs[0].items).toEqual([`cherry`, `apple`, `banana`])
+    })
+
+    it(`should track array reverse() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call reverse() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.reverse()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`cherry`, `banana`, `apple`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array fill() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call fill() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.fill(`orange`, 1, 3)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `orange`, `orange`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array copyWithin() operations`, () => {
+      const objs = [
+        { items: [`apple`, `banana`, `cherry`, `date`, `elderberry`] },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call copyWithin() method directly - copy elements from index 3-4 to index 0-1
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.copyWithin(0, 3, 5)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`date`, `elderberry`, `cherry`, `date`, `elderberry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([
+        `apple`,
+        `banana`,
+        `cherry`,
+        `date`,
+        `elderberry`,
+      ])
     })
 
     it(`should track changes in multi-dimensional arrays`, () => {

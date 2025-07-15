@@ -461,6 +461,30 @@ export function createChangeProxy<
 
         // If the value is a function, bind it to the ptarget
         if (typeof value === `function`) {
+          // For Array methods that modify the array
+          if (Array.isArray(ptarget)) {
+            const methodName = prop.toString()
+            const modifyingMethods = new Set([
+              `pop`,
+              `push`,
+              `shift`,
+              `unshift`,
+              `splice`,
+              `sort`,
+              `reverse`,
+              `fill`,
+              `copyWithin`,
+            ])
+
+            if (modifyingMethods.has(methodName)) {
+              return function (...args: Array<unknown>) {
+                const result = value.apply(changeTracker.copy_, args)
+                markChanged(changeTracker)
+                return result
+              }
+            }
+          }
+
           // For Map and Set methods that modify the collection
           if (ptarget instanceof Map || ptarget instanceof Set) {
             const methodName = prop.toString()
