@@ -96,6 +96,9 @@ function displayValue(value: unknown): string {
   if (typeof value === `number`) return value.toString()
   if (typeof value === `boolean`) return value.toString()
   if (typeof value === `function`) return `function`
+  if (value instanceof Date) return `Date('${value.toISOString()}')`
+  if (value instanceof Map) return `Map(${value.size})`
+  if (value instanceof Set) return `Set(${value.size})`
   if (Array.isArray(value)) return `Array(${value.length})`
   if (typeof value === `object`) return `Object`
   return String(value)
@@ -135,6 +138,23 @@ export function Explorer({
           value: d,
         })
       )
+    } else if (value() instanceof Map) {
+      // Map
+      entries = Array.from((value() as Map<unknown, unknown>).entries()).map(
+        ([key, val]) =>
+          makeProperty({
+            label: String(key),
+            value: val,
+          })
+      )
+    } else if (value() instanceof Set) {
+      // Set
+      entries = Array.from(value() as Set<unknown>, (val, i) =>
+        makeProperty({
+          label: i.toString(),
+          value: val,
+        })
+      )
     } else if (
       value() !== null &&
       typeof value() === `object` &&
@@ -164,12 +184,11 @@ export function Explorer({
   const subEntryPages = createMemo(() => chunkArray(subEntries(), pageSize))
 
   const [expandedPages, setExpandedPages] = createSignal<Array<number>>([])
-  const [valueSnapshot, setValueSnapshot] = createSignal(undefined)
   const styles = useStyles()
 
-  const refreshValueSnapshot = () => {
-    setValueSnapshot((value() as () => any)())
-  }
+  // const refreshValueSnapshot = () => {
+  //   setValueSnapshot((value() as () => any)())
+  // }
 
   const handleEntry = (entry: Entry) => (
     <Explorer
@@ -237,18 +256,9 @@ export function Explorer({
         </>
       ) : type() === `function` ? (
         <>
-          <Explorer
-            label={
-              <button
-                onClick={refreshValueSnapshot}
-                class={styles().refreshValueBtn}
-              >
-                <span>{rest.label}</span> 🔄{` `}
-              </button>
-            }
-            value={valueSnapshot}
-            defaultExpanded={{}}
-          />
+          <span>{rest.label}:</span>
+          {` `}
+          <span class={styles().value}>{displayValue(value())}</span>
         </>
       ) : (
         <>

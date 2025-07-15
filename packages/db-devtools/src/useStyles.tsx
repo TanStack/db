@@ -346,21 +346,55 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       background-color: ${colors.darkGray[700]};
       color: ${colors.gray[300]};
       width: 100%;
+      height: 100%;
       overflow-y: auto;
     `,
     detailsHeader: css`
       display: flex;
       align-items: center;
-      padding: ${size[2]};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[200]};
+      font-size: ${fontSize.sm};
+    `,
+    transactionHeader: css`
+      display: flex;
+      align-items: center;
+      padding: ${size[1.5]} ${size[2]};
       background-color: ${colors.darkGray[600]};
       border-bottom: 1px solid ${colors.gray[700]};
       font-weight: ${font.weight.semibold};
       color: ${colors.gray[200]};
       font-size: ${fontSize.sm};
     `,
+    transactionSubHeader: css`
+      display: flex;
+      align-items: center;
+      padding: ${size[1.5]} ${size[2]};
+      background-color: ${colors.darkGray[600]};
+      border-bottom: 1px solid ${colors.gray[700]};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[200]};
+      font-size: ${fontSize.xs};
+    `,
+    detailsHeaderRow: css`
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: ${size[2]};
+      background-color: ${colors.darkGray[600]};
+      border-bottom: 1px solid ${colors.gray[700]};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[200]};
+      font-size: ${fontSize.sm};
+      width: 100%;
+    `,
     detailsContent: css`
       flex: 1;
       padding: ${size[2]};
+      overflow-y: auto;
+    `,
+    detailsContentNoPadding: css`
+      flex: 1;
       overflow-y: auto;
     `,
     explorerContainer: css`
@@ -456,6 +490,74 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       display: flex;
       flex-direction: column;
       flex: 1;
+    `,
+    noDataMessage: css`
+      padding: ${size[4]};
+      text-align: center;
+      color: ${colors.gray[500]};
+      font-style: italic;
+    `,
+    collectionTabNav: css`
+      display: flex;
+      gap: ${size[1]};
+    `,
+    collectionTabBtn: css`
+      padding: ${size[1]} ${size[2]};
+      background: transparent;
+      border: 1px solid ${colors.gray[600]};
+      border-radius: ${border.radius.sm};
+      color: ${colors.gray[400]};
+      cursor: pointer;
+      font-size: ${fontSize.xs};
+      font-weight: ${font.weight.medium};
+      position: relative;
+
+      &:hover {
+        background: ${colors.darkGray[500]};
+        border-color: ${colors.gray[500]};
+      }
+    `,
+    collectionTabBtnActive: css`
+      background: ${colors.blue[500]} !important;
+      color: ${colors.white} !important;
+      border-color: ${colors.blue[400]} !important;
+
+      &:hover {
+        background: ${colors.blue[600]} !important;
+        border-color: ${colors.blue[500]} !important;
+      }
+    `,
+    tabBadge: css`
+      position: absolute;
+      top: -${size[0.5]};
+      right: -${size[0.5]};
+      background: ${colors.red[500]};
+      color: ${colors.white};
+      border-radius: 50%;
+      width: ${size[3]};
+      height: ${size[3]};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: ${fontSize.xs};
+      font-weight: ${font.weight.bold};
+      line-height: 1;
+    `,
+    splitPanelContainer: css`
+      display: flex;
+      width: 100%;
+      height: 100%;
+    `,
+    splitPanelLeft: css`
+      flex: 0 0 50%;
+      height: 100%;
+      border-right: 1px solid ${colors.gray[700]};
+      overflow-y: auto;
+    `,
+    splitPanelRight: css`
+      flex: 1;
+      height: 100%;
+      overflow-y: auto;
     `,
   }
 }

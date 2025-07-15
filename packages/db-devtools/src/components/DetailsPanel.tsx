@@ -8,6 +8,7 @@ export interface DetailsPanelProps {
   selectedView: Accessor<`collections` | `transactions`>
   activeCollection: Accessor<CollectionMetadata | undefined>
   activeTransaction: Accessor<TransactionDetails | undefined>
+  isSubPanel?: boolean
 }
 
 export function DetailsPanel({
@@ -83,10 +84,11 @@ export function TransactionDetailsPanel({
   )
 }
 
-export function UnifiedDetailsPanel({
+export function GenericDetailsPanel({
   selectedView,
   activeCollection,
   activeTransaction,
+  isSubPanel = false,
 }: DetailsPanelProps) {
   const styles = useStyles()
 
@@ -127,7 +129,13 @@ export function UnifiedDetailsPanel({
           when={activeTransaction()}
           fallback={
             <div class={styles().detailsPanel}>
-              <div class={styles().detailsHeader}>
+              <div
+                class={
+                  isSubPanel
+                    ? styles().transactionSubHeader
+                    : styles().transactionHeader
+                }
+              >
                 Select a transaction to view details
               </div>
             </div>
@@ -135,7 +143,13 @@ export function UnifiedDetailsPanel({
         >
           {(transaction) => (
             <div class={styles().detailsPanel}>
-              <div class={styles().detailsHeader}>
+              <div
+                class={
+                  isSubPanel
+                    ? styles().transactionSubHeader
+                    : styles().transactionHeader
+                }
+              >
                 Transaction {transaction().id}
               </div>
               <div class={styles().detailsContent}>

@@ -4,11 +4,12 @@ import { useDevtoolsOnClose } from "./contexts"
 import { useStyles } from "./useStyles"
 import { useLocalStorage } from "./useLocalStorage"
 import {
+  CollectionDetailsPanel,
   CollectionsPanel,
+  GenericDetailsPanel,
   Logo,
   TabNavigation,
   TransactionsPanel,
-  UnifiedDetailsPanel,
 } from "./components"
 import type { Accessor, JSX } from "solid-js"
 import type {
@@ -193,11 +194,16 @@ export const BaseTanStackDbDevtoolsPanel =
         </div>
 
         <div class={styles().secondContainer}>
-          <UnifiedDetailsPanel
-            selectedView={selectedView}
-            activeCollection={activeCollection}
-            activeTransaction={activeTransaction}
-          />
+          <Show when={selectedView() === `collections`}>
+            <CollectionDetailsPanel activeCollection={activeCollection} />
+          </Show>
+          <Show when={selectedView() === `transactions`}>
+            <GenericDetailsPanel
+              selectedView={selectedView}
+              activeCollection={activeCollection}
+              activeTransaction={activeTransaction}
+            />
+          </Show>
         </div>
       </div>
     )

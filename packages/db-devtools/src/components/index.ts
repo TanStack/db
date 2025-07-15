@@ -1,13 +1,11 @@
-export { Logo } from "./Logo"
-export { CollectionStats } from "./CollectionStats"
-export { TransactionStats } from "./TransactionStats"
-export { CollectionItem } from "./CollectionItem"
-export { TransactionItem } from "./TransactionItem"
 export { CollectionsPanel } from "./CollectionsPanel"
-export { TransactionsPanel } from "./TransactionsPanel"
-export {
-  DetailsPanel,
-  TransactionDetailsPanel,
-  UnifiedDetailsPanel,
-} from "./DetailsPanel"
+export { DetailsPanel, GenericDetailsPanel } from "./DetailsPanel"
+export { Explorer } from "./Explorer"
+export { Logo } from "./Logo"
 export { TabNavigation } from "./TabNavigation"
+export { TransactionItem } from "./TransactionItem"
+export { TransactionStats } from "./TransactionStats"
+export { TransactionsPanel } from "./TransactionsPanel"
+export { CollectionItem } from "./CollectionItem"
+export { CollectionStats } from "./CollectionStats"
+export { CollectionDetailsPanel } from "./CollectionDetailsPanel"
