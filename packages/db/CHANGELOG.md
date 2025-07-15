@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.22
+
+### Patch Changes
+
+- New distinct operator for queries. ([#244](https://github.com/TanStack/db/pull/244))
+
 ## 0.0.21
 
 ### Patch Changes
