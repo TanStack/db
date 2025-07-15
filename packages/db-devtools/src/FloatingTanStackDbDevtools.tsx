@@ -1,13 +1,13 @@
-import { clsx as cx } from 'clsx'
-import { createEffect, createMemo, createSignal } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
-import { DevtoolsOnCloseContext } from './contexts'
-import { BaseTanStackDbDevtoolsPanel } from './BaseTanStackDbDevtoolsPanel'
-import { useLocalStorage } from './useLocalStorage'
-import { TanStackLogo } from './logo'
-import { useStyles } from './useStyles'
-import type { Accessor, JSX } from 'solid-js'
-import type { DbDevtoolsRegistry } from './types'
+import { clsx as cx } from "clsx"
+import { createEffect, createMemo, createSignal } from "solid-js"
+import { Dynamic } from "solid-js/web"
+import { DevtoolsOnCloseContext } from "./contexts"
+import { BaseTanStackDbDevtoolsPanel } from "./BaseTanStackDbDevtoolsPanel"
+import { useLocalStorage } from "./useLocalStorage"
+import { TanStackLogo } from "./logo"
+import { useStyles } from "./useStyles"
+import type { Accessor, JSX } from "solid-js"
+import type { DbDevtoolsRegistry } from "./types"
 
 export interface FloatingDbDevtoolsOptions {
   /**
@@ -36,7 +36,7 @@ export interface FloatingDbDevtoolsOptions {
    * The position of the TanStack DB logo to open and close the devtools panel.
    * Defaults to 'bottom-left'.
    */
-  position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  position?: `top-left` | `top-right` | `bottom-left` | `bottom-right`
   /**
    * Use this to render the devtools inside a different type of container element for a11y purposes.
    * Any string which corresponds to a valid intrinsic JSX element is allowed.
@@ -58,8 +58,8 @@ export function FloatingTanStackDbDevtools({
   panelProps = {},
   closeButtonProps = {},
   toggleButtonProps = {},
-  position = 'bottom-left',
-  containerElement: Container = 'footer',
+  position = `bottom-left`,
+  containerElement: Container = `footer`,
   registry,
   shadowDOMTarget,
 }: FloatingDbDevtoolsOptions): JSX.Element | null {
@@ -69,13 +69,13 @@ export function FloatingTanStackDbDevtools({
   let panelRef: HTMLDivElement | undefined = undefined
 
   const [isOpen, setIsOpen] = useLocalStorage(
-    'tanstackDbDevtoolsOpen',
-    initialIsOpen,
+    `tanstackDbDevtoolsOpen`,
+    initialIsOpen
   )
 
   const [devtoolsHeight, setDevtoolsHeight] = useLocalStorage<number | null>(
-    'tanstackDbDevtoolsHeight',
-    null,
+    `tanstackDbDevtoolsHeight`,
+    null
   )
 
   const [isResolvedOpen, setIsResolvedOpen] = createSignal(false)
@@ -84,14 +84,14 @@ export function FloatingTanStackDbDevtools({
 
   const handleDragStart = (
     panelElement: HTMLDivElement | undefined,
-    startEvent: any,
+    startEvent: any
   ) => {
     if (startEvent.button !== 0) return // Only allow left click for drag
 
     setIsResizing(true)
 
     const dragInfo = {
-      originalHeight: panelElement?.getBoundingClientRect().height ?? 0,
+      originalHeight: panelElement?.getBoundingClientRect().height || 0,
       pageY: startEvent.pageY,
     }
 
@@ -110,18 +110,16 @@ export function FloatingTanStackDbDevtools({
 
     const unsub = () => {
       setIsResizing(false)
-      document.removeEventListener('mousemove', run)
-      document.removeEventListener('mouseUp', unsub)
+      document.removeEventListener(`mousemove`, run)
+      document.removeEventListener(`mouseUp`, unsub)
     }
 
-    document.addEventListener('mousemove', run)
-    document.addEventListener('mouseup', unsub)
+    document.addEventListener(`mousemove`, run)
+    document.addEventListener(`mouseup`, unsub)
   }
 
-
-
   createEffect(() => {
-    setIsResolvedOpen(isOpen() ?? false)
+    setIsResolvedOpen(isOpen())
   })
 
   createEffect(() => {
@@ -142,12 +140,12 @@ export function FloatingTanStackDbDevtools({
 
       run()
 
-      if (typeof window !== 'undefined') {
-        window.addEventListener('resize', run)
+      if (typeof window !== `undefined`) {
+        window.addEventListener(`resize`, run)
 
         return () => {
-          window.removeEventListener('resize', run)
-          if (rootEl()?.parentElement && typeof previousValue === 'string') {
+          window.removeEventListener(`resize`, run)
+          if (rootEl()?.parentElement && typeof previousValue === `string`) {
             setRootEl((prev) => {
               prev!.parentElement!.style.paddingBottom = previousValue
               return prev
@@ -160,7 +158,7 @@ export function FloatingTanStackDbDevtools({
       if (rootEl()?.parentElement) {
         setRootEl((prev) => {
           if (prev?.parentElement) {
-            prev.parentElement.removeAttribute('style')
+            prev.parentElement.removeAttribute(`style`)
           }
           return prev
         })
@@ -173,7 +171,7 @@ export function FloatingTanStackDbDevtools({
     if (rootEl()) {
       const el = rootEl()
       const fontSize = getComputedStyle(el!).fontSize
-      el?.style.setProperty('--tsdb-font-size', fontSize)
+      el?.style.setProperty(`--tsdb-font-size`, fontSize)
     }
   })
 
@@ -181,9 +179,7 @@ export function FloatingTanStackDbDevtools({
     style?: Record<string, any>
   }
 
-  const {
-    onClick: onCloseClick,
-  } = closeButtonProps
+  const { onClick: onCloseClick } = closeButtonProps
 
   const {
     onClick: onToggleClick,
@@ -195,7 +191,10 @@ export function FloatingTanStackDbDevtools({
   // The original isMounted() check was preventing rendering when embedded in React
   // if (!isMounted()) return null
 
-  const resolvedHeight = createMemo(() => devtoolsHeight() ?? 500)
+  const resolvedHeight = createMemo(() => {
+    const h = devtoolsHeight()
+    return typeof h === `number` ? h : 500
+  })
 
   const basePanelClass = createMemo(() => {
     return cx(
@@ -204,8 +203,8 @@ export function FloatingTanStackDbDevtools({
       styles().devtoolsPanelContainerResizing(isResizing),
       styles().devtoolsPanelContainerAnimation(
         isResolvedOpen(),
-        resolvedHeight() + 16,
-      ),
+        resolvedHeight() + 16
+      )
     )
   })
 
@@ -222,19 +221,16 @@ export function FloatingTanStackDbDevtools({
       styles().mainCloseBtn,
       styles().mainCloseBtnPosition(position),
       styles().mainCloseBtnAnimation(!!isOpen()),
-      toggleButtonClassName,
+      toggleButtonClassName
     )
   })
 
   return (
-    <Dynamic
-      component={Container}
-      ref={setRootEl}
-      class="TanStackDbDevtools"
-    >
+    <Dynamic component={Container} ref={setRootEl} class="TanStackDbDevtools">
       <DevtoolsOnCloseContext.Provider
         value={{
-          onCloseClick: onCloseClick ?? (() => {}),
+          onCloseClick:
+            typeof onCloseClick === `function` ? onCloseClick : () => {},
         }}
       >
         <BaseTanStackDbDevtoolsPanel
@@ -275,4 +271,4 @@ export function FloatingTanStackDbDevtools({
   )
 }
 
-export default FloatingTanStackDbDevtools 
+export default FloatingTanStackDbDevtools

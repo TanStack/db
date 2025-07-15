@@ -1,4 +1,4 @@
-import { createUniqueId } from 'solid-js'
+import { createUniqueId } from "solid-js"
 
 export function TanStackLogo() {
   const id = createUniqueId()

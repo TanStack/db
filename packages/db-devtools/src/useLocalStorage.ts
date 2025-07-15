@@ -1,21 +1,20 @@
-import { createSignal, createEffect } from 'solid-js'
-import type { Accessor, Setter } from 'solid-js'
+import { createEffect, createSignal } from "solid-js"
+import type { Accessor, Setter } from "solid-js"
 
 export function useLocalStorage<T>(
   key: string,
-  defaultValue?: T,
+  defaultValue?: T
 ): [Accessor<T>, Setter<T>] {
   // Initialize with default value or try to get from localStorage
   const getInitialValue = (): T => {
-    if (typeof window === 'undefined') {
+    if (typeof window === `undefined`) {
       return defaultValue as T
     }
-    
+
     try {
       const item = window.localStorage.getItem(key)
       return item ? JSON.parse(item) : (defaultValue as T)
-    } catch (error) {
-      console.warn(`Error reading localStorage key "${key}":`, error)
+    } catch {
       return defaultValue as T
     }
   }
@@ -24,8 +23,8 @@ export function useLocalStorage<T>(
 
   // Update localStorage when value changes
   createEffect(() => {
-    if (typeof window === 'undefined') return
-    
+    if (typeof window === `undefined`) return
+
     try {
       const currentValue = value()
       if (currentValue === undefined) {
@@ -33,12 +32,10 @@ export function useLocalStorage<T>(
       } else {
         window.localStorage.setItem(key, JSON.stringify(currentValue))
       }
-    } catch (error) {
-      console.warn(`Error setting localStorage key "${key}":`, error)
-    }
+    } catch {}
   })
 
   return [value, setValue]
 }
 
-export default useLocalStorage 
+export default useLocalStorage

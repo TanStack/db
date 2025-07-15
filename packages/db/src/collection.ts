@@ -26,7 +26,7 @@ export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
   if (typeof window !== `undefined`) {
     if ((window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
-      (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
+      ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
       ;(collection as any).isRegisteredWithDevtools = true
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
@@ -37,7 +37,9 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
 // Declare the devtools registry on window
 declare global {
   interface Window {
-    __TANSTACK_DB_DEVTOOLS_REGISTER__?: (collection: CollectionImpl<any, any, any>) => void
+    __TANSTACK_DB_DEVTOOLS_REGISTER__?: (
+      collection: CollectionImpl<any, any, any>
+    ) => void
     __TANSTACK_DB_DEVTOOLS_UNREGISTER__?: (id: string) => void
   }
 }
@@ -552,8 +554,11 @@ export class CollectionImpl<
     }
 
     // Unregister from devtools if available
-    if (typeof window !== `undefined` && (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__) {
-      (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__(this.id)
+    if (
+      typeof window !== `undefined` &&
+      (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__
+    ) {
+      ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__(this.id)
       this.isRegisteredWithDevtools = false
     }
 

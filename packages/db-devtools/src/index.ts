@@ -1,8 +1,11 @@
 // Core exports
-export * from './types'
-export * from './constants'
-export * from './devtools'
-export * from './registry'
+export * from "./types"
+export * from "./constants"
+export * from "./devtools"
+export * from "./registry"
+
+// Components
+export { Explorer } from "./components/Explorer"
 
 // Main Devtools Class (follows TanStack pattern)
 export { TanstackDbDevtools } from "./TanstackDbDevtools"

@@ -1,12 +1,12 @@
-import { clsx as cx } from 'clsx'
-import { useStyles } from '../useStyles'
-import type { Accessor } from 'solid-js'
+import { clsx as cx } from "clsx"
+import { useStyles } from "../useStyles"
+import type { Accessor } from "solid-js"
 
 interface TabNavigationProps {
-  selectedView: Accessor<'collections' | 'transactions'>
+  selectedView: Accessor<`collections` | `transactions`>
   collectionsCount: Accessor<number>
   transactionsCount: Accessor<number>
-  onSelectView: (view: 'collections' | 'transactions') => void
+  onSelectView: (view: `collections` | `transactions`) => void
 }
 
 export function TabNavigation({
@@ -21,26 +21,26 @@ export function TabNavigation({
     <div class={styles().tabNav}>
       <button
         onClick={() => {
-          onSelectView('collections')
+          onSelectView(`collections`)
         }}
         class={cx(
           styles().tabBtn,
-          selectedView() === 'collections' && styles().tabBtnActive
+          selectedView() === `collections` && styles().tabBtnActive
         )}
       >
         Collections ({collectionsCount()})
       </button>
       <button
         onClick={() => {
-          onSelectView('transactions')
+          onSelectView(`transactions`)
         }}
         class={cx(
           styles().tabBtn,
-          selectedView() === 'transactions' && styles().tabBtnActive
+          selectedView() === `transactions` && styles().tabBtnActive
         )}
       >
         Transactions ({transactionsCount()})
       </button>
     </div>
   )
-} 
+}

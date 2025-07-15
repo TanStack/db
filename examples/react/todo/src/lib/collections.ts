@@ -17,7 +17,7 @@ initializeDbDevtools()
 // Electric Todo Collection
 export const electricTodoCollection = createCollection(
   electricCollectionOptions({
-    id: `todos`,
+    id: `electric-todos`,
     shapeOptions: {
       url: `http://localhost:3003/v1/shape`,
       params: {
@@ -65,7 +65,7 @@ export const electricTodoCollection = createCollection(
 // Query Todo Collection
 export const queryTodoCollection = createCollection(
   queryCollectionOptions({
-    id: `todos`,
+    id: `query-todos`,
     queryKey: [`todos`],
     refetchInterval: 3000,
     queryFn: async () => {
@@ -110,7 +110,7 @@ export const queryTodoCollection = createCollection(
 // Electric Config Collection
 export const electricConfigCollection = createCollection(
   electricCollectionOptions({
-    id: `config`,
+    id: `electric-config`,
     shapeOptions: {
       url: `http://localhost:3003/v1/shape`,
       params: {
@@ -143,7 +143,7 @@ export const electricConfigCollection = createCollection(
 // Query Config Collection
 export const queryConfigCollection = createCollection(
   queryCollectionOptions({
-    id: `config`,
+    id: `query-config`,
     queryKey: [`config`],
     refetchInterval: 3000,
     queryFn: async () => {
@@ -174,5 +174,3 @@ export const queryConfigCollection = createCollection(
     },
   })
 )
-
-

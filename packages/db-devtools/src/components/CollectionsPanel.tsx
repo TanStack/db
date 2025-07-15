@@ -1,12 +1,12 @@
-import { Show, For, createMemo } from 'solid-js'
-import { useStyles } from '../useStyles'
-import { CollectionItem } from './CollectionItem'
-import { multiSortBy } from '../utils'
-import type { Accessor } from 'solid-js'
-import type { CollectionMetadata } from '../types'
+import { For, Show, createMemo } from "solid-js"
+import { useStyles } from "../useStyles"
+import { multiSortBy } from "../utils"
+import { CollectionItem } from "./CollectionItem"
+import type { Accessor } from "solid-js"
+import type { CollectionMetadata } from "../types"
 
 interface CollectionsPanelProps {
-  collections: Accessor<CollectionMetadata[]>
+  collections: Accessor<Array<CollectionMetadata>>
   activeCollectionId: Accessor<string>
   onSelectCollection: (collection: CollectionMetadata) => void
 }
@@ -19,22 +19,19 @@ export function CollectionsPanel({
   const styles = useStyles()
 
   const sortedCollections = createMemo(() => {
-    return multiSortBy(
-      collections(),
-      [
-        (c) => c.status === 'error' ? 0 : 1, // Errors first
-        (c) => c.id.toLowerCase(), // Then alphabetically by ID
-      ]
-    )
+    return multiSortBy(collections(), [
+      (c) => (c.status === `error` ? 0 : 1), // Errors first
+      (c) => c.id.toLowerCase(), // Then alphabetically by ID
+    ])
   })
 
   // Group collections by type
-  const standardCollections = createMemo(() => 
-    sortedCollections().filter(c => c.type === 'collection')
+  const standardCollections = createMemo(() =>
+    sortedCollections().filter((c) => c.type === `collection`)
   )
-  
-  const liveCollections = createMemo(() => 
-    sortedCollections().filter(c => c.type === 'live-query')
+
+  const liveCollections = createMemo(() =>
+    sortedCollections().filter((c) => c.type === `live-query`)
   )
 
   return (
@@ -43,7 +40,7 @@ export function CollectionsPanel({
         <Show
           when={sortedCollections().length > 0}
           fallback={
-            <div style={{ padding: '16px', color: '#666' }}>
+            <div style={{ padding: `16px`, color: `#666` }}>
               No collections found
             </div>
           }
@@ -63,13 +60,15 @@ export function CollectionsPanel({
                   <span>Status</span>
                 </div>
               </div>
-              <For each={standardCollections()}>{(collection) =>
-                <CollectionItem
-                  collection={collection}
-                  isActive={() => collection.id === activeCollectionId()}
-                  onSelect={onSelectCollection}
-                />
-              }</For>
+              <For each={standardCollections()}>
+                {(collection) => (
+                  <CollectionItem
+                    collection={collection}
+                    isActive={() => collection.id === activeCollectionId()}
+                    onSelect={onSelectCollection}
+                  />
+                )}
+              </For>
             </div>
           </Show>
 
@@ -86,17 +85,19 @@ export function CollectionsPanel({
                   <span>Status</span>
                 </div>
               </div>
-              <For each={liveCollections()}>{(collection) =>
-                <CollectionItem
-                  collection={collection}
-                  isActive={() => collection.id === activeCollectionId()}
-                  onSelect={onSelectCollection}
-                />
-              }</For>
+              <For each={liveCollections()}>
+                {(collection) => (
+                  <CollectionItem
+                    collection={collection}
+                    isActive={() => collection.id === activeCollectionId()}
+                    onSelect={onSelectCollection}
+                  />
+                )}
+              </For>
             </div>
           </Show>
         </Show>
       </div>
     </div>
   )
-} 
+}

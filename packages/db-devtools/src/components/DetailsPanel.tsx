@@ -1,24 +1,26 @@
-import { Show } from 'solid-js'
-import { useStyles } from '../useStyles'
-import type { CollectionMetadata, TransactionDetails } from '../types'
+import { Show, createMemo } from "solid-js"
+import { useStyles } from "../useStyles"
+import { Explorer } from "./Explorer"
+import type { CollectionMetadata, TransactionDetails } from "../types"
+import type { Accessor } from "solid-js"
 
-interface DetailsPanelProps {
-  selectedView: 'collections' | 'transactions'
-  activeCollection?: CollectionMetadata
-  activeTransaction?: TransactionDetails
+export interface DetailsPanelProps {
+  selectedView: Accessor<`collections` | `transactions`>
+  activeCollection: Accessor<CollectionMetadata | undefined>
+  activeTransaction: Accessor<TransactionDetails | undefined>
 }
 
 export function DetailsPanel({
   selectedView,
   activeCollection,
-  activeTransaction,
+  activeTransaction: _activeTransaction,
 }: DetailsPanelProps) {
   const styles = useStyles()
 
   return (
-    <Show when={selectedView === 'collections'}>
+    <Show when={selectedView() === `collections`}>
       <Show
-        when={activeCollection}
+        when={activeCollection()}
         fallback={
           <div class={styles().detailsPanel}>
             <div class={styles().detailsHeader}>
@@ -29,11 +31,13 @@ export function DetailsPanel({
       >
         {(collection) => (
           <div class={styles().detailsPanel}>
-            <div class={styles().detailsHeader}>
-              {collection().id}
-            </div>
+            <div class={styles().detailsHeader}>{collection().id}</div>
             <div class={styles().detailsContent}>
-              <pre>{JSON.stringify(collection(), null, 2)}</pre>
+              <Explorer
+                label="Collection"
+                value={() => collection()}
+                defaultExpanded={{}}
+              />
             </div>
           </div>
         )}
@@ -44,14 +48,14 @@ export function DetailsPanel({
 
 export function TransactionDetailsPanel({
   selectedView,
-  activeTransaction,
+  activeTransaction: _activeTransaction,
 }: DetailsPanelProps) {
   const styles = useStyles()
 
   return (
-    <Show when={selectedView === 'transactions'}>
+    <Show when={selectedView() === `transactions`}>
       <Show
-        when={activeTransaction}
+        when={_activeTransaction()}
         fallback={
           <div class={styles().detailsPanel}>
             <div class={styles().detailsHeader}>
@@ -66,7 +70,11 @@ export function TransactionDetailsPanel({
               Transaction {transaction().id}
             </div>
             <div class={styles().detailsContent}>
-              <pre>{JSON.stringify(transaction(), null, 2)}</pre>
+              <Explorer
+                label="Transaction"
+                value={() => transaction()}
+                defaultExpanded={{}}
+              />
             </div>
           </div>
         )}
@@ -82,57 +90,65 @@ export function UnifiedDetailsPanel({
 }: DetailsPanelProps) {
   const styles = useStyles()
 
-  // Simple conditional rendering
-  if (selectedView === 'collections') {
-    if (activeCollection) {
-      return (
-        <div class={styles().detailsPanel}>
-          <div class={styles().detailsHeader}>
-            {activeCollection.id}
-          </div>
-          <div class={styles().detailsContent}>
-            <pre>{JSON.stringify(activeCollection, null, 2)}</pre>
-          </div>
-        </div>
-      )
-    } else {
-      return (
-        <div class={styles().detailsPanel}>
-          <div class={styles().detailsHeader}>
-            Select a collection to view details
-          </div>
-        </div>
-      )
-    }
-  } else if (selectedView === 'transactions') {
-    if (activeTransaction) {
-      return (
-        <div class={styles().detailsPanel}>
-          <div class={styles().detailsHeader}>
-            Transaction {activeTransaction.id}
-          </div>
-          <div class={styles().detailsContent}>
-            <pre>{JSON.stringify(activeTransaction, null, 2)}</pre>
-          </div>
-        </div>
-      )
-    } else {
-      return (
-        <div class={styles().detailsPanel}>
-          <div class={styles().detailsHeader}>
-            Select a transaction to view details
-          </div>
-        </div>
-      )
-    }
-  }
+  // Create stable value functions using createMemo to prevent unnecessary re-renders
+  const collectionValue = createMemo(() => activeCollection())
+  const transactionValue = createMemo(() => activeTransaction())
 
-  // Fallback
   return (
-    <div class={styles().detailsPanel}>
-      <div class={styles().detailsHeader}>
-        Unknown view: {selectedView}
-      </div>
-    </div>
+    <>
+      <Show when={selectedView() === `collections`}>
+        <Show
+          when={activeCollection()}
+          fallback={
+            <div class={styles().detailsPanel}>
+              <div class={styles().detailsHeader}>
+                Select a collection to view details
+              </div>
+            </div>
+          }
+        >
+          {(collection) => (
+            <div class={styles().detailsPanel}>
+              <div class={styles().detailsHeader}>{collection().id}</div>
+              <div class={styles().detailsContent}>
+                <Explorer
+                  label="Collection"
+                  value={collectionValue}
+                  defaultExpanded={{}}
+                />
+              </div>
+            </div>
+          )}
+        </Show>
+      </Show>
+
+      <Show when={selectedView() === `transactions`}>
+        <Show
+          when={activeTransaction()}
+          fallback={
+            <div class={styles().detailsPanel}>
+              <div class={styles().detailsHeader}>
+                Select a transaction to view details
+              </div>
+            </div>
+          }
+        >
+          {(transaction) => (
+            <div class={styles().detailsPanel}>
+              <div class={styles().detailsHeader}>
+                Transaction {transaction().id}
+              </div>
+              <div class={styles().detailsContent}>
+                <Explorer
+                  label="Transaction"
+                  value={transactionValue}
+                  defaultExpanded={{}}
+                />
+              </div>
+            </div>
+          )}
+        </Show>
+      </Show>
+    </>
   )
-} 
+}

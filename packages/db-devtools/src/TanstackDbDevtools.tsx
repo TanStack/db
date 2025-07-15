@@ -3,8 +3,7 @@ import { render } from "solid-js/web"
 import { createSignal } from "solid-js"
 import { initializeDevtoolsRegistry } from "./registry"
 import { FloatingTanStackDbDevtools } from "./FloatingTanStackDbDevtools"
-import type { DbDevtoolsConfig } from "./types"
-import type { DbDevtoolsRegistry } from "./types"
+import type { DbDevtoolsConfig, DbDevtoolsRegistry } from "./types"
 import type { Signal } from "solid-js"
 
 export interface TanstackDbDevtoolsConfig extends DbDevtoolsConfig {
@@ -17,12 +16,12 @@ class TanstackDbDevtools {
   #isMounted = false
   #shadowDOMTarget?: ShadowRoot
   #initialIsOpen: Signal<boolean | undefined>
-  #position: Signal<DbDevtoolsConfig["position"] | undefined>
+  #position: Signal<DbDevtoolsConfig[`position`] | undefined>
   #panelProps: Signal<Record<string, any> | undefined>
   #toggleButtonProps: Signal<Record<string, any> | undefined>
   #closeButtonProps: Signal<Record<string, any> | undefined>
   #storageKey: Signal<string | undefined>
-  #panelState: Signal<DbDevtoolsConfig["panelState"] | undefined>
+  #panelState: Signal<DbDevtoolsConfig[`panelState`] | undefined>
   #onPanelStateChange: Signal<((isOpen: boolean) => void) | undefined>
   #dispose?: () => void
 
@@ -56,7 +55,7 @@ class TanstackDbDevtools {
     this.#initialIsOpen[1](isOpen)
   }
 
-  setPosition(position: DbDevtoolsConfig["position"]) {
+  setPosition(position: DbDevtoolsConfig[`position`]) {
     this.#position[1](position)
   }
 
@@ -76,7 +75,7 @@ class TanstackDbDevtools {
     this.#storageKey[1](key)
   }
 
-  setPanelState(state: DbDevtoolsConfig["panelState"]) {
+  setPanelState(state: DbDevtoolsConfig[`panelState`]) {
     this.#panelState[1](state)
   }
 
@@ -86,27 +85,30 @@ class TanstackDbDevtools {
 
   mount<T extends HTMLElement>(el: T) {
     if (this.#isMounted) {
-      throw new Error("DB Devtools is already mounted")
+      throw new Error(`DB Devtools is already mounted`)
     }
 
-    const getValidPosition = (pos: DbDevtoolsConfig["position"]) => {
-      if (pos === 'relative' || pos === undefined) {
-        return 'bottom-left' as const
+    const getValidPosition = (pos: DbDevtoolsConfig[`position`]) => {
+      if (pos === `relative` || pos === undefined) {
+        return `bottom-left` as const
       }
-      return pos as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+      return pos
     }
 
-    const dispose = render(() => (
-      <FloatingTanStackDbDevtools
-        initialIsOpen={this.#initialIsOpen[0]()}
-        position={getValidPosition(this.#position[0]())}
-        panelProps={this.#panelProps[0]()}
-        toggleButtonProps={this.#toggleButtonProps[0]()}
-        closeButtonProps={this.#closeButtonProps[0]()}
-        registry={() => this.#registry}
-        shadowDOMTarget={this.#shadowDOMTarget}
-      />
-    ), el)
+    const dispose = render(
+      () => (
+        <FloatingTanStackDbDevtools
+          initialIsOpen={this.#initialIsOpen[0]()}
+          position={getValidPosition(this.#position[0]())}
+          panelProps={this.#panelProps[0]()}
+          toggleButtonProps={this.#toggleButtonProps[0]()}
+          closeButtonProps={this.#closeButtonProps[0]()}
+          registry={() => this.#registry}
+          shadowDOMTarget={this.#shadowDOMTarget}
+        />
+      ),
+      el
+    )
 
     this.#isMounted = true
     this.#dispose = dispose
@@ -114,7 +116,7 @@ class TanstackDbDevtools {
 
   unmount() {
     if (!this.#isMounted) {
-      throw new Error("DB Devtools is not mounted")
+      throw new Error(`DB Devtools is not mounted`)
     }
     this.#dispose?.()
     this.#isMounted = false

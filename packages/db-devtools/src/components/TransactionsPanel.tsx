@@ -1,11 +1,11 @@
-import { Show, For } from 'solid-js'
-import { useStyles } from '../useStyles'
-import { TransactionItem } from './TransactionItem'
-import type { Accessor } from 'solid-js'
-import type { TransactionDetails } from '../types'
+import { For, Show } from "solid-js"
+import { useStyles } from "../useStyles"
+import { TransactionItem } from "./TransactionItem"
+import type { Accessor } from "solid-js"
+import type { TransactionDetails } from "../types"
 
 interface TransactionsPanelProps {
-  transactions: Accessor<TransactionDetails[]>
+  transactions: Accessor<Array<TransactionDetails>>
   selectedTransaction: Accessor<string | null>
   onSelectTransaction: (transactionId: string) => void
 }
@@ -36,21 +36,23 @@ export function TransactionsPanel({
           <Show
             when={transactions().length > 0}
             fallback={
-              <div style={{ padding: '16px', color: '#666' }}>
+              <div style={{ padding: `16px`, color: `#666` }}>
                 No transactions found
               </div>
             }
           >
-            <For each={transactions()}>{(transaction) => (
-              <TransactionItem
-                transaction={transaction}
-                isActive={selectedTransaction() === transaction.id}
-                onSelect={onSelectTransaction}
-              />
-            )}</For>
+            <For each={transactions()}>
+              {(transaction) => (
+                <TransactionItem
+                  transaction={transaction}
+                  isActive={selectedTransaction() === transaction.id}
+                  onSelect={onSelectTransaction}
+                />
+              )}
+            </For>
           </Show>
         </div>
       </div>
     </div>
   )
-} 
+}

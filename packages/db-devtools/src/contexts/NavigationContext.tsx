@@ -1,44 +1,55 @@
-import { createContext, createSignal, useContext, type Accessor, type Setter } from 'solid-js'
-import type { CollectionMetadata, TransactionDetails } from '../types'
+import { createContext, createSignal, useContext } from "solid-js"
+import type { Accessor, Setter } from "solid-js"
+import type { CollectionMetadata, TransactionDetails } from "../types"
 
 export interface NavigationState {
-  selectedView: Accessor<'collections' | 'transactions'>
-  setSelectedView: Setter<'collections' | 'transactions'>
+  selectedView: Accessor<`collections` | `transactions`>
+  setSelectedView: Setter<`collections` | `transactions`>
   activeCollectionId: Accessor<string>
   setActiveCollectionId: Setter<string>
   selectedTransaction: Accessor<string | null>
   setSelectedTransaction: Setter<string | null>
   activeCollection: Accessor<CollectionMetadata | undefined>
   activeTransaction: Accessor<TransactionDetails | undefined>
-  collections: Accessor<CollectionMetadata[]>
-  setCollections: Setter<CollectionMetadata[]>
-  transactions: Accessor<TransactionDetails[]>
-  setTransactions: Setter<TransactionDetails[]>
+  collections: Accessor<Array<CollectionMetadata>>
+  setCollections: Setter<Array<CollectionMetadata>>
+  transactions: Accessor<Array<TransactionDetails>>
+  setTransactions: Setter<Array<TransactionDetails>>
 }
 
 const NavigationContext = createContext<NavigationState>()
 
 export function createNavigationStore(): NavigationState {
-  const [selectedView, setSelectedView] = createSignal<'collections' | 'transactions'>('collections')
-  const [activeCollectionId, setActiveCollectionId] = createSignal<string>('')
-  const [selectedTransaction, setSelectedTransaction] = createSignal<string | null>(null)
-  
+  const [selectedView, setSelectedView] = createSignal<
+    `collections` | `transactions`
+  >(`collections`)
+  const [activeCollectionId, setActiveCollectionId] = createSignal<string>(``)
+  const [selectedTransaction, setSelectedTransaction] = createSignal<
+    string | null
+  >(null)
+
   // These will be set by the parent component
-  const [collections, setCollections] = createSignal<CollectionMetadata[]>([])
-  const [transactions, setTransactions] = createSignal<TransactionDetails[]>([])
+  const [collections, setCollections] = createSignal<Array<CollectionMetadata>>(
+    []
+  )
+  const [transactions, setTransactions] = createSignal<
+    Array<TransactionDetails>
+  >([])
 
   const activeCollection = () => {
-    const active = collections().find(c => c.id === activeCollectionId())
+    const active = collections().find((c) => c.id === activeCollectionId())
     return active
   }
 
   const activeTransaction = () => {
-    const active = transactions().find(t => t.id === selectedTransaction())
+    const active = transactions().find((t) => t.id === selectedTransaction())
     return active
   }
 
   // Debug logging
-  const debugSetSelectedView: Setter<'collections' | 'transactions'> = (value) => {
+  const debugSetSelectedView: Setter<`collections` | `transactions`> = (
+    value
+  ) => {
     setSelectedView(value)
   }
 
@@ -50,11 +61,11 @@ export function createNavigationStore(): NavigationState {
     setSelectedTransaction(value)
   }
 
-  const debugSetCollections: Setter<CollectionMetadata[]> = (value) => {
+  const debugSetCollections: Setter<Array<CollectionMetadata>> = (value) => {
     setCollections(value)
   }
 
-  const debugSetTransactions: Setter<TransactionDetails[]> = (value) => {
+  const debugSetTransactions: Setter<Array<TransactionDetails>> = (value) => {
     setTransactions(value)
   }
 
@@ -80,15 +91,18 @@ export function createNavigationStore(): NavigationState {
 export function useNavigation() {
   const context = useContext(NavigationContext)
   if (!context) {
-    throw new Error('useNavigation must be used within a NavigationProvider')
+    throw new Error(`useNavigation must be used within a NavigationProvider`)
   }
   return context
 }
 
-export function NavigationProvider(props: { children: any; store: NavigationState }) {
+export function NavigationProvider(props: {
+  children: any
+  store: NavigationState
+}) {
   return (
     <NavigationContext.Provider value={props.store}>
       {props.children}
     </NavigationContext.Provider>
   )
-} 
+}

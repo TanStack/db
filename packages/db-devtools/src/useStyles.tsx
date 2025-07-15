@@ -1,8 +1,8 @@
-import * as goober from 'goober'
-import { createSignal, useContext } from 'solid-js'
-import { tokens } from './tokens'
-import { ShadowDomTargetContext } from './contexts'
-import type { Accessor } from 'solid-js'
+import * as goober from "goober"
+import { createSignal, useContext } from "solid-js"
+import { tokens } from "./tokens"
+import { ShadowDomTargetContext } from "./contexts"
+import type { Accessor } from "solid-js"
 
 const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
   const { colors, font, size, alpha, border } = tokens
@@ -25,7 +25,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     `,
     devtoolsPanelContainerVisibility: (isOpen: boolean) => {
       return css`
-        visibility: ${isOpen ? 'visible' : 'hidden'};
+        visibility: ${isOpen ? `visible` : `hidden`};
       `
     },
     devtoolsPanelContainerResizing: (isResizing: Accessor<boolean>) => {
@@ -83,7 +83,11 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     dbLogo: css`
       font-weight: ${font.weight.semibold};
       font-size: ${font.size.xs};
-      background: linear-gradient(to right, rgb(249, 115, 22), rgb(194, 65, 12));
+      background: linear-gradient(
+        to right,
+        rgb(249, 115, 22),
+        rgb(194, 65, 12)
+      );
       background-clip: text;
       -webkit-background-clip: text;
       line-height: 1;
@@ -172,17 +176,17 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       }
     `,
     mainCloseBtnPosition: (
-      position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
+      position: `top-left` | `top-right` | `bottom-left` | `bottom-right`
     ) => {
       const base = css`
-        ${position === 'top-left' ? `top: ${size[2]}; left: ${size[2]};` : ''}
-        ${position === 'top-right' ? `top: ${size[2]}; right: ${size[2]};` : ''}
-        ${position === 'bottom-left'
+        ${position === `top-left` ? `top: ${size[2]}; left: ${size[2]};` : ``}
+        ${position === `top-right` ? `top: ${size[2]}; right: ${size[2]};` : ``}
+        ${position === `bottom-left`
           ? `bottom: ${size[2]}; left: ${size[2]};`
-          : ''}
-        ${position === 'bottom-right'
+          : ``}
+        ${position === `bottom-right`
           ? `bottom: ${size[2]}; right: ${size[2]};`
-          : ''}
+          : ``}
       `
       return base
     },
@@ -203,7 +207,11 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     dbLogoCloseButton: css`
       font-weight: ${font.weight.semibold};
       font-size: ${font.size.xs};
-      background: linear-gradient(to right, rgb(249, 115, 22), rgb(194, 65, 12));
+      background: linear-gradient(
+        to right,
+        rgb(249, 115, 22),
+        rgb(194, 65, 12)
+      );
       background-clip: text;
       -webkit-background-clip: text;
       line-height: 1;
@@ -266,7 +274,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       padding: ${size[1]} ${size[1.5]} ${size[0.5]} ${size[1.5]};
 
       &::after {
-        content: ' ';
+        content: " ";
         position: absolute;
         top: 100%;
         left: -${size[2.5]};
@@ -287,7 +295,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       cursor: pointer;
       background-color: ${colors.darkGray[700]};
       transition: all 0.2s ease;
-      
+
       &:hover {
         background-color: ${colors.darkGray[600]};
       }
@@ -424,7 +432,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       cursor: pointer;
       font-size: ${fontSize.xs};
       font-weight: ${font.weight.medium};
-      
+
       &:hover {
         background: ${colors.darkGray[500]};
         border-color: ${colors.gray[500]};
@@ -434,7 +442,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       background: ${colors.blue[500]};
       color: ${colors.white};
       border-color: ${colors.blue[400]};
-      
+
       &:hover {
         background: ${colors.blue[600]};
         border-color: ${colors.blue[500]};
@@ -454,6 +462,6 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
 
 export function useStyles() {
   const shadowDomTarget = useContext(ShadowDomTargetContext)
-  const [_styles] = createSignal(stylesFactory(shadowDomTarget as ShadowRoot | undefined))
+  const [_styles] = createSignal(stylesFactory(shadowDomTarget))
   return _styles
-} 
+}

@@ -1,7 +1,7 @@
-import { clsx as cx } from 'clsx'
-import { useStyles } from '../useStyles'
-import { TransactionStats } from './TransactionStats'
-import type { TransactionDetails } from '../types'
+import { clsx as cx } from "clsx"
+import { useStyles } from "../useStyles"
+import { TransactionStats } from "./TransactionStats"
+import type { TransactionDetails } from "../types"
 
 interface TransactionItemProps {
   transaction: TransactionDetails
@@ -15,7 +15,7 @@ export function TransactionItem({
   onSelect,
 }: TransactionItemProps) {
   const styles = useStyles()
-  
+
   return (
     <div
       class={cx(
@@ -24,10 +24,8 @@ export function TransactionItem({
       )}
       onClick={() => onSelect(transaction.id)}
     >
-      <div class={styles().collectionName}>
-        {transaction.id}
-      </div>
+      <div class={styles().collectionName}>{transaction.id}</div>
       <TransactionStats transaction={transaction} />
     </div>
   )
-} 
+}

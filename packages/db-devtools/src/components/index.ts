@@ -1,9 +1,13 @@
-export { Logo } from './Logo'
-export { CollectionStats } from './CollectionStats'
-export { TransactionStats } from './TransactionStats'
-export { CollectionItem } from './CollectionItem'
-export { TransactionItem } from './TransactionItem'
-export { CollectionsPanel } from './CollectionsPanel'
-export { TransactionsPanel } from './TransactionsPanel'
-export { DetailsPanel, TransactionDetailsPanel, UnifiedDetailsPanel } from './DetailsPanel'
-export { TabNavigation } from './TabNavigation' 
+export { Logo } from "./Logo"
+export { CollectionStats } from "./CollectionStats"
+export { TransactionStats } from "./TransactionStats"
+export { CollectionItem } from "./CollectionItem"
+export { TransactionItem } from "./TransactionItem"
+export { CollectionsPanel } from "./CollectionsPanel"
+export { TransactionsPanel } from "./TransactionsPanel"
+export {
+  DetailsPanel,
+  TransactionDetailsPanel,
+  UnifiedDetailsPanel,
+} from "./DetailsPanel"
+export { TabNavigation } from "./TabNavigation"

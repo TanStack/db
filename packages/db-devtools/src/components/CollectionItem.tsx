@@ -1,8 +1,8 @@
-import { clsx as cx } from 'clsx'
-import { useStyles } from '../useStyles'
-import { CollectionStats } from './CollectionStats'
-import type { Accessor } from 'solid-js'
-import type { CollectionMetadata } from '../types'
+import { clsx as cx } from "clsx"
+import { useStyles } from "../useStyles"
+import { CollectionStats } from "./CollectionStats"
+import type { Accessor } from "solid-js"
+import type { CollectionMetadata } from "../types"
 
 interface CollectionItemProps {
   collection: CollectionMetadata
@@ -16,12 +16,12 @@ export function CollectionItem({
   onSelect,
 }: CollectionItemProps) {
   const styles = useStyles()
-  
+
   return (
     <div
       class={cx(
         styles().collectionItem,
-        isActive() ? styles().collectionItemActive : ''
+        isActive() ? styles().collectionItemActive : ``
       )}
       onClick={() => onSelect(collection)}
     >
@@ -29,4 +29,4 @@ export function CollectionItem({
       <CollectionStats collection={collection} />
     </div>
   )
-} 
+}

@@ -9,7 +9,7 @@ import type { DbDevtoolsRegistry } from "./types"
  */
 export function initializeDbDevtools(): void {
   // SSR safety check
-  if (typeof window === 'undefined') {
+  if (typeof window === `undefined`) {
     return
   }
 
@@ -42,9 +42,11 @@ export function initializeDbDevtools(): void {
 export function registerCollection(
   collection: CollectionImpl<any, any, any>
 ): void {
-  if (typeof window === 'undefined') return
-  
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === `undefined`) return
+
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
+    | DbDevtoolsRegistry
+    | undefined
   if (registry) {
     registry.registerCollection(collection)
   }
@@ -55,9 +57,11 @@ export function registerCollection(
  * This is automatically called when collections are garbage collected.
  */
 export function unregisterCollection(id: string): void {
-  if (typeof window === 'undefined') return
-  
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === `undefined`) return
+
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
+    | DbDevtoolsRegistry
+    | undefined
   if (registry) {
     registry.unregisterCollection(id)
   }
@@ -67,7 +71,7 @@ export function unregisterCollection(id: string): void {
  * Check if devtools are currently enabled (registry is present).
  */
 export function isDevtoolsEnabled(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof window === `undefined`) return false
   return !!(window as any).__TANSTACK_DB_DEVTOOLS__
 }
 
@@ -75,8 +79,10 @@ export function isDevtoolsEnabled(): boolean {
  * Get the current devtools registry instance.
  */
 export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
-  if (typeof window === 'undefined') return undefined
-  return (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === `undefined`) return undefined
+  return (window as any).__TANSTACK_DB_DEVTOOLS__ as
+    | DbDevtoolsRegistry
+    | undefined
 }
 
 /**
@@ -84,9 +90,11 @@ export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
  * This is useful for testing or when you want to completely reset the devtools state.
  */
 export function cleanupDevtools(): void {
-  if (typeof window === 'undefined') return
-  
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry | undefined
+  if (typeof window === `undefined`) return
+
+  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
+    | DbDevtoolsRegistry
+    | undefined
   if (registry) {
     registry.cleanup()
     delete (window as any).__TANSTACK_DB_DEVTOOLS__

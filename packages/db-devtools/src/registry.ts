@@ -1,10 +1,10 @@
+import { POLLING_INTERVAL_MS } from "./constants"
 import type {
   CollectionMetadata,
   CollectionRegistryEntry,
   DbDevtoolsRegistry,
   TransactionDetails,
 } from "./types"
-import { POLLING_INTERVAL_MS } from "./constants"
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   public collections = new Map<string, CollectionRegistryEntry>()
@@ -78,7 +78,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   getAllCollectionMetadata = (): Array<CollectionMetadata> => {
     const results: Array<CollectionMetadata> = []
 
-    for (const [id, entry] of this.collections) {
+    for (const [_id, entry] of this.collections) {
       const collection = entry.weakRef.deref()
       if (collection) {
         // Collection is still alive, update metadata
@@ -125,8 +125,8 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   getTransactions = (collectionId?: string): Array<TransactionDetails> => {
     const transactions: Array<TransactionDetails> = []
 
-    for (const [id, entry] of this.collections) {
-      if (collectionId && id !== collectionId) continue
+    for (const [_id, entry] of this.collections) {
+      if (collectionId && _id !== collectionId) continue
 
       const collection = entry.weakRef.deref()
       if (!collection) continue
@@ -134,7 +134,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
       for (const [txId, transaction] of collection.transactions) {
         transactions.push({
           id: txId,
-          collectionId: id,
+          collectionId: _id,
           state: transaction.state,
           mutations: transaction.mutations.map((m: any) => ({
             id: m.mutationId,
@@ -159,7 +159,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   getTransaction = (id: string): TransactionDetails | undefined => {
-    for (const [collectionId, entry] of this.collections) {
+    for (const [_collectionId, entry] of this.collections) {
       const collection = entry.weakRef.deref()
       if (!collection) continue
 
@@ -167,7 +167,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
       if (transaction) {
         return {
           id,
-          collectionId,
+          collectionId: _collectionId,
           state: transaction.state,
           mutations: transaction.mutations.map((m: any) => ({
             id: m.mutationId,
@@ -254,9 +254,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     return `collection`
   }
 
-  private isLiveQuery = (
-    collection: any
-  ): boolean => {
+  private isLiveQuery = (collection: any): boolean => {
     return this.detectCollectionType(collection) === `live-query`
   }
 
@@ -283,7 +281,7 @@ export function createDbDevtoolsRegistry(): DbDevtoolsRegistry {
 // Initialize the global registry if not already present
 export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
   // SSR safety check
-  if (typeof window === 'undefined') {
+  if (typeof window === `undefined`) {
     // Return a no-op registry for server-side rendering
     return {
       collections: new Map(),
@@ -303,11 +301,9 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
       garbageCollect: () => {},
     } as DbDevtoolsRegistry
   }
-  
+
   if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
-    (window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
+    ;(window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
   }
   return (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry
 }
-
-
