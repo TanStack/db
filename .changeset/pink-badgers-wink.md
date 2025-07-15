@@ -1,5 +1,4 @@
 ---
-"@tanstack/db-collections": patch
 "@tanstack/db": patch
 ---
 
