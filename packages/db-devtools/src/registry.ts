@@ -16,15 +16,6 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   registerCollection = (collection: any): void => {
-    console.log('Registry: Registering collection', {
-      id: collection.id,
-      type: this.detectCollectionType(collection),
-      status: collection.status,
-      size: collection.size,
-      hasTransactions: collection.transactions.size > 0,
-      registrySize: this.collections.size
-    })
-
     const metadata: CollectionMetadata = {
       id: collection.id,
       type: this.detectCollectionType(collection),
@@ -49,12 +40,6 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     }
 
     this.collections.set(collection.id, entry)
-    
-    console.log('Registry: Collection registered successfully', {
-      id: collection.id,
-      totalCollections: this.collections.size,
-      allCollectionIds: Array.from(this.collections.keys())
-    })
 
     // Track performance for live queries
     if (this.isLiveQuery(collection)) {
@@ -91,8 +76,6 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   getAllCollectionMetadata = (): Array<CollectionMetadata> => {
-    console.log('Registry: getAllCollectionMetadata called, total collections:', this.collections.size)
-    
     const results: Array<CollectionMetadata> = []
 
     for (const [id, entry] of this.collections) {
@@ -105,22 +88,14 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
         entry.metadata.transactionCount = collection.transactions.size
         entry.metadata.lastUpdated = new Date()
         results.push({ ...entry.metadata })
-        console.log('Registry: Found live collection:', {
-          id,
-          status: collection.status,
-          size: collection.size,
-          type: entry.metadata.type
-        })
       } else {
         // Collection was garbage collected, mark it
         entry.metadata.status = `cleaned-up`
         entry.metadata.lastUpdated = new Date()
         results.push({ ...entry.metadata })
-        console.log('Registry: Found GC\'d collection:', id)
       }
     }
 
-    console.log('Registry: Returning metadata for', results.length, 'collections')
     return results
   }
 

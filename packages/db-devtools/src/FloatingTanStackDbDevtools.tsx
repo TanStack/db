@@ -118,7 +118,7 @@ export function FloatingTanStackDbDevtools({
     document.addEventListener('mouseup', unsub)
   }
 
-  const isButtonClosed = isOpen() ?? false
+
 
   createEffect(() => {
     setIsResolvedOpen(isOpen() ?? false)
@@ -182,9 +182,7 @@ export function FloatingTanStackDbDevtools({
   }
 
   const {
-    style: closeButtonStyle = {},
     onClick: onCloseClick,
-    ...otherCloseButtonProps
   } = closeButtonProps
 
   const {

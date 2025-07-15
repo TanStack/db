@@ -1,5 +1,5 @@
 import { clsx as cx } from 'clsx'
-import { Show, createMemo, createSignal, onMount } from 'solid-js'
+import { Show, createMemo, createSignal, onMount, For } from 'solid-js'
 import { useDevtoolsOnClose } from './contexts'
 import { useStyles } from './useStyles'
 import { useLocalStorage } from './useLocalStorage'
@@ -56,7 +56,7 @@ function CollectionItem({
   onSelect,
 }: {
   collection: CollectionMetadata
-  isActive: boolean
+  isActive: Accessor<boolean>
   onSelect: (collection: CollectionMetadata) => void
 }) {
   const styles = useStyles()
@@ -65,7 +65,7 @@ function CollectionItem({
     <div
       class={cx(
         styles().collectionItem,
-        isActive ? styles().collectionItemActive : ''
+        isActive() ? styles().collectionItemActive : ''
       )}
       onClick={() => onSelect(collection)}
     >
@@ -102,26 +102,67 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
     '',
   )
 
+  const [selectedView, setSelectedView] = createSignal<'collections' | 'transactions'>('collections')
+  const [selectedTransaction, setSelectedTransaction] = createSignal<string | null>(null)
+
   const [collections, setCollections] = createSignal<CollectionMetadata[]>([])
 
   // Poll for collections data
   onMount(() => {
     const updateCollections = () => {
       if (typeof window === 'undefined') return
-      
       try {
-        const metadata = registry().getAllCollectionMetadata()
-        setCollections(metadata)
+        const collections = registry().getAllCollectionMetadata()
+        setCollections(collections)
       } catch (error) {
-        console.warn('Error fetching collections metadata:', error)
+        // Silently handle errors when fetching collections metadata
       }
     }
-
     updateCollections()
     const intervalId = setInterval(updateCollections, POLLING_INTERVAL_MS)
-
     return () => clearInterval(intervalId)
   })
+
+  // Helper function to detect if collections data actually changed
+  const hasCollectionsChanged = (oldCollections: CollectionMetadata[], newCollections: CollectionMetadata[]): boolean => {
+    if (oldCollections.length !== newCollections.length) return true
+    
+    // Create maps for O(1) lookup by ID
+    const oldMap = new Map(oldCollections.map(c => [c.id, c]))
+    const newMap = new Map(newCollections.map(c => [c.id, c]))
+    
+    // Check if any collection data changed by comparing by ID
+    for (const [id, old] of oldMap) {
+      const new_ = newMap.get(id)
+      if (!new_) return true // Collection was removed
+      
+      if (old.status !== new_.status) return true
+      if (old.size !== new_.size) return true
+      if (old.hasTransactions !== new_.hasTransactions) return true
+      if (old.transactionCount !== new_.transactionCount) return true
+    }
+    
+    // Check if any new collections were added
+    for (const [id] of newMap) {
+      if (!oldMap.has(id)) return true
+    }
+    
+    return false
+  }
+
+  // --- Fix: Ensure selection is always valid and highlight updates instantly ---
+  // If the selected collection disappears, auto-select the first available one
+  createMemo(() => {
+    const ids = collections().map(c => c.id)
+    if (ids.length === 0) {
+      setActiveCollectionId('') // always a string
+      return
+    }
+    if (!ids.includes(activeCollectionId())) {
+      setActiveCollectionId(ids[0] ?? '')
+    }
+  })
+  // --- End fix ---
 
   const activeCollection = createMemo(() => {
     const active = collections().find(c => c.id === activeCollectionId())
@@ -138,24 +179,7 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
     )
   })
 
-  const collectionDetails = createMemo(() => {
-    const active = activeCollection()
-    if (!active) return null
-    
-    try {
-      const collection = registry().getCollection(active.id)
-      const metadata = registry().getCollectionMetadata(active.id)
-      
-      return {
-        collection,
-        metadata,
-        transactions: registry().getTransactions(active.id),
-      }
-    } catch (error) {
-      console.warn('Error getting collection details:', error)
-      return null
-    }
-  })
+
 
   return (
     <div
@@ -203,29 +227,98 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
           <Logo />
         </div>
         <div class={styles().collectionsExplorerContainer}>
-          <div class={styles().collectionsExplorer}>
-            <div class={styles().collectionsHeader}>
-              <div>Collections ({collections().length})</div>
-            </div>
-            
-            <div class={styles().collectionsList}>
-              <Show
-                when={sortedCollections().length > 0}
-                fallback={
-                  <div style={{ padding: '16px', color: '#666' }}>
-                    No collections found
-                  </div>
-                }
-              >
-                {sortedCollections().map((collection) => (
-                  <CollectionItem
-                    collection={collection}
-                    isActive={collection.id === activeCollectionId()}
-                    onSelect={(c) => setActiveCollectionId(c.id)}
-                  />
-                ))}
-              </Show>
-            </div>
+          {/* Tab Navigation */}
+          <div class={styles().tabNav}>
+            <button
+              onClick={() => setSelectedView('collections')}
+              class={cx(
+                styles().tabBtn,
+                selectedView() === 'collections' && styles().tabBtnActive
+              )}
+            >
+              Collections
+            </button>
+            <button
+              onClick={() => setSelectedView('transactions')}
+              class={cx(
+                styles().tabBtn,
+                selectedView() === 'transactions' && styles().tabBtnActive
+              )}
+            >
+              Transactions ({registry().getTransactions().length})
+            </button>
+          </div>
+
+          {/* Content based on selected view */}
+          <div class={styles().sidebarContent}>
+            <Show when={selectedView() === 'collections'}>
+              <div class={styles().collectionsExplorer}>
+                <div class={styles().collectionsHeader}>
+                  <div>Collections ({collections().length})</div>
+                </div>
+                
+                <div class={styles().collectionsList}>
+                  <Show
+                    when={sortedCollections().length > 0}
+                    fallback={
+                      <div style={{ padding: '16px', color: '#666' }}>
+                        No collections found
+                      </div>
+                    }
+                  >
+                    <For each={sortedCollections()}>{(collection) =>
+                      <CollectionItem
+                        collection={collection}
+                        isActive={() => collection.id === activeCollectionId()}
+                        onSelect={(c) => setActiveCollectionId(c.id)}
+                      />
+                    }</For>
+                  </Show>
+                </div>
+              </div>
+            </Show>
+
+            <Show when={selectedView() === 'transactions'}>
+              <div class={styles().transactionsExplorer}>
+                <div class={styles().collectionsHeader}>
+                  <div>Transactions ({registry().getTransactions().length})</div>
+                </div>
+                
+                <div class={styles().collectionsList}>
+                  <Show
+                    when={registry().getTransactions().length > 0}
+                    fallback={
+                      <div style={{ padding: '16px', color: '#666' }}>
+                        No transactions found
+                      </div>
+                    }
+                  >
+                    {registry().getTransactions().map((transaction) => (
+                      <div
+                        class={cx(
+                          styles().collectionItem,
+                          selectedTransaction() === transaction.id && styles().collectionItemActive
+                        )}
+                        onClick={() => setSelectedTransaction(transaction.id)}
+                      >
+                        <div class={styles().collectionName}>
+                          Transaction {transaction.id.slice(0, 8)}...
+                        </div>
+                        <div class={styles().collectionCount}>
+                          {transaction.mutations.length} mutations
+                        </div>
+                        <div class={cx(
+                          styles().collectionStatus,
+                          transaction.state === 'error' ? styles().collectionStatusError : ''
+                        )}>
+                          {transaction.state}
+                        </div>
+                      </div>
+                    ))}
+                  </Show>
+                </div>
+              </div>
+            </Show>
           </div>
         </div>
       </div>

@@ -13,8 +13,16 @@ export function initializeDbDevtools(): void {
     return
   }
 
+  // Check if devtools are already initialized
+  if ((window as any).__TANSTACK_DB_DEVTOOLS__) {
+    return
+  }
+
   // Initialize the registry
   const registry = initializeDevtoolsRegistry()
+
+  // Store the registry globally
+  ;(window as any).__TANSTACK_DB_DEVTOOLS__ = registry
 
   // Set up global registration function that collections can call
   ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {

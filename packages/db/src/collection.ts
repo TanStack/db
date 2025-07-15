@@ -25,19 +25,11 @@ export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
   if (typeof window !== `undefined`) {
-    console.log('Collection created, checking for devtools registration:', {
-      collectionId: collection.id,
-      registryAvailable: !!(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__,
-      registryExists: !!(window as any).__TANSTACK_DB_DEVTOOLS__
-    })
-    
     if ((window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
       (window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
       ;(collection as any).isRegisteredWithDevtools = true
-      console.log('Collection registered with devtools:', collection.id)
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
-      console.warn('Devtools registry not available for collection:', collection.id)
     }
   }
 }

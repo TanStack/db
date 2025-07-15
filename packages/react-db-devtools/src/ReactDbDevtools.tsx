@@ -31,7 +31,6 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
       devtoolsInstance.mount(ref.current)
       setDevtools(devtoolsInstance)
     } catch (error) {
-      console.error('ReactDbDevtools: Failed to mount DB devtools:', error)
       initializingRef.current = false // Reset flag on error
     }
     
@@ -43,7 +42,6 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
         }
       } catch (error) {
         // Ignore unmount errors if devtools weren't mounted
-        console.warn('ReactDbDevtools: Error unmounting DB devtools:', error)
       }
       initializingRef.current = false
     }
@@ -56,31 +54,31 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
     if (props.initialIsOpen !== undefined) {
       devtools.setInitialIsOpen(props.initialIsOpen)
     }
-    
+
     if (props.position !== undefined) {
       devtools.setPosition(props.position)
     }
-    
+
     if (props.panelProps !== undefined) {
       devtools.setPanelProps(props.panelProps)
     }
-    
+
     if (props.toggleButtonProps !== undefined) {
       devtools.setToggleButtonProps(props.toggleButtonProps)
     }
-    
+
     if (props.closeButtonProps !== undefined) {
       devtools.setCloseButtonProps(props.closeButtonProps)
     }
-    
+
     if (props.storageKey !== undefined) {
       devtools.setStorageKey(props.storageKey)
     }
-    
+
     if (props.panelState !== undefined) {
       devtools.setPanelState(props.panelState)
     }
-    
+
     if (props.onPanelStateChange !== undefined) {
       devtools.setOnPanelStateChange(props.onPanelStateChange)
     }
@@ -97,85 +95,5 @@ export function TanStackReactDbDevtools(props: TanStackReactDbDevtoolsProps = {}
   ])
 
   // Render a container div for the devtools
-  return <div ref={ref} />
-}
-
-export function TanStackReactDbDevtoolsPanel(props: TanStackReactDbDevtoolsProps = {}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [devtools, setDevtools] = useState<TanstackDbDevtools | null>(null)
-
-  // Initialize devtools only on client side
-  useEffect(() => {
-    if (typeof window === 'undefined' || !ref.current) return
-    
-    const devtoolsInstance = new TanstackDbDevtools(props)
-    
-    try {
-      // Mount the devtools to the DOM element
-      devtoolsInstance.mount(ref.current)
-      setDevtools(devtoolsInstance)
-    } catch (error) {
-      console.error('Failed to mount DB devtools panel:', error)
-    }
-    
-    return () => {
-      try {
-        // Only unmount if the devtools were successfully mounted
-        devtoolsInstance.unmount()
-      } catch (error) {
-        // Ignore unmount errors if devtools weren't mounted
-        console.warn('Error unmounting DB devtools panel:', error)
-      }
-    }
-  }, [])
-
-  // Update devtools when props change
-  useEffect(() => {
-    if (!devtools) return
-    
-    if (props.initialIsOpen !== undefined) {
-      devtools.setInitialIsOpen(props.initialIsOpen)
-    }
-    
-    if (props.position !== undefined) {
-      devtools.setPosition(props.position)
-    }
-    
-    if (props.panelProps !== undefined) {
-      devtools.setPanelProps(props.panelProps)
-    }
-    
-    if (props.toggleButtonProps !== undefined) {
-      devtools.setToggleButtonProps(props.toggleButtonProps)
-    }
-    
-    if (props.closeButtonProps !== undefined) {
-      devtools.setCloseButtonProps(props.closeButtonProps)
-    }
-    
-    if (props.storageKey !== undefined) {
-      devtools.setStorageKey(props.storageKey)
-    }
-    
-    if (props.panelState !== undefined) {
-      devtools.setPanelState(props.panelState)
-    }
-    
-    if (props.onPanelStateChange !== undefined) {
-      devtools.setOnPanelStateChange(props.onPanelStateChange)
-    }
-  }, [
-    devtools,
-    props.initialIsOpen,
-    props.position,
-    props.panelProps,
-    props.toggleButtonProps,
-    props.closeButtonProps,
-    props.storageKey,
-    props.panelState,
-    props.onPanelStateChange,
-  ])
-
-  // Render a container div for the devtools panel
   return <div ref={ref} />
 }

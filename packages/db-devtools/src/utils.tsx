@@ -15,7 +15,7 @@ export function multiSortBy<T>(
   items: T[],
   sorters: ((item: T) => any)[],
 ): T[] {
-  return items.sort((a, b) => {
+  return [...items].sort((a, b) => {
     for (let i = 0; i < sorters.length; i++) {
       const sorter = sorters[i]
       if (!sorter) continue
@@ -25,7 +25,7 @@ export function multiSortBy<T>(
       
       if (aVal < bVal) return -1
       if (aVal > bVal) return 1
-    }
+  }
     return 0
   })
 }
@@ -54,8 +54,8 @@ export function displayValue(value: any, space?: number): string {
   
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value)
-  }
-  
+}
+
   if (value === null) {
     return 'null'
   }
@@ -69,7 +69,7 @@ export function displayValue(value: any, space?: number): string {
   }
   
   return String(value)
-}
+    }
 
 export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp)
@@ -98,7 +98,7 @@ export function sortBy<T>(
   items: T[],
   sorter: (item: T) => any,
 ): T[] {
-  return items.sort((a, b) => {
+  return [...items].sort((a, b) => {
     const aVal = sorter(a)
     const bVal = sorter(b)
     

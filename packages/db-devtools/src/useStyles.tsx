@@ -5,8 +5,8 @@ import { ShadowDomTargetContext } from './contexts'
 import type { Accessor } from 'solid-js'
 
 const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
-  const { colors, font, size, alpha, shadow, border } = tokens
-  const { fontFamily, lineHeight, size: fontSize } = font
+  const { colors, font, size, alpha, border } = tokens
+  const { fontFamily, size: fontSize } = font
   const css = shadowDOMTarget
     ? goober.css.bind({ target: shadowDOMTarget })
     : goober.css
@@ -363,6 +363,42 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     `,
     collectionsExplorer: css`
       padding: ${size[2]};
+    `,
+    tabNav: css`
+      display: flex;
+      border-bottom: 1px solid ${colors.gray[700]};
+      background: ${colors.darkGray[600]};
+    `,
+    tabBtn: css`
+      flex: 1;
+      padding: ${size[2]} ${size[3]};
+      background: transparent;
+      border: none;
+      color: ${colors.gray[400]};
+      cursor: pointer;
+      font-size: ${fontSize.sm};
+      font-weight: ${font.weight.medium};
+      
+      &:hover {
+        background: ${colors.darkGray[500]};
+      }
+    `,
+    tabBtnActive: css`
+      background: ${colors.blue[500]};
+      color: ${colors.white};
+      
+      &:hover {
+        background: ${colors.blue[600]};
+      }
+    `,
+    sidebarContent: css`
+      flex: 1;
+      overflow-y: auto;
+    `,
+    transactionsExplorer: css`
+      display: flex;
+      flex-direction: column;
+      flex: 1;
     `,
   }
 }
