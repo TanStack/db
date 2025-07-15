@@ -21,17 +21,21 @@ export function initializeDbDevtools(): void {
   // Initialize the registry
   const registry = initializeDevtoolsRegistry()
 
-  // Store the registry globally
-  ;(window as any).__TANSTACK_DB_DEVTOOLS__ = registry
-
-  // Set up global registration function that collections can call
-  ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__ = (collection: any) => {
-    registry.registerCollection(collection)
-  }
-
-  // Set up global unregistration function
-  ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__ = (id: string) => {
-    registry.unregisterCollection(id)
+  // Store the registry globally under the namespaced structure
+  ;(window as any).__TANSTACK_DB_DEVTOOLS__ = {
+    ...registry,
+    collectionsSignal: registry.collectionsSignal,
+    transactionsSignal: registry.transactionsSignal,
+    registerCollection: (collection: any) => {
+      const updateCallback = registry.registerCollection(collection)
+      // Store the callback on the collection for later use
+      if (updateCallback && collection) {
+        collection.__devtoolsUpdateCallback = updateCallback
+      }
+    },
+    unregisterCollection: (id: string) => {
+      registry.unregisterCollection(id)
+    },
   }
 }
 
@@ -40,15 +44,18 @@ export function initializeDbDevtools(): void {
  * This is automatically called by collections when they are created if devtools are enabled.
  */
 export function registerCollection(
-  collection: CollectionImpl<any, any, any>
+  collection: CollectionImpl<any, any, any> | undefined
 ): void {
   if (typeof window === `undefined`) return
 
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
-    | DbDevtoolsRegistry
-    | undefined
-  if (registry) {
-    registry.registerCollection(collection)
+  const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__ as {
+    registerCollection: (collection: any) => (() => void) | undefined
+  }
+  const updateCallback: (() => void) | undefined =
+    devtools.registerCollection(collection)
+  // Store the callback on the collection for later use
+  if (updateCallback && collection) {
+    ;(collection as any).__devtoolsUpdateCallback = updateCallback
   }
 }
 
@@ -59,12 +66,10 @@ export function registerCollection(
 export function unregisterCollection(id: string): void {
   if (typeof window === `undefined`) return
 
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
-    | DbDevtoolsRegistry
-    | undefined
-  if (registry) {
-    registry.unregisterCollection(id)
+  const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__ as {
+    unregisterCollection: (id: string) => void
   }
+  devtools.unregisterCollection(id)
 }
 
 /**
@@ -75,14 +80,62 @@ export function isDevtoolsEnabled(): boolean {
   return !!(window as any).__TANSTACK_DB_DEVTOOLS__
 }
 
-/**
- * Get the current devtools registry instance.
- */
 export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
   if (typeof window === `undefined`) return undefined
-  return (window as any).__TANSTACK_DB_DEVTOOLS__ as
-    | DbDevtoolsRegistry
-    | undefined
+  const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__!
+
+  // Return the registry part of the devtools object
+  return {
+    collections: devtools.collections,
+    collectionsSignal: devtools.collectionsSignal,
+    transactionsSignal: devtools.transactionsSignal,
+    registerCollection: devtools.registerCollection,
+    unregisterCollection: devtools.unregisterCollection,
+    getCollection: devtools.getCollection,
+    releaseCollection: devtools.releaseCollection,
+    getAllCollectionMetadata: devtools.getAllCollectionMetadata,
+    getCollectionMetadata: devtools.getCollectionMetadata,
+    updateCollectionMetadata: devtools.updateCollectionMetadata,
+    updateTransactions: devtools.updateTransactions,
+    getTransactions: devtools.getTransactions,
+    getTransaction: devtools.getTransaction,
+    getTransactionDetails: devtools.getTransactionDetails,
+    clearTransactionHistory: devtools.clearTransactionHistory,
+    onTransactionStart: devtools.onTransactionStart,
+    onTransactionEnd: devtools.onTransactionEnd,
+    cleanup: devtools.cleanup,
+    garbageCollect: devtools.garbageCollect,
+  } as DbDevtoolsRegistry
+}
+
+/**
+ * Trigger a metadata update for a collection in the devtools.
+ * This should be called by collections when their state changes significantly.
+ */
+export function triggerCollectionUpdate(
+  collection: CollectionImpl<any, any, any>
+): void {
+  if (typeof window === `undefined`) return
+
+  const updateCallback = (collection as any).__devtoolsUpdateCallback
+  if (typeof updateCallback === `function`) {
+    updateCallback()
+  }
+}
+
+/**
+ * Trigger a transaction update for a collection in the devtools.
+ * This should be called by collections when their transactions change.
+ */
+export function triggerTransactionUpdate(
+  collection: CollectionImpl<any, any, any>
+): void {
+  if (typeof window === `undefined`) return
+
+  const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+  if (devtools?.updateTransactions) {
+    devtools.updateTransactions(collection.id)
+  }
 }
 
 /**
@@ -92,11 +145,9 @@ export function getDevtoolsRegistry(): DbDevtoolsRegistry | undefined {
 export function cleanupDevtools(): void {
   if (typeof window === `undefined`) return
 
-  const registry = (window as any).__TANSTACK_DB_DEVTOOLS__ as
-    | DbDevtoolsRegistry
-    | undefined
-  if (registry) {
-    registry.cleanup()
+  const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+  if (devtools?.cleanup) {
+    devtools.cleanup()
     delete (window as any).__TANSTACK_DB_DEVTOOLS__
   }
 }

@@ -117,12 +117,12 @@ export function CollectionsPanel({
           }
         >
           <For each={sortedGroupEntries()}>
-            {([type, collections]) => (
-              <Show when={collections.length > 0}>
+            {([type, groupCollections]) => (
+              <Show when={groupCollections.length > 0}>
                 <div class={styles().collectionGroup}>
                   <div class={styles().collectionGroupHeader}>
                     <div>
-                      {getGroupDisplayName(type)} ({collections.length})
+                      {getGroupDisplayName(type)} ({groupCollections.length})
                     </div>
                     <div class={styles().collectionGroupStats}>
                       <For each={getGroupStats(type)}>
@@ -130,7 +130,7 @@ export function CollectionsPanel({
                       </For>
                     </div>
                   </div>
-                  <For each={collections}>
+                  <For each={groupCollections}>
                     {(collection) => (
                       <CollectionItem
                         collection={collection}

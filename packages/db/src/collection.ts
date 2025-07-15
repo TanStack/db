@@ -25,8 +25,8 @@ export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
   if (typeof window !== `undefined`) {
-    if ((window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__) {
-      ;(window as any).__TANSTACK_DB_DEVTOOLS_REGISTER__(collection)
+    if ((window as any).__TANSTACK_DB_DEVTOOLS__?.registerCollection) {
+      ;(window as any).__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
       ;(collection as any).isRegisteredWithDevtools = true
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
@@ -34,13 +34,27 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
   }
 }
 
+// Helper function to trigger devtools updates
+function triggerDevtoolsUpdate(
+  collection: CollectionImpl<any, any, any>
+): void {
+  if (typeof window !== `undefined`) {
+    const updateCallback = (collection as any).__devtoolsUpdateCallback
+    if (typeof updateCallback === `function`) {
+      updateCallback()
+    }
+  }
+}
+
 // Declare the devtools registry on window
 declare global {
   interface Window {
-    __TANSTACK_DB_DEVTOOLS_REGISTER__?: (
-      collection: CollectionImpl<any, any, any>
-    ) => void
-    __TANSTACK_DB_DEVTOOLS_UNREGISTER__?: (id: string) => void
+    __TANSTACK_DB_DEVTOOLS__?: {
+      registerCollection: (
+        collection: CollectionImpl<any, any, any>
+      ) => (() => void) | undefined
+      unregisterCollection: (id: string) => void
+    }
   }
 }
 
@@ -327,6 +341,9 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
+
+    // Trigger devtools update when status changes
+    triggerDevtoolsUpdate(this)
   }
 
   /**
@@ -556,9 +573,9 @@ export class CollectionImpl<
     // Unregister from devtools if available
     if (
       typeof window !== `undefined` &&
-      (window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__
+      (window as any).__TANSTACK_DB_DEVTOOLS__?.unregisterCollection
     ) {
-      ;(window as any).__TANSTACK_DB_DEVTOOLS_UNREGISTER__(this.id)
+      ;(window as any).__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
       this.isRegisteredWithDevtools = false
     }
 
@@ -749,6 +766,9 @@ export class CollectionImpl<
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus)
     }
+
+    // Trigger devtools update after optimistic state changes
+    triggerDevtoolsUpdate(this)
   }
 
   /**
@@ -1209,6 +1229,9 @@ export class CollectionImpl<
         this.onFirstCommitCallbacks = []
         callbacks.forEach((callback) => callback())
       }
+
+      // Trigger devtools update after sync operations
+      triggerDevtoolsUpdate(this)
     }
   }
 
@@ -1993,5 +2016,8 @@ export class CollectionImpl<
     this.capturePreSyncVisibleState()
 
     this.recomputeOptimisticState()
+
+    // Trigger devtools update after transaction state changes
+    triggerDevtoolsUpdate(this)
   }
 }

@@ -8,8 +8,8 @@
     "jsxImportSource": "solid-js",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "target": "ES2021",
-    "lib": ["ES2021", "DOM"]
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*", "*.config.ts"],
   "exclude": ["build", "dist", "node_modules"]

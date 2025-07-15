@@ -35,5 +35,5 @@
     "examples/**/*.tsx",
     "eslint.config.mjs"
   ],
-  "exclude": ["node_modules", "devtools-reference/**"]
+  "exclude": ["node_modules"]
 }

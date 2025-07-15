@@ -75,6 +75,8 @@ export interface CollectionRegistryEntry {
   metadata: CollectionMetadata
   isActive: boolean // Whether we're currently viewing this collection (hard ref held)
   hardRef?: CollectionImpl<any, any, any> // Only set when actively viewing
+  updateCallback?: () => void // Callback to trigger metadata update (doesn't hold strong refs)
+  updateTransactionsCallback?: () => void // Callback to trigger transaction update only (doesn't hold strong refs)
 }
 
 export interface TransactionDetails {
@@ -99,13 +101,21 @@ export interface TransactionDetails {
 export interface DbDevtoolsRegistry {
   collections: Map<string, CollectionRegistryEntry>
 
+  // SolidJS signals for reactive UI updates
+  collectionsSignal: () => Array<CollectionMetadata>
+  transactionsSignal: () => Array<TransactionDetails>
+
   // Registration methods
-  registerCollection: (collection: CollectionImpl<any, any, any>) => void
+  registerCollection: (
+    collection: CollectionImpl<any, any, any>
+  ) => (() => void) | undefined
   unregisterCollection: (id: string) => void
 
   // Metadata access
   getCollectionMetadata: (id: string) => CollectionMetadata | undefined
   getAllCollectionMetadata: () => Array<CollectionMetadata>
+  updateCollectionMetadata: (id: string) => void // Trigger immediate metadata update
+  updateTransactions: (collectionId?: string) => void // Trigger immediate transaction update
 
   // Collection access (creates hard refs)
   getCollection: (id: string) => CollectionImpl<any, any, any> | undefined

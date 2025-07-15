@@ -1,4 +1,4 @@
-import { POLLING_INTERVAL_MS } from "./constants"
+import { createSignal } from "solid-js"
 import type {
   CollectionMetadata,
   CollectionRegistryEntry,
@@ -8,14 +8,60 @@ import type {
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   public collections = new Map<string, CollectionRegistryEntry>()
-  private pollingInterval: number | null = null
+
+  // SolidJS signals for reactive updates
+  private _collectionsSignal = createSignal<Array<CollectionMetadata>>([])
+  private _transactionsSignal = createSignal<Array<TransactionDetails>>([])
 
   constructor() {
-    // Start polling for metadata updates
-    this.startPolling()
+    // No polling needed; updates are now immediate via signals
   }
 
-  registerCollection = (collection: any): void => {
+  // Expose signals for reactive UI updates
+  public get collectionsSignal() {
+    return this._collectionsSignal[0]
+  }
+
+  public get transactionsSignal() {
+    return this._transactionsSignal[0]
+  }
+
+  private triggerUpdate = () => {
+    // Update collections signal
+    const collectionsData = this.getAllCollectionMetadata()
+    this._collectionsSignal[1](collectionsData)
+
+    // Update transactions signal
+    const transactionsData = this.getTransactions()
+    this._transactionsSignal[1](transactionsData)
+  }
+
+  private triggerCollectionUpdate = (id: string) => {
+    // Get the current collections array
+    const currentCollections = this._collectionsSignal[0]()
+
+    // Find the index of the collection to update
+    const index = currentCollections.findIndex((c) => c.id === id)
+
+    if (index !== -1) {
+      // Get updated metadata for this specific collection
+      const updatedMetadata = this.getCollectionMetadata(id)
+      if (updatedMetadata) {
+        // Create a new array with the updated collection
+        const newCollections = [...currentCollections]
+        newCollections[index] = updatedMetadata
+        this._collectionsSignal[1](newCollections)
+      }
+    }
+  }
+
+  private triggerTransactionUpdate = (collectionId?: string) => {
+    // Get updated transactions data
+    const updatedTransactions = this.getTransactions(collectionId)
+    this._transactionsSignal[1](updatedTransactions)
+  }
+
+  registerCollection = (collection: any): (() => void) | undefined => {
     const metadata: CollectionMetadata = {
       id: collection.id,
       type: this.detectCollectionType(collection),
@@ -33,10 +79,23 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
         : undefined,
     }
 
+    // Create a callback that updates metadata for this specific collection
+    // This callback doesn't hold strong references to the collection
+    const updateCallback = () => {
+      this.updateCollectionMetadata(collection.id)
+    }
+
+    // Create a callback that updates only transactions for this collection
+    const updateTransactionsCallback = () => {
+      this.triggerTransactionUpdate(collection.id)
+    }
+
     const entry: CollectionRegistryEntry = {
       weakRef: new WeakRef(collection),
       metadata,
       isActive: false,
+      updateCallback,
+      updateTransactionsCallback,
     }
 
     this.collections.set(collection.id, entry)
@@ -45,6 +104,15 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     if (this.isLiveQuery(collection)) {
       this.instrumentLiveQuery(collection, entry)
     }
+
+    // Call the update callback immediately so devtools UI updates right away
+    updateCallback()
+
+    // Trigger reactive update for immediate UI refresh
+    this.triggerUpdate()
+
+    // Return the update callback for the collection to use
+    return updateCallback
   }
 
   unregisterCollection = (id: string): void => {
@@ -55,6 +123,9 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
       entry.isActive = false
       this.collections.delete(id)
     }
+
+    // Trigger reactive update for immediate UI refresh
+    this.triggerUpdate()
   }
 
   getCollectionMetadata = (id: string): CollectionMetadata | undefined => {
@@ -97,6 +168,31 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     }
 
     return results
+  }
+
+  updateCollectionMetadata = (id: string): void => {
+    const entry = this.collections.get(id)
+    if (!entry) return
+
+    const collection = entry.weakRef.deref()
+    if (collection) {
+      // Update metadata with fresh data from the collection
+      entry.metadata.status = collection.status
+      entry.metadata.size = collection.size
+      entry.metadata.hasTransactions = collection.transactions.size > 0
+      entry.metadata.transactionCount = collection.transactions.size
+      entry.metadata.lastUpdated = new Date()
+    }
+
+    // Use efficient update that only changes the specific collection
+    this.triggerCollectionUpdate(id)
+
+    // Also update transactions since they may have changed
+    this.triggerTransactionUpdate(id)
+  }
+
+  updateTransactions = (collectionId?: string): void => {
+    this.triggerTransactionUpdate(collectionId)
   }
 
   getCollection = (id: string): any => {
@@ -190,10 +286,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   cleanup = (): void => {
     // Stop polling
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval)
-      this.pollingInterval = null
-    }
+    // No polling to stop
 
     // Release all hard references
     for (const [_id, entry] of this.collections) {
@@ -212,29 +305,6 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
         this.collections.delete(id)
       }
     }
-  }
-
-  private startPolling = (): void => {
-    if (this.pollingInterval) return
-
-    this.pollingInterval = window.setInterval(() => {
-      // Garbage collect dead references
-      this.garbageCollect()
-
-      // Update metadata for active collections
-      for (const [_id, entry] of this.collections) {
-        if (!entry.isActive) continue // Only update metadata for inactive collections to avoid holding refs
-
-        const collection = entry.weakRef.deref()
-        if (collection) {
-          entry.metadata.status = collection.status
-          entry.metadata.size = collection.size
-          entry.metadata.hasTransactions = collection.transactions.size > 0
-          entry.metadata.transactionCount = collection.transactions.size
-          entry.metadata.lastUpdated = new Date()
-        }
-      }
-    }, POLLING_INTERVAL_MS)
   }
 
   private detectCollectionType = (collection: any): string => {
@@ -276,14 +346,21 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
   // SSR safety check
   if (typeof window === `undefined`) {
     // Return a no-op registry for server-side rendering
+    const [collectionsSignal] = createSignal<Array<CollectionMetadata>>([])
+    const [transactionsSignal] = createSignal<Array<TransactionDetails>>([])
+
     return {
       collections: new Map(),
-      registerCollection: () => {},
+      collectionsSignal,
+      transactionsSignal,
+      registerCollection: () => undefined,
       unregisterCollection: () => {},
       getCollection: () => undefined,
       releaseCollection: () => {},
       getAllCollectionMetadata: () => [],
       getCollectionMetadata: () => undefined,
+      updateCollectionMetadata: () => {},
+      updateTransactions: () => {},
       getTransactions: () => [],
       getTransaction: () => undefined,
       getTransactionDetails: () => undefined,
