@@ -211,8 +211,8 @@ importers:
   packages/db:
     dependencies:
       '@electric-sql/d2mini':
-        specifier: ^0.1.6
-        version: 0.1.6
+        specifier: ^0.1.7
+        version: 0.1.7
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -622,8 +622,8 @@ packages:
   '@electric-sql/client@1.0.0':
     resolution: {integrity: sha512-kGiVbBIlMqc/CeJpWZuLjxNkm0836NWxeMtIWH2w5IUK8pUL13hyxg3ZkR7+FlTGhpKuZRiCP5nPOH9D6wbhPw==}
 
-  '@electric-sql/d2mini@0.1.6':
-    resolution: {integrity: sha512-FLzsK4kAtD3upU0MDj3JQx3jPwgFfwmPJ69kheMPeMexoPO8aTIr/nhWL7GSnCLFB+BDSPOFUeffDhSomLRNXA==}
+  '@electric-sql/d2mini@0.1.7':
+    resolution: {integrity: sha512-gcXZKkMmgGdNB6AQl0S9jJIbKZdlgafbA3u/a9TVltIgXE1VPuBN7j6tf25RfxX/5oi6o6ca9KHluJQwg40oLg==}
 
   '@emnapi/core@1.4.4':
     resolution: {integrity: sha512-A9CnAbC6ARNMKcIcrQwq6HeHCjpcBZ5wSx4U01WXCqEKlrzB9F9315WDNHkrs2xbx7YjjSxbUYxuN6EQzpcY2g==}
@@ -7512,7 +7512,7 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.44.2
 
-  '@electric-sql/d2mini@0.1.6':
+  '@electric-sql/d2mini@0.1.7':
     dependencies:
       fractional-indexing: 3.2.0
       murmurhash-js: 1.0.0

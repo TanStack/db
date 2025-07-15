@@ -480,6 +480,27 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }) as any
   }
 
+  /**
+   * Specify that the query should return distinct rows.
+   * Deduplicates rows based on the selected columns.
+   * @returns A QueryBuilder with distinct enabled
+   *
+   * @example
+   * ```ts
+   * // Get countries our users are from
+   * query
+   *   .from({ users: usersCollection })
+   *   .select(({users}) => users.country)
+   *   .distinct()
+   * ```
+   */
+  distinct(): QueryBuilder<TContext> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      distinct: true,
+    }) as any
+  }
+
   // Helper methods
   private _getCurrentAliases(): Array<string> {
     const aliases: Array<string> = []

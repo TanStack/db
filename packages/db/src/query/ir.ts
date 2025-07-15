@@ -15,6 +15,7 @@ export interface QueryIR {
   orderBy?: OrderBy
   limit?: Limit
   offset?: Offset
+  distinct?: true
 
   // Functional variants
   fnSelect?: (row: NamespacedRow) => any
