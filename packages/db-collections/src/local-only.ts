@@ -211,6 +211,7 @@ export function localOnlyCollectionOptions<
     utils: {} as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,
+    collectionType: `local-only` as const,
   }
 }
 

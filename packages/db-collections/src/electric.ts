@@ -424,6 +424,7 @@ export function electricCollectionOptions<
     utils: {
       awaitTxId,
     },
+    collectionType: `electric` as const,
   }
 }
 

@@ -237,21 +237,14 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     }, POLLING_INTERVAL_MS)
   }
 
-  private detectCollectionType = (
-    collection: any
-  ): `collection` | `live-query` => {
-    // Check the devtools type marker first
-    if (collection.config.__devtoolsType) {
-      return collection.config.__devtoolsType
+  private detectCollectionType = (collection: any): string => {
+    // Check the new collection type marker first
+    if (collection.config.collectionType) {
+      return collection.config.collectionType
     }
 
-    // Check if the collection ID suggests it's a live query
-    if (collection.id.startsWith(`live-query-`)) {
-      return `live-query`
-    }
-
-    // Default to regular collection
-    return `collection`
+    // Default to generic collection
+    return `generic`
   }
 
   private isLiveQuery = (collection: any): boolean => {

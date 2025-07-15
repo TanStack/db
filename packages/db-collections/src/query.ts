@@ -232,7 +232,10 @@ export function queryCollectionOptions<
   TQueryKey extends QueryKey = QueryKey,
 >(
   config: QueryCollectionConfig<TItem, TError, TQueryKey>
-): CollectionConfig<TItem> & { utils: QueryCollectionUtils } {
+): CollectionConfig<TItem> & {
+  utils: QueryCollectionUtils
+  collectionType: `query`
+} {
   const {
     queryKey,
     queryFn,
@@ -446,5 +449,6 @@ export function queryCollectionOptions<
     utils: {
       refetch,
     },
+    collectionType: `query` as const,
   }
 }

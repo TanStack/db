@@ -48,7 +48,7 @@ export interface DbDevtoolsConfig {
 
 export interface CollectionMetadata {
   id: string
-  type: `collection` | `live-query`
+  type: string
   status: CollectionStatus
   size: number
   hasTransactions: boolean

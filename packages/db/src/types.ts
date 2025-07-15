@@ -331,10 +331,10 @@ export interface CollectionConfig<
    */
   compare?: (x: T, y: T) => number
   /**
-   * Internal field used by devtools to identify collection type
+   * Collection type for devtools grouping and identification
    * @internal
    */
-  __devtoolsType?: `live-query` | `collection`
+  collectionType?: string
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
