@@ -84,7 +84,7 @@ export function createTransaction<T extends object = Record<string, unknown>>(
  *   console.log('Operations will join transaction:', ambientTx.id)
  * }
  */
-export function getActiveTransaction(): Transaction<any> | undefined {
+export function getActiveTransaction(): Transaction | undefined {
   if (transactionStack.length > 0) {
     return transactionStack.slice(-1)[0]
   } else {

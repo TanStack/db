@@ -149,8 +149,9 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
  */
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
 > = Transaction<T> & {
-  mutations: NonEmptyArray<PendingMutation<T>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
@@ -272,7 +273,7 @@ export type UpdateMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
-  transaction: TransactionWithMutations<T>
+  transaction: TransactionWithMutations<T, `update`>
   collection: Collection<T, TKey, TUtils>
 }
 
@@ -281,7 +282,7 @@ export type InsertMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
-  transaction: TransactionWithMutations<T>
+  transaction: TransactionWithMutations<T, `insert`>
   collection: Collection<T, TKey, TUtils>
 }
 export type DeleteMutationFnParams<
@@ -289,7 +290,7 @@ export type DeleteMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
 > = {
-  transaction: TransactionWithMutations<T>
+  transaction: TransactionWithMutations<T, `delete`>
   collection: Collection<T, TKey, TUtils>
 }
 
@@ -424,6 +425,7 @@ export interface CollectionConfig<
    * }
    */
   onInsert?: InsertMutationFn<TInsertInput, TKey>
+
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and collection information

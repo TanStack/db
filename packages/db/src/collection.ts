@@ -1370,7 +1370,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T> = {
+      const mutation: PendingMutation<T, `insert`> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -1412,7 +1412,10 @@ export class CollectionImpl<
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
             transaction:
-              params.transaction as unknown as TransactionWithMutations<TInsertInput>,
+              params.transaction as unknown as TransactionWithMutations<
+                TInsertInput,
+                `insert`
+              >,
             collection: this as unknown as Collection<T, TKey, TUtils>,
           })
         },
@@ -1639,7 +1642,11 @@ export class CollectionImpl<
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
-          ...params,
+          transaction:
+            params.transaction as unknown as TransactionWithMutations<
+              T,
+              `update`
+            >,
           collection: this as unknown as Collection<T, TKey, TUtils>,
         })
       },
@@ -1754,7 +1761,11 @@ export class CollectionImpl<
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
-          ...params,
+          transaction:
+            params.transaction as unknown as TransactionWithMutations<
+              T,
+              `delete`
+            >,
           collection: this as unknown as Collection<T, TKey, TUtils>,
         })
       },

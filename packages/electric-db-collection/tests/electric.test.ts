@@ -461,7 +461,7 @@ describe(`Electric Integration`, () => {
       const mockTransaction = {
         id: `test-transaction`,
         mutations: [],
-      } as unknown as TransactionWithMutations<Row>
+      } as unknown as TransactionWithMutations<Row, `insert`>
       const mockParams: InsertMutationFnParams<Row> = {
         transaction: mockTransaction,
         // @ts-expect-error not relevant to test

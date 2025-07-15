@@ -161,9 +161,9 @@ describe(`LocalStorage collection type resolution tests`, () => {
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
-        expectTypeOf(params.transaction.mutations[0].original).toEqualTypeOf<
-          ExplicitType | {}
-        >()
+        expectTypeOf(
+          params.transaction.mutations[0].original
+        ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
     })

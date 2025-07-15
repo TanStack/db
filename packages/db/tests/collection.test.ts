@@ -1094,10 +1094,6 @@ describe(`Collection with schema validation`, () => {
     expect(tx1.mutations).toHaveLength(1)
     const mutation = tx1.mutations[0]!
 
-    mutation.collection.forEach((item) => {
-      console.log(item)
-    })
-
     // Test the mutation type structure
     expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
     expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
