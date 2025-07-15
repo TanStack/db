@@ -107,13 +107,34 @@ export const queryTodoCollection = createCollection(
   })
 )
 
+type Todo = {
+  id: number
+  text: string
+  completed: boolean
+  created_at: number
+  updated_at: number
+}
+
 // TrailBase Todo Collection
-export const trailBaseTodoCollection = createCollection<SelectTodo>(
-  trailBaseCollectionOptions({
+export const trailBaseTodoCollection = createCollection(
+  trailBaseCollectionOptions<SelectTodo, Todo>({
     id: `todos`,
     getKey: (item) => item.id,
     schema: selectTodoSchema,
     recordApi: trailBaseClient.records(`todos`),
+    // Re-using the example's drizzle-schema requires remapping the items.
+    parse: (record: Todo): SelectTodo => ({
+      ...record,
+      created_at: new Date(record.created_at * 1000),
+      updated_at: new Date(record.updated_at * 1000),
+    }),
+    serialize: (item) => ({
+      ...item,
+      created_at:
+        item.created_at && Math.floor(item.created_at.valueOf() / 1000),
+      updated_at:
+        item.updated_at && Math.floor(item.updated_at.valueOf() / 1000),
+    }),
   })
 )
 
@@ -185,12 +206,33 @@ export const queryConfigCollection = createCollection(
   })
 )
 
+type Config = {
+  id: number
+  key: string
+  value: string
+  created_at: number
+  updated_at: number
+}
+
 // TrailBase Config Collection
-export const trailBaseConfigCollection = createCollection<SelectConfig>(
-  trailBaseCollectionOptions({
+export const trailBaseConfigCollection = createCollection(
+  trailBaseCollectionOptions<SelectConfig, Config>({
     id: `config`,
     getKey: (item) => item.id,
     schema: selectConfigSchema,
     recordApi: trailBaseClient.records(`config`),
+    // Re-using the example's drizzle-schema requires remapping the items.
+    parse: (record: Config): SelectConfig => ({
+      ...record,
+      created_at: new Date(record.created_at * 1000),
+      updated_at: new Date(record.updated_at * 1000),
+    }),
+    serialize: (item) => ({
+      ...item,
+      created_at:
+        item.created_at && Math.floor(item.created_at.valueOf() / 1000),
+      updated_at:
+        item.updated_at && Math.floor(item.updated_at.valueOf() / 1000),
+    }),
   })
 )

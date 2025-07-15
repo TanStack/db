@@ -5,10 +5,11 @@ import type { Event, RecordApi } from "trailbase"
 import type { CollectionConfig, SyncConfig, UtilsRecord } from "@tanstack/db"
 
 /**
- * Configuration interface for TrailbaseCollection
+ * Configuration interface for Trailbase Collection
  */
 export interface TrailBaseCollectionConfig<
   TItem extends object,
+  TRecord extends object = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
     CollectionConfig<TItem, TKey>,
@@ -17,7 +18,10 @@ export interface TrailBaseCollectionConfig<
   /**
    * Record API name
    */
-  recordApi: RecordApi<TItem>
+  recordApi: RecordApi<TRecord>
+
+  parse?: (record: TRecord) => TItem
+  serialize?: (item: Partial<TItem> | TItem) => Partial<TRecord> | TRecord
 }
 
 export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
@@ -26,10 +30,20 @@ export interface TrailBaseCollectionUtils extends UtilsRecord {
   cancel: () => void
 }
 
-export function trailBaseCollectionOptions<TItem extends object>(
-  config: TrailBaseCollectionConfig<TItem>
-): CollectionConfig<TItem> & { utils: TrailBaseCollectionUtils } {
+export function trailBaseCollectionOptions<
+  TItem extends object,
+  TRecord extends object = TItem,
+  TKey extends string | number = string | number,
+>(
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>
+): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
   const getKey = config.getKey
+
+  const parse = (record: TRecord) => (config.parse?.(record) ?? record) as TItem
+  const serialUpd = (item: Partial<TItem>) =>
+    (config.serialize?.(item) ?? item) as Partial<TRecord>
+  const serialIns = (item: TItem) =>
+    (config.serialize?.(item) ?? item) as TRecord
 
   const seenIds = new Store(new Map<string, number>())
 
@@ -83,7 +97,7 @@ export function trailBaseCollectionOptions<TItem extends object>(
     }
   }, 120 * 1000)
 
-  type SyncParams = Parameters<SyncConfig<TItem>[`sync`]>[0]
+  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
 
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancel = () => {
@@ -117,7 +131,10 @@ export function trailBaseCollectionOptions<TItem extends object>(
 
           got = got + length
           for (const item of response.records) {
-            write({ type: `insert`, value: item })
+            write({
+              type: `insert`,
+              value: parse(item),
+            })
           }
 
           if (length < limit) break
@@ -149,13 +166,13 @@ export function trailBaseCollectionOptions<TItem extends object>(
           begin()
           let value: TItem | undefined
           if (`Insert` in event) {
-            value = event.Insert as TItem
+            value = parse(event.Insert as TRecord)
             write({ type: `insert`, value })
           } else if (`Delete` in event) {
-            value = event.Delete as TItem
+            value = parse(event.Delete as TRecord)
             write({ type: `delete`, value })
           } else if (`Update` in event) {
-            value = event.Update as TItem
+            value = parse(event.Update as TRecord)
             write({ type: `update`, value })
           } else {
             console.error(`Error: ${event.Error}`)
@@ -205,7 +222,7 @@ export function trailBaseCollectionOptions<TItem extends object>(
           if (type !== `insert`) {
             throw new Error(`Expected 'insert', got: ${type}`)
           }
-          return changes
+          return serialIns(changes)
         })
       )
 
@@ -224,7 +241,8 @@ export function trailBaseCollectionOptions<TItem extends object>(
             throw new Error(`Expected 'update', got: ${type}`)
           }
 
-          await config.recordApi.update(key, changes)
+          await config.recordApi.update(key, serialUpd(changes))
+
           return String(key)
         })
       )
