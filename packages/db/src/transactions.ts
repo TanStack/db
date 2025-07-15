@@ -2,7 +2,6 @@ import { createDeferred } from "./deferred"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
-  OperationType,
   PendingMutation,
   TransactionConfig,
   TransactionState,
@@ -66,10 +65,10 @@ let sequenceNumber = 0
  * // Commit later
  * await tx.commit()
  */
-export function createTransaction<
-  TData extends object = Record<string, unknown>,
->(config: TransactionConfig<TData>): Transaction<TData> {
-  const newTransaction = new Transaction<TData>(config)
+export function createTransaction<T extends object = Record<string, unknown>>(
+  config: TransactionConfig<T>
+): Transaction<T> {
+  const newTransaction = new Transaction<T>(config)
   transactions.push(newTransaction)
   return newTransaction
 }
@@ -108,15 +107,12 @@ function removeFromPendingList(tx: Transaction<any>) {
   }
 }
 
-class Transaction<
-  T extends object = Record<string, unknown>,
-  TOperation extends OperationType = OperationType,
-> {
+class Transaction<T extends object = Record<string, unknown>> {
   public id: string
   public state: TransactionState
   public mutationFn: MutationFn<T>
-  public mutations: Array<PendingMutation<T, TOperation>>
-  public isPersisted: Deferred<Transaction<T, TOperation>>
+  public mutations: Array<PendingMutation<T>>
+  public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
   public createdAt: Date
   public sequenceNumber: number
@@ -134,7 +130,7 @@ class Transaction<
     this.mutationFn = config.mutationFn
     this.state = `pending`
     this.mutations = []
-    this.isPersisted = createDeferred<Transaction<T, TOperation>>()
+    this.isPersisted = createDeferred<Transaction<T>>()
     this.autoCommit = config.autoCommit ?? true
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
