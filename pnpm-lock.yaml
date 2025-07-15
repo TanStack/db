@@ -99,16 +99,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.0.4
+        specifier: ^0.0.5
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.75.7
         version: 5.81.5
       '@tanstack/query-db-collection':
-        specifier: ^0.0.4
+        specifier: ^0.0.5
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.0.22
+        specifier: ^0.0.23
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.125.6
