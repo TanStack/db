@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.23
+
+### Patch Changes
+
+- Ensure schemas can apply defaults when inserting ([#209](https://github.com/TanStack/db/pull/209))
+
 ## 0.0.22
 
 ### Patch Changes
