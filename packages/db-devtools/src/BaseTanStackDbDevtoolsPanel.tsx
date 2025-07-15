@@ -50,6 +50,67 @@ function Logo(props: any) {
   )
 }
 
+function formatTime(ms: number): string {
+  if (ms === 0) return '0s'
+  
+  const units = ['s', 'min', 'h', 'd']
+  const values = [ms / 1000, ms / 60000, ms / 3600000, ms / 86400000]
+
+  let chosenUnitIndex = 0
+  for (let i = 1; i < values.length; i++) {
+    if (values[i]! < 1) break
+    chosenUnitIndex = i
+  }
+
+  const formatter = new Intl.NumberFormat(navigator.language, {
+    compactDisplay: 'short',
+    notation: 'compact',
+    maximumFractionDigits: 0,
+  })
+
+  return formatter.format(values[chosenUnitIndex]!) + units[chosenUnitIndex]
+}
+
+function CollectionStats({ collection }: { collection: CollectionMetadata }) {
+  const styles = useStyles()
+  
+  if (collection.type === 'collection') {
+    // Standard collection stats
+    return (
+      <div class={styles().collectionStats}>
+        <div>{collection.size}</div>
+        <div>/</div>
+        <div>{collection.transactionCount}</div>
+        <div>/</div>
+        <div>{formatTime(collection.gcTime || 0)}</div>
+        <div>/</div>
+        <div class={cx(
+          styles().collectionStatus,
+          collection.status === 'error' ? styles().collectionStatusError : ''
+        )}>
+          {collection.status}
+        </div>
+      </div>
+    )
+  } else {
+    // Live query collection stats
+    return (
+      <div class={styles().collectionStats}>
+        <div>{collection.size}</div>
+        <div>/</div>
+        <div>{formatTime(collection.gcTime || 0)}</div>
+        <div>/</div>
+        <div class={cx(
+          styles().collectionStatus,
+          collection.status === 'error' ? styles().collectionStatusError : ''
+        )}>
+          {collection.status}
+        </div>
+      </div>
+    )
+  }
+}
+
 function CollectionItem({
   collection,
   isActive,
@@ -70,13 +131,7 @@ function CollectionItem({
       onClick={() => onSelect(collection)}
     >
       <div class={styles().collectionName}>{collection.id}</div>
-      <div class={styles().collectionCount}>({collection.size})</div>
-      <div class={cx(
-        styles().collectionStatus,
-        collection.status === 'error' ? styles().collectionStatusError : ''
-      )}>
-        {collection.status}
-      </div>
+      <CollectionStats collection={collection} />
     </div>
   )
 }
@@ -112,8 +167,13 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
     const updateCollections = () => {
       if (typeof window === 'undefined') return
       try {
-        const collections = registry().getAllCollectionMetadata()
-        setCollections(collections)
+        const newCollections = registry().getAllCollectionMetadata()
+        const currentCollections = collections()
+        
+        // Only update if collections data actually changed
+        if (hasCollectionsChanged(currentCollections, newCollections)) {
+          setCollections(newCollections)
+        }
       } catch (error) {
         // Silently handle errors when fetching collections metadata
       }
@@ -179,6 +239,14 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
     )
   })
 
+  // Group collections by type
+  const standardCollections = createMemo(() => 
+    sortedCollections().filter(c => c.type === 'collection')
+  )
+  
+  const liveCollections = createMemo(() => 
+    sortedCollections().filter(c => c.type === 'live-query')
+  )
 
 
   return (
@@ -224,39 +292,36 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
 
       <div class={styles().firstContainer}>
         <div class={styles().row}>
-          <Logo />
+          <div class={styles().headerContainer}>
+            <Logo />
+            {/* Tab Navigation */}
+            <div class={styles().tabNav}>
+              <button
+                onClick={() => setSelectedView('collections')}
+                class={cx(
+                  styles().tabBtn,
+                  selectedView() === 'collections' && styles().tabBtnActive
+                )}
+              >
+                Collections ({collections().length})
+              </button>
+              <button
+                onClick={() => setSelectedView('transactions')}
+                class={cx(
+                  styles().tabBtn,
+                  selectedView() === 'transactions' && styles().tabBtnActive
+                )}
+              >
+                Transactions ({registry().getTransactions().length})
+              </button>
+            </div>
+          </div>
         </div>
         <div class={styles().collectionsExplorerContainer}>
-          {/* Tab Navigation */}
-          <div class={styles().tabNav}>
-            <button
-              onClick={() => setSelectedView('collections')}
-              class={cx(
-                styles().tabBtn,
-                selectedView() === 'collections' && styles().tabBtnActive
-              )}
-            >
-              Collections
-            </button>
-            <button
-              onClick={() => setSelectedView('transactions')}
-              class={cx(
-                styles().tabBtn,
-                selectedView() === 'transactions' && styles().tabBtnActive
-              )}
-            >
-              Transactions ({registry().getTransactions().length})
-            </button>
-          </div>
-
           {/* Content based on selected view */}
           <div class={styles().sidebarContent}>
             <Show when={selectedView() === 'collections'}>
               <div class={styles().collectionsExplorer}>
-                <div class={styles().collectionsHeader}>
-                  <div>Collections ({collections().length})</div>
-                </div>
-                
                 <div class={styles().collectionsList}>
                   <Show
                     when={sortedCollections().length > 0}
@@ -266,13 +331,53 @@ export const BaseTanStackDbDevtoolsPanel = function BaseTanStackDbDevtoolsPanel(
                       </div>
                     }
                   >
-                    <For each={sortedCollections()}>{(collection) =>
-                      <CollectionItem
-                        collection={collection}
-                        isActive={() => collection.id === activeCollectionId()}
-                        onSelect={(c) => setActiveCollectionId(c.id)}
-                      />
-                    }</For>
+                    {/* Standard Collections */}
+                    <Show when={standardCollections().length > 0}>
+                      <div class={styles().collectionGroup}>
+                        <div class={styles().collectionGroupHeader}>
+                          <div>Standard Collections ({standardCollections().length})</div>
+                          <div class={styles().collectionGroupStats}>
+                            <span>Items</span>
+                            <span>/</span>
+                            <span>Txn</span>
+                            <span>/</span>
+                            <span>GC</span>
+                            <span>/</span>
+                            <span>Status</span>
+                          </div>
+                        </div>
+                        <For each={standardCollections()}>{(collection) =>
+                          <CollectionItem
+                            collection={collection}
+                            isActive={() => collection.id === activeCollectionId()}
+                            onSelect={(c) => setActiveCollectionId(c.id)}
+                          />
+                        }</For>
+                      </div>
+                    </Show>
+
+                    {/* Live Collections */}
+                    <Show when={liveCollections().length > 0}>
+                      <div class={styles().collectionGroup}>
+                        <div class={styles().collectionGroupHeader}>
+                          <div>Live Collections ({liveCollections().length})</div>
+                          <div class={styles().collectionGroupStats}>
+                            <span>Items</span>
+                            <span>/</span>
+                            <span>GC</span>
+                            <span>/</span>
+                            <span>Status</span>
+                          </div>
+                        </div>
+                        <For each={liveCollections()}>{(collection) =>
+                          <CollectionItem
+                            collection={collection}
+                            isActive={() => collection.id === activeCollectionId()}
+                            onSelect={(c) => setActiveCollectionId(c.id)}
+                          />
+                        }</For>
+                      </div>
+                    </Show>
                   </Show>
                 </div>
               </div>

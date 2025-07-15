@@ -121,7 +121,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       }
     `,
     firstContainer: css`
-      flex: 1 1 500px;
+      flex: 0 0 35%;
       min-height: 40%;
       max-height: 100%;
       overflow: auto;
@@ -303,7 +303,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     `,
     collectionStatus: css`
       font-size: ${fontSize.xs};
-      padding: ${size[1]} ${size[2]};
+      padding: ${size[0.5]} ${size[1]};
       border-radius: ${border.radius.sm};
       font-weight: ${font.weight.medium};
       background-color: ${colors.green[900]};
@@ -319,6 +319,15 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       font-size: ${fontSize.xs};
       color: ${colors.gray[400]};
       margin-left: ${size[2]};
+    `,
+    collectionStats: css`
+      display: flex;
+      gap: ${size[1]};
+      font-size: ${fontSize.xs};
+      color: ${colors.gray[400]};
+      font-variant-numeric: tabular-nums;
+      line-height: ${font.lineHeight.xs};
+      align-items: center;
     `,
     detailsPanel: css`
       display: flex;
@@ -354,41 +363,78 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       align-items: center;
       padding: ${size[2]} ${size[2.5]};
       gap: ${size[2.5]};
-      border-bottom: ${colors.darkGray[500]} 1px solid;
+      border-bottom: ${colors.gray[700]} 1px solid;
       align-items: center;
+    `,
+    headerContainer: css`
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: ${size[0.5]} ${size[2]};
     `,
     collectionsExplorerContainer: css`
       overflow-y: auto;
       flex: 1;
     `,
     collectionsExplorer: css`
-      padding: ${size[2]};
+      /* Removed padding to use full width and height */
+    `,
+    collectionGroup: css`
+      /* Removed margin to eliminate extra spacing */
+    `,
+    collectionGroupHeader: css`
+      padding: ${size[1.5]} ${size[2]};
+      font-size: ${fontSize.xs};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[400]};
+      background: ${colors.darkGray[600]};
+      border-bottom: 1px solid ${colors.gray[700]};
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    `,
+    collectionGroupStats: css`
+      display: flex;
+      gap: ${size[1]};
+      font-size: ${fontSize.xs};
+      color: ${colors.gray[500]};
+      font-variant-numeric: tabular-nums;
+      line-height: ${font.lineHeight.xs};
+      align-items: center;
+      font-weight: ${font.weight.normal};
+      text-transform: none;
+      letter-spacing: normal;
     `,
     tabNav: css`
       display: flex;
-      border-bottom: 1px solid ${colors.gray[700]};
-      background: ${colors.darkGray[600]};
+      gap: ${size[1]};
     `,
     tabBtn: css`
-      flex: 1;
-      padding: ${size[2]} ${size[3]};
+      padding: ${size[1]} ${size[2]};
       background: transparent;
-      border: none;
+      border: 1px solid ${colors.gray[600]};
+      border-radius: ${border.radius.sm};
       color: ${colors.gray[400]};
       cursor: pointer;
-      font-size: ${fontSize.sm};
+      font-size: ${fontSize.xs};
       font-weight: ${font.weight.medium};
       
       &:hover {
         background: ${colors.darkGray[500]};
+        border-color: ${colors.gray[500]};
       }
     `,
     tabBtnActive: css`
       background: ${colors.blue[500]};
       color: ${colors.white};
+      border-color: ${colors.blue[400]};
       
       &:hover {
         background: ${colors.blue[600]};
+        border-color: ${colors.blue[500]};
       }
     `,
     sidebarContent: css`
