@@ -113,6 +113,7 @@ export interface PendingMutation<
   original: TOperation extends `insert` ? {} : T
   // The result state of the object after all mutations.
   modified: T
+  // Only the actual changes to the object by the mutation.
   changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
 
