@@ -106,25 +106,16 @@ function compileRef(ref: PropRef): CompiledExpression {
 function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
   const propertyPath = ref.path
 
-  if (propertyPath.length === 0) {
-    // Empty path - return the whole item
-    return (item) => item
-  } else if (propertyPath.length === 1) {
-    // Single property access - most common case
-    const prop = propertyPath[0]!
-    return (item) => item[prop]
-  } else {
-    // Multiple property navigation
-    return (item) => {
-      let value: any = item
-      for (const prop of propertyPath) {
-        if (value == null) {
-          return value
-        }
-        value = value[prop]
+  // This function works for all path lengths including empty path
+  return (item) => {
+    let value: any = item
+    for (const prop of propertyPath) {
+      if (value == null) {
+        return value
       }
-      return value
+      value = value[prop]
     }
+    return value
   }
 }
 

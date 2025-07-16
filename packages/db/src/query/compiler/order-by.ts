@@ -1,5 +1,5 @@
 import { orderByWithFractionalIndex } from "@electric-sql/d2mini"
-import { ascComparator } from "../../utils/comparison.js"
+import { ascComparator, descComparator } from "../../utils/comparison.js"
 import { compileExpression } from "./evaluators.js"
 import type { OrderByClause } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
@@ -52,10 +52,7 @@ export function processOrderBy(
     return null
   }
 
-  // Create comparator functions
-  const descComparator = (a: unknown, b: unknown): number => {
-    return ascComparator(b, a)
-  }
+  // Use comparator functions from utils
 
   // Create a multi-property comparator that respects the order and direction of each property
   const makeComparator = () => {
