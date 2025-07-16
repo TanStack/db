@@ -1,5 +1,6 @@
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
 import { ascComparator } from "./utils/comparison.js"
+import { findInsertPosition } from "./utils/array-utils.js"
 import type { BasicExpression } from "./query/ir.js"
 
 /**
@@ -41,7 +42,11 @@ export class CollectionIndex<TKey extends string | number = string | number> {
         this.valueMap.set(indexedValue, keySet)
 
         // Find correct position in ordered entries using binary search
-        const insertIndex = this.findInsertPosition(indexedValue)
+        const insertIndex = findInsertPosition(
+          this.orderedEntries,
+          indexedValue,
+          this.compareFn
+        )
         this.orderedEntries.splice(insertIndex, 0, [indexedValue, keySet])
       }
 
@@ -67,7 +72,11 @@ export class CollectionIndex<TKey extends string | number = string | number> {
           this.valueMap.delete(indexedValue)
 
           // Remove from orderedEntries using binary search
-          const entryIndex = this.findInsertPosition(indexedValue)
+          const entryIndex = findInsertPosition(
+            this.orderedEntries,
+            indexedValue,
+            this.compareFn
+          )
           if (
             entryIndex < this.orderedEntries.length &&
             this.compareFn(
@@ -169,7 +178,11 @@ export class CollectionIndex<TKey extends string | number = string | number> {
     const result = new Set<TKey>()
 
     // Find the position of the value using binary search
-    const insertIndex = this.findInsertPosition(value)
+    const insertIndex = findInsertPosition(
+      this.orderedEntries,
+      value,
+      this.compareFn
+    )
 
     let startIndex: number
     let endIndex: number
@@ -261,23 +274,5 @@ export class CollectionIndex<TKey extends string | number = string | number> {
     // Use the single-row evaluator for direct property access without table aliases
     const evaluator = compileSingleRowExpression(this.expression)
     return evaluator(item as Record<string, unknown>)
-  }
-
-  private findInsertPosition(value: any): number {
-    let left = 0
-    let right = this.orderedEntries.length
-
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2)
-      const comparison = this.compareFn(this.orderedEntries[mid]![0], value)
-
-      if (comparison < 0) {
-        left = mid + 1
-      } else {
-        right = mid
-      }
-    }
-
-    return left
   }
 }

@@ -6,8 +6,11 @@ import {
   toExpression,
 } from "./query/builder/ref-proxy"
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
-
 import { CollectionIndex } from "./collection-index.js"
+import {
+  canOptimizeExpression,
+  optimizeQuery,
+} from "./utils/query-optimization.js"
 import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
@@ -2000,7 +2003,7 @@ export class CollectionImpl<
       const expression = toExpression(whereExpression)
 
       // Try to optimize the query using indexes
-      const optimizationResult = this.optimizeQuery(expression)
+      const optimizationResult = optimizeQuery(expression, this.indexes)
 
       if (optimizationResult.canOptimize) {
         // Use index optimization
@@ -2049,48 +2052,6 @@ export class CollectionImpl<
     }
 
     return result
-  }
-
-  /**
-   * Optimizes a query expression using available indexes
-   * @private
-   */
-  private optimizeQuery(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    return this.optimizeQueryRecursive(expression)
-  }
-
-  /**
-   * Recursively optimizes query expressions
-   * @private
-   */
-  private optimizeQueryRecursive(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    if (expression.type === `func`) {
-      switch (expression.name) {
-        case `eq`:
-        case `gt`:
-        case `gte`:
-        case `lt`:
-        case `lte`:
-          return this.optimizeSimpleComparison(expression)
-
-        case `and`:
-          return this.optimizeAndExpression(expression)
-
-        case `or`:
-          return this.optimizeOrExpression(expression)
-
-        case `in`:
-          return this.optimizeInArrayExpression(expression)
-      }
-    }
-
-    return { canOptimize: false, matchingKeys: new Set() }
   }
 
   /**
@@ -2163,8 +2124,10 @@ export class CollectionImpl<
       return false
     }
 
-    // All arguments must be optimizable
-    return expression.args.every((arg) => this.canOptimizeExpression(arg))
+    // If any argument can be optimized, we can gain some speedup (Kevin's feedback)
+    return expression.args.some((arg) =>
+      canOptimizeExpression(arg, this.indexes)
+    )
   }
 
   /**
@@ -2176,8 +2139,10 @@ export class CollectionImpl<
       return false
     }
 
-    // All arguments must be optimizable
-    return expression.args.every((arg) => this.canOptimizeExpression(arg))
+    // If any argument can be optimized, we can gain some speedup (Kevin's feedback)
+    return expression.args.some((arg) =>
+      canOptimizeExpression(arg, this.indexes)
+    )
   }
 
   /**
