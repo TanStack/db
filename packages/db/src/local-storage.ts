@@ -393,7 +393,7 @@ export function localStorageCollectionOptions<
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // For delete operations, mutation.original contains the full object
-      const key = config.getKey(mutation.original)
+      const key = config.getKey(mutation.original as ResolvedType)
       currentData.delete(key)
     })
 
@@ -506,7 +506,7 @@ function createLocalStorageSync<T extends object>(
   storageKey: string,
   storage: StorageApi,
   storageEventApi: StorageEventApi,
-  getKey: (item: T) => string | number,
+  _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
 ): SyncConfig<T> & { manualTrigger?: () => void } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
@@ -586,7 +586,7 @@ function createLocalStorageSync<T extends object>(
 
   const syncConfig: SyncConfig<T> & { manualTrigger?: () => void } = {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit } = params
+      const { begin, write, commit, markReady } = params
 
       // Store sync params for later use
       syncParams = params
@@ -607,6 +607,9 @@ function createLocalStorageSync<T extends object>(
       initialData.forEach((storedItem, key) => {
         lastKnownData.set(key, storedItem)
       })
+
+      // Mark collection as ready after initial load
+      markReady()
 
       // Listen for storage events from other tabs
       const handleStorageEvent = (event: StorageEvent) => {

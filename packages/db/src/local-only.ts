@@ -240,7 +240,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
      * @returns Unsubscribe function (empty since no ongoing sync is needed)
      */
     sync: (params) => {
-      const { begin, write, commit } = params
+      const { begin, write, commit, markReady } = params
 
       // Capture sync functions for later use by confirmOperationsSync
       syncBegin = begin
@@ -258,6 +258,9 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
         })
         commit()
       }
+
+      // Mark collection as ready since local-only collections are immediately ready
+      markReady()
 
       // Return empty unsubscribe function - no ongoing sync needed
       return () => {}

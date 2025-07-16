@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import mitt from "mitt"
 import { z } from "zod"
 import { SchemaValidationError, createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
-import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
+import type {
+  ChangeMessage,
+  MutationFn,
+  OperationType,
+  PendingMutation,
+  ResolveTransactionChanges,
+} from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -1041,5 +1047,118 @@ describe(`Collection with schema validation`, () => {
         )
       }
     }
+  })
+
+  it(`should apply schema defaults on insert`, () => {
+    const todoSchema = z.object({
+      id: z
+        .string()
+        .default(() => `todo-${Math.random().toString(36).substr(2, 9)}`),
+      text: z.string(),
+      completed: z.boolean().default(false),
+      createdAt: z.coerce.date().default(() => new Date()),
+      updatedAt: z.coerce.date().default(() => new Date()),
+    })
+
+    // Define inferred types for clarity and use in assertions
+    type Todo = z.infer<typeof todoSchema>
+    type TodoInput = z.input<typeof todoSchema>
+
+    // NOTE: `createCollection<Todo>` breaks the schema type inference.
+    // We have to use only the schema, and not the type generic, like so:
+    const collection = createCollection({
+      id: `defaults-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: todoSchema,
+    })
+
+    // Type test: should allow inserting input type (with missing fields that have defaults)
+    // Important: Input type is different from the output type (which is inferred using z.infer)
+    // For more details, @see https://github.com/colinhacks/zod/issues/4179#issuecomment-2811669261
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<InsertParam>().toEqualTypeOf<TodoInput | Array<TodoInput>>()
+
+    const mutationFn = async () => {}
+
+    // Minimal data
+    const tx1 = createTransaction<Todo>({ mutationFn })
+    tx1.mutate(() => collection.insert({ text: `task-1` }))
+
+    // Type assertions on the mutation structure
+    expect(tx1.mutations).toHaveLength(1)
+    const mutation = tx1.mutations[0]!
+
+    // Test the mutation type structure
+    expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
+    expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
+    expectTypeOf(mutation.changes).toEqualTypeOf<
+      ResolveTransactionChanges<Todo>
+    >()
+    expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
+
+    // Runtime assertions for actual values
+    expect(mutation.type).toBe(`insert`)
+    expect(mutation.changes).toEqual({ text: `task-1` })
+    expect(mutation.modified.text).toBe(`task-1`)
+    expect(mutation.modified.completed).toBe(false)
+    expect(mutation.modified.id).toBeDefined()
+    expect(mutation.modified.createdAt).toBeInstanceOf(Date)
+    expect(mutation.modified.updatedAt).toBeInstanceOf(Date)
+
+    let insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(1)
+    const insertedItem = insertedItems[0]!
+    expect(insertedItem.text).toBe(`task-1`)
+    expect(insertedItem.completed).toBe(false)
+    expect(insertedItem.id).toBeDefined()
+    expect(typeof insertedItem.id).toBe(`string`)
+    expect(insertedItem.createdAt).toBeInstanceOf(Date)
+    expect(insertedItem.updatedAt).toBeInstanceOf(Date)
+
+    // Partial data
+    const tx2 = createTransaction<Todo>({ mutationFn })
+    tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
+
+    insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(2)
+
+    const secondItem = insertedItems.find((item) => item.text === `task-2`)!
+    expect(secondItem).toBeDefined()
+    expect(secondItem.text).toBe(`task-2`)
+    expect(secondItem.completed).toBe(true)
+    expect(secondItem.id).toBeDefined()
+    expect(typeof secondItem.id).toBe(`string`)
+    expect(secondItem.createdAt).toBeInstanceOf(Date)
+    expect(secondItem.updatedAt).toBeInstanceOf(Date)
+
+    // All fields provided
+    const tx3 = createTransaction<Todo>({ mutationFn })
+
+    tx3.mutate(() =>
+      collection.insert({
+        id: `task-id-3`,
+        text: `task-3`,
+        completed: true,
+        createdAt: new Date(`2023-01-01T00:00:00Z`),
+        updatedAt: new Date(`2023-01-01T00:00:00Z`),
+      })
+    )
+    insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(3)
+
+    // using insertedItems[2] was finding wrong item for some reason.
+    const thirdItem = insertedItems.find((item) => item.text === `task-3`)
+    expect(thirdItem).toBeDefined()
+    expect(thirdItem!.text).toBe(`task-3`)
+    expect(thirdItem!.completed).toBe(true)
+    expect(thirdItem!.createdAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
+    expect(thirdItem!.updatedAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
+    expect(thirdItem!.id).toBe(`task-id-3`)
   })
 })

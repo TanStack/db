@@ -55,6 +55,7 @@ export function mockSyncCollectionOptions<
         begin = params.begin
         write = params.write
         commit = params.commit
+        const markReady = params.markReady
 
         begin()
         config.initialData.forEach((item) => {
@@ -64,6 +65,7 @@ export function mockSyncCollectionOptions<
           })
         })
         commit()
+        markReady()
       },
     },
     startSync: true,
