@@ -1,6 +1,6 @@
-import { BaseIndex, IndexOperation } from "./base-index.js"
 import { ascComparator } from "../utils/comparison.js"
 import { findInsertPosition } from "../utils/array-utils.js"
+import { BaseIndex, IndexOperation } from "./base-index.js"
 
 /**
  * Options for Ordered index
@@ -13,14 +13,16 @@ export interface OrderedIndexOptions {
  * Ordered index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
  */
-export class OrderedIndex<TKey extends string | number = string | number> extends BaseIndex<TKey> {
+export class OrderedIndex<
+  TKey extends string | number = string | number,
+> extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set([
     IndexOperation.EQ,
     IndexOperation.GT,
     IndexOperation.GTE,
     IndexOperation.LT,
     IndexOperation.LTE,
-    IndexOperation.IN
+    IndexOperation.IN,
   ])
 
   // Internal data structures - private to hide implementation details
@@ -60,7 +62,7 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
 
       this.indexedKeys.add(key)
       this.updateTimestamp()
-    } catch (error) {
+    } catch {
       // Silently skip if evaluation fails
     }
   }
@@ -92,7 +94,7 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
 
       this.indexedKeys.delete(key)
       this.updateTimestamp()
-    } catch (error) {
+    } catch {
       // Silently skip if evaluation fails
     }
   }
@@ -142,7 +144,10 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
       case IndexOperation.GTE:
       case IndexOperation.LT:
       case IndexOperation.LTE:
-        result = this.rangeQuery(operation as 'gt' | 'gte' | 'lt' | 'lte', value)
+        result = this.rangeQuery(
+          operation as `gt` | `gte` | `lt` | `lte`,
+          value
+        )
         break
       case IndexOperation.IN:
         result = this.inArrayLookup(value)
@@ -174,7 +179,7 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
   /**
    * Performs a range query
    */
-  rangeQuery(operation: 'gt' | 'gte' | 'lt' | 'lte', value: any): Set<TKey> {
+  rangeQuery(operation: `gt` | `gte` | `lt` | `lte`, value: any): Set<TKey> {
     const result = new Set<TKey>()
 
     // Use binary search to find the starting position
@@ -230,7 +235,7 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
   /**
    * Performs an IN array lookup
    */
-  inArrayLookup(values: any[]): Set<TKey> {
+  inArrayLookup(values: Array<any>): Set<TKey> {
     const result = new Set<TKey>()
 
     for (const value of values) {
@@ -261,7 +266,7 @@ export class OrderedIndex<TKey extends string | number = string | number> extend
     const entriesSize = this.orderedEntries.length * 100 // Estimated size per entry
     const valueMapSize = this.valueMap.size * 80 // Estimated size per map entry
     const indexedKeysSize = this.indexedKeys.size * 20 // Estimated size per key
-    
+
     return entriesSize + valueMapSize + indexedKeysSize
   }
 }

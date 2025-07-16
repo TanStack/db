@@ -8,9 +8,7 @@ import {
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
 import { OrderedIndex } from "./indexes/ordered-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
-import {
-  optimizeQuery,
-} from "./utils/query-optimization.js"
+import { optimizeQuery } from "./utils/query-optimization.js"
 import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
@@ -35,7 +33,6 @@ import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
-
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -345,12 +342,12 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
-    
+
     // Resolve indexes when collection becomes ready
-    if (newStatus === 'ready' && !this.isIndexesResolved) {
+    if (newStatus === `ready` && !this.isIndexesResolved) {
       // Resolve indexes asynchronously without blocking
       this.resolveAllIndexes().catch((error) => {
-        console.warn('Failed to resolve indexes:', error)
+        console.warn(`Failed to resolve indexes:`, error)
       })
     }
   }
@@ -1289,7 +1286,9 @@ export class CollectionImpl<
    *   options: { language: 'en' }
    * })
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof OrderedIndex>(
+  public createIndex<
+    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
+  >(
     indexCallback: (row: SingleRowRefProxy<T>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
@@ -1299,7 +1298,7 @@ export class CollectionImpl<
     const singleRowRefProxy = createSingleRowRefProxy<T>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
-    
+
     // Default to OrderedIndex if no type specified
     const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
 
@@ -1317,21 +1316,21 @@ export class CollectionImpl<
 
     // For synchronous constructors (classes), resolve immediately
     // For async loaders, wait for collection to be ready
-    if (typeof resolver === 'function' && resolver.prototype) {
+    if (typeof resolver === `function` && resolver.prototype) {
       // This is a constructor - resolve immediately and synchronously
       try {
         const resolvedIndex = lazyIndex.getResolved() // This should work since constructor resolved it
         this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch (error) {
+      } catch {
         // Fallback to async resolution
         this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-          console.warn('Failed to resolve single index:', error)
+          console.warn(`Failed to resolve single index:`, error)
         })
       }
     } else if (this.isIndexesResolved) {
       // Async loader but indexes are already resolved - resolve this one
       this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-        console.warn('Failed to resolve single index:', error)
+        console.warn(`Failed to resolve single index:`, error)
       })
     }
 
@@ -1348,10 +1347,10 @@ export class CollectionImpl<
     const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
       async ([indexId, lazyIndex]) => {
         const resolvedIndex = await lazyIndex.resolve()
-        
+
         // Build index with current data
         resolvedIndex.build(this.entries())
-        
+
         this.resolvedIndexes.set(indexId, resolvedIndex)
         return { indexId, resolvedIndex }
       }
@@ -1366,7 +1365,7 @@ export class CollectionImpl<
    * @private
    */
   private async resolveSingleIndex(
-    indexId: string, 
+    indexId: string,
     lazyIndex: LazyIndexWrapper<TKey>
   ): Promise<BaseIndex<TKey>> {
     const resolvedIndex = await lazyIndex.resolve()
@@ -2139,10 +2138,6 @@ export class CollectionImpl<
 
     return result
   }
-
-
-
-
 
   /**
    * Creates a filter function from a where callback

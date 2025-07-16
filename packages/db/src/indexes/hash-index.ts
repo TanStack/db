@@ -3,7 +3,9 @@ import { BaseIndex, IndexOperation } from "./base-index.js"
 /**
  * Placeholder Hash index for equality lookups (not yet implemented)
  */
-export class HashIndex<TKey extends string | number = string | number> extends BaseIndex<TKey> {
+export class HashIndex<
+  TKey extends string | number = string | number,
+> extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set([
     IndexOperation.EQ,
     IndexOperation.IN,
@@ -13,11 +15,11 @@ export class HashIndex<TKey extends string | number = string | number> extends B
     // Placeholder implementation
   }
 
-  add(key: TKey, item: any): void {
+  add(_key: TKey, _item: any): void {
     // TODO: Implement hash indexing
   }
 
-  remove(key: TKey, item: any): void {
+  remove(_key: TKey, _item: any): void {
     // TODO: Implement hash removal
   }
 
@@ -37,7 +39,7 @@ export class HashIndex<TKey extends string | number = string | number> extends B
     this.updateTimestamp()
   }
 
-  lookup(operation: IndexOperation, value: any): Set<TKey> {
+  lookup(_operation: IndexOperation, _value: any): Set<TKey> {
     // TODO: Implement hash lookup
     return new Set()
   }

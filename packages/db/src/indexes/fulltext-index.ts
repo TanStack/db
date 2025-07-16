@@ -3,20 +3,20 @@ import { BaseIndex, IndexOperation } from "./base-index.js"
 /**
  * Placeholder FullText index for text search (not yet implemented)
  */
-export class FullTextIndex<TKey extends string | number = string | number> extends BaseIndex<TKey> {
-  public readonly supportedOperations = new Set([
-    IndexOperation.EQ,
-  ])
+export class FullTextIndex<
+  TKey extends string | number = string | number,
+> extends BaseIndex<TKey> {
+  public readonly supportedOperations = new Set([IndexOperation.EQ])
 
   protected initialize(): void {
     // Placeholder implementation
   }
 
-  add(key: TKey, item: any): void {
+  add(_key: TKey, _item: any): void {
     // TODO: Implement full text indexing
   }
 
-  remove(key: TKey, item: any): void {
+  remove(_key: TKey, _item: any): void {
     // TODO: Implement full text removal
   }
 
@@ -36,7 +36,7 @@ export class FullTextIndex<TKey extends string | number = string | number> exten
     this.updateTimestamp()
   }
 
-  lookup(operation: IndexOperation, value: any): Set<TKey> {
+  lookup(_operation: IndexOperation, _value: any): Set<TKey> {
     // TODO: Implement full text search
     return new Set()
   }

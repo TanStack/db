@@ -163,10 +163,10 @@ export function similar(
   right: string | RefProxy<string> | BasicExpression<string>,
   threshold?: number | BasicExpression<number>
 ): BasicExpression<boolean> {
-  const args: BasicExpression[] = [toExpression(left), toExpression(right)]
+  const args: Array<BasicExpression> = [toExpression(left), toExpression(right)]
   if (threshold !== undefined) {
     // Handle number threshold by creating a Value expression
-    if (typeof threshold === 'number') {
+    if (typeof threshold === `number`) {
       args.push(new Value(threshold))
     } else {
       args.push(threshold)

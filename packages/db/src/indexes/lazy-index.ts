@@ -1,4 +1,8 @@
-import { BaseIndex, IndexConstructor, IndexResolver } from "./base-index.js"
+import type {
+  BaseIndex,
+  IndexConstructor,
+  IndexResolver,
+} from "./base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 
 /**
@@ -9,7 +13,7 @@ function isConstructor<TKey extends string | number>(
 ): resolver is IndexConstructor<TKey> {
   // Check if it's a function with a prototype (constructor)
   return (
-    typeof resolver === 'function' &&
+    typeof resolver === `function` &&
     resolver.prototype !== undefined &&
     resolver.prototype.constructor === resolver
   )
@@ -35,7 +39,7 @@ async function resolveIndexConstructor<TKey extends string | number>(
 export class LazyIndexWrapper<TKey extends string | number = string | number> {
   private indexPromise: Promise<BaseIndex<TKey>> | null = null
   private resolvedIndex: BaseIndex<TKey> | null = null
-  
+
   constructor(
     private id: string,
     private expression: BasicExpression,
@@ -46,7 +50,12 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
   ) {
     // For synchronous constructors, resolve immediately
     if (isConstructor(this.resolver)) {
-      this.resolvedIndex = new this.resolver(this.id, this.expression, this.name, this.options)
+      this.resolvedIndex = new this.resolver(
+        this.id,
+        this.expression,
+        this.name,
+        this.options
+      )
       // Build with initial data if provided
       if (this.collectionEntries) {
         this.resolvedIndex.build(this.collectionEntries)
@@ -82,7 +91,9 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
    */
   getResolved(): BaseIndex<TKey> {
     if (!this.resolvedIndex) {
-      throw new Error(`Index ${this.id} has not been resolved yet. Ensure collection is synced.`)
+      throw new Error(
+        `Index ${this.id} has not been resolved yet. Ensure collection is synced.`
+      )
     }
     return this.resolvedIndex
   }
@@ -228,7 +239,7 @@ export class IndexProxy<TKey extends string | number = string | number> {
     return resolved.rangeQuery?.(operation, value) ?? new Set()
   }
 
-  inArrayLookup(values: any[]): Set<TKey> {
+  inArrayLookup(values: Array<any>): Set<TKey> {
     const resolved = this.index as any
     return resolved.inArrayLookup?.(values) ?? new Set()
   }

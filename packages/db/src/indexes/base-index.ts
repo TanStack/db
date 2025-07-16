@@ -6,30 +6,30 @@ import type { BasicExpression } from "../query/ir.js"
  */
 export enum IndexOperation {
   // Basic comparisons
-  EQ = 'eq',
-  NE = 'ne',
-  GT = 'gt',
-  GTE = 'gte',
-  LT = 'lt',
-  LTE = 'lte',
-  
+  EQ = `eq`,
+  NE = `ne`,
+  GT = `gt`,
+  GTE = `gte`,
+  LT = `lt`,
+  LTE = `lte`,
+
   // Array/set operations
-  IN = 'in',
-  NOT_IN = 'not_in',
-  
+  IN = `in`,
+  NOT_IN = `not_in`,
+
   // Text operations
-  LIKE = 'like',
-  ILIKE = 'ilike',
-  MATCH = 'match',           // Full-text search
-  SIMILAR = 'similar',       // Trigram similarity
-  
+  LIKE = `like`,
+  ILIKE = `ilike`,
+  MATCH = `match`, // Full-text search
+  SIMILAR = `similar`, // Trigram similarity
+
   // Fuzzy operations
-  FUZZY = 'fuzzy',
-  DISTANCE = 'distance',
-  
+  FUZZY = `fuzzy`,
+  DISTANCE = `distance`,
+
   // Geometric operations (future)
-  CONTAINS = 'contains',
-  WITHIN = 'within'
+  CONTAINS = `contains`,
+  WITHIN = `within`,
 }
 
 /**
@@ -46,7 +46,9 @@ export interface IndexStats {
 /**
  * Base abstract class that all index types extend
  */
-export abstract class BaseIndex<TKey extends string | number = string | number> {
+export abstract class BaseIndex<
+  TKey extends string | number = string | number,
+> {
   public readonly id: string
   public readonly name?: string
   public readonly expression: BasicExpression
@@ -56,7 +58,12 @@ export abstract class BaseIndex<TKey extends string | number = string | number> 
   protected totalLookupTime = 0
   protected lastUpdated = new Date()
 
-  constructor(id: string, expression: BasicExpression, name?: string, options?: any) {
+  constructor(
+    id: string,
+    expression: BasicExpression,
+    name?: string,
+    options?: any
+  ) {
     this.id = id
     this.expression = expression
     this.name = name
@@ -90,8 +97,9 @@ export abstract class BaseIndex<TKey extends string | number = string | number> 
       entryCount: this.keyCount,
       memoryUsage: this.estimateMemoryUsage(),
       lookupCount: this.lookupCount,
-      averageLookupTime: this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
-      lastUpdated: this.lastUpdated
+      averageLookupTime:
+        this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
+      lastUpdated: this.lastUpdated,
     }
   }
 
@@ -122,16 +130,17 @@ export abstract class BaseIndex<TKey extends string | number = string | number> 
 /**
  * Type for index constructor
  */
-export type IndexConstructor<TKey extends string | number = string | number> = new (
-  id: string,
-  expression: BasicExpression,
-  name?: string,
-  options?: any
-) => BaseIndex<TKey>
+export type IndexConstructor<TKey extends string | number = string | number> =
+  new (
+    id: string,
+    expression: BasicExpression,
+    name?: string,
+    options?: any
+  ) => BaseIndex<TKey>
 
 /**
  * Index resolver can be either a class constructor or async loader
  */
-export type IndexResolver<TKey extends string | number = string | number> = 
+export type IndexResolver<TKey extends string | number = string | number> =
   | IndexConstructor<TKey>
   | (() => Promise<IndexConstructor<TKey>>)

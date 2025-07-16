@@ -376,22 +376,18 @@ function evaluateLike(
  * Evaluate trigram similarity between two strings
  * Uses Jaccard similarity coefficient on trigrams
  */
-function evaluateSimilar(
-  value: any,
-  pattern: any,
-  threshold: any
-): boolean {
+function evaluateSimilar(value: any, pattern: any, threshold: any): boolean {
   if (typeof value !== `string` || typeof pattern !== `string`) {
     return false
   }
-  
+
   if (typeof threshold !== `number` || threshold < 0 || threshold > 1) {
     threshold = 0.3 // Default threshold
   }
 
   // Normalize strings (case insensitive, whitespace normalized)
   const normalizeText = (text: string): string => {
-    return text.toLowerCase().replace(/\s+/g, ' ').trim()
+    return text.toLowerCase().replace(/\s+/g, ` `).trim()
   }
 
   const normalizedValue = normalizeText(value)
@@ -401,7 +397,7 @@ function evaluateSimilar(
   const extractTrigrams = (text: string): Set<string> => {
     const trigrams = new Set<string>()
     const padded = `  ${text}  `
-    
+
     for (let i = 0; i <= padded.length - 3; i++) {
       trigrams.add(padded.substring(i, i + 3))
     }
@@ -415,14 +411,16 @@ function evaluateSimilar(
   if (valueTrigrams.size === 0 && patternTrigrams.size === 0) {
     return true // Both empty
   }
-  
+
   if (valueTrigrams.size === 0 || patternTrigrams.size === 0) {
     return false // One empty, one not
   }
 
-  const intersection = new Set([...valueTrigrams].filter(t => patternTrigrams.has(t)))
+  const intersection = new Set(
+    [...valueTrigrams].filter((t) => patternTrigrams.has(t))
+  )
   const union = new Set([...valueTrigrams, ...patternTrigrams])
-  
+
   const similarity = intersection.size / union.size
   return similarity >= threshold
 }

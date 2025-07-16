@@ -1,6 +1,6 @@
+import { IndexOperation } from "../indexes/base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { BaseIndex } from "../indexes/base-index.js"
-import { IndexOperation } from "../indexes/base-index.js"
 
 /**
  * Result of query optimization
@@ -180,15 +180,15 @@ function optimizeSimpleComparison<TKey extends string | number>(
 
     if (index) {
       const queryValue = (valueArg as any).value
-      
+
       // Map operation to IndexOperation enum
       const indexOperation = operation as IndexOperation
-      
+
       // Check if the index supports this operation
       if (!index.supports(indexOperation)) {
         return { canOptimize: false, matchingKeys: new Set() }
       }
-      
+
       const matchingKeys = index.lookup(indexOperation, queryValue)
       return { canOptimize: true, matchingKeys }
     }
