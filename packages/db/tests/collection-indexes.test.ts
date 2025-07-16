@@ -899,32 +899,32 @@ describe(`Collection Indexes`, () => {
       })
     })
 
-    it(`should fall back to full scan when not all conditions can be optimized`, () => {
+    it(`should partially optimize when some conditions can be optimized`, () => {
       withIndexTracking(collection, (tracker) => {
         // Mix of optimizable and non-optimizable conditions
         const result = collection.currentStateAsChanges({
           where: (row) =>
             and(
-              eq(row.status, `active`),
-              gt(length(row.name), 4) // Complex expression - can't optimize
+              eq(row.status, `active`), // Can optimize with index
+              gt(row.age, 24) // Can also optimize - will be AND combined
             ),
         })
 
-        expect(result).toHaveLength(2) // Alice, Charlie (active with name > 4 chars)
+        expect(result).toHaveLength(2) // Alice (25), Charlie (35) - both active and age > 24
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Alice`, `Charlie`])
 
-        // Should fall back to full scan since not all conditions can be optimized
+        // Should use optimization: both conditions can use indexes
         expectIndexUsage(tracker.stats, {
-          shouldUseIndex: false,
-          shouldUseFullScan: true,
-          indexCallCount: 0,
-          fullScanCallCount: 1,
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 2,
+          fullScanCallCount: 0,
         })
       })
     })
 
-    it(`should optimize queries with missing indexes by falling back gracefully`, () => {
+    it(`should optimize queries with missing indexes by using partial optimization`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query on a field without an index (name)
         const result = collection.currentStateAsChanges({
@@ -938,8 +938,141 @@ describe(`Collection Indexes`, () => {
         expect(result).toHaveLength(1) // Alice (25, name Alice)
         expect(result[0]?.value.name).toBe(`Alice`)
 
-        // Should fall back to full scan since name doesn't have an index
+        // Should use partial optimization: age index, then filter by name
         expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 1,
+          fullScanCallCount: 0,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when no conditions can be optimized`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Only complex expressions that can't be optimized
+        const result = collection.currentStateAsChanges({
+          where: (row) => gt(length(row.name), 3),
+        })
+
+        expect(result).toHaveLength(3) // Alice, Charlie, Diana (names > 3 chars)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Alice`, `Charlie`, `Diana`])
+
+        // Should fall back to full scan since no conditions can be optimized
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan for complex nested expressions`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Complex expression involving function calls - no simple field comparisons
+        const result = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              gt(length(row.name), 4), // Complex - can't optimize (Alice=5, Charlie=7, Diana=5)
+              gt(length(row.status), 6) // Complex - can't optimize (only "inactive" = 8 > 6)
+            ),
+        })
+
+        expect(result).toHaveLength(1) // Only Diana has name>4 AND status>6 (Diana name=5, status="pending"=7)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Diana`])
+
+        // Should fall back to full scan for complex expressions
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when OR conditions can't be optimized`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // OR with complex conditions that can't be optimized
+        const result = collection.currentStateAsChanges({
+          where: (row) =>
+            or(
+              gt(length(row.name), 6), // Complex - can't optimize (only Charlie has name length 7 > 6)
+              gt(length(row.status), 7) // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
+            ),
+        })
+
+        expect(result).toHaveLength(2) // Charlie (name length 7 > 6), Bob (status length 8 > 7)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Bob`, `Charlie`])
+
+        // Should fall back to full scan when no OR branches can be optimized
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when querying non-indexed fields only`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Query only on fields without indexes (name and score fields don't have indexes)
+        const result = collection.currentStateAsChanges({
+          where: (row) => and(eq(row.name, `Alice`), eq(row.score, 95)),
+        })
+
+        expect(result).toHaveLength(1) // Alice
+        expect(result[0]?.value.name).toBe(`Alice`)
+
+        // Should fall back to full scan since no indexed fields are used
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should handle mixed optimization scenarios within same query`, () => {
+      // Test two separate queries to show different optimization strategies
+
+      // First: partial optimization (age index + name filter)
+      withIndexTracking(collection, (tracker1) => {
+        const result1 = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              eq(row.age, 25), // Can optimize - has index
+              eq(row.name, `Alice`) // Can't optimize - no index
+            ),
+        })
+
+        expect(result1).toHaveLength(1) // Alice via partial optimization
+        expectIndexUsage(tracker1.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 1,
+          fullScanCallCount: 0,
+        })
+      })
+
+      // Second: full scan (no optimizable conditions)
+      withIndexTracking(collection, (tracker2) => {
+        const result2 = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              eq(row.name, `Alice`), // Can't optimize - no index
+              gt(length(row.name), 3) // Can't optimize - complex expression
+            ),
+        })
+
+        expect(result2).toHaveLength(1) // Alice via full scan
+        expectIndexUsage(tracker2.stats, {
           shouldUseIndex: false,
           shouldUseFullScan: true,
           indexCallCount: 0,
