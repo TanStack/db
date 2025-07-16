@@ -8,7 +8,7 @@ import {
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
 import { OrderedIndex } from "./indexes/ordered-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
-import { optimizeQuery } from "./utils/query-optimization.js"
+import { optimizeExpressionWithIndexes } from "./utils/index-optimization.js"
 import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
@@ -2088,7 +2088,10 @@ export class CollectionImpl<
       const expression = toExpression(whereExpression)
 
       // Try to optimize the query using indexes
-      const optimizationResult = optimizeQuery(expression, this.indexes)
+      const optimizationResult = optimizeExpressionWithIndexes(
+        expression,
+        this.indexes
+      )
 
       if (optimizationResult.canOptimize) {
         // Use index optimization

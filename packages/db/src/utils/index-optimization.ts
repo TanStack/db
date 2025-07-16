@@ -1,9 +1,26 @@
+/**
+ * # Index-Based Query Optimization
+ *
+ * This module provides utilities for optimizing query expressions by leveraging
+ * available indexes to quickly find matching keys instead of scanning all data.
+ *
+ * This is different from the query structure optimizer in `query/optimizer.ts`
+ * which rewrites query IR structure. This module focuses on using indexes during
+ * query execution to speed up data filtering.
+ *
+ * ## Key Features:
+ * - Uses indexes to find matching keys for WHERE conditions
+ * - Supports AND/OR logic with set operations
+ * - Handles range queries (eq, gt, gte, lt, lte)
+ * - Optimizes IN array expressions
+ */
+
 import { IndexOperation } from "../indexes/base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { BaseIndex } from "../indexes/base-index.js"
 
 /**
- * Result of query optimization
+ * Result of index-based query optimization
  */
 export interface OptimizationResult<TKey> {
   canOptimize: boolean
@@ -59,9 +76,9 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
 }
 
 /**
- * Optimizes a query expression using available indexes
+ * Optimizes a query expression using available indexes to find matching keys
  */
-export function optimizeQuery<TKey extends string | number>(
+export function optimizeExpressionWithIndexes<TKey extends string | number>(
   expression: BasicExpression,
   indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
