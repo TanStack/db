@@ -74,6 +74,8 @@ function setUp(recordApi: MockRecordApi<Data>) {
     getKey: (item: Data): number | number =>
       item.id ?? Math.round(Math.random() * 100000),
     startSync: true,
+    parse: {},
+    serialize: {},
   })
 
   return options

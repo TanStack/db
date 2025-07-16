@@ -4,12 +4,75 @@ import type { Event, RecordApi } from "trailbase"
 
 import type { CollectionConfig, SyncConfig, UtilsRecord } from "@tanstack/db"
 
+type ShapeOf<T> = Record<keyof T, unknown>
+type Conversion<I, O> = (value: I) => O
+
+type OptionalConversions<
+  InputType extends ShapeOf<OutputType>,
+  OutputType extends ShapeOf<InputType>,
+> = {
+  // Excludes all keys that require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? K
+    : never]?: Conversion<InputType[K], OutputType[K]>
+}
+
+type RequiredConversions<
+  InputType extends ShapeOf<OutputType>,
+  OutputType extends ShapeOf<InputType>,
+> = {
+  // Excludes all keys that do not strictly require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
+    ? never
+    : K]: Conversion<InputType[K], OutputType[K]>
+}
+
+type Conversions<
+  InputType extends ShapeOf<OutputType>,
+  OutputType extends ShapeOf<InputType>,
+> = OptionalConversions<InputType, OutputType> &
+  RequiredConversions<InputType, OutputType>
+
+function convert<
+  InputType extends ShapeOf<OutputType> & Record<string, unknown>,
+  OutputType extends ShapeOf<InputType>,
+>(
+  conversions: Conversions<InputType, OutputType>,
+  input: InputType
+): OutputType {
+  const c = conversions as Record<string, Conversion<InputType, OutputType>>
+
+  return Object.fromEntries(
+    Object.keys(input).map((k: string) => {
+      const value = input[k]
+      return [k, c[k]?.(value as any) ?? value]
+    })
+  ) as OutputType
+}
+
+function convertPartial<
+  InputType extends ShapeOf<OutputType> & Record<string, unknown>,
+  OutputType extends ShapeOf<InputType>,
+>(
+  conversions: Conversions<InputType, OutputType>,
+  input: Partial<InputType>
+): Partial<OutputType> {
+  const c = conversions as Record<string, Conversion<InputType, OutputType>>
+
+  return Object.fromEntries(
+    Object.keys(input).map((k: string) => {
+      const value = input[k]
+      return [k, c[k]?.(value as any) ?? value]
+    })
+  ) as OutputType
+}
+
 /**
  * Configuration interface for Trailbase Collection
  */
 export interface TrailBaseCollectionConfig<
-  TItem extends object,
-  TRecord extends object = TItem,
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
     CollectionConfig<TItem, TKey>,
@@ -20,8 +83,8 @@ export interface TrailBaseCollectionConfig<
    */
   recordApi: RecordApi<TRecord>
 
-  parse?: (record: TRecord) => TItem
-  serialize?: (item: Partial<TItem> | TItem) => Partial<TRecord> | TRecord
+  parse: Conversions<TRecord, TItem>
+  serialize: Conversions<TItem, TRecord>
 }
 
 export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
@@ -31,19 +94,20 @@ export interface TrailBaseCollectionUtils extends UtilsRecord {
 }
 
 export function trailBaseCollectionOptions<
-  TItem extends object,
-  TRecord extends object = TItem,
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>
 ): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
   const getKey = config.getKey
 
-  const parse = (record: TRecord) => (config.parse?.(record) ?? record) as TItem
+  const parse = (record: TRecord) =>
+    convert<TRecord, TItem>(config.parse, record)
   const serialUpd = (item: Partial<TItem>) =>
-    (config.serialize?.(item) ?? item) as Partial<TRecord>
+    convertPartial<TItem, TRecord>(config.serialize, item)
   const serialIns = (item: TItem) =>
-    (config.serialize?.(item) ?? item) as TRecord
+    convert<TItem, TRecord>(config.serialize, item)
 
   const seenIds = new Store(new Map<string, number>())
 

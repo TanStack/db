@@ -123,18 +123,14 @@ export const trailBaseTodoCollection = createCollection(
     schema: selectTodoSchema,
     recordApi: trailBaseClient.records(`todos`),
     // Re-using the example's drizzle-schema requires remapping the items.
-    parse: (record: Todo): SelectTodo => ({
-      ...record,
-      created_at: new Date(record.created_at * 1000),
-      updated_at: new Date(record.updated_at * 1000),
-    }),
-    serialize: (item) => ({
-      ...item,
-      created_at:
-        item.created_at && Math.floor(item.created_at.valueOf() / 1000),
-      updated_at:
-        item.updated_at && Math.floor(item.updated_at.valueOf() / 1000),
-    }),
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+      updated_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+      updated_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
   })
 )
 
@@ -222,17 +218,13 @@ export const trailBaseConfigCollection = createCollection(
     schema: selectConfigSchema,
     recordApi: trailBaseClient.records(`config`),
     // Re-using the example's drizzle-schema requires remapping the items.
-    parse: (record: Config): SelectConfig => ({
-      ...record,
-      created_at: new Date(record.created_at * 1000),
-      updated_at: new Date(record.updated_at * 1000),
-    }),
-    serialize: (item) => ({
-      ...item,
-      created_at:
-        item.created_at && Math.floor(item.created_at.valueOf() / 1000),
-      updated_at:
-        item.updated_at && Math.floor(item.updated_at.valueOf() / 1000),
-    }),
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+      updated_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+      updated_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
   })
 )
