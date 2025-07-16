@@ -1,5 +1,34 @@
 # @tanstack/db
 
+## 0.0.23
+
+### Patch Changes
+
+- Ensure schemas can apply defaults when inserting ([#209](https://github.com/TanStack/db/pull/209))
+
+## 0.0.22
+
+### Patch Changes
+
+- New distinct operator for queries. ([#244](https://github.com/TanStack/db/pull/244))
+
+## 0.0.21
+
+### Patch Changes
+
+- Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+  - Move local-only and local-storage collections to main `@tanstack/db` package
+  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/query-db-collection` package for TanStack Query integration
+  - Delete `@tanstack/db-collections` package (removed from repo)
+  - Update example app and documentation to use new package structure
+
+  Why?
+  - Better separation of concerns
+  - Independent versioning for each collection type
+  - Cleaner dependencies (electric collections don't need query deps, etc.)
+  - Easier to add more collection types moving forward
+
 ## 0.0.20
 
 ### Patch Changes

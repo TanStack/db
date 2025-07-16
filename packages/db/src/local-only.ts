@@ -6,7 +6,7 @@ import type {
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
+} from "./types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**

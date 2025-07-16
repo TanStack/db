@@ -1,11 +1,14 @@
 {
   "name": "@tanstack/db-example-react-todo",
   "private": true,
-  "version": "0.0.26",
+  "version": "0.0.29",
   "dependencies": {
-    "@tanstack/db-collections": "^0.0.24",
-    "@tanstack/query-core": "^5.81.5",
-    "@tanstack/react-db": "^0.0.20",
+    "@tanstack/electric-db-collection": "^0.0.5",
+    "@tanstack/query-core": "^5.75.7",
+    "@tanstack/query-db-collection": "^0.0.5",
+    "@tanstack/react-db": "^0.0.23",
+    "@tanstack/react-router": "^1.125.6",
+    "@tanstack/react-start": "^1.126.1",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",
@@ -13,7 +16,8 @@
     "postgres": "^3.4.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tailwindcss": "^4.1.11"
+    "tailwindcss": "^4.1.11",
+    "vite-tsconfig-paths": "^5.1.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
@@ -39,13 +43,12 @@
     "vite": "^6.2.2"
   },
   "scripts": {
-    "api:dev": "tsx watch src/api/server.ts",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "db:ensure-config": "tsx scripts/ensure-default-config.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "dev": "docker compose up -d && concurrently \"pnpm api:dev\" \"vite\"",
+    "dev": "docker compose up -d && vite dev",
     "lint": "eslint . --fix",
     "preview": "vite preview"
   },

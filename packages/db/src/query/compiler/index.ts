@@ -1,4 +1,4 @@
-import { filter, map } from "@electric-sql/d2mini"
+import { distinct, filter, map } from "@electric-sql/d2mini"
 import { optimizeQuery } from "../optimizer.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
@@ -106,8 +106,12 @@ export function compileQuery(
     }
   }
 
+  if (query.distinct && !query.fnSelect && !query.select) {
+    throw new Error(`DISTINCT requires a SELECT clause.`)
+  }
+
   // Process the SELECT clause early - always create __select_results
-  // This eliminates duplication and allows for future DISTINCT implementation
+  // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
     // Handle functional select - apply the function to transform the row
     pipeline = pipeline.pipe(
@@ -196,6 +200,11 @@ export function compileQuery(
         })
       )
     }
+  }
+
+  // Process the DISTINCT clause if it exists
+  if (query.distinct) {
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
   }
 
   // Process orderBy parameter if it exists

@@ -475,6 +475,18 @@ function createElectricSync<T extends Row<unknown>>(
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
+        onError: (params) => {
+          // Just immediately commit if there's an error to avoid blocking
+          // apps waiting for `.preload()` to finish.
+          begin()
+          commit()
+
+          if (shapeOptions.onError) {
+            return shapeOptions.onError(params)
+          }
+
+          return
+        },
       })
       let transactionStarted = false
       const newTxids = new Set<Txid>()

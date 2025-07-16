@@ -1,17 +1,12 @@
 {
-  "name": "@tanstack/db-collections",
-  "description": "A collection for (aspirationally) every way of loading your data",
-  "version": "0.0.24",
+  "name": "@tanstack/query-db-collection",
+  "description": "TanStack Query collection for TanStack DB",
+  "version": "0.0.5",
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/query-core": "^5.75.7",
-    "@tanstack/store": "^0.7.0",
-    "debug": "^4.4.1"
+    "@tanstack/query-core": "^5.75.7"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.0.0",
-    "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
@@ -35,7 +30,6 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
-    "@electric-sql/client": ">=1.0.0",
     "typescript": ">=4.7"
   },
   "author": "Kyle Mathews",
@@ -43,10 +37,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TanStack/db.git",
-    "directory": "packages/db-collections"
+    "directory": "packages/query-db-collection"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
+    "query",
+    "tanstack",
     "optimistic",
     "typescript"
   ],

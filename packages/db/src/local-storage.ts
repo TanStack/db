@@ -6,7 +6,7 @@ import type {
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
+} from "./types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**
@@ -393,7 +393,7 @@ export function localStorageCollectionOptions<
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // For delete operations, mutation.original contains the full object
-      const key = config.getKey(mutation.original)
+      const key = config.getKey(mutation.original as ResolvedType)
       currentData.delete(key)
     })
 
@@ -506,7 +506,7 @@ function createLocalStorageSync<T extends object>(
   storageKey: string,
   storage: StorageApi,
   storageEventApi: StorageEventApi,
-  getKey: (item: T) => string | number,
+  _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
 ): SyncConfig<T> & { manualTrigger?: () => void } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
