@@ -174,7 +174,7 @@ export function trailBaseCollectionOptions<
 
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit } = params
+      const { begin, write, commit, markReady } = params
 
       // Initial fetch.
       async function initialFetch() {
@@ -214,6 +214,7 @@ export function trailBaseCollectionOptions<
         }
 
         commit()
+        markReady()
       }
 
       // Afterwards subscribe.
@@ -265,6 +266,7 @@ export function trailBaseCollectionOptions<
           await initialFetch()
         } catch (e) {
           cancel()
+          markReady()
           throw e
         }
       }
