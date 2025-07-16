@@ -6,9 +6,9 @@ import {
   toExpression,
 } from "./query/builder/ref-proxy"
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
-import { CollectionIndex } from "./collection-index.js"
+import { OrderedIndex } from "./indexes/ordered-index.js"
+import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
 import {
-  canOptimizeExpression,
   optimizeQuery,
 } from "./utils/query-optimization.js"
 import type { Transaction } from "./transactions"
@@ -19,7 +19,6 @@ import type {
   CollectionStatus,
   CurrentStateAsChangesOptions,
   Fn,
-  IndexOptions,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
@@ -32,9 +31,11 @@ import type {
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
+import type { IndexOptions } from "./indexes/index-options.js"
+import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
-import type { BasicExpression } from "./query/ir"
+
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -230,7 +231,9 @@ export class CollectionImpl<
   private _size = 0
 
   // Index storage
-  private indexes = new Map<string, CollectionIndex<TKey>>()
+  private lazyIndexes = new Map<string, LazyIndexWrapper<TKey>>()
+  private resolvedIndexes = new Map<string, BaseIndex<TKey>>()
+  private isIndexesResolved = false
   private indexCounter = 0
 
   // Event system
@@ -342,6 +345,14 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
+    
+    // Resolve indexes when collection becomes ready
+    if (newStatus === 'ready' && !this.isIndexesResolved) {
+      // Resolve indexes asynchronously without blocking
+      this.resolveAllIndexes().catch((error) => {
+        console.warn('Failed to resolve indexes:', error)
+      })
+    }
   }
 
   /**
@@ -1249,51 +1260,126 @@ export class CollectionImpl<
   }
 
   /**
-   * Creates an index on the collection for faster lookups
-   * All indexes are ordered to support range queries
-   * @param indexCallback - Function that extracts the value to index from each row
-   * @param options - Optional configuration including index name
-   * @returns The created index object
-   * @example
-   * // Create an index on a field
-   * const nameIndex = collection.createIndex((row) => row.name)
+   * Creates an index on a collection for faster queries.
+   * Indexes significantly improve query performance by allowing binary search
+   * and range queries instead of full scans.
    *
-   * // Create a named index
-   * const statusIndex = collection.createIndex((row) => row.status, {
-   *   name: 'statusIndex'
+   * @template TResolver - The type of the index resolver (constructor or async loader)
+   * @param indexCallback - Function that extracts the indexed value from each item
+   * @param config - Configuration including index type and type-specific options
+   * @returns An index proxy that provides access to the index when ready
+   *
+   * @example
+   * // Create a default B-tree index
+   * const ageIndex = collection.createIndex((row) => row.age)
+   *
+   * // Create a B-tree index with custom options
+   * const ageIndex = collection.createIndex((row) => row.age, {
+   *   indexType: OrderedIndex,
+   *   options: { compareFn: customComparator },
+   *   name: 'age_btree'
    * })
    *
-   * // Create an index on a computed value
-   * const fullNameIndex = collection.createIndex((row) => `${row.firstName} ${row.lastName}`)
+   * // Create an async-loaded index
+   * const textIndex = collection.createIndex((row) => row.content, {
+   *   indexType: async () => {
+   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
+   *     return FullTextIndex
+   *   },
+   *   options: { language: 'en' }
+   * })
    */
-  public createIndex(
+  public createIndex<TResolver extends IndexResolver<TKey> = typeof OrderedIndex>(
     indexCallback: (row: SingleRowRefProxy<T>) => any,
-    options: IndexOptions = {}
-  ): CollectionIndex<TKey> {
+    config: IndexOptions<TResolver> = {}
+  ): IndexProxy<TKey> {
     this.validateCollectionUsable(`createIndex`)
 
-    // Generate unique ID for this index
     const indexId = `${++this.indexCounter}`
-
-    // Create the single-row refProxy for the callback
     const singleRowRefProxy = createSingleRowRefProxy<T>()
-
-    // Execute the callback to get the expression
     const indexExpression = indexCallback(singleRowRefProxy)
-
-    // Convert the result to a BasicExpression
     const expression = toExpression(indexExpression)
+    
+    // Default to OrderedIndex if no type specified
+    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
 
-    // Create the index using the new class
-    const index = new CollectionIndex<TKey>(indexId, expression, options.name)
+    // Create lazy wrapper
+    const lazyIndex = new LazyIndexWrapper<TKey>(
+      indexId,
+      expression,
+      config.name,
+      resolver,
+      config.options,
+      this.entries()
+    )
 
-    // Build the index with current data
-    index.build(this.entries())
+    this.lazyIndexes.set(indexId, lazyIndex)
 
-    // Store the index
-    this.indexes.set(indexId, index)
+    // For synchronous constructors (classes), resolve immediately
+    // For async loaders, wait for collection to be ready
+    if (typeof resolver === 'function' && resolver.prototype) {
+      // This is a constructor - resolve immediately and synchronously
+      try {
+        const resolvedIndex = lazyIndex.getResolved() // This should work since constructor resolved it
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch (error) {
+        // Fallback to async resolution
+        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+          console.warn('Failed to resolve single index:', error)
+        })
+      }
+    } else if (this.isIndexesResolved) {
+      // Async loader but indexes are already resolved - resolve this one
+      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+        console.warn('Failed to resolve single index:', error)
+      })
+    }
 
-    return index
+    return new IndexProxy(indexId, lazyIndex)
+  }
+
+  /**
+   * Resolve all lazy indexes (called when collection first syncs)
+   * @private
+   */
+  private async resolveAllIndexes(): Promise<void> {
+    if (this.isIndexesResolved) return
+
+    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
+      async ([indexId, lazyIndex]) => {
+        const resolvedIndex = await lazyIndex.resolve()
+        
+        // Build index with current data
+        resolvedIndex.build(this.entries())
+        
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+        return { indexId, resolvedIndex }
+      }
+    )
+
+    await Promise.all(resolutionPromises)
+    this.isIndexesResolved = true
+  }
+
+  /**
+   * Resolve a single index immediately
+   * @private
+   */
+  private async resolveSingleIndex(
+    indexId: string, 
+    lazyIndex: LazyIndexWrapper<TKey>
+  ): Promise<BaseIndex<TKey>> {
+    const resolvedIndex = await lazyIndex.resolve()
+    resolvedIndex.build(this.entries())
+    this.resolvedIndexes.set(indexId, resolvedIndex)
+    return resolvedIndex
+  }
+
+  /**
+   * Get resolved indexes for query optimization
+   */
+  get indexes(): Map<string, BaseIndex<TKey>> {
+    return this.resolvedIndexes
   }
 
   /**
@@ -1301,7 +1387,7 @@ export class CollectionImpl<
    * @private
    */
   private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
-    for (const index of this.indexes.values()) {
+    for (const index of this.resolvedIndexes.values()) {
       for (const change of changes) {
         switch (change.type) {
           case `insert`:
@@ -2054,301 +2140,9 @@ export class CollectionImpl<
     return result
   }
 
-  /**
-   * Checks if an expression can be optimized without actually performing the optimization
-   * This is used to avoid making index calls when we know we'll fall back to full scan
-   * @private
-   */
-  private canOptimizeExpression(expression: BasicExpression): boolean {
-    if (expression.type === `func`) {
-      switch (expression.name) {
-        case `eq`:
-        case `gt`:
-        case `gte`:
-        case `lt`:
-        case `lte`:
-          return this.canOptimizeSimpleComparison(expression)
 
-        case `and`:
-          return this.canOptimizeAndExpression(expression)
 
-        case `or`:
-          return this.canOptimizeOrExpression(expression)
 
-        case `in`:
-          return this.canOptimizeInArrayExpression(expression)
-      }
-    }
-
-    return false
-  }
-
-  /**
-   * Checks if a simple comparison can be optimized
-   * @private
-   */
-  private canOptimizeSimpleComparison(expression: BasicExpression): boolean {
-    if (expression.type !== `func` || expression.args.length !== 2) {
-      return false
-    }
-
-    const leftArg = expression.args[0]!
-    const rightArg = expression.args[1]!
-
-    // Check if this is a simple field comparison: field op value
-
-    if (leftArg.type === `ref` && rightArg.type === `val`) {
-      const fieldPath = leftArg.path
-
-      // Find an index that matches this field
-      for (const index of this.indexes.values()) {
-        if (
-          index.expression.type === `ref` &&
-          index.expression.path.length === fieldPath.length &&
-          index.expression.path.every((part, i) => part === fieldPath[i])
-        ) {
-          return true
-        }
-      }
-    }
-
-    return false
-  }
-
-  /**
-   * Checks if an AND expression can be optimized
-   * @private
-   */
-  private canOptimizeAndExpression(expression: BasicExpression): boolean {
-    if (expression.type !== `func` || expression.args.length < 2) {
-      return false
-    }
-
-    // If any argument can be optimized, we can gain some speedup (Kevin's feedback)
-    return expression.args.some((arg) =>
-      canOptimizeExpression(arg, this.indexes)
-    )
-  }
-
-  /**
-   * Checks if an OR expression can be optimized
-   * @private
-   */
-  private canOptimizeOrExpression(expression: BasicExpression): boolean {
-    if (expression.type !== `func` || expression.args.length < 2) {
-      return false
-    }
-
-    // If any argument can be optimized, we can gain some speedup (Kevin's feedback)
-    return expression.args.some((arg) =>
-      canOptimizeExpression(arg, this.indexes)
-    )
-  }
-
-  /**
-   * Checks if an inArray expression can be optimized
-   * @private
-   */
-  private canOptimizeInArrayExpression(expression: BasicExpression): boolean {
-    if (expression.type !== `func` || expression.args.length !== 2) {
-      return false
-    }
-
-    const fieldArg = expression.args[0]!
-    const arrayArg = expression.args[1]!
-
-    // Check if this is a field IN array comparison
-
-    if (
-      fieldArg.type === `ref` &&
-      arrayArg.type === `val` &&
-      Array.isArray(arrayArg.value)
-    ) {
-      const fieldPath = fieldArg.path
-
-      // Find an index that matches this field
-      for (const index of this.indexes.values()) {
-        if (index.matchesField(fieldPath)) {
-          return true
-        }
-      }
-    }
-
-    return false
-  }
-
-  /**
-   * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
-   * @private
-   */
-  private optimizeSimpleComparison(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    if (expression.type !== `func` || expression.args.length !== 2) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    const leftArg = expression.args[0]!
-    const rightArg = expression.args[1]!
-
-    // Check if this is a simple field comparison: field op value
-
-    if (leftArg.type === `ref` && rightArg.type === `val`) {
-      const fieldPath = leftArg.path
-      const operation = expression.name as `eq` | `gt` | `gte` | `lt` | `lte`
-
-      // Find an index that matches this field
-      for (const index of this.indexes.values()) {
-        if (index.matchesField(fieldPath)) {
-          // Found a matching index! Use it for fast lookup
-          const queryValue = rightArg.value
-          const matchingKeys =
-            operation === `eq`
-              ? index.equalityLookup(queryValue)
-              : index.rangeQuery(operation, queryValue)
-          return { canOptimize: true, matchingKeys }
-        }
-      }
-    }
-
-    return { canOptimize: false, matchingKeys: new Set() }
-  }
-
-  /**
-   * Optimizes AND expressions by intersecting results from multiple conditions
-   * @private
-   */
-  private optimizeAndExpression(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    if (expression.type !== `func` || expression.args.length < 2) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    // First, check if all arguments CAN be optimized without actually doing the optimization
-    // This avoids making index calls if we're going to fall back to full scan anyway
-    const canOptimizeAll = expression.args.every((arg) =>
-      this.canOptimizeExpression(arg)
-    )
-
-    if (!canOptimizeAll) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    // Now that we know all can be optimized, actually do the optimization
-    const results: Array<{ canOptimize: boolean; matchingKeys: Set<TKey> }> = []
-
-    for (const arg of expression.args) {
-      const result = this.optimizeQueryRecursive(arg)
-      results.push(result)
-    }
-
-    if (results.length > 0) {
-      // Intersect all matching keys (AND logic)
-      let intersectedKeys = results[0]!.matchingKeys
-      for (let i = 1; i < results.length; i++) {
-        const newIntersection = new Set<TKey>()
-        for (const key of intersectedKeys) {
-          if (results[i]!.matchingKeys.has(key)) {
-            newIntersection.add(key)
-          }
-        }
-        intersectedKeys = newIntersection
-      }
-
-      return { canOptimize: true, matchingKeys: intersectedKeys }
-    }
-
-    return { canOptimize: false, matchingKeys: new Set() }
-  }
-
-  /**
-   * Optimizes OR expressions by unioning results from multiple conditions
-   * @private
-   */
-  private optimizeOrExpression(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    if (expression.type !== `func` || expression.args.length < 2) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    // First, check if all arguments CAN be optimized without actually doing the optimization
-    const canOptimizeAll = expression.args.every((arg) =>
-      this.canOptimizeExpression(arg)
-    )
-
-    if (!canOptimizeAll) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    // Now that we know all can be optimized, actually do the optimization
-    const results: Array<{ canOptimize: boolean; matchingKeys: Set<TKey> }> = []
-
-    for (const arg of expression.args) {
-      const result = this.optimizeQueryRecursive(arg)
-      results.push(result)
-    }
-
-    // Union all matching keys (OR logic)
-    const unionedKeys = new Set<TKey>()
-    for (const result of results) {
-      for (const key of result.matchingKeys) {
-        unionedKeys.add(key)
-      }
-    }
-
-    return { canOptimize: true, matchingKeys: unionedKeys }
-  }
-
-  /**
-   * Optimizes inArray expressions
-   * @private
-   */
-  private optimizeInArrayExpression(expression: BasicExpression): {
-    canOptimize: boolean
-    matchingKeys: Set<TKey>
-  } {
-    if (expression.type !== `func` || expression.args.length !== 2) {
-      return { canOptimize: false, matchingKeys: new Set() }
-    }
-
-    const fieldArg = expression.args[0]!
-    const arrayArg = expression.args[1]!
-
-    // Check if this is a field IN array comparison
-
-    if (
-      fieldArg.type === `ref` &&
-      arrayArg.type === `val` &&
-      Array.isArray(arrayArg.value)
-    ) {
-      const fieldPath = fieldArg.path
-      const values = arrayArg.value
-
-      // Find an index that matches this field
-      for (const index of this.indexes.values()) {
-        if (index.matchesField(fieldPath)) {
-          // Found a matching index! Use it for fast lookup of each value
-          const matchingKeys = new Set<TKey>()
-
-          for (const value of values) {
-            const keysForValue = index.equalityLookup(value)
-            for (const key of keysForValue) {
-              matchingKeys.add(key)
-            }
-          }
-
-          return { canOptimize: true, matchingKeys }
-        }
-      }
-    }
-
-    return { canOptimize: false, matchingKeys: new Set() }
-  }
 
   /**
    * Creates a filter function from a where callback

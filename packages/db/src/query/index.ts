@@ -25,6 +25,7 @@ export {
   inArray,
   like,
   ilike,
+  similar,
   // Functions
   upper,
   lower,

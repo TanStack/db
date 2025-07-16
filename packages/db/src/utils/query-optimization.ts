@@ -1,5 +1,6 @@
 import type { BasicExpression } from "../query/ir.js"
-import type { CollectionIndex } from "../collection-index.js"
+import type { BaseIndex } from "../indexes/base-index.js"
+import { IndexOperation } from "../indexes/base-index.js"
 
 /**
  * Result of query optimization
@@ -13,9 +14,9 @@ export interface OptimizationResult<TKey> {
  * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
-  indexes: Map<string, CollectionIndex<TKey>>,
+  indexes: Map<string, BaseIndex<TKey>>,
   fieldPath: Array<string>
-): CollectionIndex<TKey> | undefined {
+): BaseIndex<TKey> | undefined {
   for (const index of indexes.values()) {
     if (index.matchesField(fieldPath)) {
       return index
@@ -62,7 +63,7 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
  */
 export function optimizeQuery<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   return optimizeQueryRecursive(expression, indexes)
 }
@@ -72,7 +73,7 @@ export function optimizeQuery<TKey extends string | number>(
  */
 function optimizeQueryRecursive<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -102,7 +103,7 @@ function optimizeQueryRecursive<TKey extends string | number>(
  */
 export function canOptimizeExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): boolean {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -132,7 +133,7 @@ export function canOptimizeExpression<TKey extends string | number>(
  */
 function optimizeSimpleComparison<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -179,10 +180,16 @@ function optimizeSimpleComparison<TKey extends string | number>(
 
     if (index) {
       const queryValue = (valueArg as any).value
-      const matchingKeys =
-        operation === `eq`
-          ? index.equalityLookup(queryValue)
-          : index.rangeQuery(operation, queryValue)
+      
+      // Map operation to IndexOperation enum
+      const indexOperation = operation as IndexOperation
+      
+      // Check if the index supports this operation
+      if (!index.supports(indexOperation)) {
+        return { canOptimize: false, matchingKeys: new Set() }
+      }
+      
+      const matchingKeys = index.lookup(indexOperation, queryValue)
       return { canOptimize: true, matchingKeys }
     }
   }
@@ -195,7 +202,7 @@ function optimizeSimpleComparison<TKey extends string | number>(
  */
 function canOptimizeSimpleComparison<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false
@@ -226,7 +233,7 @@ function canOptimizeSimpleComparison<TKey extends string | number>(
  */
 function optimizeAndExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -257,7 +264,7 @@ function optimizeAndExpression<TKey extends string | number>(
  */
 function canOptimizeAndExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
@@ -272,7 +279,7 @@ function canOptimizeAndExpression<TKey extends string | number>(
  */
 function optimizeOrExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -303,7 +310,7 @@ function optimizeOrExpression<TKey extends string | number>(
  */
 function canOptimizeOrExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
@@ -318,7 +325,7 @@ function canOptimizeOrExpression<TKey extends string | number>(
  */
 function optimizeInArrayExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -337,16 +344,21 @@ function optimizeInArrayExpression<TKey extends string | number>(
     const index = findIndexForField(indexes, fieldPath)
 
     if (index) {
-      const matchingKeys = new Set<TKey>()
-
-      for (const value of values) {
-        const keysForValue = index.equalityLookup(value)
-        for (const key of keysForValue) {
-          matchingKeys.add(key)
+      // Check if the index supports IN operation
+      if (index.supports(IndexOperation.IN)) {
+        const matchingKeys = index.lookup(IndexOperation.IN, values)
+        return { canOptimize: true, matchingKeys }
+      } else if (index.supports(IndexOperation.EQ)) {
+        // Fallback to multiple equality lookups
+        const matchingKeys = new Set<TKey>()
+        for (const value of values) {
+          const keysForValue = index.lookup(IndexOperation.EQ, value)
+          for (const key of keysForValue) {
+            matchingKeys.add(key)
+          }
         }
+        return { canOptimize: true, matchingKeys }
       }
-
-      return { canOptimize: true, matchingKeys }
     }
   }
 
@@ -358,7 +370,7 @@ function optimizeInArrayExpression<TKey extends string | number>(
  */
 function canOptimizeInArrayExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, CollectionIndex<TKey>>
+  indexes: Map<string, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false

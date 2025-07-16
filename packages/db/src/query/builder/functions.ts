@@ -1,4 +1,4 @@
-import { Aggregate, Func } from "../ir"
+import { Aggregate, Func, Value } from "../ir"
 import { toExpression } from "./ref-proxy.js"
 import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
@@ -151,6 +151,28 @@ export function ilike(
   right: string | RefProxy<string> | BasicExpression<string>
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
+}
+
+export function similar(
+  left:
+    | RefProxy<string>
+    | RefProxy<string | null>
+    | RefProxy<string | undefined>
+    | string
+    | BasicExpression<string>,
+  right: string | RefProxy<string> | BasicExpression<string>,
+  threshold?: number | BasicExpression<number>
+): BasicExpression<boolean> {
+  const args: BasicExpression[] = [toExpression(left), toExpression(right)]
+  if (threshold !== undefined) {
+    // Handle number threshold by creating a Value expression
+    if (typeof threshold === 'number') {
+      args.push(new Value(threshold))
+    } else {
+      args.push(threshold)
+    }
+  }
+  return new Func(`similar`, args)
 }
 
 // Functions

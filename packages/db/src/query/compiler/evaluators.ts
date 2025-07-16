@@ -233,6 +233,17 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         return evaluateLike(value, pattern, true)
       }
     }
+    case `similar`: {
+      const valueEvaluator = compiledArgs[0]!
+      const patternEvaluator = compiledArgs[1]!
+      const thresholdEvaluator = compiledArgs[2] // Optional third argument
+      return (data) => {
+        const value = valueEvaluator(data)
+        const pattern = patternEvaluator(data)
+        const threshold = thresholdEvaluator ? thresholdEvaluator(data) : 0.3
+        return evaluateSimilar(value, pattern, threshold)
+      }
+    }
 
     // String functions
     case `upper`: {
@@ -359,4 +370,59 @@ function evaluateLike(
 
   const regex = new RegExp(`^${regexPattern}$`)
   return regex.test(searchValue)
+}
+
+/**
+ * Evaluate trigram similarity between two strings
+ * Uses Jaccard similarity coefficient on trigrams
+ */
+function evaluateSimilar(
+  value: any,
+  pattern: any,
+  threshold: any
+): boolean {
+  if (typeof value !== `string` || typeof pattern !== `string`) {
+    return false
+  }
+  
+  if (typeof threshold !== `number` || threshold < 0 || threshold > 1) {
+    threshold = 0.3 // Default threshold
+  }
+
+  // Normalize strings (case insensitive, whitespace normalized)
+  const normalizeText = (text: string): string => {
+    return text.toLowerCase().replace(/\s+/g, ' ').trim()
+  }
+
+  const normalizedValue = normalizeText(value)
+  const normalizedPattern = normalizeText(pattern)
+
+  // Extract trigrams from both strings
+  const extractTrigrams = (text: string): Set<string> => {
+    const trigrams = new Set<string>()
+    const padded = `  ${text}  `
+    
+    for (let i = 0; i <= padded.length - 3; i++) {
+      trigrams.add(padded.substring(i, i + 3))
+    }
+    return trigrams
+  }
+
+  const valueTrigrams = extractTrigrams(normalizedValue)
+  const patternTrigrams = extractTrigrams(normalizedPattern)
+
+  // Calculate Jaccard similarity
+  if (valueTrigrams.size === 0 && patternTrigrams.size === 0) {
+    return true // Both empty
+  }
+  
+  if (valueTrigrams.size === 0 || patternTrigrams.size === 0) {
+    return false // One empty, one not
+  }
+
+  const intersection = new Set([...valueTrigrams].filter(t => patternTrigrams.has(t)))
+  const union = new Set([...valueTrigrams, ...patternTrigrams])
+  
+  const similarity = intersection.size / union.size
+  return similarity >= threshold
 }

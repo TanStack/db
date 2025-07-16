@@ -52,23 +52,9 @@ function createIndexUsageTracker(collection: any): {
   const originalMethods = new Map()
 
   for (const [indexId, index] of collection.indexes) {
-    // Track equality lookup calls
-    const originalEqualityLookup = index.equalityLookup.bind(index)
-    index.equalityLookup = function (value: any) {
-      stats.rangeQueryCalls++
-      stats.indexesUsed.push(indexId)
-      stats.queriesExecuted.push({
-        type: `index`,
-        operation: `eq`,
-        field: index.expression?.path?.join(`.`),
-        value,
-      })
-      return originalEqualityLookup(value)
-    }
-
-    // Track range query calls
-    const originalRangeQuery = index.rangeQuery.bind(index)
-    index.rangeQuery = function (operation: any, value: any) {
+    // Track lookup calls (new unified method)
+    const originalLookup = index.lookup.bind(index)
+    index.lookup = function (operation: any, value: any) {
       stats.rangeQueryCalls++
       stats.indexesUsed.push(indexId)
       stats.queriesExecuted.push({
@@ -77,12 +63,11 @@ function createIndexUsageTracker(collection: any): {
         field: index.expression?.path?.join(`.`),
         value,
       })
-      return originalRangeQuery(operation, value)
+      return originalLookup(operation, value)
     }
 
     originalMethods.set(indexId, {
-      equalityLookup: originalEqualityLookup,
-      rangeQuery: originalRangeQuery,
+      lookup: originalLookup,
     })
   }
 
@@ -109,8 +94,7 @@ function createIndexUsageTracker(collection: any): {
     for (const [indexId, index] of collection.indexes) {
       const original = originalMethods.get(indexId)
       if (original) {
-        index.equalityLookup = original.equalityLookup
-        index.rangeQuery = original.rangeQuery
+        index.lookup = original.lookup
       }
     }
     collection.entries = originalEntries
@@ -828,27 +812,21 @@ describe(`Collection Indexes`, () => {
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Alice`, `Charlie`, `Diana`, `Eve`])
 
-        // Verify 100% index usage - should use status index twice (for each value)
+        // Verify 100% index usage - should use status index once with IN operation
         expectIndexUsage(tracker.stats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 2, // Two eq operations for the array values
+          indexCallCount: 1, // One IN operation for the array values
           fullScanCallCount: 0,
         })
 
-        // Verify both values were looked up using the status index
-        expect(tracker.stats.queriesExecuted).toHaveLength(2)
+        // Verify the IN operation was used
+        expect(tracker.stats.queriesExecuted).toHaveLength(1)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
-          operation: `eq`,
+          operation: `in`,
           field: `status`,
-          value: `active`,
-        })
-        expect(tracker.stats.queriesExecuted[1]).toMatchObject({
-          type: `index`,
-          operation: `eq`,
-          field: `status`,
-          value: `pending`,
+          value: [`active`, `pending`],
         })
       })
     })
@@ -1023,7 +1001,7 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query only on fields without indexes (name and score fields don't have indexes)
         const result = collection.currentStateAsChanges({
-          where: (row) => and(eq(row.name, `Alice`), eq(row.score, 95)),
+          where: (row) => and(eq(row.name, `Alice`), eq(row.score!, 95)),
         })
 
         expect(result).toHaveLength(1) // Alice
