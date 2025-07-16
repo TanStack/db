@@ -271,7 +271,7 @@ export function queryCollectionOptions<
   }
 
   const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
-    const { begin, write, commit, collection } = params
+    const { begin, write, commit, markReady, collection } = params
 
     const observerOptions: QueryObserverOptions<
       Array<TItem>,
@@ -371,11 +371,17 @@ export function queryCollectionOptions<
         })
 
         commit()
+
+        // Mark collection as ready after first successful query result
+        markReady()
       } else if (result.isError) {
         console.error(
           `[QueryCollection] Error observing query ${String(queryKey)}:`,
           result.error
         )
+
+        // Mark collection as ready even on error to avoid blocking apps
+        markReady()
       }
     })
 

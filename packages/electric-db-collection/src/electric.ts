@@ -471,15 +471,14 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit } = params
+      const { begin, write, commit, markReady } = params
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
         onError: (params) => {
-          // Just immediately commit if there's an error to avoid blocking
+          // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
-          begin()
-          commit()
+          markReady()
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(params)
@@ -531,12 +530,10 @@ function createElectricSync<T extends Row<unknown>>(
           if (transactionStarted) {
             commit()
             transactionStarted = false
-          } else {
-            // If the shape is empty, do an empty commit to move the collection status
-            // to ready.
-            begin()
-            commit()
           }
+
+          // Mark the collection as ready now that sync is up to date
+          markReady()
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
