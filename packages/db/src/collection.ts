@@ -7,13 +7,12 @@ import {
 } from "./query/builder/ref-proxy"
 import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
 
-import { ascComparator } from "./utils/comparison.js"
+import { CollectionIndex } from "./collection-index.js"
 import type { Transaction } from "./transactions"
 import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
-  CollectionIndex,
   CollectionStatus,
   CurrentStateAsChangesOptions,
   Fn,
@@ -1271,7 +1270,7 @@ export class CollectionImpl<
     this.validateCollectionUsable(`createIndex`)
 
     // Generate unique ID for this index
-    const indexId = `index_${++this.indexCounter}`
+    const indexId = `${++this.indexCounter}`
 
     // Create the single-row refProxy for the callback
     const singleRowRefProxy = createSingleRowRefProxy<T>()
@@ -1282,266 +1281,16 @@ export class CollectionImpl<
     // Convert the result to a BasicExpression
     const expression = toExpression(indexExpression)
 
-    // Create a comparison function for ordering
-    const compareFn = this.createComparisonFunction()
-
-    // Create the index
-    const index: CollectionIndex<TKey> = {
-      id: indexId,
-      name: options.name,
-      expression,
-      orderedEntries: [],
-      valueMap: new Map<any, Set<TKey>>(),
-      indexedKeys: new Set<TKey>(),
-      compareFn,
-    }
+    // Create the index using the new class
+    const index = new CollectionIndex<TKey>(indexId, expression, options.name)
 
     // Build the index with current data
-    this.buildIndex(index)
+    index.build(this.entries())
 
     // Store the index
     this.indexes.set(indexId, index)
 
     return index
-  }
-
-  /**
-   * Creates a comparison function for ordering index values
-   * Uses the exact same logic as the orderBy compiler for consistency
-   * @private
-   */
-  private createComparisonFunction(): (a: any, b: any) => number {
-    return ascComparator
-  }
-
-  /**
-   * Evaluates an index expression for a given item
-   * @private
-   */
-  private evaluateIndexExpression(index: CollectionIndex<TKey>, item: T): any {
-    // Use the single-row evaluator for direct property access without table aliases
-    const evaluator = compileSingleRowExpression(index.expression)
-
-    return evaluator(item as Record<string, unknown>)
-  }
-
-  /**
-   * Builds an index by iterating through all current items
-   * @private
-   */
-  private buildIndex(index: CollectionIndex<TKey>): void {
-    // Clear existing index data
-    index.orderedEntries.length = 0
-    index.valueMap.clear()
-    index.indexedKeys.clear()
-
-    // Collect all values first
-    const valueEntries = new Map<any, Set<TKey>>()
-
-    // Index all current items
-    for (const [key, item] of this.entries()) {
-      try {
-        const indexedValue = this.evaluateIndexExpression(index, item)
-
-        if (!valueEntries.has(indexedValue)) {
-          valueEntries.set(indexedValue, new Set<TKey>())
-        }
-
-        valueEntries.get(indexedValue)!.add(key)
-        index.indexedKeys.add(key)
-      } catch (error) {
-        // If indexing fails for this item, skip it but don't break the whole index
-        console.warn(`Failed to index item with key ${key}:`, error)
-      }
-    }
-
-    // Sort the values and create ordered entries
-    // Note: JavaScript's Array.sort() always moves undefined to the end, regardless of comparison function
-    // So we need to manually handle undefined/null values to match the orderBy compiler behavior
-    const allValues = Array.from(valueEntries.keys())
-    const undefinedValues: Array<any> = []
-    const definedValues: Array<any> = []
-
-    for (const value of allValues) {
-      if (value == null) {
-        // null or undefined
-        undefinedValues.push(value)
-      } else {
-        definedValues.push(value)
-      }
-    }
-
-    // Sort defined values normally
-    definedValues.sort(index.compareFn)
-
-    // Sort undefined values (they should all be equal, but just in case)
-    undefinedValues.sort(index.compareFn)
-
-    // Combine with undefined/null first (to match orderBy compiler behavior)
-    const sortedValues = [...undefinedValues, ...definedValues]
-
-    for (const value of sortedValues) {
-      const keys = valueEntries.get(value)!
-      index.orderedEntries.push([value, keys])
-      index.valueMap.set(value, keys)
-    }
-  }
-
-  /**
-   * Adds an item to an index, maintaining order
-   * @private
-   */
-  private addToIndex(index: CollectionIndex<TKey>, key: TKey, item: T): void {
-    try {
-      const indexedValue = this.evaluateIndexExpression(index, item)
-
-      // Check if this value already exists
-      if (index.valueMap.has(indexedValue)) {
-        // Add to existing set
-        index.valueMap.get(indexedValue)!.add(key)
-      } else {
-        // Create new set for this value
-        const keySet = new Set<TKey>([key])
-        index.valueMap.set(indexedValue, keySet)
-
-        // Find correct position in ordered entries using binary search
-        const insertIndex = this.findInsertPosition(
-          index.orderedEntries,
-          indexedValue,
-          index.compareFn
-        )
-        index.orderedEntries.splice(insertIndex, 0, [indexedValue, keySet])
-      }
-
-      index.indexedKeys.add(key)
-    } catch (error) {
-      // If indexing fails for this item, skip it but don't break the whole index
-      console.warn(`Failed to index item with key ${key}:`, error)
-    }
-  }
-
-  /**
-   * Removes an item from an index, maintaining order
-   * @private
-   */
-  private removeFromIndex(
-    index: CollectionIndex<TKey>,
-    key: TKey,
-    item: T
-  ): void {
-    try {
-      const indexedValue = this.evaluateIndexExpression(index, item)
-
-      const keysForValue = index.valueMap.get(indexedValue)
-      if (keysForValue) {
-        keysForValue.delete(key)
-        if (keysForValue.size === 0) {
-          // Remove from valueMap
-          index.valueMap.delete(indexedValue)
-
-          // Remove from orderedEntries
-          const entryIndex = index.orderedEntries.findIndex(
-            ([value]) => index.compareFn(value, indexedValue) === 0
-          )
-          if (entryIndex >= 0) {
-            index.orderedEntries.splice(entryIndex, 1)
-          }
-        }
-      }
-
-      index.indexedKeys.delete(key)
-    } catch (error) {
-      // If removing from index fails, skip it but don't break
-      console.warn(`Failed to remove item with key ${key} from index:`, error)
-    }
-  }
-
-  /**
-   * Updates an item in an index (removes old, adds new)
-   * @private
-   */
-  private updateInIndex(
-    index: CollectionIndex<TKey>,
-    key: TKey,
-    oldItem: T,
-    newItem: T
-  ): void {
-    this.removeFromIndex(index, key, oldItem)
-    this.addToIndex(index, key, newItem)
-  }
-
-  /**
-   * Finds the correct insert position for a value in the ordered entries array
-   * @private
-   */
-  private findInsertPosition<V>(
-    orderedEntries: Array<[V, any]>,
-    value: V,
-    compareFn: (a: V, b: V) => number
-  ): number {
-    let left = 0
-    let right = orderedEntries.length
-
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2)
-      const comparison = compareFn(orderedEntries[mid]![0], value)
-
-      if (comparison < 0) {
-        left = mid + 1
-      } else {
-        right = mid
-      }
-    }
-
-    return left
-  }
-
-  /**
-   * Performs a range query on an ordered index
-   * @private
-   */
-  private rangeQuery(
-    index: CollectionIndex<TKey>,
-    operation: `gt` | `gte` | `lt` | `lte` | `eq`,
-    value: any
-  ): Set<TKey> {
-    const result = new Set<TKey>()
-
-    if (operation === `eq`) {
-      // Fast equality lookup
-      const keys = index.valueMap.get(value)
-      if (keys) {
-        keys.forEach((key) => result.add(key))
-      }
-      return result
-    }
-
-    // Range operations - iterate through ordered entries
-    for (const [indexValue, keys] of index.orderedEntries) {
-      const comparison = index.compareFn(indexValue, value)
-
-      let matches = false
-      switch (operation) {
-        case `gt`:
-          matches = comparison > 0
-          break
-        case `gte`:
-          matches = comparison >= 0
-          break
-        case `lt`:
-          matches = comparison < 0
-          break
-        case `lte`:
-          matches = comparison <= 0
-          break
-      }
-
-      if (matches) {
-        keys.forEach((key) => result.add(key))
-      }
-    }
-
-    return result
   }
 
   /**
@@ -1553,22 +1302,17 @@ export class CollectionImpl<
       for (const change of changes) {
         switch (change.type) {
           case `insert`:
-            this.addToIndex(index, change.key, change.value)
+            index.add(change.key, change.value)
             break
           case `update`:
             if (change.previousValue) {
-              this.updateInIndex(
-                index,
-                change.key,
-                change.previousValue,
-                change.value
-              )
+              index.update(change.key, change.previousValue, change.value)
             } else {
-              this.addToIndex(index, change.key, change.value)
+              index.add(change.key, change.value)
             }
             break
           case `delete`:
-            this.removeFromIndex(index, change.key, change.value)
+            index.remove(change.key, change.value)
             break
         }
       }
@@ -2465,11 +2209,7 @@ export class CollectionImpl<
 
       // Find an index that matches this field
       for (const index of this.indexes.values()) {
-        if (
-          index.expression.type === `ref` &&
-          index.expression.path.length === fieldPath.length &&
-          index.expression.path.every((part, i) => part === fieldPath[i])
-        ) {
+        if (index.matchesField(fieldPath)) {
           return true
         }
       }
@@ -2501,14 +2241,13 @@ export class CollectionImpl<
 
       // Find an index that matches this field
       for (const index of this.indexes.values()) {
-        if (
-          index.expression.type === `ref` &&
-          index.expression.path.length === fieldPath.length &&
-          index.expression.path.every((part, i) => part === fieldPath[i])
-        ) {
+        if (index.matchesField(fieldPath)) {
           // Found a matching index! Use it for fast lookup
           const queryValue = rightArg.value
-          const matchingKeys = this.rangeQuery(index, operation, queryValue)
+          const matchingKeys =
+            operation === `eq`
+              ? index.equalityLookup(queryValue)
+              : index.rangeQuery(operation, queryValue)
           return { canOptimize: true, matchingKeys }
         }
       }
@@ -2633,16 +2372,12 @@ export class CollectionImpl<
 
       // Find an index that matches this field
       for (const index of this.indexes.values()) {
-        if (
-          index.expression.type === `ref` &&
-          index.expression.path.length === fieldPath.length &&
-          index.expression.path.every((part, i) => part === fieldPath[i])
-        ) {
+        if (index.matchesField(fieldPath)) {
           // Found a matching index! Use it for fast lookup of each value
           const matchingKeys = new Set<TKey>()
 
           for (const value of values) {
-            const keysForValue = this.rangeQuery(index, `eq`, value)
+            const keysForValue = index.equalityLookup(value)
             for (const key of keysForValue) {
               matchingKeys.add(key)
             }

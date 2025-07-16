@@ -48,18 +48,42 @@ function createIndexUsageTracker(collection: any): {
     queriesExecuted: [],
   }
 
-  // Track rangeQuery calls (index usage)
-  const originalRangeQuery = collection.rangeQuery
-  collection.rangeQuery = function (index: any, operation: string, value: any) {
-    stats.rangeQueryCalls++
-    stats.indexesUsed.push(index.id)
-    stats.queriesExecuted.push({
-      type: `index`,
-      operation,
-      field: index.expression?.path?.join(`.`),
-      value,
+  // Track index method calls by patching all existing indexes
+  const originalMethods = new Map()
+
+  for (const [indexId, index] of collection.indexes) {
+    // Track equality lookup calls
+    const originalEqualityLookup = index.equalityLookup.bind(index)
+    index.equalityLookup = function (value: any) {
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(indexId)
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation: `eq`,
+        field: index.expression?.path?.join(`.`),
+        value,
+      })
+      return originalEqualityLookup(value)
+    }
+
+    // Track range query calls
+    const originalRangeQuery = index.rangeQuery.bind(index)
+    index.rangeQuery = function (operation: any, value: any) {
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(indexId)
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation,
+        field: index.expression?.path?.join(`.`),
+        value,
+      })
+      return originalRangeQuery(operation, value)
+    }
+
+    originalMethods.set(indexId, {
+      equalityLookup: originalEqualityLookup,
+      rangeQuery: originalRangeQuery,
     })
-    return originalRangeQuery.call(this, index, operation, value)
   }
 
   // Track full scan calls (entries() iteration)
@@ -81,7 +105,14 @@ function createIndexUsageTracker(collection: any): {
   }
 
   const restore = () => {
-    collection.rangeQuery = originalRangeQuery
+    // Restore original index methods
+    for (const [indexId, index] of collection.indexes) {
+      const original = originalMethods.get(indexId)
+      if (original) {
+        index.equalityLookup = original.equalityLookup
+        index.rangeQuery = original.rangeQuery
+      }
+    }
     collection.entries = originalEntries
   }
 
@@ -243,10 +274,10 @@ describe(`Collection Indexes`, () => {
     it(`should create an index on a simple field`, () => {
       const index = collection.createIndex((row) => row.status)
 
-      expect(index.id).toMatch(/^index_\d+$/)
+      expect(index.id).toMatch(/^\d+$/)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
-      expect(index.indexedKeys.size).toBe(5)
+      expect(index.indexedKeysSet.size).toBe(5)
     })
 
     it(`should create a named index`, () => {
@@ -255,7 +286,7 @@ describe(`Collection Indexes`, () => {
       })
 
       expect(index.name).toBe(`ageIndex`)
-      expect(index.indexedKeys.size).toBe(5)
+      expect(index.indexedKeysSet.size).toBe(5)
     })
 
     it(`should create multiple indexes`, () => {
@@ -263,15 +294,15 @@ describe(`Collection Indexes`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       expect(statusIndex.id).not.toBe(ageIndex.id)
-      expect(statusIndex.indexedKeys.size).toBe(5)
-      expect(ageIndex.indexedKeys.size).toBe(5)
+      expect(statusIndex.indexedKeysSet.size).toBe(5)
+      expect(ageIndex.indexedKeysSet.size).toBe(5)
     })
 
     it(`should maintain ordered entries`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Ages should be ordered: 22, 25, 28, 30, 35
-      const orderedAges = ageIndex.orderedEntries.map(([age]) => age)
+      const orderedAges = ageIndex.orderedEntriesArray.map(([age]) => age)
       expect(orderedAges).toEqual([22, 25, 28, 30, 35])
     })
 
@@ -279,10 +310,10 @@ describe(`Collection Indexes`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
 
       // Should have 3 unique status values
-      expect(statusIndex.orderedEntries.length).toBe(3)
+      expect(statusIndex.orderedEntriesArray.length).toBe(3)
 
       // "active" status should have 3 items
-      const activeKeys = statusIndex.valueMap.get(`active`)
+      const activeKeys = statusIndex.valueMapData.get(`active`)
       expect(activeKeys?.size).toBe(3)
     })
 
@@ -290,10 +321,10 @@ describe(`Collection Indexes`, () => {
       const scoreIndex = collection.createIndex((row) => row.score)
 
       // Should include the item with undefined score
-      expect(scoreIndex.indexedKeys.size).toBe(5)
+      expect(scoreIndex.indexedKeysSet.size).toBe(5)
 
       // undefined should be first in ordered entries
-      const firstValue = scoreIndex.orderedEntries[0]?.[0]
+      const firstValue = scoreIndex.orderedEntriesArray[0]?.[0]
       expect(firstValue).toBeUndefined()
     })
   })
@@ -580,7 +611,7 @@ describe(`Collection Indexes`, () => {
         })
 
         // Verify the specific index was used
-        expect(tracker.stats.indexesUsed[0]).toMatch(/^index_\d+$/)
+        expect(tracker.stats.indexesUsed[0]).toMatch(/^\d+$/)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
           operation: `eq`,
@@ -1213,11 +1244,11 @@ describe(`Collection Indexes`, () => {
       const ageIndex = specialCollection.createIndex((row) => row.age)
 
       // Verify index contains all items including special values
-      expect(ageIndex.indexedKeys.size).toBe(8) // Original 5 + 3 special
-      expect(ageIndex.orderedEntries).toHaveLength(8) // 8 unique age values (including null)
+      expect(ageIndex.indexedKeysSet.size).toBe(8) // Original 5 + 3 special
+      expect(ageIndex.orderedEntriesArray).toHaveLength(8) // 8 unique age values (including null)
 
       // Null/undefined should be ordered first
-      const firstValue = ageIndex.orderedEntries[0]?.[0]
+      const firstValue = ageIndex.orderedEntriesArray[0]?.[0]
       expect(firstValue == null).toBe(true)
 
       // Test that queries with special values use indexes correctly
@@ -1260,17 +1291,17 @@ describe(`Collection Indexes`, () => {
 
       const index = emptyCollection.createIndex((row) => row.age)
 
-      expect(index.indexedKeys.size).toBe(0)
-      expect(index.orderedEntries).toHaveLength(0)
-      expect(index.valueMap.size).toBe(0)
+      expect(index.indexedKeysSet.size).toBe(0)
+      expect(index.orderedEntriesArray).toHaveLength(0)
+      expect(index.valueMapData.size).toBe(0)
     })
 
     it(`should handle index updates when data changes through sync`, async () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Original index should have 5 items
-      expect(ageIndex.indexedKeys.size).toBe(5)
-      expect(ageIndex.orderedEntries).toHaveLength(5)
+      expect(ageIndex.indexedKeysSet.size).toBe(5)
+      expect(ageIndex.orderedEntriesArray).toHaveLength(5)
 
       // Perform mutations that will sync back and update indexes
       const tx1 = createTransaction({ mutationFn })
@@ -1304,7 +1335,7 @@ describe(`Collection Indexes`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Verify that indexes are updated after sync
-      expect(ageIndex.indexedKeys.size).toBe(5) // 5 original - 1 deleted + 1 inserted
+      expect(ageIndex.indexedKeysSet.size).toBe(5) // 5 original - 1 deleted + 1 inserted
 
       // Test that index-optimized queries work with the updated data
       withIndexTracking(collection, (tracker) => {
