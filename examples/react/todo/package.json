@@ -1,12 +1,12 @@
 {
   "name": "@tanstack/db-example-react-todo",
   "private": true,
-  "version": "0.0.29",
+  "version": "0.0.30",
   "dependencies": {
-    "@tanstack/electric-db-collection": "^0.0.5",
+    "@tanstack/electric-db-collection": "^0.0.6",
     "@tanstack/query-core": "^5.75.7",
-    "@tanstack/query-db-collection": "^0.0.5",
-    "@tanstack/react-db": "^0.0.23",
+    "@tanstack/query-db-collection": "^0.0.6",
+    "@tanstack/react-db": "^0.0.24",
     "@tanstack/react-router": "^1.125.6",
     "@tanstack/react-start": "^1.126.1",
     "cors": "^2.8.5",

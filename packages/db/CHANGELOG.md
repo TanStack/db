@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.0.24
+
+### Patch Changes
+
+- Add query optimizer with predicate pushdown ([#256](https://github.com/TanStack/db/pull/256))
+
+  Implements automatic query optimization that moves WHERE clauses closer to data sources, reducing intermediate result sizes and improving performance for queries with joins.
+
+- Add `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` aliases of the main `join` method on the query builder. ([#269](https://github.com/TanStack/db/pull/269))
+
+- • Add proper tracking for array mutating methods (push, pop, shift, unshift, splice, sort, reverse, fill, copyWithin) ([#267](https://github.com/TanStack/db/pull/267))
+  • Fix existing array tests that were misleadingly named but didn't actually call the methods they claimed to test
+  • Add comprehensive test coverage for all supported array mutating methods
+
 ## 0.0.23
 
 ### Patch Changes
