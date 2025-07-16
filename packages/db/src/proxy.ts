@@ -430,7 +430,7 @@ export function createChangeProxy<
   // Update parent status based on child changes
   function checkParentStatus(
     parentState: ChangeTracker<Record<string | symbol, unknown>>,
-    childProp: string | symbol
+    childProp: string | symbol | unknown
   ) {
     debugLog(`checkParentStatus called for child prop:`, childProp)
 
