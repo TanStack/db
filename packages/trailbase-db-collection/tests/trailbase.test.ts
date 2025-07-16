@@ -17,19 +17,19 @@ type Data = {
 
 class MockRecordApi<T> implements RecordApi<T> {
   list = vi.fn(
-    async (_opts?: {
+    (_opts?: {
       pagination?: Pagination
       order?: Array<string>
       filters?: Array<FilterOrComposite>
       count?: boolean
       expand?: Array<string>
     }): Promise<ListResponse<T>> => {
-      return { records: [] }
+      return Promise.resolve({ records: [] })
     }
   )
 
   read = vi.fn(
-    async (
+    (
       _id: string | number,
       _opt?: {
         expand?: Array<string>
@@ -39,32 +39,28 @@ class MockRecordApi<T> implements RecordApi<T> {
     }
   )
 
-  create = vi.fn(async (_record: T): Promise<string | number> => {
+  create = vi.fn((_record: T): Promise<string | number> => {
     throw `create`
   })
-  createBulk = vi.fn(
-    async (_records: Array<T>): Promise<Array<string | number>> => {
-      throw `createBulk`
-    }
-  )
+  createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
+    throw `createBulk`
+  })
 
-  update = vi.fn(
-    async (_id: string | number, _record: Partial<T>): Promise<void> => {
-      throw `update`
-    }
-  )
-  delete = vi.fn(async (_id: string | number): Promise<void> => {
+  update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
+    throw `update`
+  })
+  delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
   })
-  subscribe = vi.fn(
-    async (_id: string | number): Promise<ReadableStream<Event>> => {
-      return new ReadableStream({
+  subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
+    return Promise.resolve(
+      new ReadableStream({
         start: (controller: ReadableStreamDefaultController<Event>) => {
           controller.close()
         },
       })
-    }
-  )
+    )
+  })
 }
 
 function setUp(recordApi: MockRecordApi<Data>) {
@@ -93,12 +89,15 @@ describe(`TrailBase Integration`, () => {
 
     // Prepare mock API.
     const recordApi = new MockRecordApi<Data>()
-    const listResolver = Promise.withResolvers<boolean>()
-    recordApi.list.mockImplementation(async (_opts) => {
-      setInterval(() => listResolver.resolve(true), 1)
-      return {
+    let listResolver: (value: boolean) => void
+    const listPromise = new Promise<boolean>((res) => {
+      listResolver = res
+    })
+    recordApi.list.mockImplementation((_opts) => {
+      setInterval(() => listResolver(true), 1)
+      return Promise.resolve({
         records,
-      }
+      })
     })
 
     const stream = new TransformStream<Event>()
@@ -113,7 +112,7 @@ describe(`TrailBase Integration`, () => {
     const collection = createCollection(options)
 
     // Await initial fetch and assert state.
-    await listResolver.promise
+    await listPromise
     expect(collection.state).toEqual(new Map(records.map((d) => [d.id, d])))
 
     // Inject an update event and assert state.
@@ -177,7 +176,7 @@ describe(`TrailBase Integration`, () => {
     stream.writable.close()
   })
 
-  it(`local inserts, updates and deletes`, async () => {
+  it(`local inserts, updates and deletes`, () => {
     // Prepare mock API.
     const recordApi = new MockRecordApi<Data>()
 
@@ -185,7 +184,7 @@ describe(`TrailBase Integration`, () => {
     recordApi.subscribe.mockResolvedValue(stream.readable)
 
     const createBulkMock = recordApi.createBulk.mockImplementation(
-      async (records: Array<Data>): Promise<Array<string | number>> => {
+      (records: Array<Data>): Promise<Array<string | number>> => {
         setTimeout(() => {
           const writer = stream.writable.getWriter()
           for (const record of records) {
@@ -196,7 +195,7 @@ describe(`TrailBase Integration`, () => {
           writer.releaseLock()
         }, 1)
 
-        return records.map((r) => r.id ?? 0)
+        return Promise.resolve(records.map((r) => r.id ?? 0))
       }
     )
 
@@ -224,13 +223,14 @@ describe(`TrailBase Integration`, () => {
     }
 
     const updateMock = recordApi.update.mockImplementation(
-      async (_id: string | number, record: Partial<Data>) => {
+      (_id: string | number, record: Partial<Data>) => {
         expect(record).toEqual({ updated: updatedData.updated })
         const writer = stream.writable.getWriter()
         writer.write({
           Update: record,
         })
         writer.releaseLock()
+        return Promise.resolve()
       }
     )
 
@@ -243,12 +243,13 @@ describe(`TrailBase Integration`, () => {
     expect(collection.state).toEqual(new Map([[updatedData.id, updatedData]]))
 
     const deleteMock = recordApi.delete.mockImplementation(
-      async (_id: string | number) => {
+      (_id: string | number) => {
         const writer = stream.writable.getWriter()
         writer.write({
           Delete: updatedData,
         })
         writer.releaseLock()
+        return Promise.resolve()
       }
     )
 
