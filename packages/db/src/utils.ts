@@ -17,7 +17,7 @@
  * ```
  */
 export function deepEquals(a: any, b: any): boolean {
-  return deepEqualsInternal(a, b, new WeakMap())
+  return deepEqualsInternal(a, b, new Map())
 }
 
 /**
@@ -26,7 +26,7 @@ export function deepEquals(a: any, b: any): boolean {
 function deepEqualsInternal(
   a: any,
   b: any,
-  visited: WeakMap<object, object>
+  visited: Map<object, object>
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b) return true

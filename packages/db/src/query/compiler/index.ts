@@ -323,22 +323,20 @@ function mapNestedQueries(
       i < optimizedQuery.join.length && i < originalQuery.join.length;
       i++
     ) {
-      const optimizedJoin = optimizedQuery.join[i]
-      const originalJoin = originalQuery.join[i]
+      const optimizedJoin = optimizedQuery.join[i]!
+      const originalJoin = originalQuery.join[i]!
 
-      if (optimizedJoin && originalJoin) {
-        if (
-          optimizedJoin.from.type === `queryRef` &&
-          originalJoin.from.type === `queryRef`
-        ) {
-          queryMapping.set(optimizedJoin.from.query, originalJoin.from.query)
-          // Recursively map nested queries in joins
-          mapNestedQueries(
-            optimizedJoin.from.query,
-            originalJoin.from.query,
-            queryMapping
-          )
-        }
+      if (
+        optimizedJoin.from.type === `queryRef` &&
+        originalJoin.from.type === `queryRef`
+      ) {
+        queryMapping.set(optimizedJoin.from.query, originalJoin.from.query)
+        // Recursively map nested queries in joins
+        mapNestedQueries(
+          optimizedJoin.from.query,
+          originalJoin.from.query,
+          queryMapping
+        )
       }
     }
   }

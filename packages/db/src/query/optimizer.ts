@@ -168,14 +168,14 @@ export interface GroupedWhereClauses {
 export function optimizeQuery(query: QueryIR): QueryIR {
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
-  let previousOptimized: QueryIR | null = null
+  let previousOptimized: QueryIR | undefined
   let iterations = 0
   const maxIterations = 10 // Prevent infinite loops
 
   // Keep optimizing until no more changes occur or max iterations reached
   while (
     iterations < maxIterations &&
-    !areQueriesEqual(optimized, previousOptimized)
+    !deepEquals(optimized, previousOptimized)
   ) {
     previousOptimized = optimized
     optimized = applyRecursiveOptimization(optimized)
@@ -320,7 +320,7 @@ function isRedundantSubquery(query: QueryIR): boolean {
 }
 
 /**
- * Step 1: Split all AND clauses at the root level into separate WHERE clauses.
+ * Step 1: Split all AND clauses recursively into separate WHERE clauses.
  *
  * This enables more granular optimization by treating each condition independently.
  * OR clauses are preserved as they cannot be split without changing query semantics.
@@ -434,13 +434,11 @@ function groupWhereClauses(
   for (const clause of analyzedClauses) {
     if (clause.touchedSources.size === 1) {
       // Single source clause - can be optimized
-      const source = Array.from(clause.touchedSources)[0]
-      if (source) {
-        if (!singleSource.has(source)) {
-          singleSource.set(source, [])
-        }
-        singleSource.get(source)!.push(clause.expression)
+      const source = Array.from(clause.touchedSources)[0]!
+      if (!singleSource.has(source)) {
+        singleSource.set(source, [])
       }
+      singleSource.get(source)!.push(clause.expression)
     } else if (clause.touchedSources.size > 1) {
       // Multi-source clause - must stay in main query
       multiSource.push(clause.expression)
@@ -492,9 +490,7 @@ function applyOptimizations(
   // Optimize JOIN clauses and track what was optimized
   const optimizedJoins = query.join
     ? query.join.map((joinClause) => ({
-        type: joinClause.type,
-        left: joinClause.left,
-        right: joinClause.right,
+        ...joinClause,
         from: optimizeFromWithTracking(
           joinClause.from,
           groupedClauses.singleSource,
@@ -739,12 +735,4 @@ function combineWithAnd(
 
   // Create an AND function with all expressions as arguments
   return new Func(`and`, expressions)
-}
-
-/**
- * Deep equality check for QueryIR objects
- */
-function areQueriesEqual(query1: QueryIR, query2: QueryIR | null): boolean {
-  if (query2 === null) return false
-  return deepEquals(query1, query2)
 }
