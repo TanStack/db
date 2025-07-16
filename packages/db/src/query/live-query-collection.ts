@@ -203,7 +203,7 @@ export function liveQueryCollectionOptions<
   // Create the sync configuration
   const sync: SyncConfig<TResult> = {
     rowUpdateMode: `full`,
-    sync: ({ begin, write, commit, collection: theCollection }) => {
+    sync: ({ begin, write, commit, markReady, collection: theCollection }) => {
       const { graph, inputs, pipeline } = maybeCompileBasePipeline()
       let messagesCount = 0
       pipeline.pipe(
@@ -295,6 +295,8 @@ export function liveQueryCollectionOptions<
             begin()
             commit()
           }
+          // Mark the collection as ready after the first successful run
+          markReady()
         }
       }
 

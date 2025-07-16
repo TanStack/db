@@ -978,9 +978,12 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false, // Don't start sync immediately
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
-            commitFn = commit
+            commitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't call begin/commit immediately
           },
         },
@@ -1207,9 +1210,12 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             personBeginFn = begin
-            personCommitFn = commit
+            personCommitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't sync immediately
           },
         },
@@ -1223,9 +1229,12 @@ describe(`Query Collections`, () => {
         getKey: (issue: Issue) => issue.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             issueBeginFn = begin
-            issueCommitFn = commit
+            issueCommitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't sync immediately
           },
         },
@@ -1305,9 +1314,12 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
-            commitFn = commit
+            commitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't sync immediately
           },
         },
