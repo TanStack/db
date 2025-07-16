@@ -229,8 +229,9 @@ export class CollectionImpl<
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
 
-  // Array to store one-time commit listeners
-  private onFirstCommitCallbacks: Array<() => void> = []
+  // Array to store one-time ready listeners
+  private onFirstReadyCallbacks: Array<() => void> = []
+  private hasBeenReady = false
 
   // Event batching for preventing duplicate emissions during transaction flows
   private batchedEvents: Array<ChangeMessage<T, TKey>> = []
@@ -244,17 +245,66 @@ export class CollectionImpl<
   private syncCleanupFn: (() => void) | null = null
 
   /**
-   * Register a callback to be executed on the next commit
+   * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
-   * @param callback Function to call after the next commit
+   * @param callback Function to call when the collection first becomes ready
    * @example
-   * collection.onFirstCommit(() => {
-   *   console.log('Collection has received first data')
+   * collection.onFirstReady(() => {
+   *   console.log('Collection is ready for the first time')
    *   // Safe to access collection.state now
    * })
    */
-  public onFirstCommit(callback: () => void): void {
-    this.onFirstCommitCallbacks.push(callback)
+  public onFirstReady(callback: () => void): void {
+    // If already ready, call immediately
+    if (this.hasBeenReady) {
+      callback()
+      return
+    }
+
+    this.onFirstReadyCallbacks.push(callback)
+  }
+
+  /**
+   * Check if the collection is ready for use
+   * Returns true if the collection has been marked as ready by its sync implementation
+   * @returns true if the collection is ready, false otherwise
+   * @example
+   * if (collection.isReady()) {
+   *   console.log('Collection is ready, data is available')
+   *   // Safe to access collection.state
+   * } else {
+   *   console.log('Collection is still loading')
+   * }
+   */
+  public isReady(): boolean {
+    return this._status === `ready`
+  }
+
+  /**
+   * Mark the collection as ready for use
+   * This is called by sync implementations to explicitly signal that the collection is ready,
+   * providing a more intuitive alternative to using commits for readiness signaling
+   * @private - Should only be called by sync implementations
+   */
+  private markReady(): void {
+    // Can transition to ready from loading or initialCommit states
+    if (this._status === `loading` || this._status === `initialCommit`) {
+      this.setStatus(`ready`)
+
+      // Call any registered first ready callbacks (only on first time becoming ready)
+      if (!this.hasBeenReady) {
+        this.hasBeenReady = true
+
+        // Also mark as having received first commit for backwards compatibility
+        if (!this.hasReceivedFirstCommit) {
+          this.hasReceivedFirstCommit = true
+        }
+
+        const callbacks = [...this.onFirstReadyCallbacks]
+        this.onFirstReadyCallbacks = []
+        callbacks.forEach((callback) => callback())
+      }
+    }
   }
 
   public id = ``
@@ -302,7 +352,7 @@ export class CollectionImpl<
       Array<CollectionStatus>
     > = {
       idle: [`loading`, `error`, `cleaned-up`],
-      loading: [`initialCommit`, `error`, `cleaned-up`],
+      loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
       initialCommit: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
       error: [`cleaned-up`, `idle`],
@@ -455,11 +505,9 @@ export class CollectionImpl<
           }
 
           this.commitPendingTransactions()
-
-          // Transition from initialCommit to ready after the first commit is complete
-          if (this._status === `initialCommit`) {
-            this.setStatus(`ready`)
-          }
+        },
+        markReady: () => {
+          this.markReady()
         },
       })
 
@@ -492,7 +540,7 @@ export class CollectionImpl<
       }
 
       // Register callback BEFORE starting sync to avoid race condition
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve()
       })
 
@@ -555,7 +603,8 @@ export class CollectionImpl<
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
     this.hasReceivedFirstCommit = false
-    this.onFirstCommitCallbacks = []
+    this.hasBeenReady = false
+    this.onFirstReadyCallbacks = []
     this.preloadPromise = null
     this.batchedEvents = []
     this.shouldBatchEvents = false
@@ -1184,8 +1233,8 @@ export class CollectionImpl<
       // Call any registered one-time commit listeners
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
-        const callbacks = [...this.onFirstCommitCallbacks]
-        this.onFirstCommitCallbacks = []
+        const callbacks = [...this.onFirstReadyCallbacks]
+        this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
       }
     }
@@ -1812,14 +1861,14 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, T>> {
-    // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    // If we already have data or collection is ready, resolve immediately
+    if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
     }
 
-    // Otherwise, wait for the first commit
+    // Otherwise, wait for the collection to be ready
     return new Promise<Map<TKey, T>>((resolve) => {
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve(this.state)
       })
     })
@@ -1841,14 +1890,14 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<T>> {
-    // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    // If we already have data or collection is ready, resolve immediately
+    if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
     }
 
-    // Otherwise, wait for the first commit
+    // Otherwise, wait for the collection to be ready
     return new Promise<Array<T>>((resolve) => {
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve(this.toArray)
       })
     })
