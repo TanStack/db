@@ -15,13 +15,6 @@ export * from "./indexes/base-index.js"
 export * from "./indexes/ordered-index.js"
 export * from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"
-export * from "./indexes/index-types.js"
-
-// Backward compatibility exports (deprecated)
-export {
-  OrderedIndex as BTreeIndex,
-  type OrderedIndexOptions as BTreeOptions,
-} from "./indexes/ordered-index.js"
 
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from "./collection"
