@@ -638,6 +638,9 @@ describe(`Proxy Library`, () => {
         }
       }
 
+      // Verify the original map was not modified.
+      expect(map.get(`key1`)).toEqual({ count: 1, name: `test` })
+
       expect(getChanges()).toEqual({
         myMap: new Map([
           [`key1`, { count: 10, name: `modified` }],
