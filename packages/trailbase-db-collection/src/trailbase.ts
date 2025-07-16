@@ -284,11 +284,11 @@ export function trailBaseCollectionOptions<
     onInsert: async (params): Promise<Array<number | string>> => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
-          const { type, changes } = tx
+          const { type, modified } = tx
           if (type !== `insert`) {
             throw new Error(`Expected 'insert', got: ${type}`)
           }
-          return serialIns(changes)
+          return serialIns(modified)
         })
       )
 
