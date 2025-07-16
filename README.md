@@ -141,7 +141,7 @@ There's also an example [React todo app](./examples/react/todo) and usage exampl
 TanStack DB provides several collection types to support different backend integrations:
 
 - **`@tanstack/db`** - Core collection functionality with local-only and local-storage collections for offline-first applications
-- **`@tanstack/query-db-collection`** - Collections backed by [TanStack Query](https://tanstack.com/query) for REST APIs and GraphQL endpoints  
+- **`@tanstack/query-db-collection`** - Collections backed by [TanStack Query](https://tanstack.com/query) for REST APIs and GraphQL endpoints
 - **`@tanstack/electric-db-collection`** - Real-time sync collections powered by [ElectricSQL](https://electric-sql.com) for live database synchronization
 - **`@tanstack/trailbase-db-collection`** - Collections for [TrailBase](https://trailbase.io) backend integration
 
