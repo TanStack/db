@@ -131,9 +131,10 @@ export class CollectionIndex<TKey extends string | number = string | number> {
 
     for (const value of allValues) {
       if (value === undefined) {
-        // Only undefined (null is considered defined for sorting)
+        // Only undefined (null is considered defined for sorting per Kevin's feedback)
         undefinedValues.push(value)
       } else {
+        // null is considered defined and will be sorted properly
         definedValues.push(value)
       }
     }
@@ -141,8 +142,10 @@ export class CollectionIndex<TKey extends string | number = string | number> {
     // Sort defined values (including null)
     definedValues.sort(this.compareFn)
 
-    // Combine with undefined first, then defined values
-    undefinedValues.push(...definedValues)
+    // Use Kevin's optimization: avoid array spreading, mutate undefinedValues instead
+    for (const value of definedValues) {
+      undefinedValues.push(value)
+    }
 
     for (const value of undefinedValues) {
       const keys = valueEntries.get(value)!

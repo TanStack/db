@@ -2087,9 +2087,6 @@ export class CollectionImpl<
 
         case `in`:
           return this.optimizeInArrayExpression(expression)
-
-        default:
-          return { canOptimize: false, matchingKeys: new Set() }
       }
     }
 
@@ -2119,9 +2116,6 @@ export class CollectionImpl<
 
         case `in`:
           return this.canOptimizeInArrayExpression(expression)
-
-        default:
-          return false
       }
     }
 
@@ -2406,7 +2400,8 @@ export class CollectionImpl<
         const expression = toExpression(whereExpression)
         const evaluator = compileSingleRowExpression(expression)
         const result = evaluator(item as Record<string, unknown>)
-        return Boolean(result)
+        // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
+        return result
       } catch {
         // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
         try {
@@ -2418,7 +2413,7 @@ export class CollectionImpl<
           }) as SingleRowRefProxy<T>
 
           const result = whereCallback(simpleProxy)
-          return Boolean(result)
+          return result
         } catch {
           // If both approaches fail, exclude the item
           return false
