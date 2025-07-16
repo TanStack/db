@@ -1,5 +1,32 @@
 # @tanstack/db
 
+## 0.0.25
+
+### Patch Changes
+
+- Fix iterator-based change tracking in proxy system ([#271](https://github.com/TanStack/db/pull/271))
+
+  This fixes several issues with iterator-based change tracking for Maps and Sets:
+  - **Map.entries()** now correctly updates actual Map entries instead of creating duplicate keys
+  - **Map.values()** now tracks back to original Map keys using value-to-key mapping instead of using symbol placeholders
+  - **Set iterators** now properly replace objects in Set when modified instead of creating symbol-keyed entries
+  - **forEach()** methods continue to work correctly
+
+  The implementation now uses a sophisticated parent-child tracking system with specialized `updateMap` and `updateSet` functions to ensure that changes made to objects accessed through iterators are properly attributed to the correct collection entries.
+
+  This brings the proxy system in line with how mature libraries like Immer handle iterator-based change tracking, using method interception rather than trying to proxy all property access.
+
+- Add explicit collection readiness detection with `isReady()` and `markReady()` ([#270](https://github.com/TanStack/db/pull/270))
+  - Add `isReady()` method to check if a collection is ready for use
+  - Add `onFirstReady()` method to register callbacks for when collection becomes ready
+  - Add `markReady()` to SyncConfig interface for sync implementations to explicitly signal readiness
+  - Replace `onFirstCommit()` with `onFirstReady()` for better semantics
+  - Update status state machine to allow `loading` → `ready` transition for cases with no data to commit
+  - Update all sync implementations (Electric, Query, Local-only, Local-storage) to use `markReady()`
+  - Improve error handling by allowing collections to be marked ready even when sync errors occur
+
+  This provides a more intuitive and ergonomic API for determining collection readiness, replacing the previous approach of using commits as a readiness signal.
+
 ## 0.0.24
 
 ### Patch Changes

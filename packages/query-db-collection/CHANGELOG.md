@@ -1,5 +1,23 @@
 # @tanstack/query-db-collection
 
+## 0.0.7
+
+### Patch Changes
+
+- Add explicit collection readiness detection with `isReady()` and `markReady()` ([#270](https://github.com/TanStack/db/pull/270))
+  - Add `isReady()` method to check if a collection is ready for use
+  - Add `onFirstReady()` method to register callbacks for when collection becomes ready
+  - Add `markReady()` to SyncConfig interface for sync implementations to explicitly signal readiness
+  - Replace `onFirstCommit()` with `onFirstReady()` for better semantics
+  - Update status state machine to allow `loading` → `ready` transition for cases with no data to commit
+  - Update all sync implementations (Electric, Query, Local-only, Local-storage) to use `markReady()`
+  - Improve error handling by allowing collections to be marked ready even when sync errors occur
+
+  This provides a more intuitive and ergonomic API for determining collection readiness, replacing the previous approach of using commits as a readiness signal.
+
+- Updated dependencies [[`1758eda`](https://github.com/TanStack/db/commit/1758edab9608383d9d1470156021ee632f043e51), [`20f810e`](https://github.com/TanStack/db/commit/20f810e13a7d802bf56da6f0df89b34312ebb2fd)]:
+  - @tanstack/db@0.0.25
+
 ## 0.0.6
 
 ### Patch Changes
