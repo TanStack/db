@@ -12,7 +12,7 @@ export * from "./local-storage";
 // Index system exports
 export * from "./indexes/base-index.js";
 export * from "./indexes/ordered-index.js";
-export * from "./indexes/trigram-index.js";
+
 export * from "./indexes/lazy-index.js";
 export * from "./indexes/index-types.js";
 // Backward compatibility exports (deprecated)
