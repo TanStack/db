@@ -1,7 +1,8 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import { createTransaction, getActiveTransaction } from "./transactions"
 import type { Transaction } from "./transactions"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -19,7 +20,6 @@ import type {
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -383,7 +383,7 @@ export class CollectionImpl<
    */
   constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
     // eslint-disable-next-line
-    if (!config) {
+		if (!config) {
       throw new Error(`Collection requires a config`)
     }
     if (config.id) {
@@ -393,7 +393,7 @@ export class CollectionImpl<
     }
 
     // eslint-disable-next-line
-    if (!config.sync) {
+		if (!config.sync) {
       throw new Error(`Collection requires a sync config`)
     }
 
@@ -1242,7 +1242,7 @@ export class CollectionImpl<
 
   private ensureStandardSchema(schema: unknown): StandardSchema<T> {
     // If the schema already implements the standard-schema interface, return it
-    if (schema && typeof schema === `object` && `~standard` in schema) {
+    if (schema && `~standard` in (schema as {})) {
       return schema as StandardSchema<T>
     }
 

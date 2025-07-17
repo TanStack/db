@@ -265,7 +265,6 @@ export function queryCollectionOptions<
     throw new Error(`[QueryCollection] queryClient must be provided.`)
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
     throw new Error(`[QueryCollection] getKey must be provided.`)
   }
