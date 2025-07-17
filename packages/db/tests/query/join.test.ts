@@ -619,4 +619,555 @@ describe(`Query JOIN Operations`, () => {
       expect(alice?.department_name).toBe(`Engineering`)
     })
   })
+
+  describe(`Self-Join Scenarios`, () => {
+    // Sample data for self-join testing
+    type Employee = {
+      id: number
+      name: string
+      manager_id: number | undefined
+      department: string
+    }
+
+    const sampleEmployees: Array<Employee> = [
+      { id: 1, name: `Alice`, manager_id: undefined, department: `Engineering` },
+      { id: 2, name: `Bob`, manager_id: 1, department: `Engineering` },
+      { id: 3, name: `Charlie`, manager_id: 1, department: `Sales` },
+      { id: 4, name: `Dave`, manager_id: 2, department: `Engineering` },
+      { id: 5, name: `Eve`, manager_id: 3, department: `Sales` },
+    ]
+
+    function createEmployeesCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Employee>({
+          id: `test-employees`,
+          getKey: (employee) => employee.id,
+          initialData: sampleEmployees,
+        })
+      )
+    }
+
+    let employeesCollection: ReturnType<typeof createEmployeesCollection>
+
+    beforeEach(() => {
+      employeesCollection = createEmployeesCollection()
+    })
+
+    test(`should perform self-join to get employees with their managers`, () => {
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ employees: employeesCollection })
+            .join(
+              { managers: employeesCollection },
+              ({ employees, managers }) => eq(employees.manager_id, managers.id),
+              `inner`
+            )
+            .select(({ employees, managers }) => ({
+              employee_id: employees.id,
+              employee_name: employees.name,
+              manager_id: managers.id,
+              manager_name: managers.name,
+              department: employees.department,
+            })),
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have 4 results: Bob->Alice, Charlie->Alice, Dave->Bob, Eve->Charlie
+      expect(results).toHaveLength(4)
+
+      // Check specific relationships
+      const bobResult = results.find((r) => r.employee_name === `Bob`)
+      expect(bobResult).toMatchObject({
+        employee_id: 2,
+        employee_name: `Bob`,
+        manager_id: 1,
+        manager_name: `Alice`,
+        department: `Engineering`,
+      })
+
+      const daveResult = results.find((r) => r.employee_name === `Dave`)
+      expect(daveResult).toMatchObject({
+        employee_id: 4,
+        employee_name: `Dave`,
+        manager_id: 2,
+        manager_name: `Bob`,
+        department: `Engineering`,
+      })
+
+      // Alice should not appear as an employee (she has no manager)
+      const aliceAsEmployee = results.find((r) => r.employee_name === `Alice`)
+      expect(aliceAsEmployee).toBeUndefined()
+
+      // Alice should appear as a manager
+      const aliceAsManager = results.find((r) => r.manager_name === `Alice`)
+      expect(aliceAsManager).toBeDefined()
+    })
+
+    test(`should perform left self-join to get all employees with their managers`, () => {
+      const leftSelfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ employees: employeesCollection })
+            .join(
+              { managers: employeesCollection },
+              ({ employees, managers }) => eq(employees.manager_id, managers.id),
+              `left`
+            )
+            .select(({ employees, managers }) => ({
+              employee_id: employees.id,
+              employee_name: employees.name,
+              manager_id: managers?.id,
+              manager_name: managers?.name,
+              department: employees.department,
+            })),
+      })
+
+      const results = leftSelfJoinQuery.toArray
+
+      // Should have 5 results: all employees, including Alice with null manager
+      expect(results).toHaveLength(5)
+
+      // Alice should appear as an employee with null manager
+      const aliceResult = results.find((r) => r.employee_name === `Alice`)
+      expect(aliceResult).toMatchObject({
+        employee_id: 1,
+        employee_name: `Alice`,
+        manager_id: undefined,
+        manager_name: undefined,
+        department: `Engineering`,
+      })
+
+      // Bob should have Alice as manager
+      const bobResult = results.find((r) => r.employee_name === `Bob`)
+      expect(bobResult).toMatchObject({
+        employee_id: 2,
+        employee_name: `Bob`,
+        manager_id: 1,
+        manager_name: `Alice`,
+        department: `Engineering`,
+      })
+    })
+
+    test(`should handle live updates for self-joins`, () => {
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ employees: employeesCollection })
+            .join(
+              { managers: employeesCollection },
+              ({ employees, managers }) => eq(employees.manager_id, managers.id),
+              `inner`
+            )
+            .select(({ employees, managers }) => ({
+              employee_id: employees.id,
+              employee_name: employees.name,
+              manager_name: managers.name,
+            })),
+      })
+
+      const initialSize = selfJoinQuery.size
+      expect(initialSize).toBe(4)
+
+      // Add a new employee with an existing manager
+      const newEmployee: Employee = {
+        id: 6,
+        name: `Frank`,
+        manager_id: 1, // Alice
+        department: `Engineering`,
+      }
+
+      employeesCollection.utils.begin()
+      employeesCollection.utils.write({ type: `insert`, value: newEmployee })
+      employeesCollection.utils.commit()
+
+      // Should now have 5 results
+      expect(selfJoinQuery.size).toBe(5)
+
+      const frankResult = selfJoinQuery.get(`[6,1]`)
+      expect(frankResult).toMatchObject({
+        employee_id: 6,
+        employee_name: `Frank`,
+        manager_name: `Alice`,
+      })
+    })
+
+    test(`should handle bug report scenario - self-join with parentId`, () => {
+      // This test reproduces the exact scenario from the bug report
+      type User = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      const sampleUsers: Array<User> = [
+        { id: 1, name: `Alice`, parentId: undefined },
+        { id: 2, name: `Bob`, parentId: 1 },
+        { id: 3, name: `Charlie`, parentId: 1 },
+        { id: 4, name: `Dave`, parentId: 2 },
+        { id: 5, name: `Eve`, parentId: 3 },
+      ]
+
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-self-join`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: usersCollection })
+            .join(
+              { parentUsers: usersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
+            })),
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have 4 results: Bob->Alice, Charlie->Alice, Dave->Bob, Eve->Charlie
+      expect(results).toHaveLength(4)
+
+      // Check specific relationships
+      const bobResult = results.find((r) => r.user_name === `Bob`)
+      expect(bobResult).toMatchObject({
+        user_id: 2,
+        user_name: `Bob`,
+        parent_id: 1,
+        parent_name: `Alice`,
+      })
+
+      const daveResult = results.find((r) => r.user_name === `Dave`)
+      expect(daveResult).toMatchObject({
+        user_id: 4,
+        user_name: `Dave`,
+        parent_id: 2,
+        parent_name: `Bob`,
+      })
+
+      // Alice should not appear as a user (she has no parent)
+      const aliceAsUser = results.find((r) => r.user_name === `Alice`)
+      expect(aliceAsUser).toBeUndefined()
+
+      // Alice should appear as a parent
+      const aliceAsParent = results.find((r) => r.parent_name === `Alice`)
+      expect(aliceAsParent).toBeDefined()
+    })
+
+    test(`should not produce cartesian product in self-joins - reproduces bug report issue`, () => {
+      // This test reproduces the cartesian product issue from the bug report
+      // With 10 input rows, we should get exactly 9 results (not 100)
+      type User = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      // Create 10 users with clear parent-child relationships
+      const sampleUsers: Array<User> = [
+        { id: 1, name: `User1`, parentId: undefined }, // Root
+        { id: 2, name: `User2`, parentId: 1 },         // Child of 1
+        { id: 3, name: `User3`, parentId: 1 },         // Child of 1
+        { id: 4, name: `User4`, parentId: 2 },         // Child of 2
+        { id: 5, name: `User5`, parentId: 2 },         // Child of 2
+        { id: 6, name: `User6`, parentId: 3 },         // Child of 3
+        { id: 7, name: `User7`, parentId: 3 },         // Child of 3
+        { id: 8, name: `User8`, parentId: 4 },         // Child of 4
+        { id: 9, name: `User9`, parentId: 5 },         // Child of 5
+        { id: 10, name: `User10`, parentId: 6 },       // Child of 6
+      ]
+
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-cartesian`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: usersCollection })
+            .join(
+              { parentUsers: usersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
+            })),
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have exactly 9 results (all users except the root user)
+      // NOT 100 (which would be a cartesian product)
+      expect(results).toHaveLength(9)
+
+      // Verify the relationships are correct
+      const user2Result = results.find((r) => r.user_name === `User2`)
+      expect(user2Result).toMatchObject({
+        user_id: 2,
+        user_name: `User2`,
+        parent_id: 1,
+        parent_name: `User1`,
+      })
+
+      const user4Result = results.find((r) => r.user_name === `User4`)
+      expect(user4Result).toMatchObject({
+        user_id: 4,
+        user_name: `User4`,
+        parent_id: 2,
+        parent_name: `User2`,
+      })
+
+      // User1 should not appear as a child (it has no parent)
+      const user1AsChild = results.find((r) => r.user_name === `User1`)
+      expect(user1AsChild).toBeUndefined()
+
+      // User1 should appear as a parent multiple times
+      const user1AsParent = results.filter((r) => r.parent_name === `User1`)
+      expect(user1AsParent).toHaveLength(2) // User2 and User3
+    })
+
+    test(`should handle larger dataset without cartesian product`, () => {
+      // Test with a larger dataset to ensure the issue doesn't appear
+      type User = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      // Create 100 users with a tree structure
+      const sampleUsers: Array<User> = []
+      for (let i = 1; i <= 100; i++) {
+        const parentId = i === 1 ? undefined : Math.floor(i / 2)
+        sampleUsers.push({
+          id: i,
+          name: `User${i}`,
+          parentId: parentId === 0 ? undefined : parentId,
+        })
+      }
+
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-large`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: usersCollection })
+            .join(
+              { parentUsers: usersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
+            })),
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have exactly 99 results (all users except the root user)
+      // NOT 999894 (which would be a cartesian product)
+      expect(results).toHaveLength(99)
+
+      // Verify some specific relationships
+      const user2Result = results.find((r) => r.user_name === `User2`)
+      expect(user2Result).toMatchObject({
+        user_id: 2,
+        parent_id: 1,
+        parent_name: `User1`,
+      })
+
+      const user3Result = results.find((r) => r.user_name === `User3`)
+      expect(user3Result).toMatchObject({
+        user_id: 3,
+        parent_id: 1,
+        parent_name: `User1`,
+      })
+
+      // User1 should not appear as a child
+      const user1AsChild = results.find((r) => r.user_name === `User1`)
+      expect(user1AsChild).toBeUndefined()
+    })
+
+    test(`should verify join key generation for self-joins`, () => {
+      // This test specifically checks that join keys are being generated correctly
+      // and that we're not getting cartesian products
+      type User = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      // Create a simple dataset where we can easily verify the join keys
+      const sampleUsers: Array<User> = [
+        { id: 1, name: `Alice`, parentId: undefined },
+        { id: 2, name: `Bob`, parentId: 1 },
+        { id: 3, name: `Charlie`, parentId: 1 },
+        { id: 4, name: `Dave`, parentId: 2 },
+      ]
+
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-join-keys`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: usersCollection })
+            .join(
+              { parentUsers: usersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
+            })),
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have exactly 3 results (Bob->Alice, Charlie->Alice, Dave->Bob)
+      expect(results).toHaveLength(3)
+
+      // Verify the actual relationships by checking the results directly
+      const bobResult = results.find(r => r.user_name === `Bob`)
+      expect(bobResult).toMatchObject({
+        user_id: 2,
+        user_name: `Bob`,
+        parent_id: 1,
+        parent_name: `Alice`,
+      })
+
+      const daveResult = results.find(r => r.user_name === `Dave`)
+      expect(daveResult).toMatchObject({
+        user_id: 4,
+        user_name: `Dave`,
+        parent_id: 2,
+        parent_name: `Bob`,
+      })
+
+      // Verify that we don't have any cartesian product results
+      // Each user should appear at most once as a child
+      const uniqueUserIds = new Set(results.map(r => r.user_id))
+      expect(uniqueUserIds.size).toBe(3) // Bob, Charlie, Dave
+
+      // Each parent should appear as many times as they have children
+      const parentCounts = results.reduce((acc, r) => {
+        acc[r.parent_id] = (acc[r.parent_id] || 0) + 1
+        return acc
+      }, {} as Record<number, number>)
+      
+      expect(parentCounts[1]).toBe(2) // Alice has 2 children (Bob, Charlie)
+      expect(parentCounts[2]).toBe(1) // Bob has 1 child (Dave)
+    })
+
+    test(`should handle self-join with limit to prevent memory issues`, () => {
+      // This test simulates the bug report scenario with limit
+      type User = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      // Create a larger dataset to simulate the 8000 rows scenario
+      const sampleUsers: Array<User> = []
+      for (let i = 1; i <= 100; i++) {
+        const parentId = i === 1 ? undefined : Math.floor(i / 2)
+        sampleUsers.push({
+          id: i,
+          name: `User${i}`,
+          parentId: parentId === 0 ? undefined : parentId,
+        })
+      }
+
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-limit`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const selfJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: usersCollection })
+            .join(
+              { parentUsers: usersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
+            }))
+            .orderBy(({ users }) => users.id)
+            .limit(10), // Add limit like in the bug report
+      })
+
+      const results = selfJoinQuery.toArray
+
+      // Should have exactly 10 results (limited)
+      expect(results).toHaveLength(10)
+
+      // All results should have valid parent-child relationships
+      results.forEach((result) => {
+        expect(result.user_id).toBeGreaterThan(result.parent_id)
+        expect(result.parent_id).toBeGreaterThan(0)
+      })
+
+      // Should not have any cartesian product results
+      const uniqueUserIds = new Set(results.map(r => r.user_id))
+      const uniqueParentIds = new Set(results.map(r => r.parent_id))
+      
+      // Each user should appear at most once
+      expect(uniqueUserIds.size).toBe(10)
+      
+      // Parent IDs should be a subset of all possible parent IDs
+      expect(uniqueParentIds.size).toBeLessThanOrEqual(50) // Should be much smaller than 100
+    })
+  })
 })
