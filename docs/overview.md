@@ -221,7 +221,7 @@ The Electric collection requires two Electric-specific options:
 - `shapeOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
   - `url` to your sync engine; and
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
-- `getKey` &mdash; identifies the id for the rows being synced into the collection.
+- `getKey` &mdash; identifies the id for the rows being synced into the collection
 
 When you create the collection, sync starts automatically.
 
@@ -259,7 +259,7 @@ See the [Electric docs](https://electric-sql.com/docs/intro) for more informatio
 
 #### `TrailBaseCollection`
 
-[TrailBase](https://trailbase.io) is an easy-to-selfhost, single-executable application backend with built-in SQLite, a V8 JS runtime, auth, admin UIs and sync functionality.
+[TrailBase](https://trailbase.io) is an easy-to-self-host, single-executable application backend with built-in SQLite, a V8 JS runtime, auth, admin UIs and sync functionality.
 
 TrailBase lets you expose tables via [Record APIs](https://trailbase.io/documentation/apis_record/) and subscribe to changes when `enable_subscriptions` is set. Use `trailBaseCollectionOptions` to sync records into a collection:
 
@@ -304,7 +304,7 @@ Use `localStorageCollectionOptions` to create a collection that stores data in l
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
-import { localStorageCollectionOptions } from "@tanstack/db"
+import { localStorageCollectionOptions } from "@tanstack/react-db"
 
 export const userPreferencesCollection = createCollection(
   localStorageCollectionOptions({
@@ -345,7 +345,7 @@ Use `localOnlyCollectionOptions` to create a collection that stores data only in
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
-import { localOnlyCollectionOptions } from "@tanstack/db"
+import { localOnlyCollectionOptions } from "@tanstack/react-db"
 
 export const uiStateCollection = createCollection(
   localOnlyCollectionOptions({
