@@ -1246,9 +1246,7 @@ export class CollectionImpl<
       return schema as StandardSchema<T>
     }
 
-    throw new Error(
-      `Schema must either implement the standard-schema interface or be a Zod schema`
-    )
+    throw new Error(`Schema must implement the standard-schema interface`)
   }
 
   public getKeyFromItem(item: T): TKey {
