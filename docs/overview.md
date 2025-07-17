@@ -147,12 +147,13 @@ With an instant inner loop of optimistic state, superseded in time by the slower
 
 ### Collections
 
-There are a number of built-in collection types implemented in [`@tanstack/db-collections`](https://github.com/TanStack/db/tree/main/packages/db-collections):
+There are a number of built-in collection types:
 
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-3. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-4. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
+4. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+5. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -175,6 +176,9 @@ type (e.g. `createCollection<Todo>()`).
 [TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `queryCollectionOptions` to fetch data into a collection using TanStack Query:
 
 ```ts
+import { createCollection } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["todoItems"],
@@ -195,7 +199,7 @@ Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/gu
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
-import { electricCollectionOptions } from "@tanstack/db-collections"
+import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 
 export const todoCollection = createCollection(
   electricCollectionOptions({
@@ -217,7 +221,7 @@ The Electric collection requires two Electric-specific options:
 - `shapeOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
   - `url` to your sync engine; and
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
-- `getKey` &mdash; identifies the id for the rows being synced into the collection
+- `getKey` &mdash; identifies the id for the rows being synced into the collection.
 
 When you create the collection, sync starts automatically.
 
@@ -253,6 +257,45 @@ If you need more control over what data syncs into the collection, Electric allo
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
 
+#### `TrailBaseCollection`
+
+[TrailBase](https://trailbase.io) is an easy-to-selfhost, single-executable application backend with built-in SQLite, a V8 JS runtime, auth, admin UIs and sync functionality.
+
+TrailBase lets you expose tables via [Record APIs](https://trailbase.io/documentation/apis_record/) and subscribe to changes when `enable_subscriptions` is set. Use `trailBaseCollectionOptions` to sync records into a collection:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
+import { initClient } from "trailbase"
+
+const trailBaseClient = initClient(`https://trailbase.io`)
+
+export const todoCollection = createCollection<SelectTodo, Todo>(
+  electricCollectionOptions({
+    id: "todos",
+    recordApi: trailBaseClient.records(`todos`),
+    getKey: (item) => item.id,
+    schema: todoSchema,
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
+  })
+)
+```
+
+This collection requires the following TrailBase-specific options:
+
+- `recordApi` — identifies the API to sync.
+- `getKey` — identifies the id for the records being synced into the collection.
+- `parse` — maps `(v: Todo[k]) => SelectTodo[k]`.
+- `serialize` — maps `(v: SelectTodo[k]) => Todo[k]`.
+
+When you create the collection, sync starts automatically.
+
+
 #### `LocalStorageCollection`
 
 localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
@@ -261,7 +304,7 @@ Use `localStorageCollectionOptions` to create a collection that stores data in l
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
-import { localStorageCollectionOptions } from "@tanstack/db-collections"
+import { localStorageCollectionOptions } from "@tanstack/db"
 
 export const userPreferencesCollection = createCollection(
   localStorageCollectionOptions({
@@ -302,7 +345,7 @@ Use `localOnlyCollectionOptions` to create a collection that stores data only in
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
-import { localOnlyCollectionOptions } from "@tanstack/db-collections"
+import { localOnlyCollectionOptions } from "@tanstack/db"
 
 export const uiStateCollection = createCollection(
   localOnlyCollectionOptions({
@@ -374,11 +417,11 @@ const completedTodoCollection = createLiveQueryCollection({
 
 This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
 
-#### base Collection
+#### Collection
 
-There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
+There is a `Collection` interface in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this to implement your own collection types.
 
-See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
+See the existing implementations in [`../packages/db`](../packages/db), [`../packages/query-db-collection`](../packages/query-db-collection), [`../packages/electric-db-collection`](../packages/electric-db-collection) and [`../packages/trailbase-db-collection`](../packages/trailbase-db-collection) for reference.
 
 ### Live queries
 
@@ -739,7 +782,7 @@ The steps are to:
 
 ```tsx
 import { useLiveQuery, createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/db-collections"
+import { queryCollectionOptions } from "@tanstack/electric-db-collection"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
@@ -806,7 +849,7 @@ Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) a
 ```tsx
 import type { Collection } from '@tanstack/db'
 import type { MutationFn, PendingMutation, createCollection } from '@tanstack/react-db'
-import { electricCollectionOptions } from '@tanstack/db-collections'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 export const todoCollection = createCollection(electricCollectionOptions({
   id: 'todos',
