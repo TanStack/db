@@ -2,7 +2,14 @@
 import { Store } from "@tanstack/store"
 import type { Event, RecordApi } from "trailbase"
 
-import type { CollectionConfig, SyncConfig, UtilsRecord } from "@tanstack/db"
+import type {
+  CollectionConfig,
+  DeleteMutationFnParams,
+  InsertMutationFnParams,
+  SyncConfig,
+  UpdateMutationFnParams,
+  UtilsRecord,
+} from "@tanstack/db"
 
 type ShapeOf<T> = Record<keyof T, unknown>
 type Conversion<I, O> = (value: I) => O
@@ -245,7 +252,7 @@ export function trailBaseCollectionOptions<
           commit()
 
           if (value) {
-            seenIds.setState((curr) => {
+            seenIds.setState((curr: Map<string, number>) => {
               const newIds = new Map(curr)
               newIds.set(String(getKey(value)), Date.now())
               return newIds
@@ -281,7 +288,9 @@ export function trailBaseCollectionOptions<
     ...config,
     sync,
     getKey,
-    onInsert: async (params): Promise<Array<number | string>> => {
+    onInsert: async (
+      params: InsertMutationFnParams<TItem, TKey>
+    ): Promise<Array<number | string>> => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
           const { type, modified } = tx
@@ -299,7 +308,7 @@ export function trailBaseCollectionOptions<
 
       return ids
     },
-    onUpdate: async (params) => {
+    onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, changes, key } = tx
@@ -318,7 +327,7 @@ export function trailBaseCollectionOptions<
       // DB by the subscription.
       await awaitIds(ids)
     },
-    onDelete: async (params) => {
+    onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, key } = tx
