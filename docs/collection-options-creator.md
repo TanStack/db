@@ -13,7 +13,7 @@ Collection options creators follow a consistent pattern:
 ## When to Create a Custom Collection
 
 You should create a custom collection when:
-- You have a dedicated sync engine (like Electric SQL, Trailbase, or a custom WebSocket solution)
+- You have a dedicated sync engine (like ElectricSQL, Trailbase, or a custom WebSocket solution)
 - You need specific sync behaviors that aren't covered by the query collection
 - You want to integrate with a backend that has its own sync protocol
 
@@ -145,6 +145,7 @@ interface MyCollectionConfig<TItem, TRecord> {
     metadata?: (obj: object) => JSON.stringify(obj)                 // object -> JSON string
   }
 }
+```
 
 ### 5. Mutation Handler Patterns
 
@@ -514,9 +515,9 @@ A critical challenge in sync-first apps is knowing when to drop optimistic state
 
 The key question is: **How do you know when step 4 is complete?**
 
-### Strategy 1: Transaction ID Tracking (Electric SQL)
+### Strategy 1: Transaction ID Tracking (ElectricSQL)
 
-Electric SQL returns transaction IDs that you can track:
+ElectricSQL returns transaction IDs that you can track:
 
 ```typescript
 // Track seen transaction IDs
