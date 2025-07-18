@@ -383,7 +383,7 @@ export class CollectionImpl<
    */
   constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
     // eslint-disable-next-line
-		if (!config) {
+    if (!config) {
       throw new Error(`Collection requires a config`)
     }
     if (config.id) {
@@ -393,7 +393,7 @@ export class CollectionImpl<
     }
 
     // eslint-disable-next-line
-		if (!config.sync) {
+    if (!config.sync) {
       throw new Error(`Collection requires a sync config`)
     }
 
