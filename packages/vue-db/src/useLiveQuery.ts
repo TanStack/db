@@ -1,5 +1,6 @@
 import {
   computed,
+  getCurrentScope,
   onScopeDispose,
   ref,
   shallowRef,
@@ -20,7 +21,7 @@ import type {
 import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
 const isCollection = (v: unknown): v is CollectionImpl => {
-  return !!v && v instanceof CollectionImpl
+  return v instanceof CollectionImpl
 }
 
 /**
@@ -296,8 +297,10 @@ export function useLiveQuery(
     }
   })
 
-  // Cleanup on unmount (only if we're in a component context)
-  onScopeDispose(clean)
+  // Cleanup
+  if (getCurrentScope()) {
+    onScopeDispose(clean)
+  }
 
   return {
     state: () => state.value,
