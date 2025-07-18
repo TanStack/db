@@ -45,7 +45,12 @@
     },
     {
       "label": "Guides",
-      "children": []
+      "children": [
+        {
+          "label": "Error Handling",
+          "to": "error-handling"
+        }
+      ]
     },
     {
       "label": "API Reference",
