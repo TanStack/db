@@ -223,7 +223,7 @@ The Electric collection requires two Electric-specific options:
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
 - `getKey` &mdash; identifies the id for the rows being synced into the collection
 
-When you create the collection, sync starts automatically.
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
 Electric shapes allow you to filter data using where clauses:
 
@@ -293,7 +293,7 @@ This collection requires the following TrailBase-specific options:
 - `parse` — maps `(v: Todo[k]) => SelectTodo[k]`.
 - `serialize` — maps `(v: SelectTodo[k]) => Todo[k]`.
 
-When you create the collection, sync starts automatically.
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
 
 #### `LocalStorageCollection`
