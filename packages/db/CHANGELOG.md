@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.27
+
+### Patch Changes
+
+- fix arktype schemas for collections ([#279](https://github.com/TanStack/db/pull/279))
+
 ## 0.0.26
 
 ### Patch Changes
