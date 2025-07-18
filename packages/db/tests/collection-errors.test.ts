@@ -263,10 +263,13 @@ describe(`Collection Error Handling`, () => {
       )
     })
 
-    it(`should throw helpful errors when trying to use operations on cleaned-up collection`, async () => {
+    it(`should automatically restart collection when operations are called on cleaned-up collection`, async () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `cleaned-up-test`,
         getKey: (item) => item.id,
+        onInsert: async () => {}, // Add handler to prevent "no handler" error
+        onUpdate: async () => {}, // Add handler to prevent "no handler" error
+        onDelete: async () => {}, // Add handler to prevent "no handler" error
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -279,26 +282,54 @@ describe(`Collection Error Handling`, () => {
       await collection.cleanup()
       expect(collection.status).toBe(`cleaned-up`)
 
-      // Operations should be blocked with helpful messages
+      // Insert operation should automatically restart the collection
       expect(() => {
         collection.insert({ id: `1`, name: `test` })
-      }).toThrow(
-        `Cannot perform insert on collection "cleaned-up-test" - collection has been cleaned up. The collection will automatically restart on next access.`
+      }).not.toThrow()
+
+      // Collection should no longer be in cleaned-up state
+      expect(collection.status).not.toBe(`cleaned-up`)
+
+      // Test with a new collection for update - need to start with data
+      const collectionWithData = createCollection<{ id: string; name: string }>(
+        {
+          id: `cleaned-up-test-2`,
+          getKey: (item) => item.id,
+          onUpdate: async () => {},
+          onDelete: async () => {},
+          sync: {
+            sync: ({ begin, write, commit }) => {
+              begin()
+              write({ type: `insert`, value: { id: `2`, name: `test2` } })
+              commit()
+            },
+          },
+        }
       )
 
+      // Wait for initial sync and then cleanup
+      await collectionWithData.preload()
+      await collectionWithData.cleanup()
+      expect(collectionWithData.status).toBe(`cleaned-up`)
+
+      // Update should restart the collection
       expect(() => {
-        collection.update(`1`, (draft) => {
+        collectionWithData.update(`2`, (draft) => {
           draft.name = `updated`
         })
-      }).toThrow(
-        `Cannot perform update on collection "cleaned-up-test" - collection has been cleaned up. The collection will automatically restart on next access.`
-      )
+      }).not.toThrow()
+
+      expect(collectionWithData.status).not.toBe(`cleaned-up`)
+
+      // Reset and test delete
+      await collectionWithData.cleanup()
+      expect(collectionWithData.status).toBe(`cleaned-up`)
 
       expect(() => {
-        collection.delete(`1`)
-      }).toThrow(
-        `Cannot perform delete on collection "cleaned-up-test" - collection has been cleaned up. The collection will automatically restart on next access.`
-      )
+        collectionWithData.delete(`2`)
+      }).not.toThrow()
+
+      expect(collectionWithData.status).not.toBe(`cleaned-up`)
     })
   })
 
