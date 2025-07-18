@@ -328,10 +328,9 @@ export class CollectionImpl<
             `Try calling cleanup() and restarting the collection.`
         )
       case `cleaned-up`:
-        throw new Error(
-          `Cannot perform ${operation} on collection "${this.id}" - collection has been cleaned up. ` +
-            `The collection will automatically restart on next access.`
-        )
+        // Automatically restart the collection when operations are called on cleaned-up collections
+        this.startSync()
+        break
     }
   }
 
