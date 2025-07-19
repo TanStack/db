@@ -2,6 +2,7 @@ import {
   batch,
   createComputed,
   createMemo,
+  createResource,
   createSignal,
   onCleanup,
 } from "solid-js"
@@ -296,7 +297,7 @@ export function useLiveQuery(
 
       // Preload collection data if not already started
       if (currentCollection.status === `idle`) {
-        currentCollection.preload().catch(console.error)
+        createResource(() => currentCollection.preload())
       }
 
       // Cleanup when computed is invalidated
