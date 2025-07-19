@@ -262,6 +262,7 @@ export function useLiveQuery(
       // Clean up previous subscription
       if (currentUnsubscribe) {
         currentUnsubscribe()
+        currentUnsubscribe = null
       }
 
       // Initialize state with current collection data
