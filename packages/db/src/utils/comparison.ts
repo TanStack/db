@@ -48,8 +48,8 @@ export const ascComparator = (a: any, b: any): number => {
   }
 
   // If at least one of the values is an object, use stable IDs for comparison
-  const aIsObject = typeof a === `object` && a !== null
-  const bIsObject = typeof b === `object` && b !== null
+  const aIsObject = typeof a === `object`
+  const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
     // If both are objects, compare their stable IDs
@@ -65,26 +65,9 @@ export const ascComparator = (a: any, b: any): number => {
   }
 
   // For primitive values, use direct comparison
-  try {
-    if (a < b) return -1
-    if (a > b) return 1
-    return 0
-  } catch {
-    // If comparison fails, fall back to string comparison
-    return safeStringify(a).localeCompare(safeStringify(b))
-  }
-}
-
-function safeStringify(value: any): string {
-  try {
-    return String(value)
-  } catch {
-    try {
-      return JSON.stringify(value) || `[object]`
-    } catch {
-      return `[object]`
-    }
-  }
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
 }
 
 /**

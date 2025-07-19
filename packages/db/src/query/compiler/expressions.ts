@@ -27,28 +27,18 @@ export const SUPPORTED_COLLECTION_FUNCS = new Set([
 export function isConvertibleToCollectionFilter(
   whereClause: BasicExpression<boolean>
 ): boolean {
-  function checkExpression(expr: BasicExpression<boolean>): boolean {
-    switch (expr.type) {
-      case `val`:
-        return true
-      case `ref`:
-        return true
-      case `func`: {
-        // Check if this function is supported
-        if (!SUPPORTED_COLLECTION_FUNCS.has(expr.name)) {
-          return false
-        }
-        // Recursively check all arguments
-        return expr.args.every((arg) =>
-          checkExpression(arg as BasicExpression<boolean>)
-        )
-      }
-      default:
-        return false
+  const tpe = whereClause.type
+  if (tpe === `func`) {
+    // Check if this function is supported
+    if (!SUPPORTED_COLLECTION_FUNCS.has(whereClause.name)) {
+      return false
     }
+    // Recursively check all arguments
+    return whereClause.args.every((arg) =>
+      isConvertibleToCollectionFilter(arg as BasicExpression<boolean>)
+    )
   }
-
-  return checkExpression(whereClause)
+  return [`val`, `ref`].includes(tpe)
 }
 
 /**
@@ -64,40 +54,39 @@ export function convertToBasicExpression(
   whereClause: BasicExpression<boolean>,
   collectionAlias: string
 ): BasicExpression<boolean> | null {
-  function convert(
-    expr: BasicExpression<boolean>
-  ): BasicExpression<boolean> | null {
-    switch (expr.type) {
-      case `val`:
-        return new Value(expr.value)
-      case `ref`: {
-        const path = expr.path
-        if (Array.isArray(path)) {
-          if (path[0] === collectionAlias && path.length > 1) {
-            // Remove the table alias from the path for single-collection queries
-            return new PropRef(path.slice(1))
-          } else if (path.length === 1 && path[0] !== undefined) {
-            // Single field reference
-            return new PropRef([path[0]])
-          }
-        }
-        // Fallback for non-array paths
-        return new PropRef(Array.isArray(path) ? path : [String(path)])
+  const tpe = whereClause.type
+  if (tpe === `val`) {
+    return new Value(whereClause.value)
+  } else if (tpe === `ref`) {
+    const path = whereClause.path
+    if (Array.isArray(path)) {
+      if (path[0] === collectionAlias && path.length > 1) {
+        // Remove the table alias from the path for single-collection queries
+        return new PropRef(path.slice(1))
+      } else if (path.length === 1 && path[0] !== undefined) {
+        // Single field reference
+        return new PropRef([path[0]])
       }
-      case `func`: {
-        if (!SUPPORTED_COLLECTION_FUNCS.has(expr.name)) return null
-        const args: Array<BasicExpression> = []
-        for (const arg of expr.args) {
-          const conv = convert(arg)
-          if (conv == null) return null
-          args.push(conv)
-        }
-        return new Func(expr.name, args)
-      }
-      default:
-        return null
     }
+    // Fallback for non-array paths
+    return new PropRef(Array.isArray(path) ? path : [String(path)])
+  } else {
+    // Check if this function is supported
+    if (!SUPPORTED_COLLECTION_FUNCS.has(whereClause.name)) {
+      return null
+    }
+    // Recursively convert all arguments
+    const args: Array<BasicExpression> = []
+    for (const arg of whereClause.args) {
+      const convertedArg = convertToBasicExpression(
+        arg as BasicExpression<boolean>,
+        collectionAlias
+      )
+      if (convertedArg == null) {
+        return null
+      }
+      args.push(convertedArg)
+    }
+    return new Func(whereClause.name, args)
   }
-
-  return convert(whereClause)
 }

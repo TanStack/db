@@ -186,13 +186,10 @@ export function liveQueryCollectionOptions<
     )
 
     // Compile the query and get both pipeline and collection WHERE clauses
-    const compilationResult = compileQuery(
-      query,
-      inputsCache as Record<string, KeyedStream>
-    )
-
-    pipelineCache = compilationResult.pipeline
-    collectionWhereClausesCache = compilationResult.collectionWhereClauses
+    ;({
+      pipeline: pipelineCache,
+      collectionWhereClauses: collectionWhereClausesCache,
+    } = compileQuery(query, inputsCache as Record<string, KeyedStream>))
   }
 
   const maybeCompileBasePipeline = () => {
