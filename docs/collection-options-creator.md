@@ -1,3 +1,7 @@
+---
+title: Creating a Collection Options Creator
+id: guide/collection-options-creator
+---
 # Creating a Collection Options Creator
 
 A collection options creator is a factory function that generates configuration options for TanStack DB collections. It provides a standardized way to integrate different sync engines and data sources with TanStack DB's reactive sync-first architecture.
