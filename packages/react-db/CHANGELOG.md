@@ -1,5 +1,79 @@
 # @tanstack/react-db
 
+## 0.0.27
+
+### Patch Changes
+
+- Updated dependencies [[`bec8620`](https://github.com/TanStack/db/commit/bec862004deef5fdd560f70107ebd59f7c27656e)]:
+  - @tanstack/db@0.0.27
+
+## 0.0.26
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+- Updated dependencies [[`09c6995`](https://github.com/TanStack/db/commit/09c6995ea9c8e6979d077ca63cbdd6215054ae78)]:
+  - @tanstack/db@0.0.26
+
+## 0.0.25
+
+### Patch Changes
+
+- Updated dependencies [[`1758eda`](https://github.com/TanStack/db/commit/1758edab9608383d9d1470156021ee632f043e51), [`20f810e`](https://github.com/TanStack/db/commit/20f810e13a7d802bf56da6f0df89b34312ebb2fd)]:
+  - @tanstack/db@0.0.25
+
+## 0.0.24
+
+### Patch Changes
+
+- Updated dependencies [[`11215d9`](https://github.com/TanStack/db/commit/11215d9544d02e9dc6258c661ba4b5e439e479ed), [`fe42591`](https://github.com/TanStack/db/commit/fe42591bd7ea9955d67ecec4471b44cb7808e74b), [`665efe6`](https://github.com/TanStack/db/commit/665efe660c1aed68139326a2a33904968622a882)]:
+  - @tanstack/db@0.0.24
+
+## 0.0.23
+
+### Patch Changes
+
+- Updated dependencies [[`056609e`](https://github.com/TanStack/db/commit/056609ed2926e12df5ee08be5fad0a6333e787f3)]:
+  - @tanstack/db@0.0.23
+
+## 0.0.22
+
+### Patch Changes
+
+- Updated dependencies [[`aeee9a1`](https://github.com/TanStack/db/commit/aeee9a13411527bd0ebfc0a0c06989bdb904b650)]:
+  - @tanstack/db@0.0.22
+
+## 0.0.21
+
+### Patch Changes
+
+- Updated dependencies [[`8e23322`](https://github.com/TanStack/db/commit/8e233229b25eabed07cdaf12948ba913786bf4f9)]:
+  - @tanstack/db@0.0.21
+
+## 0.0.20
+
+### Patch Changes
+
+- Updated dependencies [[`f13c11e`](https://github.com/TanStack/db/commit/f13c11ed0ab27cd88b03d789b0cd953e86bd1333)]:
+  - @tanstack/db@0.0.20
+
+## 0.0.19
+
+### Patch Changes
+
+- Updated dependencies [[`9f0b0c2`](https://github.com/TanStack/db/commit/9f0b0c28ede99273eb5914be28aff55b91c50778)]:
+  - @tanstack/db@0.0.19
+
+## 0.0.18
+
+### Patch Changes
+
+- Improve jsdocs ([#243](https://github.com/TanStack/db/pull/243))
+
+- Updated dependencies [[`266bd29`](https://github.com/TanStack/db/commit/266bd29514c6c0fa9e903986ca11c5e22f4d2361)]:
+  - @tanstack/db@0.0.18
+
 ## 0.0.17
 
 ### Patch Changes
@@ -39,7 +113,6 @@
   Adds automatic lifecycle management for collections to optimize resource usage.
 
   **New Features:**
-
   - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
   - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
   - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
@@ -146,7 +219,6 @@
 ### Patch Changes
 
 - A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
-
   - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
   - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
   - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
@@ -161,7 +233,6 @@
 - Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
 
   Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
-
   - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
   - Added `utils` property to CollectionImpl
   - Added TypeScript types for utility functions and utility records

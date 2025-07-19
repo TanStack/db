@@ -28,15 +28,13 @@ TanStack DB works by:
 // Define collections to load data into
 const todoCollection = createCollection({
   // ...your config
-  onUpdate: updateMutationFn
+  onUpdate: updateMutationFn,
 })
 
 const Todos = () => {
   // Bind data using live queries
   const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todo: todoCollection })
-      .where(({ todo }) => todo.completed)
+    q.from({ todo: todoCollection }).where(({ todo }) => todo.completed)
   )
 
   const complete = (todo) => {
@@ -48,11 +46,11 @@ const Todos = () => {
 
   return (
     <ul>
-      {todos.map(todo =>
-        <li key={ todo.id } onClick={() => complete(todo) }>
-          { todo.text }
+      {todos.map((todo) => (
+        <li key={todo.id} onClick={() => complete(todo)}>
+          {todo.text}
         </li>
-      )}
+      ))}
     </ul>
   )
 }
@@ -75,14 +73,14 @@ Once you have your data in collections, you can query across them using live que
 
 Live queries are used to query data out of collections. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the result is incrementally updated and returned from the query, triggering a re-render.
 
-TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update *incrementally* (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
+TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update _incrementally_ (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
 
 Live queries support joins across collections. This allows you to:
 
 1. load normalised data into collections and then de-normalise it through queries; simplifying your backend by avoiding the need for bespoke API endpoints that match your client
 2. join data from multiple sources; for example, syncing some data out of a database, fetching some other data from an external API and then joining these into a unified data model for your front-end code
 
-Every query returns another collection which can *also* be queried.
+Every query returns another collection which can _also_ be queried.
 
 ### Making optimistic mutations
 
@@ -94,7 +92,7 @@ const todoCollection = createCollection({
   id: "todos",
   // ... other config
   onUpdate: async ({ transaction }) => {
-    const {original, changes} = transaction.mutations[0]
+    const { original, changes } = transaction.mutations[0]
     await api.todos.update(original.id, changes)
   },
 })
@@ -113,7 +111,7 @@ If the handler throws an error, the optimistic state is rolled back.
 
 ### Explicit transactions
 
-Mutations are based on a `Transaction` primitive. 
+Mutations are based on a `Transaction` primitive.
 
 For simple state changes, directly mutating the collection and persisting with the operator handlers is enough.
 
@@ -122,7 +120,7 @@ But for more complex use cases, you can directly create custom actions with `cre
 For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.update(updatedTodo)` and then calls `await collection.refetch()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
 
 ```ts
-const updateTodo = createOptimisticAction<{id: string}>({
+const updateTodo = createOptimisticAction<{ id: string }>({
   onMutate,
   mutationFn: async ({ transaction }) => {
     const { collection, modified: updatedTodo } = transaction.mutations[0]
@@ -149,12 +147,13 @@ With an instant inner loop of optimistic state, superseded in time by the slower
 
 ### Collections
 
-There are a number of built-in collection types implemented in [`@tanstack/db-collections`](https://github.com/TanStack/db/tree/main/packages/db-collections):
+There are a number of built-in collection types:
 
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-3. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-4. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
+4. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+5. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -163,25 +162,31 @@ You can also use:
 
 #### Collection schemas
 
-All collections optionally support a `schema`.
+All collections optionally (though strongly recommended) support adding a `schema`.
 
 If provided, this must be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as a [Zod](https://zod.dev) or [Effect](https://effect.website/docs/schema/introduction/) schema.
 
+The collection will use the schema to do client-side validation of optimistic mutations.
+
 The collection will use the schema for its type so if you provide a schema, you can't also pass in an explicit
 type (e.g. `createCollection<Todo>()`).
-
 
 #### `QueryCollection`
 
 [TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `queryCollectionOptions` to fetch data into a collection using TanStack Query:
 
 ```ts
-const todoCollection = createCollection(queryCollectionOptions({
-  queryKey: ['todoItems'],
-  queryFn: async () => fetch('/api/todos'),
-  getKey: (item) => item.id,
-  schema: todoSchema // any standard schema
-}))
+import { createCollection } from "@tanstack/react-db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
+const todoCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todoItems"],
+    queryFn: async () => fetch("/api/todos"),
+    getKey: (item) => item.id,
+    schema: todoSchema, // any standard schema
+  })
+)
 ```
 
 The collection will be populated with the query results.
@@ -193,20 +198,22 @@ The collection will be populated with the query results.
 Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/guides/shapes). Use `electricCollectionOptions` to sync a shape into a collection:
 
 ```ts
-import { createCollection } from '@tanstack/react-db'
-import { electricCollectionOptions } from '@tanstack/db-collections'
+import { createCollection } from "@tanstack/react-db"
+import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 
-export const todoCollection = createCollection(electricCollectionOptions({
-  id: 'todos',
-  shapeOptions: {
-    url: 'https://example.com/v1/shape',
-    params: {
-      table: 'todos'
-    }
-  },
-  getKey: (item) => item.id,
-  schema: todoSchema
-}))
+export const todoCollection = createCollection(
+  electricCollectionOptions({
+    id: "todos",
+    shapeOptions: {
+      url: "https://example.com/v1/shape",
+      params: {
+        table: "todos",
+      },
+    },
+    getKey: (item) => item.id,
+    schema: todoSchema,
+  })
+)
 ```
 
 The Electric collection requires two Electric-specific options:
@@ -216,27 +223,29 @@ The Electric collection requires two Electric-specific options:
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
 - `getKey` &mdash; identifies the id for the rows being synced into the collection
 
-When you create the collection, sync starts automatically.
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
 Electric shapes allow you to filter data using where clauses:
 
 ```ts
-export const myPendingTodos = createCollection(electricCollectionOptions({
-  id: 'todos',
-  shapeOptions: {
-    url: 'https://example.com/v1/shape',
-    params: {
-      table: 'todos',
-      where: `
+export const myPendingTodos = createCollection(
+  electricCollectionOptions({
+    id: "todos",
+    shapeOptions: {
+      url: "https://example.com/v1/shape",
+      params: {
+        table: "todos",
+        where: `
         status = 'pending'
         AND
         user_id = '${user.id}'
-      `
-    }
-  },
-  getKey: (item) => item.id,
-  schema: todoSchema
-}))
+      `,
+      },
+    },
+    getKey: (item) => item.id,
+    schema: todoSchema,
+  })
+)
 ```
 
 > [!TIP]
@@ -248,6 +257,45 @@ If you need more control over what data syncs into the collection, Electric allo
 
 See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
 
+#### `TrailBaseCollection`
+
+[TrailBase](https://trailbase.io) is an easy-to-self-host, single-executable application backend with built-in SQLite, a V8 JS runtime, auth, admin UIs and sync functionality.
+
+TrailBase lets you expose tables via [Record APIs](https://trailbase.io/documentation/apis_record/) and subscribe to changes when `enable_subscriptions` is set. Use `trailBaseCollectionOptions` to sync records into a collection:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
+import { initClient } from "trailbase"
+
+const trailBaseClient = initClient(`https://trailbase.io`)
+
+export const todoCollection = createCollection<SelectTodo, Todo>(
+  electricCollectionOptions({
+    id: "todos",
+    recordApi: trailBaseClient.records(`todos`),
+    getKey: (item) => item.id,
+    schema: todoSchema,
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
+  })
+)
+```
+
+This collection requires the following TrailBase-specific options:
+
+- `recordApi` — identifies the API to sync.
+- `getKey` — identifies the id for the records being synced into the collection.
+- `parse` — maps `(v: Todo[k]) => SelectTodo[k]`.
+- `serialize` — maps `(v: SelectTodo[k]) => Todo[k]`.
+
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
+
+
 #### `LocalStorageCollection`
 
 localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
@@ -255,15 +303,17 @@ localStorage collections store small amounts of local-only state that persists a
 Use `localStorageCollectionOptions` to create a collection that stores data in localStorage:
 
 ```ts
-import { createCollection } from '@tanstack/react-db'
-import { localStorageCollectionOptions } from '@tanstack/db-collections'
+import { createCollection } from "@tanstack/react-db"
+import { localStorageCollectionOptions } from "@tanstack/react-db"
 
-export const userPreferencesCollection = createCollection(localStorageCollectionOptions({
-  id: 'user-preferences',
-  storageKey: 'app-user-prefs', // localStorage key
-  getKey: (item) => item.id,
-  schema: userPrefsSchema
-}))
+export const userPreferencesCollection = createCollection(
+  localStorageCollectionOptions({
+    id: "user-preferences",
+    storageKey: "app-user-prefs", // localStorage key
+    getKey: (item) => item.id,
+    schema: userPrefsSchema,
+  })
+)
 ```
 
 The localStorage collection requires:
@@ -274,12 +324,14 @@ The localStorage collection requires:
 Mutation handlers (`onInsert`, `onUpdate`, `onDelete`) are completely optional. Data will persist to localStorage whether or not you provide handlers. You can provide alternative storage backends like `sessionStorage` or custom implementations that match the localStorage API.
 
 ```ts
-export const sessionCollection = createCollection(localStorageCollectionOptions({
-  id: 'session-data',
-  storageKey: 'session-key',
-  storage: sessionStorage, // Use sessionStorage instead
-  getKey: (item) => item.id
-}))
+export const sessionCollection = createCollection(
+  localStorageCollectionOptions({
+    id: "session-data",
+    storageKey: "session-key",
+    storage: sessionStorage, // Use sessionStorage instead
+    getKey: (item) => item.id,
+  })
+)
 ```
 
 > [!TIP]
@@ -292,19 +344,21 @@ LocalOnly collections are designed for in-memory client data or UI state that do
 Use `localOnlyCollectionOptions` to create a collection that stores data only in memory:
 
 ```ts
-import { createCollection } from '@tanstack/react-db'
-import { localOnlyCollectionOptions } from '@tanstack/db-collections'
+import { createCollection } from "@tanstack/react-db"
+import { localOnlyCollectionOptions } from "@tanstack/react-db"
 
-export const uiStateCollection = createCollection(localOnlyCollectionOptions({
-  id: 'ui-state',
-  getKey: (item) => item.id,
-  schema: uiStateSchema,
-  // Optional initial data to populate the collection
-  initialData: [
-    { id: 'sidebar', isOpen: false },
-    { id: 'theme', mode: 'light' }
-  ]
-}))
+export const uiStateCollection = createCollection(
+  localOnlyCollectionOptions({
+    id: "ui-state",
+    getKey: (item) => item.id,
+    schema: uiStateSchema,
+    // Optional initial data to populate the collection
+    initialData: [
+      { id: "sidebar", isOpen: false },
+      { id: "theme", mode: "light" },
+    ],
+  })
+)
 ```
 
 The LocalOnly collection requires:
@@ -319,19 +373,21 @@ Optional configuration:
 Mutation handlers are completely optional. When provided, they are called before the optimistic state is confirmed. The collection automatically manages the transition from optimistic to confirmed state internally.
 
 ```ts
-export const tempDataCollection = createCollection(localOnlyCollectionOptions({
-  id: 'temp-data',
-  getKey: (item) => item.id,
-  onInsert: async ({ transaction }) => {
-    // Custom logic before confirming the insert
-    console.log('Inserting:', transaction.mutations[0].modified)
-  },
-  onUpdate: async ({ transaction }) => {
-    // Custom logic before confirming the update
-    const { original, modified } = transaction.mutations[0]
-    console.log('Updating from', original, 'to', modified)
-  }
-}))
+export const tempDataCollection = createCollection(
+  localOnlyCollectionOptions({
+    id: "temp-data",
+    getKey: (item) => item.id,
+    onInsert: async ({ transaction }) => {
+      // Custom logic before confirming the insert
+      console.log("Inserting:", transaction.mutations[0].modified)
+    },
+    onUpdate: async ({ transaction }) => {
+      // Custom logic before confirming the update
+      const { original, modified } = transaction.mutations[0]
+      console.log("Updating from", original, "to", modified)
+    },
+  })
+)
 ```
 
 > [!TIP]
@@ -355,19 +411,17 @@ const todoCollection = createCollection({
 const completedTodoCollection = createLiveQueryCollection({
   startSync: true,
   query: (q) =>
-    q
-      .from({ todo: todoCollection })
-      .where(({ todo }) => todo.completed)
+    q.from({ todo: todoCollection }).where(({ todo }) => todo.completed),
 })
 ```
 
 This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
 
-#### base Collection
+#### Collection
 
-There is a base `Collection` class in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this directly or as a base class for implementing your own collection types.
+There is a `Collection` interface in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this to implement your own collection types.
 
-See the existing implementations in [`../packages/db-collections`](../packages/db-collections) for reference.
+See the existing implementations in [`../packages/db`](../packages/db), [`../packages/query-db-collection`](../packages/query-db-collection), [`../packages/electric-db-collection`](../packages/electric-db-collection) and [`../packages/trailbase-db-collection`](../packages/trailbase-db-collection) for reference.
 
 ### Live queries
 
@@ -432,8 +486,9 @@ import { createLiveQueryCollection, eq } from "@tanstack/db"
 const completedTodos = createLiveQueryCollection({
   startSync: true,
   query: (q) =>
-    q.from({ todo: todoCollection })
-     .where(({ todo }) => eq(todo.completed, true))
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, true)),
 })
 
 const results = completedTodos.toArray
@@ -460,7 +515,7 @@ Mutators are created with a `mutationFn`. You can define a single, generic `muta
 The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored, e.g.:
 
 ```tsx
-import type { MutationFn } from '@tanstack/react-db'
+import type { MutationFn } from "@tanstack/react-db"
 
 const mutationFn: MutationFn = async ({ transaction }) => {
   const response = await api.todos.create(transaction.mutations)
@@ -484,7 +539,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 Use `createOptimisticAction` with your `mutationFn` and `onMutate` functions to create an action that you can use to mutate data in your components in fully custom ways:
 
 ```tsx
-import { createOptimisticAction } from '@tanstack/react-db'
+import { createOptimisticAction } from "@tanstack/react-db"
 
 // Create the `addTodo` action, passing in your `mutationFn` and `onMutate`.
 const addTodo = createOptimisticAction<string>({
@@ -493,26 +548,26 @@ const addTodo = createOptimisticAction<string>({
     todoCollection.insert({
       id: uuid(),
       text,
-      completed: false
+      completed: false,
     })
   },
   mutationFn: async (text) => {
     // Persist the todo to your backend
-    const response = await fetch('/api/todos', {
-      method: 'POST',
+    const response = await fetch("/api/todos", {
+      method: "POST",
       body: JSON.stringify({ text, completed: false }),
     })
     return response.json()
-  }
+  },
 })
 
 const Todo = () => {
   const handleClick = () => {
     // Triggers the onMutate and then the mutationFn
-    addTodo('🔥 Make app faster')
+    addTodo("🔥 Make app faster")
   }
 
-  return <Button onClick={ handleClick } />
+  return <Button onClick={handleClick} />
 }
 ```
 
@@ -520,7 +575,6 @@ const Todo = () => {
 
 By manually creating transactions, you can fully control their lifecycles and behaviors. `createOptimisticAction` is a ~25 line
 function which implements a common transaction pattern. Feel free to invent your own patterns!
-
 
 Here's one way you could use transactions.
 
@@ -574,8 +628,20 @@ insert([
   { text: "Walk dog", completed: false },
 ])
 
-// Insert with custom key
-insert({ text: "Buy groceries" }, { key: "grocery-task" })
+// Insert with optimistic updates disabled
+myCollection.insert(
+  { text: "Server-validated item", completed: false },
+  { optimistic: false }
+)
+
+// Insert with metadata and optimistic control
+myCollection.insert(
+  { text: "Custom item", completed: false },
+  {
+    metadata: { source: "import" },
+    optimistic: true, // default behavior
+  }
+)
 ```
 
 ##### `update`
@@ -599,19 +665,100 @@ update([todo1.id, todo2.id], (drafts) => {
 update(todo.id, { metadata: { reason: "user update" } }, (draft) => {
   draft.text = "Updated text"
 })
+
+// Update without optimistic updates
+update(todo.id, { optimistic: false }, (draft) => {
+  draft.status = "server-validated"
+})
+
+// Update with both metadata and optimistic control
+update(
+  todo.id,
+  {
+    metadata: { reason: "admin update" },
+    optimistic: false,
+  },
+  (draft) => {
+    draft.priority = "high"
+  }
+)
 ```
 
 ##### `delete`
 
 ```typescript
 // Delete a single item
-delete(todo.id)
+delete todo.id
 
 // Delete multiple items
-delete([todo1.id, todo2.id])
+delete [todo1.id, todo2.id]
 
 // Delete with metadata
-delete(todo.id, { metadata: { reason: "completed" } })
+delete (todo.id, { metadata: { reason: "completed" } })
+
+// Delete without optimistic updates (waits for server confirmation)
+delete (todo.id, { optimistic: false })
+
+// Delete with metadata and optimistic control
+delete (todo.id,
+{
+  metadata: { reason: "admin deletion" },
+  optimistic: false,
+})
+```
+
+#### Controlling optimistic behavior
+
+By default, all mutations (`insert`, `update`, `delete`) apply optimistic updates immediately to provide instant feedback in your UI. However, there are cases where you may want to disable this behavior and wait for server confirmation before applying changes locally.
+
+##### When to use `optimistic: false`
+
+Consider disabling optimistic updates when:
+
+- **Complex server-side processing**: Inserts that depend on server-side generation (e.g., cascading foreign keys, computed fields)
+- **Validation requirements**: Operations where backend validation might reject the change
+- **Confirmation workflows**: Deletes where UX should wait for confirmation before removing data
+- **Batch operations**: Large operations where optimistic rollback would be disruptive
+
+##### Behavior differences
+
+**`optimistic: true` (default)**:
+
+- Immediately applies mutation to the local store
+- Provides instant UI feedback
+- Requires rollback if server rejects the mutation
+- Best for simple, predictable operations
+
+**`optimistic: false`**:
+
+- Does not modify local store until server confirms
+- No immediate UI feedback, but no rollback needed
+- UI updates only after successful server response
+- Best for complex or validation-heavy operations
+
+```typescript
+// Example: Critical deletion that needs confirmation
+const handleDeleteAccount = () => {
+  // Don't remove from UI until server confirms
+  userCollection.delete(userId, { optimistic: false })
+}
+
+// Example: Server-generated data
+const handleCreateInvoice = () => {
+  // Server generates invoice number, tax calculations, etc.
+  invoiceCollection.insert(invoiceData, { optimistic: false })
+}
+
+// Example: Mixed approach in same transaction
+tx.mutate(() => {
+  // Instant UI feedback for simple change
+  todoCollection.update(todoId, (draft) => {
+    draft.completed = true
+  })
+
+  // Wait for server confirmation for complex change
+  auditCollection.insert(auditRecord, { optimistic: false })
+})
 ```
 
 ## Usage examples
@@ -635,11 +782,11 @@ The steps are to:
 
 ```tsx
 import { useLiveQuery, createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/db-collections"
+import { queryCollectionOptions } from "@tanstack/electric-db-collection"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createCollection<Todo>(queryCollectionOptions({
+const todoCollection = createCollection(queryCollectionOptions({
   queryKey: ["todos"],
   queryFn: async () => fetch("/api/todos"),
   getKey: (item) => item.id,
@@ -652,7 +799,7 @@ const todoCollection = createCollection<Todo>(queryCollectionOptions({
   }
   // also add onUpdate, onDelete as needed.
 }))
-const listCollection = createCollection<TodoList>(queryCollectionOptions({
+const listCollection = createCollection(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
   getKey: (item) => item.id,
@@ -702,9 +849,9 @@ Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) a
 ```tsx
 import type { Collection } from '@tanstack/db'
 import type { MutationFn, PendingMutation, createCollection } from '@tanstack/react-db'
-import { electricCollectionOptions } from '@tanstack/db-collections'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
-export const todoCollection = createCollection(electricCollectionOptions<Todo>({
+export const todoCollection = createCollection(electricCollectionOptions({
   id: 'todos',
   schema: todoSchema,
   // Electric syncs data using "shapes". These are filtered views

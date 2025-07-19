@@ -50,7 +50,10 @@
     {
       "label": "Guides",
       "children": [
-        
+        {
+          "label": "Creating Collection Options Creators",
+          "to": "collection-options-creator"
+        }
       ]
     },
     {

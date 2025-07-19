@@ -1,5 +1,111 @@
 # examples/react/todo
 
+## 0.0.33
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.9
+  - @tanstack/query-db-collection@0.0.9
+  - @tanstack/react-db@0.0.27
+  - @tanstack/trailbase-db-collection@0.0.3
+
+## 0.0.32
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+- Updated dependencies [[`09c6995`](https://github.com/TanStack/db/commit/09c6995ea9c8e6979d077ca63cbdd6215054ae78)]:
+  - @tanstack/trailbase-db-collection@0.0.2
+  - @tanstack/electric-db-collection@0.0.8
+  - @tanstack/query-db-collection@0.0.8
+  - @tanstack/react-db@0.0.26
+
+## 0.0.31
+
+### Patch Changes
+
+- Updated dependencies [[`20f810e`](https://github.com/TanStack/db/commit/20f810e13a7d802bf56da6f0df89b34312ebb2fd)]:
+  - @tanstack/electric-db-collection@0.0.7
+  - @tanstack/query-db-collection@0.0.7
+  - @tanstack/react-db@0.0.25
+
+## 0.0.30
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.6
+  - @tanstack/query-db-collection@0.0.6
+  - @tanstack/react-db@0.0.24
+
+## 0.0.29
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.5
+  - @tanstack/query-db-collection@0.0.5
+  - @tanstack/react-db@0.0.23
+
+## 0.0.28
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.4
+  - @tanstack/query-db-collection@0.0.4
+  - @tanstack/react-db@0.0.22
+
+## 0.0.27
+
+### Patch Changes
+
+- Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+  - Move local-only and local-storage collections to main `@tanstack/db` package
+  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/query-db-collection` package for TanStack Query integration
+  - Delete `@tanstack/db-collections` package (removed from repo)
+  - Update example app and documentation to use new package structure
+
+  Why?
+  - Better separation of concerns
+  - Independent versioning for each collection type
+  - Cleaner dependencies (electric collections don't need query deps, etc.)
+  - Easier to add more collection types moving forward
+
+- Updated dependencies [[`8e23322`](https://github.com/TanStack/db/commit/8e233229b25eabed07cdaf12948ba913786bf4f9)]:
+  - @tanstack/electric-db-collection@0.0.3
+  - @tanstack/query-db-collection@0.0.3
+  - @tanstack/react-db@0.0.21
+
+## 0.0.26
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-collections@0.0.24
+  - @tanstack/react-db@0.0.20
+
+## 0.0.25
+
+### Patch Changes
+
+- - [Breaking change for the Electric Collection]: Use numbers for txid ([#245](https://github.com/TanStack/db/pull/245))
+  - misc type fixes
+- Updated dependencies [[`9f0b0c2`](https://github.com/TanStack/db/commit/9f0b0c28ede99273eb5914be28aff55b91c50778)]:
+  - @tanstack/db-collections@0.0.23
+  - @tanstack/react-db@0.0.19
+
+## 0.0.24
+
+### Patch Changes
+
+- Updated dependencies [[`266bd29`](https://github.com/TanStack/db/commit/266bd29514c6c0fa9e903986ca11c5e22f4d2361)]:
+  - @tanstack/db-collections@0.0.22
+  - @tanstack/react-db@0.0.18
+
 ## 0.0.23
 
 ### Patch Changes
@@ -115,7 +221,6 @@
   When `collection.insert()`, `.update()`, or `.delete()` are called outside of an explicit transaction (i.e., not within `useOptimisticMutation`), the library now automatically creates a single-operation transaction and invokes the corresponding handler to persist the change.
 
   Key changes:
-
   - **`@tanstack/db`**: The `Collection` class now supports `onInsert`, `onUpdate`, and `onDelete` in its configuration. Direct calls to mutation methods will throw an error if the corresponding handler is not defined.
   - **`@tanstack/db-collections`**:
     - `queryCollectionOptions` now accepts the new handlers and will automatically `refetch` the collection's query after a handler successfully completes. This behavior can be disabled if the handler returns `{ refetch: false }`.
@@ -127,7 +232,6 @@
   ***
 
   The documentation and the React Todo example application have been significantly refactored to adopt the new direct persistence handler pattern as the primary way to perform mutations.
-
   - The `README.md` and `docs/overview.md` files have been updated to de-emphasize `useOptimisticMutation` for simple writes. They now showcase the much simpler API of calling `collection.insert()` directly and defining persistence logic in the collection's configuration.
   - The React Todo example (`examples/react/todo/src/App.tsx`) has been completely overhauled. All instances of `useOptimisticMutation` have been removed and replaced with the new `onInsert`, `onUpdate`, and `onDelete` handlers, resulting in cleaner and more concise code.
 

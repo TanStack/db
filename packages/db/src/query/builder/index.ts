@@ -185,6 +185,110 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 
   /**
+   * Perform a LEFT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the left joined table available
+   *
+   * @example
+   * ```ts
+   * // Left join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  leftJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
+  > {
+    return this.join(source, onCallback, `left`)
+  }
+
+  /**
+   * Perform a RIGHT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the right joined table available
+   *
+   * @example
+   * ```ts
+   * // Right join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .rightJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  rightJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
+  > {
+    return this.join(source, onCallback, `right`)
+  }
+
+  /**
+   * Perform an INNER JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the inner joined table available
+   *
+   * @example
+   * ```ts
+   * // Inner join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .innerJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  innerJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
+  > {
+    return this.join(source, onCallback, `inner`)
+  }
+
+  /**
+   * Perform a FULL JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the full joined table available
+   *
+   * @example
+   * ```ts
+   * // Full join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .fullJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  fullJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
+  > {
+    return this.join(source, onCallback, `full`)
+  }
+
+  /**
    * Filter rows based on a condition
    *
    * @param callback - A function that receives table references and returns an expression
@@ -477,6 +581,27 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return new BaseQueryBuilder({
       ...this.query,
       offset: count,
+    }) as any
+  }
+
+  /**
+   * Specify that the query should return distinct rows.
+   * Deduplicates rows based on the selected columns.
+   * @returns A QueryBuilder with distinct enabled
+   *
+   * @example
+   * ```ts
+   * // Get countries our users are from
+   * query
+   *   .from({ users: usersCollection })
+   *   .select(({users}) => users.country)
+   *   .distinct()
+   * ```
+   */
+  distinct(): QueryBuilder<TContext> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      distinct: true,
     }) as any
   }
 

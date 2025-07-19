@@ -1,5 +1,110 @@
 # @tanstack/db
 
+## 0.0.27
+
+### Patch Changes
+
+- fix arktype schemas for collections ([#279](https://github.com/TanStack/db/pull/279))
+
+## 0.0.26
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+## 0.0.25
+
+### Patch Changes
+
+- Fix iterator-based change tracking in proxy system ([#271](https://github.com/TanStack/db/pull/271))
+
+  This fixes several issues with iterator-based change tracking for Maps and Sets:
+  - **Map.entries()** now correctly updates actual Map entries instead of creating duplicate keys
+  - **Map.values()** now tracks back to original Map keys using value-to-key mapping instead of using symbol placeholders
+  - **Set iterators** now properly replace objects in Set when modified instead of creating symbol-keyed entries
+  - **forEach()** methods continue to work correctly
+
+  The implementation now uses a sophisticated parent-child tracking system with specialized `updateMap` and `updateSet` functions to ensure that changes made to objects accessed through iterators are properly attributed to the correct collection entries.
+
+  This brings the proxy system in line with how mature libraries like Immer handle iterator-based change tracking, using method interception rather than trying to proxy all property access.
+
+- Add explicit collection readiness detection with `isReady()` and `markReady()` ([#270](https://github.com/TanStack/db/pull/270))
+  - Add `isReady()` method to check if a collection is ready for use
+  - Add `onFirstReady()` method to register callbacks for when collection becomes ready
+  - Add `markReady()` to SyncConfig interface for sync implementations to explicitly signal readiness
+  - Replace `onFirstCommit()` with `onFirstReady()` for better semantics
+  - Update status state machine to allow `loading` → `ready` transition for cases with no data to commit
+  - Update all sync implementations (Electric, Query, Local-only, Local-storage) to use `markReady()`
+  - Improve error handling by allowing collections to be marked ready even when sync errors occur
+
+  This provides a more intuitive and ergonomic API for determining collection readiness, replacing the previous approach of using commits as a readiness signal.
+
+## 0.0.24
+
+### Patch Changes
+
+- Add query optimizer with predicate pushdown ([#256](https://github.com/TanStack/db/pull/256))
+
+  Implements automatic query optimization that moves WHERE clauses closer to data sources, reducing intermediate result sizes and improving performance for queries with joins.
+
+- Add `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` aliases of the main `join` method on the query builder. ([#269](https://github.com/TanStack/db/pull/269))
+
+- • Add proper tracking for array mutating methods (push, pop, shift, unshift, splice, sort, reverse, fill, copyWithin) ([#267](https://github.com/TanStack/db/pull/267))
+  • Fix existing array tests that were misleadingly named but didn't actually call the methods they claimed to test
+  • Add comprehensive test coverage for all supported array mutating methods
+
+## 0.0.23
+
+### Patch Changes
+
+- Ensure schemas can apply defaults when inserting ([#209](https://github.com/TanStack/db/pull/209))
+
+## 0.0.22
+
+### Patch Changes
+
+- New distinct operator for queries. ([#244](https://github.com/TanStack/db/pull/244))
+
+## 0.0.21
+
+### Patch Changes
+
+- Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+  - Move local-only and local-storage collections to main `@tanstack/db` package
+  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/query-db-collection` package for TanStack Query integration
+  - Delete `@tanstack/db-collections` package (removed from repo)
+  - Update example app and documentation to use new package structure
+
+  Why?
+  - Better separation of concerns
+  - Independent versioning for each collection type
+  - Cleaner dependencies (electric collections don't need query deps, etc.)
+  - Easier to add more collection types moving forward
+
+## 0.0.20
+
+### Patch Changes
+
+- Add non-optimistic mutations support ([#250](https://github.com/TanStack/db/pull/250))
+  - Add `optimistic` option to insert, update, and delete operations
+  - Default `optimistic: true` maintains backward compatibility
+  - When `optimistic: false`, mutations only apply after server confirmation
+  - Enables better control for server-validated operations and confirmation workflows
+
+## 0.0.19
+
+### Patch Changes
+
+- - [Breaking change for the Electric Collection]: Use numbers for txid ([#245](https://github.com/TanStack/db/pull/245))
+  - misc type fixes
+
+## 0.0.18
+
+### Patch Changes
+
+- Improve jsdocs ([#243](https://github.com/TanStack/db/pull/243))
+
 ## 0.0.17
 
 ### Patch Changes
@@ -35,7 +140,6 @@
   Adds automatic lifecycle management for collections to optimize resource usage.
 
   **New Features:**
-
   - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
   - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
   - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
@@ -143,7 +247,6 @@
 - refactor the live query comparator and fix an issue with sorting with a null/undefined value in a column of non-null values ([#167](https://github.com/TanStack/db/pull/167))
 
 - A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
-
   - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
   - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
   - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
@@ -161,7 +264,6 @@
 - Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
 
   Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
-
   - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
   - Added `utils` property to CollectionImpl
   - Added TypeScript types for utility functions and utility records
@@ -185,7 +287,6 @@
   When `collection.insert()`, `.update()`, or `.delete()` are called outside of an explicit transaction (i.e., not within `useOptimisticMutation`), the library now automatically creates a single-operation transaction and invokes the corresponding handler to persist the change.
 
   Key changes:
-
   - **`@tanstack/db`**: The `Collection` class now supports `onInsert`, `onUpdate`, and `onDelete` in its configuration. Direct calls to mutation methods will throw an error if the corresponding handler is not defined.
   - **`@tanstack/db-collections`**:
     - `queryCollectionOptions` now accepts the new handlers and will automatically `refetch` the collection's query after a handler successfully completes. This behavior can be disabled if the handler returns `{ refetch: false }`.
@@ -197,7 +298,6 @@
   ***
 
   The documentation and the React Todo example application have been significantly refactored to adopt the new direct persistence handler pattern as the primary way to perform mutations.
-
   - The `README.md` and `docs/overview.md` files have been updated to de-emphasize `useOptimisticMutation` for simple writes. They now showcase the much simpler API of calling `collection.insert()` directly and defining persistence logic in the collection's configuration.
   - The React Todo example (`examples/react/todo/src/App.tsx`) has been completely overhauled. All instances of `useOptimisticMutation` have been removed and replaced with the new `onInsert`, `onUpdate`, and `onDelete` handlers, resulting in cleaner and more concise code.
 

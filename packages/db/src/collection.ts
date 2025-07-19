@@ -1,7 +1,8 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
-import { createTransaction, getActiveTransaction } from "./transactions"
 import { SortedMap } from "./SortedMap"
+import { createTransaction, getActiveTransaction } from "./transactions"
 import type { Transaction } from "./transactions"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -12,15 +13,16 @@ import type {
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
+  ResolveInsertInput,
   ResolveType,
   StandardSchema,
   Transaction as TransactionType,
+  TransactionWithMutations,
   UtilsRecord,
 } from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Store collections in memory
-export const collectionsStore = new Map<string, CollectionImpl<any, any>>()
+export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -32,12 +34,15 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
+ * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
  */
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-> extends CollectionImpl<T, TKey> {
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TInsertInput extends object = T,
+> extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
 }
 
@@ -53,12 +58,52 @@ export interface Collection<
  * @returns A new Collection with utilities exposed both at top level and under .utils
  *
  * @example
- * // Using explicit type
- * const todos = createCollection<Todo>({
+ * // Pattern 1: With operation handlers (direct collection calls)
+ * const todos = createCollection({
+ *   id: "todos",
  *   getKey: (todo) => todo.id,
+ *   schema,
+ *   onInsert: async ({ transaction, collection }) => {
+ *     // Send to API
+ *     await api.createTodo(transaction.mutations[0].modified)
+ *   },
+ *   onUpdate: async ({ transaction, collection }) => {
+ *     await api.updateTodo(transaction.mutations[0].modified)
+ *   },
+ *   onDelete: async ({ transaction, collection }) => {
+ *     await api.deleteTodo(transaction.mutations[0].key)
+ *   },
  *   sync: { sync: () => {} }
  * })
  *
+ * // Direct usage (handlers manage transactions)
+ * const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
+ * await tx.isPersisted.promise
+ *
+ * @example
+ * // Pattern 2: Manual transaction management
+ * const todos = createCollection({
+ *   getKey: (todo) => todo.id,
+ *   schema: todoSchema,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Explicit transaction usage
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Handle all mutations in transaction
+ *     await api.saveChanges(transaction.mutations)
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   todos.insert({ id: "1", text: "Buy milk" })
+ *   todos.update("2", draft => { draft.completed = true })
+ * })
+ *
+ * await tx.isPersisted.promise
+ *
+ * @example
  * // Using schema for type inference (preferred as it also gives you client side validation)
  * const todoSchema = z.object({
  *   id: z.string(),
@@ -72,7 +117,7 @@ export interface Collection<
  *   sync: { sync: () => {} }
  * })
  *
- * // Note: You must provide either an explicit type or a schema, but not both
+ * // Note: You must provide either an explicit type or a schema, but not both.
  */
 export function createCollection<
   TExplicit = unknown,
@@ -84,12 +129,22 @@ export function createCollection<
   options: CollectionConfig<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    TSchema
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
-): Collection<ResolveType<TExplicit, TSchema, TFallback>, TKey, TUtils> {
+): Collection<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+> {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
-    TKey
+    TKey,
+    TUtils,
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   >(options)
 
   // Copy utils to both top level and .utils namespace
@@ -102,7 +157,9 @@ export function createCollection<
   return collection as Collection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    TUtils
+    TUtils,
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
   >
 }
 
@@ -138,8 +195,11 @@ export class SchemaValidationError extends Error {
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TInsertInput extends object = T,
 > {
-  public config: CollectionConfig<T, TKey, any>
+  public config: CollectionConfig<T, TKey, TSchema, TInsertInput>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -169,8 +229,9 @@ export class CollectionImpl<
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
 
-  // Array to store one-time commit listeners
-  private onFirstCommitCallbacks: Array<() => void> = []
+  // Array to store one-time ready listeners
+  private onFirstReadyCallbacks: Array<() => void> = []
+  private hasBeenReady = false
 
   // Event batching for preventing duplicate emissions during transaction flows
   private batchedEvents: Array<ChangeMessage<T, TKey>> = []
@@ -184,12 +245,66 @@ export class CollectionImpl<
   private syncCleanupFn: (() => void) | null = null
 
   /**
-   * Register a callback to be executed on the next commit
+   * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
-   * @param callback Function to call after the next commit
+   * @param callback Function to call when the collection first becomes ready
+   * @example
+   * collection.onFirstReady(() => {
+   *   console.log('Collection is ready for the first time')
+   *   // Safe to access collection.state now
+   * })
    */
-  public onFirstCommit(callback: () => void): void {
-    this.onFirstCommitCallbacks.push(callback)
+  public onFirstReady(callback: () => void): void {
+    // If already ready, call immediately
+    if (this.hasBeenReady) {
+      callback()
+      return
+    }
+
+    this.onFirstReadyCallbacks.push(callback)
+  }
+
+  /**
+   * Check if the collection is ready for use
+   * Returns true if the collection has been marked as ready by its sync implementation
+   * @returns true if the collection is ready, false otherwise
+   * @example
+   * if (collection.isReady()) {
+   *   console.log('Collection is ready, data is available')
+   *   // Safe to access collection.state
+   * } else {
+   *   console.log('Collection is still loading')
+   * }
+   */
+  public isReady(): boolean {
+    return this._status === `ready`
+  }
+
+  /**
+   * Mark the collection as ready for use
+   * This is called by sync implementations to explicitly signal that the collection is ready,
+   * providing a more intuitive alternative to using commits for readiness signaling
+   * @private - Should only be called by sync implementations
+   */
+  private markReady(): void {
+    // Can transition to ready from loading or initialCommit states
+    if (this._status === `loading` || this._status === `initialCommit`) {
+      this.setStatus(`ready`)
+
+      // Call any registered first ready callbacks (only on first time becoming ready)
+      if (!this.hasBeenReady) {
+        this.hasBeenReady = true
+
+        // Also mark as having received first commit for backwards compatibility
+        if (!this.hasReceivedFirstCommit) {
+          this.hasReceivedFirstCommit = true
+        }
+
+        const callbacks = [...this.onFirstReadyCallbacks]
+        this.onFirstReadyCallbacks = []
+        callbacks.forEach((callback) => callback())
+      }
+    }
   }
 
   public id = ``
@@ -237,7 +352,7 @@ export class CollectionImpl<
       Array<CollectionStatus>
     > = {
       idle: [`loading`, `error`, `cleaned-up`],
-      loading: [`initialCommit`, `error`, `cleaned-up`],
+      loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
       initialCommit: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
       error: [`cleaned-up`, `idle`],
@@ -266,7 +381,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, any>) {
+  constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
     // eslint-disable-next-line
     if (!config) {
       throw new Error(`Collection requires a config`)
@@ -390,11 +505,9 @@ export class CollectionImpl<
           }
 
           this.commitPendingTransactions()
-
-          // Transition from initialCommit to ready after the first commit is complete
-          if (this._status === `initialCommit`) {
-            this.setStatus(`ready`)
-          }
+        },
+        markReady: () => {
+          this.markReady()
         },
       })
 
@@ -427,7 +540,7 @@ export class CollectionImpl<
       }
 
       // Register callback BEFORE starting sync to avoid race condition
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve()
       })
 
@@ -490,7 +603,8 @@ export class CollectionImpl<
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
     this.hasReceivedFirstCommit = false
-    this.onFirstCommitCallbacks = []
+    this.hasBeenReady = false
+    this.onFirstReadyCallbacks = []
     this.preloadPromise = null
     this.batchedEvents = []
     this.shouldBatchEvents = false
@@ -588,7 +702,7 @@ export class CollectionImpl<
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
       for (const mutation of transaction.mutations) {
-        if (mutation.collection === this) {
+        if (mutation.collection === this && mutation.optimistic) {
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -1018,7 +1132,7 @@ export class CollectionImpl<
       for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
           for (const mutation of transaction.mutations) {
-            if (mutation.collection === this) {
+            if (mutation.collection === this && mutation.optimistic) {
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
@@ -1119,8 +1233,8 @@ export class CollectionImpl<
       // Call any registered one-time commit listeners
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
-        const callbacks = [...this.onFirstCommitCallbacks]
-        this.onFirstCommitCallbacks = []
+        const callbacks = [...this.onFirstReadyCallbacks]
+        this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
       }
     }
@@ -1128,13 +1242,11 @@ export class CollectionImpl<
 
   private ensureStandardSchema(schema: unknown): StandardSchema<T> {
     // If the schema already implements the standard-schema interface, return it
-    if (schema && typeof schema === `object` && `~standard` in schema) {
+    if (schema && `~standard` in (schema as {})) {
       return schema as StandardSchema<T>
     }
 
-    throw new Error(
-      `Schema must either implement the standard-schema interface or be a Zod schema`
-    )
+    throw new Error(`Schema must implement the standard-schema interface`)
   }
 
   public getKeyFromItem(item: T): TKey {
@@ -1243,25 +1355,44 @@ export class CollectionImpl<
   /**
    * Inserts one or more items into the collection
    * @param items - Single item or array of items to insert
-   * @param config - Optional configuration including metadata and custom keys
-   * @returns A TransactionType object representing the insert operation(s)
+   * @param config - Optional configuration including metadata
+   * @returns A Transaction object representing the insert operation(s)
    * @throws {SchemaValidationError} If the data fails schema validation
    * @example
-   * // Insert a single item
-   * insert({ text: "Buy groceries", completed: false })
+   * // Insert a single todo (requires onInsert handler)
+   * const tx = collection.insert({ id: "1", text: "Buy milk", completed: false })
+   * await tx.isPersisted.promise
    *
-   * // Insert multiple items
-   * insert([
-   *   { text: "Buy groceries", completed: false },
-   *   { text: "Walk dog", completed: false }
+   * @example
+   * // Insert multiple todos at once
+   * const tx = collection.insert([
+   *   { id: "1", text: "Buy milk", completed: false },
+   *   { id: "2", text: "Walk dog", completed: true }
    * ])
+   * await tx.isPersisted.promise
    *
-   * // Insert with custom key
-   * insert({ text: "Buy groceries" }, { key: "grocery-task" })
+   * @example
+   * // Insert with metadata
+   * const tx = collection.insert({ id: "1", text: "Buy groceries" },
+   *   { metadata: { source: "mobile-app" } }
+   * )
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.insert({ id: "1", text: "New item" })
+   *   await tx.isPersisted.promise
+   *   console.log('Insert successful')
+   * } catch (error) {
+   *   console.log('Insert failed:', error)
+   * }
    */
-  insert = (data: T | Array<T>, config?: InsertConfig) => {
+  insert = (
+    data: TInsertInput | Array<TInsertInput>,
+    config?: InsertConfig
+  ) => {
     this.validateCollectionUsable(`insert`)
-
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
@@ -1272,7 +1403,7 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T, `insert`>> = []
+    const mutations: Array<PendingMutation<T>> = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -1280,7 +1411,7 @@ export class CollectionImpl<
       const validatedData = this.validateData(item, `insert`)
 
       // Check if an item with this ID already exists in the collection
-      const key = this.getKeyFromItem(item)
+      const key = this.getKeyFromItem(validatedData)
       if (this.has(key)) {
         throw `Cannot insert document with ID "${key}" because it already exists in the collection`
       }
@@ -1290,11 +1421,20 @@ export class CollectionImpl<
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
-        changes: validatedData,
+        // Pick the values from validatedData based on what's passed in - this is for cases
+        // where a schema has default values. The validated data has the extra default
+        // values but for changes, we just want to show the data that was actually passed in.
+        changes: Object.fromEntries(
+          Object.keys(item).map((k) => [
+            k,
+            validatedData[k as keyof typeof validatedData],
+          ])
+        ) as TInsertInput,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
+        optimistic: config?.optimistic ?? true,
         type: `insert`,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -1316,8 +1456,15 @@ export class CollectionImpl<
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = createTransaction<T>({
         mutationFn: async (params) => {
-          // Call the onInsert handler with the transaction
-          return this.config.onInsert!(params)
+          // Call the onInsert handler with the transaction and collection
+          return await this.config.onInsert!({
+            transaction:
+              params.transaction as unknown as TransactionWithMutations<
+                TInsertInput,
+                `insert`
+              >,
+            collection: this as unknown as Collection<T, TKey, TUtils>,
+          })
         },
       })
 
@@ -1335,43 +1482,44 @@ export class CollectionImpl<
 
   /**
    * Updates one or more items in the collection using a callback function
-   * @param items - Single item/key or array of items/keys to update
+   * @param keys - Single key or array of keys to update
    * @param configOrCallback - Either update configuration or update callback
    * @param maybeCallback - Update callback if config was provided
    * @returns A Transaction object representing the update operation(s)
    * @throws {SchemaValidationError} If the updated data fails schema validation
    * @example
-   * // Update a single item
-   * update(todo, (draft) => { draft.completed = true })
+   * // Update single item by key
+   * const tx = collection.update("todo-1", (draft) => {
+   *   draft.completed = true
+   * })
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Update multiple items
-   * update([todo1, todo2], (drafts) => {
+   * const tx = collection.update(["todo-1", "todo-2"], (drafts) => {
    *   drafts.forEach(draft => { draft.completed = true })
    * })
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Update with metadata
-   * update(todo, { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
+   * const tx = collection.update("todo-1",
+   *   { metadata: { reason: "user update" } },
+   *   (draft) => { draft.text = "Updated text" }
+   * )
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.update("item-1", draft => { draft.value = "new" })
+   *   await tx.isPersisted.promise
+   *   console.log('Update successful')
+   * } catch (error) {
+   *   console.log('Update failed:', error)
+   * }
    */
 
-  /**
-   * Updates one or more items in the collection using a callback function
-   * @param ids - Single ID or array of IDs to update
-   * @param configOrCallback - Either update configuration or update callback
-   * @param maybeCallback - Update callback if config was provided
-   * @returns A Transaction object representing the update operation(s)
-   * @throws {SchemaValidationError} If the updated data fails schema validation
-   * @example
-   * // Update a single item
-   * update("todo-1", (draft) => { draft.completed = true })
-   *
-   * // Update multiple items
-   * update(["todo-1", "todo-2"], (drafts) => {
-   *   drafts.forEach(draft => { draft.completed = true })
-   * })
-   *
-   * // Update with metadata
-   * update("todo-1", { metadata: { reason: "user update" } }, (draft) => { draft.text = "Updated text" })
-   */
   // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
@@ -1458,7 +1606,7 @@ export class CollectionImpl<
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T, `update`>> = keysArray
+    const mutations: Array<PendingMutation<T, `update`, this>> = keysArray
       .map((key, index) => {
         const itemChanges = changesArray[index] // User-provided changes for this specific item
 
@@ -1506,13 +1654,14 @@ export class CollectionImpl<
             string,
             unknown
           >,
+          optimistic: config.optimistic ?? true,
           type: `update`,
           createdAt: new Date(),
           updatedAt: new Date(),
           collection: this,
         }
       })
-      .filter(Boolean) as Array<PendingMutation<T, `update`>>
+      .filter(Boolean) as Array<PendingMutation<T, `update`, this>>
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
@@ -1538,8 +1687,15 @@ export class CollectionImpl<
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = createTransaction<T>({
       mutationFn: async (params) => {
-        // Call the onUpdate handler with the transaction
-        return this.config.onUpdate!(params)
+        // Call the onUpdate handler with the transaction and collection
+        return this.config.onUpdate!({
+          transaction:
+            params.transaction as unknown as TransactionWithMutations<
+              T,
+              `update`
+            >,
+          collection: this as unknown as Collection<T, TKey, TUtils>,
+        })
       },
     })
 
@@ -1557,18 +1713,33 @@ export class CollectionImpl<
 
   /**
    * Deletes one or more items from the collection
-   * @param ids - Single ID or array of IDs to delete
+   * @param keys - Single key or array of keys to delete
    * @param config - Optional configuration including metadata
-   * @returns A TransactionType object representing the delete operation(s)
+   * @returns A Transaction object representing the delete operation(s)
    * @example
    * // Delete a single item
-   * delete("todo-1")
+   * const tx = collection.delete("todo-1")
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Delete multiple items
-   * delete(["todo-1", "todo-2"])
+   * const tx = collection.delete(["todo-1", "todo-2"])
+   * await tx.isPersisted.promise
    *
+   * @example
    * // Delete with metadata
-   * delete("todo-1", { metadata: { reason: "completed" } })
+   * const tx = collection.delete("todo-1", { metadata: { reason: "completed" } })
+   * await tx.isPersisted.promise
+   *
+   * @example
+   * // Handle errors
+   * try {
+   *   const tx = collection.delete("item-1")
+   *   await tx.isPersisted.promise
+   *   console.log('Delete successful')
+   * } catch (error) {
+   *   console.log('Delete failed:', error)
+   * }
    */
   delete = (
     keys: Array<TKey> | TKey,
@@ -1590,7 +1761,7 @@ export class CollectionImpl<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T, `delete`>> = []
+    const mutations: Array<PendingMutation<T, `delete`, this>> = []
 
     for (const key of keysArray) {
       if (!this.has(key)) {
@@ -1599,7 +1770,7 @@ export class CollectionImpl<
         )
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T, `delete`> = {
+      const mutation: PendingMutation<T, `delete`, this> = {
         mutationId: crypto.randomUUID(),
         original: this.get(key)!,
         modified: this.get(key)!,
@@ -1611,6 +1782,7 @@ export class CollectionImpl<
           string,
           unknown
         >,
+        optimistic: config?.optimistic ?? true,
         type: `delete`,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -1634,8 +1806,15 @@ export class CollectionImpl<
     const directOpTransaction = createTransaction<T>({
       autoCommit: true,
       mutationFn: async (params) => {
-        // Call the onDelete handler with the transaction
-        return this.config.onDelete!(params)
+        // Call the onDelete handler with the transaction and collection
+        return this.config.onDelete!({
+          transaction:
+            params.transaction as unknown as TransactionWithMutations<
+              T,
+              `delete`
+            >,
+          collection: this as unknown as Collection<T, TKey, TUtils>,
+        })
       },
     })
 
@@ -1651,8 +1830,19 @@ export class CollectionImpl<
 
   /**
    * Gets the current state of the collection as a Map
+   * @returns Map containing all items in the collection, with keys as identifiers
+   * @example
+   * const itemsMap = collection.state
+   * console.log(`Collection has ${itemsMap.size} items`)
    *
-   * @returns A Map containing all items in the collection, with keys as identifiers
+   * for (const [key, item] of itemsMap) {
+   *   console.log(`${key}: ${item.title}`)
+   * }
+   *
+   * // Check if specific item exists
+   * if (itemsMap.has("todo-1")) {
+   *   console.log("Todo 1 exists:", itemsMap.get("todo-1"))
+   * }
    */
   get state() {
     const result = new Map<TKey, T>()
@@ -1669,14 +1859,14 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, T>> {
-    // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    // If we already have data or collection is ready, resolve immediately
+    if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
     }
 
-    // Otherwise, wait for the first commit
+    // Otherwise, wait for the collection to be ready
     return new Promise<Map<TKey, T>>((resolve) => {
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve(this.state)
       })
     })
@@ -1698,14 +1888,14 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<T>> {
-    // If we already have data or there are no loading collections, resolve immediately
-    if (this.size > 0 || this.hasReceivedFirstCommit === true) {
+    // If we already have data or collection is ready, resolve immediately
+    if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
     }
 
-    // Otherwise, wait for the first commit
+    // Otherwise, wait for the collection to be ready
     return new Promise<Array<T>>((resolve) => {
-      this.onFirstCommit(() => {
+      this.onFirstReady(() => {
         resolve(this.toArray)
       })
     })
@@ -1725,8 +1915,24 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
-   * @param callback - A function that will be called with the changes in the collection
-   * @returns A function that can be called to unsubscribe from the changes
+   * @param callback - Function called when items change
+   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @returns Unsubscribe function - Call this to stop listening for changes
+   * @example
+   * // Basic subscription
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   changes.forEach(change => {
+   *     console.log(`${change.type}: ${change.key}`, change.value)
+   *   })
+   * })
+   *
+   * // Later: unsubscribe()
+   *
+   * @example
+   * // Include current state immediately
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, { includeInitialState: true })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,

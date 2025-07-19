@@ -15,6 +15,40 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
+ * Helper type to extract the input type from a standard schema
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type InferSchemaInput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends object
+    ? StandardSchemaV1.InferInput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+/**
+ * Helper type to determine the insert input type
+ * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
+ *
+ * Priority:
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema input type (if schema provided)
+ * 3. Fallback type TFallback
+ *
+ * @internal This is used for collection insert type inference
+ */
+export type ResolveInsertInput<
+  TExplicit = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaInput<TSchema>
+  : TExplicit extends object
+    ? TExplicit
+    : Record<string, unknown>
+
+/**
  * Helper type to determine the final type based on priority:
  * 1. Explicit generic TExplicit (if not 'unknown')
  * 2. Schema output type (if schema provided)
@@ -49,29 +83,49 @@ export type Fn = (...args: Array<any>) => any
 export type UtilsRecord = Record<string, Fn>
 
 /**
+ *
+ * @remarks `update` and `insert` are both represented as `Partial<T>`, but changes for `insert` could me made more precise by inferring the schema input type. In practice, this has almost 0 real world impact so it's not worth the added type complexity.
+ *
+ * @see  https://github.com/TanStack/db/pull/209#issuecomment-3053001206
+ */
+export type ResolveTransactionChanges<
+  T extends object = Record<string, unknown>,
+  TOperation extends OperationType = OperationType,
+> = TOperation extends `delete` ? T : Partial<T>
+
+/**
  * Represents a pending mutation within a transaction
  * Contains information about the original and modified data, as well as metadata
  */
 export interface PendingMutation<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
 > {
   mutationId: string
+  // The state of the object before the mutation.
   original: TOperation extends `insert` ? {} : T
+  // The result state of the object after all mutations.
   modified: T
-  changes: TOperation extends `insert`
-    ? T
-    : TOperation extends `delete`
-      ? T
-      : Partial<T>
+  // Only the actual changes to the object by the mutation.
+  changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
+
   key: any
-  type: OperationType
+  type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
+  /** Whether this mutation should be applied optimistically (defaults to true) */
+  optimistic: boolean
   createdAt: Date
   updatedAt: Date
-  collection: Collection<T, any>
+  collection: TCollection
 }
 
 /**
@@ -97,7 +151,7 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
-> = Transaction<T, TOperation> & {
+> = Transaction<T> & {
   mutations: NonEmptyArray<PendingMutation<T, TOperation>>
 }
 
@@ -114,12 +168,14 @@ export interface TransactionConfig<T extends object = Record<string, unknown>> {
 /**
  * Options for the createOptimisticAction helper
  */
-export interface CreateOptimisticActionsOptions<TVars = unknown>
-  extends Omit<TransactionConfig, `mutationFn`> {
+export interface CreateOptimisticActionsOptions<
+  TVars = unknown,
+  T extends object = Record<string, unknown>,
+> extends Omit<TransactionConfig<T>, `mutationFn`> {
   /** Function to apply optimistic updates locally before the mutation completes */
   onMutate: (vars: TVars) => void
   /** Function to execute the mutation on the server */
-  mutationFn: (vars: TVars, params: MutationFnParams) => Promise<any>
+  mutationFn: (vars: TVars, params: MutationFnParams<T>) => Promise<any>
 }
 
 export type { Transaction }
@@ -143,10 +199,11 @@ export interface SyncConfig<
   TKey extends string | number = string | number,
 > {
   sync: (params: {
-    collection: Collection<T, TKey>
+    collection: Collection<T, TKey, any, any, any>
     begin: () => void
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
+    markReady: () => void
   }) => void
 
   /**
@@ -203,41 +260,74 @@ export type StandardSchemaAlias<T = unknown> = StandardSchema<T>
 
 export interface OperationConfig {
   metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
 }
 
 export interface InsertConfig {
   metadata?: Record<string, unknown>
+  /** Whether to apply optimistic updates immediately. Defaults to true. */
+  optimistic?: boolean
 }
 
-export type UpdateMutationFnParams<T extends object = Record<string, unknown>> =
-  {
-    transaction: TransactionWithMutations<T, `update`>
-  }
+export type UpdateMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = {
+  transaction: TransactionWithMutations<T, `update`>
+  collection: Collection<T, TKey, TUtils>
+}
 
-export type InsertMutationFnParams<T extends object = Record<string, unknown>> =
-  {
-    transaction: TransactionWithMutations<T, `insert`>
-  }
+export type InsertMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = {
+  transaction: TransactionWithMutations<T, `insert`>
+  collection: Collection<T, TKey, TUtils>
+}
+export type DeleteMutationFnParams<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = {
+  transaction: TransactionWithMutations<T, `delete`>
+  collection: Collection<T, TKey, TUtils>
+}
 
-export type DeleteMutationFnParams<T extends object = Record<string, unknown>> =
-  {
-    transaction: TransactionWithMutations<T, `delete`>
-  }
+export type InsertMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
-export type InsertMutationFn<T extends object = Record<string, unknown>> = (
-  params: InsertMutationFnParams<T>
-) => Promise<any>
+export type UpdateMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
-export type UpdateMutationFn<T extends object = Record<string, unknown>> = (
-  params: UpdateMutationFnParams<T>
-) => Promise<any>
-
-export type DeleteMutationFn<T extends object = Record<string, unknown>> = (
-  params: DeleteMutationFnParams<T>
-) => Promise<any>
+export type DeleteMutationFn<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<any>
 
 /**
  * Collection status values for lifecycle management
+ * @example
+ * // Check collection status
+ * if (collection.status === "loading") {
+ *   console.log("Collection is loading initial data")
+ * } else if (collection.status === "ready") {
+ *   console.log("Collection is ready for use")
+ * }
+ *
+ * @example
+ * // Status transitions
+ * // idle → loading → initialCommit → ready
+ * // Any status can transition to → error or cleaned-up
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -257,6 +347,7 @@ export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TInsertInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -296,22 +387,133 @@ export interface CollectionConfig<
   compare?: (x: T, y: T) => number
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
+   * @example
+   * // Basic insert handler
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
+   *   const items = transaction.mutations.map(m => m.modified)
+   *   await api.createTodos(items)
+   * }
+   *
+   * @example
+   * // Insert handler with error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   try {
+   *     const newItem = transaction.mutations[0].modified
+   *     const result = await api.createTodo(newItem)
+   *     return result
+   *   } catch (error) {
+   *     console.error('Insert failed:', error)
+   *     throw error // This will cause the transaction to fail
+   *   }
+   * }
+   *
+   * @example
+   * // Insert handler with metadata
+   * onInsert: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   await api.createTodo(mutation.modified, {
+   *     source: mutation.metadata?.source,
+   *     timestamp: mutation.createdAt
+   *   })
+   * }
    */
-  onInsert?: InsertMutationFn<T>
+  onInsert?: InsertMutationFn<TInsertInput, TKey>
+
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
+   * @example
+   * // Basic update handler
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const updatedItem = transaction.mutations[0].modified
+   *   await api.updateTodo(updatedItem.id, updatedItem)
+   * }
+   *
+   * @example
+   * // Update handler with partial updates
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const changes = mutation.changes // Only the changed fields
+   *   await api.updateTodo(mutation.original.id, changes)
+   * }
+   *
+   * @example
+   * // Update handler with multiple items
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const updates = transaction.mutations.map(m => ({
+   *     id: m.key,
+   *     changes: m.changes
+   *   }))
+   *   await api.updateTodos(updates)
+   * }
+   *
+   * @example
+   * // Update handler with optimistic rollback
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     await api.updateTodo(mutation.original.id, mutation.changes)
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Update failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
    */
-  onUpdate?: UpdateMutationFn<T>
+  onUpdate?: UpdateMutationFn<T, TKey>
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and mutation information
+   * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
+   * @example
+   * // Basic delete handler
+   * onDelete: async ({ transaction, collection }) => {
+   *   const deletedKey = transaction.mutations[0].key
+   *   await api.deleteTodo(deletedKey)
+   * }
+   *
+   * @example
+   * // Delete handler with multiple items
+   * onDelete: async ({ transaction, collection }) => {
+   *   const keysToDelete = transaction.mutations.map(m => m.key)
+   *   await api.deleteTodos(keysToDelete)
+   * }
+   *
+   * @example
+   * // Delete handler with confirmation
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const shouldDelete = await confirmDeletion(mutation.original)
+   *   if (!shouldDelete) {
+   *     throw new Error('Delete cancelled by user')
+   *   }
+   *   await api.deleteTodo(mutation.original.id)
+   * }
+   *
+   * @example
+   * // Delete handler with optimistic rollback
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   try {
+   *     await api.deleteTodo(mutation.original.id)
+   *   } catch (error) {
+   *     // Transaction will automatically rollback optimistic changes
+   *     console.error('Delete failed, rolling back:', error)
+   *     throw error
+   *   }
+   * }
    */
-  onDelete?: DeleteMutationFn<T>
+  onDelete?: DeleteMutationFn<T, TKey>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
@@ -353,6 +555,37 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
  */
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 
+/**
+ * Function type for listening to collection changes
+ * @param changes - Array of change messages describing what happened
+ * @example
+ * // Basic change listener
+ * const listener: ChangeListener = (changes) => {
+ *   changes.forEach(change => {
+ *     console.log(`${change.type}: ${change.key}`, change.value)
+ *   })
+ * }
+ *
+ * collection.subscribeChanges(listener)
+ *
+ * @example
+ * // Handle different change types
+ * const listener: ChangeListener<Todo> = (changes) => {
+ *   for (const change of changes) {
+ *     switch (change.type) {
+ *       case 'insert':
+ *         addToUI(change.value)
+ *         break
+ *       case 'update':
+ *         updateInUI(change.key, change.value, change.previousValue)
+ *         break
+ *       case 'delete':
+ *         removeFromUI(change.key)
+ *         break
+ *     }
+ *   }
+ * }
+ */
 export type ChangeListener<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
