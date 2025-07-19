@@ -32,7 +32,7 @@ Live queries are just collections that automatically update when their underlyin
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)
-- [Basic Queries](#basic-queries)
+- [From Clause](#from-clause)
 - [Where Clauses](#where-clauses)
 - [Select Projections](#select-projections)
 - [Joins](#joins)
@@ -141,6 +141,20 @@ For more details on framework integration, see the [React](/docs/framework/react
 ## From Clause
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
+
+### Method Signature
+
+```ts
+from({
+  [alias]: Collection | Query,
+}): Query
+```
+
+**Parameters:**
+- `[alias]` - A Collection or Query instance. Note that only a single aliased collection or subquery is allowed in the `from` clause.
+
+### Basic Usage
+
 Start with a basic query that selects all records from a collection:
 
 ```ts
@@ -186,6 +200,17 @@ const userNames = createCollection(liveQueryCollectionOptions({
 Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with `and` logic.
 
 The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Functions Reference](#functions-reference) section.
+
+### Method Signature
+
+```ts
+where(
+  condition: (row: TRow) => Expression<boolean>
+): Query
+```
+
+**Parameters:**
+- `condition` - A callback function that receives the row object with table aliases and returns a boolean expression
 
 ### Basic Filtering
 
@@ -276,6 +301,17 @@ For a complete reference of all available functions, see the [Functions Referenc
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.
 
 Similar to the `where` clause, the `select` method takes a callback function that receives an object containing your table aliases and returns an object with the fields you want to include in your results. These can be combined with functions from the [Functions Reference](#functions-reference) section to create computed fields. You can also use the spread operator to include all fields from a table.
+
+### Method Signature
+
+```ts
+select(
+  projection: (row: TRow) => Record<string, Expression>
+): Query
+```
+
+**Parameters:**
+- `projection` - A callback function that receives the row object with table aliases and returns the selected fields object
 
 ### Basic Projections
 
@@ -381,6 +417,21 @@ The result type of a join will take into account the join type, with the optiona
 > [!NOTE]
 > We are working on an `include` system that will enable joins that project to a hierarchical object. For example an `issue` row could have a `comments` property that is an array of `comment` rows.
 > See [this issue](https://github.com/TanStack/db/issues/288) for more details.
+
+### Method Signature
+
+```ts
+join(
+  { [alias]: Collection | Query },
+  condition: (row: TRow) => Expression<boolean>, // Must be an `eq` condition
+  joinType?: 'left' | 'right' | 'inner' | 'full'
+): Query
+```
+
+**Parameters:**
+- `aliases` - An object where keys are alias names and values are collections or subqueries to join
+- `condition` - A callback function that receives the combined row object and returns an equality condition
+- `joinType` - Optional join type: `'left'` (default), `'right'`, `'inner'`, or `'full'`
 
 ### Basic Joins
 
@@ -654,6 +705,17 @@ const topUsers = createCollection(liveQueryCollectionOptions({
 
 Use `groupBy` to group your data and apply aggregate functions. When you use aggregates in `select` without `groupBy`, the entire result set is treated as a single group.
 
+### Method Signature
+
+```ts
+groupBy(
+  grouper: (row: TRow) => Expression | Expression[]
+): Query
+```
+
+**Parameters:**
+- `grouper` - A callback function that receives the row object and returns the grouping key(s). Can return a single value or an array for multi-column grouping
+
 ### Basic Grouping
 
 Group users by their department and count them:
@@ -727,6 +789,17 @@ See the [Aggregate Functions](#aggregate-functions) section for a complete list 
 
 Filter aggregated results using `having` - this is similar to the `where` clause, but is applied after the aggregation has been performed.
 
+#### Method Signature
+
+```ts
+having(
+  condition: (row: TRow) => Expression<boolean>
+): Query
+```
+
+**Parameters:**
+- `condition` - A callback function that receives the aggregated row object and returns a boolean expression
+
 ```ts
 const highValueCustomers = createLiveQueryCollection((q) =>
   q
@@ -786,6 +859,24 @@ const engineeringStats = deptStats.get(1)
 ## Order By, Limit, and Offset
 
 Use `orderBy`, `limit`, and `offset` to control the order and pagination of your results. Ordering is performed incrementally for optimal performance.
+
+### Method Signatures
+
+```ts
+orderBy(
+  selector: (row: TRow) => Expression,
+  direction?: 'asc' | 'desc'
+): Query
+
+limit(count: number): Query
+
+offset(count: number): Query
+```
+
+**Parameters:**
+- `selector` - A callback function that receives the row object and returns the value to sort by
+- `direction` - Sort direction: `'asc'` (default) or `'desc'`
+- `count` - Number of rows to limit or skip
 
 ### Basic Ordering
 
