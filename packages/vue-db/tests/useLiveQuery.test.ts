@@ -108,24 +108,25 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state, data } = useLiveQuery((q) =>
-      q
-        .from({ persons: collection })
-        .where(({ persons }) => gt(persons.age, 30))
-        .select(({ persons }) => ({
-          id: persons.id,
-          name: persons.name,
-          age: persons.age,
-        }))
+    const { state, data } = useLiveQuery(
+      () => (q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
     )
 
     // Wait for Vue reactivity to update
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1) // Only John Smith (age 35)
-    expect(data.value).toHaveLength(1)
+    expect(state().size).toBe(1) // Only John Smith (age 35)
+    expect(data()).toHaveLength(1)
 
-    const johnSmith = data.value[0]
+    const johnSmith = data()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
@@ -142,28 +143,29 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state, data } = useLiveQuery((q) =>
-      q
-        .from({ collection })
-        .where(({ collection: c }) => gt(c.age, 30))
-        .select(({ collection: c }) => ({
-          id: c.id,
-          name: c.name,
-        }))
-        .orderBy(({ collection: c }) => c.id, `asc`)
+    const { state, data } = useLiveQuery(
+      () => (q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+          .orderBy(({ collection: c }) => c.id, `asc`)
     )
 
     // Wait for collection to sync
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toMatchObject({
+    expect(state().size).toBe(1)
+    expect(state().get(`3`)).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
 
-    expect(data.value.length).toBe(1)
-    expect(data.value[0]).toMatchObject({
+    expect(data().length).toBe(1)
+    expect(data()[0]).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
@@ -185,18 +187,18 @@ describe(`Query Collections`, () => {
 
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(2)
-    expect(state.value.get(`3`)).toMatchObject({
+    expect(state().size).toBe(2)
+    expect(state().get(`3`)).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
-    expect(state.value.get(`4`)).toMatchObject({
+    expect(state().get(`4`)).toMatchObject({
       id: `4`,
       name: `Kyle Doe`,
     })
 
-    expect(data.value.length).toBe(2)
-    expect(data.value).toEqual(
+    expect(data().length).toBe(2)
+    expect(data()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: `3`,
@@ -226,14 +228,14 @@ describe(`Query Collections`, () => {
 
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(2)
-    expect(state.value.get(`4`)).toMatchObject({
+    expect(state().size).toBe(2)
+    expect(state().get(`4`)).toMatchObject({
       id: `4`,
       name: `Kyle Doe 2`,
     })
 
-    expect(data.value.length).toBe(2)
-    expect(data.value).toEqual(
+    expect(data().length).toBe(2)
+    expect(data()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: `3`,
@@ -263,11 +265,11 @@ describe(`Query Collections`, () => {
 
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`4`)).toBeUndefined()
+    expect(state().size).toBe(1)
+    expect(state().get(`4`)).toBeUndefined()
 
-    expect(data.value.length).toBe(1)
-    expect(data.value[0]).toMatchObject({
+    expect(data().length).toBe(1)
+    expect(data()[0]).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
@@ -292,38 +294,39 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state } = useLiveQuery((q) =>
-      q
-        .from({ issues: issueCollection })
-        .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
-        )
-        .select(({ issues, persons }) => ({
-          id: issues.id,
-          title: issues.title,
-          name: persons.name,
-        }))
+    const { state } = useLiveQuery(
+      () => (q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)
+          )
+          .select(({ issues, persons }) => ({
+            id: issues.id,
+            title: issues.title,
+            name: persons.name,
+          }))
     )
 
     // Wait for collections to sync
     await waitForVueUpdate()
 
     // Verify that we have the expected joined results
-    expect(state.value.size).toBe(3)
+    expect(state().size).toBe(3)
 
-    expect(state.value.get(`[1,1]`)).toMatchObject({
+    expect(state().get(`[1,1]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state().get(`[2,2]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`[3,1]`)).toMatchObject({
+    expect(state().get(`[3,1]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -344,8 +347,8 @@ describe(`Query Collections`, () => {
 
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`[4,2]`)).toMatchObject({
+    expect(state().size).toBe(4)
+    expect(state().get(`[4,2]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -367,7 +370,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state().get(`[2,2]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -389,8 +392,8 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // After deletion, issue 3 should no longer have a joined result
-    expect(state.value.get(`[3,1]`)).toBeUndefined()
-    expect(state.value.size).toBe(3)
+    expect(state().get(`[3,1]`)).toBeUndefined()
+    expect(state().size).toBe(3)
   })
 
   it(`should recompile query when parameters change and change results`, async () => {
@@ -405,7 +408,7 @@ describe(`Query Collections`, () => {
     const minAge = ref(30)
 
     const { state } = useLiveQuery(
-      (q) =>
+      () => (q) =>
         q
           .from({ collection })
           .where(({ collection: c }) => gt(c.age, minAge.value))
@@ -413,16 +416,15 @@ describe(`Query Collections`, () => {
             id: c.id,
             name: c.name,
             age: c.age,
-          })),
-      [minAge]
+          }))
     )
 
     // Wait for collection to sync
     await waitForVueUpdate()
 
     // Initially should return only people older than 30
-    expect(state.value.size).toBe(1)
-    expect(state.value.get(`3`)).toMatchObject({
+    expect(state().size).toBe(1)
+    expect(state().get(`3`)).toMatchObject({
       id: `3`,
       name: `John Smith`,
       age: 35,
@@ -434,18 +436,18 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // Now should return all people as they're all older than 20
-    expect(state.value.size).toBe(3)
-    expect(state.value.get(`1`)).toMatchObject({
+    expect(state().size).toBe(3)
+    expect(state().get(`1`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       age: 30,
     })
-    expect(state.value.get(`2`)).toMatchObject({
+    expect(state().get(`2`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       age: 25,
     })
-    expect(state.value.get(`3`)).toMatchObject({
+    expect(state().get(`3`)).toMatchObject({
       id: `3`,
       name: `John Smith`,
       age: 35,
@@ -457,7 +459,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // Should now be empty
-    expect(state.value.size).toBe(0)
+    expect(state().size).toBe(0)
   })
 
   it(`should be able to query a result collection with live updates`, async () => {
@@ -471,38 +473,40 @@ describe(`Query Collections`, () => {
 
     // Initial query
     const { state: _initialState, collection: initialCollection } =
-      useLiveQuery((q) =>
-        q
-          .from({ collection })
-          .where(({ collection: c }) => gt(c.age, 30))
-          .select(({ collection: c }) => ({
-            id: c.id,
-            name: c.name,
-            team: c.team,
-          }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+      useLiveQuery(
+        () => (q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, 30))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+              team: c.team,
+            }))
+            .orderBy(({ collection: c }) => c.id, `asc`)
       )
 
     // Wait for collection to sync
     await waitForVueUpdate()
 
     // Grouped query derived from initial query
-    const { state: groupedState } = useLiveQuery((q) =>
-      q
-        .from({ queryResult: initialCollection.value })
-        .groupBy(({ queryResult }) => queryResult.team)
-        .select(({ queryResult }) => ({
-          team: queryResult.team,
-          count: count(queryResult.id),
-        }))
+    const { state: groupedState } = useLiveQuery(
+      () => (q) =>
+        q
+          .from({ queryResult: initialCollection() })
+          .groupBy(({ queryResult }) => queryResult.team)
+          .select(({ queryResult }) => ({
+            team: queryResult.team,
+            count: count(queryResult.id),
+          }))
     )
 
     // Wait for grouped query to sync
     await waitForVueUpdate()
 
     // Verify initial grouped results
-    expect(groupedState.value.size).toBe(1)
-    const teamResult = Array.from(groupedState.value.values())[0]
+    expect(groupedState().size).toBe(1)
+    const teamResult = Array.from(groupedState().values())[0]
     expect(teamResult).toMatchObject({
       team: `team1`,
       count: 1,
@@ -537,9 +541,9 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // Verify the grouped results include the new team members
-    expect(groupedState.value.size).toBe(2)
+    expect(groupedState().size).toBe(2)
 
-    const groupedResults = Array.from(groupedState.value.values())
+    const groupedResults = Array.from(groupedState().values())
     const team1Result = groupedResults.find((r) => r.team === `team1`)
     const team2Result = groupedResults.find((r) => r.team === `team2`)
 
@@ -581,17 +585,18 @@ describe(`Query Collections`, () => {
     )
 
     // Render the hook with a query that joins persons and issues
-    const queryResult = useLiveQuery((q) =>
-      q
-        .from({ issues: issueCollection })
-        .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
-        )
-        .select(({ issues, persons }) => ({
-          id: issues.id,
-          title: issues.title,
-          name: persons.name,
-        }))
+    const queryResult = useLiveQuery(
+      () => (q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)
+          )
+          .select(({ issues, persons }) => ({
+            id: issues.id,
+            title: issues.title,
+            name: persons.name,
+          }))
     )
 
     const { state } = queryResult
@@ -599,9 +604,9 @@ describe(`Query Collections`, () => {
     // Track each state change like React does with useEffect
     watchEffect(() => {
       renderStates.push({
-        stateSize: state.value.size,
-        hasTempKey: state.value.has(`[temp-key,1]`),
-        hasPermKey: state.value.has(`[4,1]`),
+        stateSize: state().size,
+        hasTempKey: state().has(`[temp-key,1]`),
+        hasPermKey: state().has(`[4,1]`),
         timestamp: Date.now(),
       })
     })
@@ -609,7 +614,7 @@ describe(`Query Collections`, () => {
     // Wait for collections to sync and verify initial state
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(3)
+    expect(state().size).toBe(3)
 
     // Reset render states array for clarity in the remaining test
     renderStates.length = 0
@@ -672,13 +677,13 @@ describe(`Query Collections`, () => {
     await nextTick()
 
     // Verify optimistic state is immediately reflected (should be synchronous)
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toMatchObject({
+    expect(state().size).toBe(4)
+    expect(state().get(`[temp-key,1]`)).toMatchObject({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
-    expect(state.value.get(`[4,1]`)).toBeUndefined()
+    expect(state().get(`[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise
@@ -686,9 +691,9 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // Verify the temporary key is replaced by the permanent one
-    expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
-    expect(state.value.get(`[4,1]`)).toMatchObject({
+    expect(state().size).toBe(4)
+    expect(state().get(`[temp-key,1]`)).toBeUndefined()
+    expect(state().get(`[4,1]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,
@@ -727,10 +732,10 @@ describe(`Query Collections`, () => {
     // Wait for collection to sync and state to update
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1) // Only John Smith (age 35)
-    expect(data.value).toHaveLength(1)
+    expect(state().size).toBe(1) // Only John Smith (age 35)
+    expect(data()).toHaveLength(1)
 
-    const johnSmith = data.value[0]
+    const johnSmith = data()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
@@ -738,7 +743,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify that the returned collection is the same instance
-    expect(returnedCollection.value).toBe(liveQueryCollection)
+    expect(returnedCollection()).toBe(liveQueryCollection)
   })
 
   it(`should switch to a different pre-created live query collection when reactive ref changes`, async () => {
@@ -808,12 +813,12 @@ describe(`Query Collections`, () => {
     // Wait for first collection to sync
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1) // Only John Smith from collection1
-    expect(state.value.get(`3`)).toMatchObject({
+    expect(state().size).toBe(1) // Only John Smith from collection1
+    expect(state().get(`3`)).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
-    expect(returnedCollection.value.id).toBe(liveQueryCollection1.id)
+    expect(returnedCollection().id).toBe(liveQueryCollection1.id)
 
     // Switch to the second collection by updating the reactive ref
     currentCollection.value = liveQueryCollection2 as any
@@ -821,19 +826,19 @@ describe(`Query Collections`, () => {
     // Wait for the reactive change to propagate
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(2) // Alice and Bob from collection2
-    expect(state.value.get(`4`)).toMatchObject({
+    expect(state().size).toBe(2) // Alice and Bob from collection2
+    expect(state().get(`4`)).toMatchObject({
       id: `4`,
       name: `Alice Cooper`,
     })
-    expect(state.value.get(`5`)).toMatchObject({
+    expect(state().get(`5`)).toMatchObject({
       id: `5`,
       name: `Bob Dylan`,
     })
-    expect(returnedCollection.value.id).toBe(liveQueryCollection2.id)
+    expect(returnedCollection().id).toBe(liveQueryCollection2.id)
 
     // Verify we no longer have data from the first collection
-    expect(state.value.get(`3`)).toBeUndefined()
+    expect(state().get(`3`)).toBeUndefined()
   })
 
   describe(`isReady property`, () => {
@@ -858,14 +863,15 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery((q) =>
-        q
-          .from({ persons: collection })
-          .where(({ persons }) => gt(persons.age, 30))
-          .select(({ persons }) => ({
-            id: persons.id,
-            name: persons.name,
-          }))
+      const { isReady } = useLiveQuery(
+        () => (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            }))
       )
 
       // Initially isReady should be false (collection is in idle state)
@@ -972,14 +978,15 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery((q) =>
-        q
-          .from({ persons: collection })
-          .where(({ persons }) => gt(persons.age, 30))
-          .select(({ persons }) => ({
-            id: persons.id,
-            name: persons.name,
-          }))
+      const { isReady } = useLiveQuery(
+        () => (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            }))
       )
 
       expect(isReady.value).toBe(false)
@@ -1008,14 +1015,15 @@ describe(`Query Collections`, () => {
         })
       )
 
-      const { isReady } = useLiveQuery((q) =>
-        q
-          .from({ persons: collection })
-          .where(({ persons }) => gt(persons.age, 30))
-          .select(({ persons }) => ({
-            id: persons.id,
-            name: persons.name,
-          }))
+      const { isReady } = useLiveQuery(
+        () => (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            }))
       )
 
       await waitForVueUpdate()
@@ -1076,17 +1084,18 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery((q) =>
-        q
-          .from({ issues: issueCollection })
-          .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
-          )
-          .select(({ issues, persons }) => ({
-            id: issues.id,
-            title: issues.title,
-            name: persons.name,
-          }))
+      const { isReady } = useLiveQuery(
+        () => (q) =>
+          q
+            .from({ issues: issueCollection })
+            .join({ persons: personCollection }, ({ issues, persons }) =>
+              eq(issues.userId, persons.id)
+            )
+            .select(({ issues, persons }) => ({
+              id: issues.id,
+              title: issues.title,
+              name: persons.name,
+            }))
       )
 
       expect(isReady.value).toBe(false)
@@ -1139,15 +1148,14 @@ describe(`Query Collections`, () => {
 
       const minAge = ref(30)
       const { isReady } = useLiveQuery(
-        (q) =>
+        () => (q) =>
           q
             .from({ collection })
             .where(({ collection: c }) => gt(c.age, minAge.value))
             .select(({ collection: c }) => ({
               id: c.id,
               name: c.name,
-            })),
-        [minAge]
+            }))
       )
 
       expect(isReady.value).toBe(false)
@@ -1205,10 +1213,10 @@ describe(`Query Collections`, () => {
     // Wait for collection to sync and state to update
     await waitForVueUpdate()
 
-    expect(state.value.size).toBe(1) // Only John Smith (age 35)
-    expect(data.value).toHaveLength(1)
+    expect(state().size).toBe(1) // Only John Smith (age 35)
+    expect(data()).toHaveLength(1)
 
-    const johnSmith = data.value[0]
+    const johnSmith = data()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
