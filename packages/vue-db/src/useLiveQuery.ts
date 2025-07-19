@@ -20,10 +20,6 @@ import type {
 } from "@tanstack/db"
 import type { ComputedRef, MaybeRefOrGetter } from "vue"
 
-const isCollection = (v: unknown): v is CollectionImpl => {
-  return v instanceof CollectionImpl
-}
-
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
@@ -210,7 +206,7 @@ export function useLiveQuery(
   const collection = computed(() => {
     const configOrQueryOrCollectionVal = toValue(configOrQueryOrCollection)
 
-    if (isCollection(configOrQueryOrCollectionVal)) {
+    if (configOrQueryOrCollectionVal instanceof CollectionImpl) {
       configOrQueryOrCollectionVal.startSyncImmediate()
       return configOrQueryOrCollectionVal
     }
