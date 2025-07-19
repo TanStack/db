@@ -2,7 +2,7 @@ import type { IStreamBuilder } from "@electric-sql/d2mini"
 import type { Collection } from "./collection"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
-import type { BasicExpression } from "./query/ir"
+
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 
 /**
@@ -555,37 +555,6 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
  * a `select` clause.
  */
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
-
-/**
- * Index configuration options
- */
-export interface IndexOptions {
-  /** Optional name for the index, used for referencing and debugging */
-  name?: string
-}
-
-/**
- * Represents an index for fast lookups on a collection
- * All indexes are ordered to support range queries
- */
-export interface CollectionIndex<
-  TKey extends string | number = string | number,
-> {
-  /** Unique identifier for this index */
-  id: string
-  /** Optional name for the index */
-  name?: string
-  /** The expression that defines what to index (a Ref expression) */
-  expression: BasicExpression
-  /** Ordered array of [indexedValue, Set<TKey>] pairs, sorted by indexedValue */
-  orderedEntries: Array<[any, Set<TKey>]>
-  /** Map from indexed value to Set of keys for fast equality lookups */
-  valueMap: Map<any, Set<TKey>>
-  /** Set of all keys that have been indexed */
-  indexedKeys: Set<TKey>
-  /** Comparison function used for ordering */
-  compareFn: (a: any, b: any) => number
-}
 
 /**
  * Options for subscribing to collection changes

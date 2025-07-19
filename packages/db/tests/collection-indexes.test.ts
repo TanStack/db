@@ -48,18 +48,27 @@ function createIndexUsageTracker(collection: any): {
     queriesExecuted: [],
   }
 
-  // Track rangeQuery calls (index usage)
-  const originalRangeQuery = collection.rangeQuery
-  collection.rangeQuery = function (index: any, operation: string, value: any) {
-    stats.rangeQueryCalls++
-    stats.indexesUsed.push(index.id)
-    stats.queriesExecuted.push({
-      type: `index`,
-      operation,
-      field: index.expression?.path?.join(`.`),
-      value,
+  // Track index method calls by patching all existing indexes
+  const originalMethods = new Map()
+
+  for (const [indexId, index] of collection.indexes) {
+    // Track lookup calls (new unified method)
+    const originalLookup = index.lookup.bind(index)
+    index.lookup = function (operation: any, value: any) {
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(indexId)
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation,
+        field: index.expression?.path?.join(`.`),
+        value,
+      })
+      return originalLookup(operation, value)
+    }
+
+    originalMethods.set(indexId, {
+      lookup: originalLookup,
     })
-    return originalRangeQuery.call(this, index, operation, value)
   }
 
   // Track full scan calls (entries() iteration)
@@ -81,7 +90,13 @@ function createIndexUsageTracker(collection: any): {
   }
 
   const restore = () => {
-    collection.rangeQuery = originalRangeQuery
+    // Restore original index methods
+    for (const [indexId, index] of collection.indexes) {
+      const original = originalMethods.get(indexId)
+      if (original) {
+        index.lookup = original.lookup
+      }
+    }
     collection.entries = originalEntries
   }
 
@@ -243,10 +258,10 @@ describe(`Collection Indexes`, () => {
     it(`should create an index on a simple field`, () => {
       const index = collection.createIndex((row) => row.status)
 
-      expect(index.id).toMatch(/^index_\d+$/)
+      expect(index.id).toMatch(/^\d+$/)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
-      expect(index.indexedKeys.size).toBe(5)
+      expect(index.indexedKeysSet.size).toBe(5)
     })
 
     it(`should create a named index`, () => {
@@ -255,7 +270,7 @@ describe(`Collection Indexes`, () => {
       })
 
       expect(index.name).toBe(`ageIndex`)
-      expect(index.indexedKeys.size).toBe(5)
+      expect(index.indexedKeysSet.size).toBe(5)
     })
 
     it(`should create multiple indexes`, () => {
@@ -263,15 +278,15 @@ describe(`Collection Indexes`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       expect(statusIndex.id).not.toBe(ageIndex.id)
-      expect(statusIndex.indexedKeys.size).toBe(5)
-      expect(ageIndex.indexedKeys.size).toBe(5)
+      expect(statusIndex.indexedKeysSet.size).toBe(5)
+      expect(ageIndex.indexedKeysSet.size).toBe(5)
     })
 
     it(`should maintain ordered entries`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Ages should be ordered: 22, 25, 28, 30, 35
-      const orderedAges = ageIndex.orderedEntries.map(([age]) => age)
+      const orderedAges = ageIndex.orderedEntriesArray.map(([age]) => age)
       expect(orderedAges).toEqual([22, 25, 28, 30, 35])
     })
 
@@ -279,10 +294,10 @@ describe(`Collection Indexes`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
 
       // Should have 3 unique status values
-      expect(statusIndex.orderedEntries.length).toBe(3)
+      expect(statusIndex.orderedEntriesArray.length).toBe(3)
 
       // "active" status should have 3 items
-      const activeKeys = statusIndex.valueMap.get(`active`)
+      const activeKeys = statusIndex.valueMapData.get(`active`)
       expect(activeKeys?.size).toBe(3)
     })
 
@@ -290,10 +305,10 @@ describe(`Collection Indexes`, () => {
       const scoreIndex = collection.createIndex((row) => row.score)
 
       // Should include the item with undefined score
-      expect(scoreIndex.indexedKeys.size).toBe(5)
+      expect(scoreIndex.indexedKeysSet.size).toBe(5)
 
       // undefined should be first in ordered entries
-      const firstValue = scoreIndex.orderedEntries[0]?.[0]
+      const firstValue = scoreIndex.orderedEntriesArray[0]?.[0]
       expect(firstValue).toBeUndefined()
     })
   })
@@ -580,7 +595,7 @@ describe(`Collection Indexes`, () => {
         })
 
         // Verify the specific index was used
-        expect(tracker.stats.indexesUsed[0]).toMatch(/^index_\d+$/)
+        expect(tracker.stats.indexesUsed[0]).toMatch(/^\d+$/)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
           operation: `eq`,
@@ -797,27 +812,21 @@ describe(`Collection Indexes`, () => {
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Alice`, `Charlie`, `Diana`, `Eve`])
 
-        // Verify 100% index usage - should use status index twice (for each value)
+        // Verify 100% index usage - should use status index once with IN operation
         expectIndexUsage(tracker.stats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 2, // Two eq operations for the array values
+          indexCallCount: 1, // One IN operation for the array values
           fullScanCallCount: 0,
         })
 
-        // Verify both values were looked up using the status index
-        expect(tracker.stats.queriesExecuted).toHaveLength(2)
+        // Verify the IN operation was used
+        expect(tracker.stats.queriesExecuted).toHaveLength(1)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
-          operation: `eq`,
+          operation: `in`,
           field: `status`,
-          value: `active`,
-        })
-        expect(tracker.stats.queriesExecuted[1]).toMatchObject({
-          type: `index`,
-          operation: `eq`,
-          field: `status`,
-          value: `pending`,
+          value: [`active`, `pending`],
         })
       })
     })
@@ -868,32 +877,32 @@ describe(`Collection Indexes`, () => {
       })
     })
 
-    it(`should fall back to full scan when not all conditions can be optimized`, () => {
+    it(`should partially optimize when some conditions can be optimized`, () => {
       withIndexTracking(collection, (tracker) => {
         // Mix of optimizable and non-optimizable conditions
         const result = collection.currentStateAsChanges({
           where: (row) =>
             and(
-              eq(row.status, `active`),
-              gt(length(row.name), 4) // Complex expression - can't optimize
+              eq(row.status, `active`), // Can optimize with index
+              gt(row.age, 24) // Can also optimize - will be AND combined
             ),
         })
 
-        expect(result).toHaveLength(2) // Alice, Charlie (active with name > 4 chars)
+        expect(result).toHaveLength(2) // Alice (25), Charlie (35) - both active and age > 24
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Alice`, `Charlie`])
 
-        // Should fall back to full scan since not all conditions can be optimized
+        // Should use optimization: both conditions can use indexes
         expectIndexUsage(tracker.stats, {
-          shouldUseIndex: false,
-          shouldUseFullScan: true,
-          indexCallCount: 0,
-          fullScanCallCount: 1,
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 2,
+          fullScanCallCount: 0,
         })
       })
     })
 
-    it(`should optimize queries with missing indexes by falling back gracefully`, () => {
+    it(`should optimize queries with missing indexes by using partial optimization`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query on a field without an index (name)
         const result = collection.currentStateAsChanges({
@@ -907,8 +916,141 @@ describe(`Collection Indexes`, () => {
         expect(result).toHaveLength(1) // Alice (25, name Alice)
         expect(result[0]?.value.name).toBe(`Alice`)
 
-        // Should fall back to full scan since name doesn't have an index
+        // Should use partial optimization: age index, then filter by name
         expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 1,
+          fullScanCallCount: 0,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when no conditions can be optimized`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Only complex expressions that can't be optimized
+        const result = collection.currentStateAsChanges({
+          where: (row) => gt(length(row.name), 3),
+        })
+
+        expect(result).toHaveLength(3) // Alice, Charlie, Diana (names > 3 chars)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Alice`, `Charlie`, `Diana`])
+
+        // Should fall back to full scan since no conditions can be optimized
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan for complex nested expressions`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Complex expression involving function calls - no simple field comparisons
+        const result = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              gt(length(row.name), 4), // Complex - can't optimize (Alice=5, Charlie=7, Diana=5)
+              gt(length(row.status), 6) // Complex - can't optimize (only "inactive" = 8 > 6)
+            ),
+        })
+
+        expect(result).toHaveLength(1) // Only Diana has name>4 AND status>6 (Diana name=5, status="pending"=7)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Diana`])
+
+        // Should fall back to full scan for complex expressions
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when OR conditions can't be optimized`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // OR with complex conditions that can't be optimized
+        const result = collection.currentStateAsChanges({
+          where: (row) =>
+            or(
+              gt(length(row.name), 6), // Complex - can't optimize (only Charlie has name length 7 > 6)
+              gt(length(row.status), 7) // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
+            ),
+        })
+
+        expect(result).toHaveLength(2) // Charlie (name length 7 > 6), Bob (status length 8 > 7)
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Bob`, `Charlie`])
+
+        // Should fall back to full scan when no OR branches can be optimized
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should fall back to full scan when querying non-indexed fields only`, () => {
+      withIndexTracking(collection, (tracker) => {
+        // Query only on fields without indexes (name and score fields don't have indexes)
+        const result = collection.currentStateAsChanges({
+          where: (row) => and(eq(row.name, `Alice`), eq(row.score!, 95)),
+        })
+
+        expect(result).toHaveLength(1) // Alice
+        expect(result[0]?.value.name).toBe(`Alice`)
+
+        // Should fall back to full scan since no indexed fields are used
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+          indexCallCount: 0,
+          fullScanCallCount: 1,
+        })
+      })
+    })
+
+    it(`should handle mixed optimization scenarios within same query`, () => {
+      // Test two separate queries to show different optimization strategies
+
+      // First: partial optimization (age index + name filter)
+      withIndexTracking(collection, (tracker1) => {
+        const result1 = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              eq(row.age, 25), // Can optimize - has index
+              eq(row.name, `Alice`) // Can't optimize - no index
+            ),
+        })
+
+        expect(result1).toHaveLength(1) // Alice via partial optimization
+        expectIndexUsage(tracker1.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 1,
+          fullScanCallCount: 0,
+        })
+      })
+
+      // Second: full scan (no optimizable conditions)
+      withIndexTracking(collection, (tracker2) => {
+        const result2 = collection.currentStateAsChanges({
+          where: (row) =>
+            and(
+              eq(row.name, `Alice`), // Can't optimize - no index
+              gt(length(row.name), 3) // Can't optimize - complex expression
+            ),
+        })
+
+        expect(result2).toHaveLength(1) // Alice via full scan
+        expectIndexUsage(tracker2.stats, {
           shouldUseIndex: false,
           shouldUseFullScan: true,
           indexCallCount: 0,
@@ -1213,11 +1355,11 @@ describe(`Collection Indexes`, () => {
       const ageIndex = specialCollection.createIndex((row) => row.age)
 
       // Verify index contains all items including special values
-      expect(ageIndex.indexedKeys.size).toBe(8) // Original 5 + 3 special
-      expect(ageIndex.orderedEntries).toHaveLength(8) // 8 unique age values (including null)
+      expect(ageIndex.indexedKeysSet.size).toBe(8) // Original 5 + 3 special
+      expect(ageIndex.orderedEntriesArray).toHaveLength(8) // 8 unique age values (including null)
 
       // Null/undefined should be ordered first
-      const firstValue = ageIndex.orderedEntries[0]?.[0]
+      const firstValue = ageIndex.orderedEntriesArray[0]?.[0]
       expect(firstValue == null).toBe(true)
 
       // Test that queries with special values use indexes correctly
@@ -1260,17 +1402,17 @@ describe(`Collection Indexes`, () => {
 
       const index = emptyCollection.createIndex((row) => row.age)
 
-      expect(index.indexedKeys.size).toBe(0)
-      expect(index.orderedEntries).toHaveLength(0)
-      expect(index.valueMap.size).toBe(0)
+      expect(index.indexedKeysSet.size).toBe(0)
+      expect(index.orderedEntriesArray).toHaveLength(0)
+      expect(index.valueMapData.size).toBe(0)
     })
 
     it(`should handle index updates when data changes through sync`, async () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Original index should have 5 items
-      expect(ageIndex.indexedKeys.size).toBe(5)
-      expect(ageIndex.orderedEntries).toHaveLength(5)
+      expect(ageIndex.indexedKeysSet.size).toBe(5)
+      expect(ageIndex.orderedEntriesArray).toHaveLength(5)
 
       // Perform mutations that will sync back and update indexes
       const tx1 = createTransaction({ mutationFn })
@@ -1304,7 +1446,7 @@ describe(`Collection Indexes`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Verify that indexes are updated after sync
-      expect(ageIndex.indexedKeys.size).toBe(5) // 5 original - 1 deleted + 1 inserted
+      expect(ageIndex.indexedKeysSet.size).toBe(5) // 5 original - 1 deleted + 1 inserted
 
       // Test that index-optimized queries work with the updated data
       withIndexTracking(collection, (tracker) => {
