@@ -85,6 +85,14 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
   startSync: true, // Optional: starts sync immediately
 }))
 ```
+| Option | Type | Description |
+|--------|------|-------------|
+| `id` | `string` (optional) | An optional unique identifier for the live query. If not provided, it will be auto-generated. This is useful for debugging and logging. |
+| `query` | `QueryBuilder` or function | The query definition, this is either a `Query` instance or a function that returns a `Query` instance. |
+| `getKey` | `(item) => string \| number` (optional) | A function that extracts a unique key from each row. If not provided, the stream's internal key will be used. For simple cases this is the key from the parent collection, but in the case of joins, the auto-generated key will be a composite of the parent keys. Using `getKey` is useful when you want to use a specific key from a parent collection for the resulting collection. |
+| `schema` | `Schema` (optional) | Optional schema for validation |
+| `startSync` | `boolean` (optional) | Whether to start syncing immediately. Defaults to `true`. |
+| `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
 
 ### Convenience Function
 
@@ -130,23 +138,9 @@ function UserList() {
 
 For more details on framework integration, see the [React](/docs/framework/react/adapter) and [Vue](/docs/framework/vue/adapter) adapter documentation.
 
-### Configuration Options
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `id` | `string` | Unique identifier (auto-generated if not provided) |
-| `query` | `QueryBuilder` or function | The query definition |
-| `getKey` | `(item) => string \| number` | Function to extract keys from results |
-| `schema` | `Schema` | Optional schema for validation |
-| `startSync` | `boolean` | Whether to start syncing immediately |
-| `gcTime` | `number` | Garbage collection time in milliseconds |
-
-## Basic Queries
+## From Clause
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
-
-### Simple Queries
-
 Start with a basic query that selects all records from a collection:
 
 ```ts
@@ -168,8 +162,6 @@ const user = allUsers.get(1)
 const hasUser = allUsers.has(1)
 ```
 
-### Table Aliasing
-
 Use aliases to make your queries more readable, especially when working with multiple collections:
 
 ```ts
@@ -189,35 +181,19 @@ const userNames = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-### Query Builder Pattern
-
-Each method returns a new query builder, allowing you to chain operations:
-
-```ts
-const query = q
-  .from({ user: usersCollection })
-  .where(({ user }) => eq(user.active, true))
-  .select(({ user }) => ({
-    id: user.id,
-    name: user.name,
-  }))
-  .orderBy(({ user }) => user.name, 'asc')
-  .limit(10)
-
-const activeUsers = createCollection(liveQueryCollectionOptions({ query }))
-```
-
-This pattern makes it easy to build complex queries step by step and reuse query parts.
-
 ## Where Clauses
 
-Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with AND logic.
+Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with `and` logic.
+
+The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Functions Reference](#functions-reference) section.
 
 ### Basic Filtering
 
 Filter users by a simple condition:
 
 ```ts
+import { eq } from '@tanstack/db'
+
 const activeUsers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
@@ -231,6 +207,8 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 Chain multiple `where` calls for AND logic:
 
 ```ts
+import { eq, gt } from '@tanstack/db'
+
 const adultActiveUsers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
@@ -245,6 +223,8 @@ const adultActiveUsers = createCollection(liveQueryCollectionOptions({
 Use logical operators to build complex conditions:
 
 ```ts
+import { eq, gt, or, and } from '@tanstack/db'
+
 const specialUsers = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
@@ -295,11 +275,13 @@ For a complete reference of all available functions, see the [Functions Referenc
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.
 
+Similar to the `where` clause, the `select` method takes a callback function that receives an object containing your table aliases and returns an object with the fields you want to include in your results. These can be combined with functions from the [Functions Reference](#functions-reference) section to create computed fields. You can also use the spread operator to include all fields from a table.
+
 ### Basic Projections
 
 Select specific fields from your data:
 
-```ts
+````ts
 const userNames = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
@@ -309,7 +291,17 @@ const userNames = createLiveQueryCollection((q) =>
       email: user.email,
     }))
 )
+
+/*
+Result type: { id: number, name: string, email: string }
+
+```ts
+for (const row of userNames) {
+  console.log(row.name)
+}
 ```
+*/
+````
 
 ### Field Renaming
 
@@ -344,40 +336,35 @@ const userStats = createLiveQueryCollection((q) =>
 )
 ```
 
-### Using Functions
+### Using Functions and Including All Fields
 
 Transform your data using built-in functions:
 
-```ts
-import { upper, lower, concat } from '@tanstack/db'
+````ts
+import { concat } from '@tanstack/db'
 
 const formattedUsers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
       .from({ user: usersCollection })
       .select(({ user }) => ({
-        id: user.id,
-        name: upper(user.name),
-        email: lower(user.email),
-        displayName: concat(user.firstName, ' ', user.lastName),
+        ...user, // Include all user fields
+        displayName: upper(concat(user.firstName, ' ', user.lastName)),
+        isAdult: gt(user.age, 18),
       }))
 }))
-```
 
-### Including All Fields
-
-To include all fields from a table, you can use the spread operator:
-
-```ts
-const usersWithExtra = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .select(({ user }) => ({
-      ...user, // Include all user fields
-      isActive: eq(user.active, true),
-    }))
-)
-```
+/*
+Result type:
+{
+  id: number,
+  name: string,
+  email: string,
+  displayName: string,
+  isAdult: boolean,
+}
+*/
+````
 
 For a complete list of available functions, see the [Functions Reference](#functions-reference) section.
 
@@ -385,62 +372,147 @@ For a complete list of available functions, see the [Functions Reference](#funct
 
 Use `join` to combine data from multiple collections. Joins default to `left` join type and only support equality conditions.
 
+Joins in Tanstack DB are a way to combine data from multiple collections, and are conceptionally very similar to SQL joins. When two collections are joined, the result is a new collection that contains the combined data as single rows. The new collection is a live query collection, and will automatically update when the underlying data changes.
+
+A `join` without a `select` will return row objects that are namespaced with the aliases of the joined collections.
+
+The result type of a join will take into account the join type, with the optionality of the joined fields being determined by the join type.
+
+> [!NOTE]
+> We are working on an `include` system that will enable joins that project to a hierarchical object. For example an `issue` row could have a `comments` property that is an array of `comment` rows.
+> See [this issue](https://github.com/TanStack/db/issues/288) for more details.
+
 ### Basic Joins
 
 Join users with their posts:
 
-```ts
+````ts
 const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
     .join({ post: postsCollection }, ({ user, post }) => 
       eq(user.id, post.userId)
     )
-    .select(({ user, post }) => ({
-      userName: user.name,
-      postTitle: post.title,
-      postContent: post.content,
-    }))
 )
+
+/*
+Result type: 
+{ 
+  user: User,
+  post?: Post, // post is optional because it is a left join
+}
+
+```ts
+for (const row of userPosts) {
+  console.log(row.user.name, row.post?.title)
+}
 ```
+*/
+````
 
 ### Join Types
 
 Specify the join type as the third parameter:
 
 ```ts
-// Inner join - only matching records
 const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
     .join(
       { post: postsCollection }, 
       ({ user, post }) => eq(user.id, post.userId),
-      'inner'
+      'inner', // `inner`, `left`, `right` or `full`
+    )
+)
+```
+
+Or using the alases `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` methods:
+
+### Left Join
+```ts
+
+// Left join - all users, even without posts
+const allUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .leftJoin(
+      { post: postsCollection }, 
+      ({ user, post }) => eq(user.id, post.userId),
     )
 )
 
+/*
+Result type:
+{
+  user: User,
+  post?: Post, // post is optional because it is a left join
+}
+*/
+```
+
+### Right Join
+```ts
 // Right join - all posts, even without users
 const allPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(
+    .rightJoin(
       { post: postsCollection }, 
       ({ user, post }) => eq(user.id, post.userId),
-      'right'
     )
 )
 
+/*
+Result type:
+{
+  user?: User, // user is optional because it is a right join
+  post: Post,
+}
+*/
+```
+
+### Inner Join
+
+```ts
+// Inner join - only matching records
+const activeUserPosts = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .innerJoin(
+      { post: postsCollection }, 
+      ({ user, post }) => eq(user.id, post.userId),
+    )
+)
+
+/*
+Result type:
+{
+  user: User,
+  post: Post,
+}
+*/
+```
+
+### Full Join
+
+```ts
 // Full join - all users and all posts
 const allUsersAndPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join(
+    .fullJoin(
       { post: postsCollection }, 
       ({ user, post }) => eq(user.id, post.userId),
-      'full'
     )
 )
+
+/*
+Result type:
+{
+  user?: User, // user is optional because it is a full join
+  post?: Post, // post is optional because it is a full join
+}
+*/
 ```
 
 ### Multiple Joins
@@ -465,47 +537,11 @@ const userPostComments = createLiveQueryCollection((q) =>
 )
 ```
 
-### Join Results Without Select
-
-When you don't use `select`, the result contains namespaced objects:
-
-```ts
-const userPosts = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .join({ post: postsCollection }, ({ user, post }) => 
-      eq(user.id, post.userId)
-    )
-)
-
-// Result type: { user: User, post: Post }
-// Access: userPosts.get(1).user.name
-```
-
-### TypeScript Optionality
-
-Join types affect TypeScript optionality. Left joins make joined fields optional:
-
-```ts
-// With left join, post fields are optional
-const userPosts = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .join({ post: postsCollection }, ({ user, post }) => 
-      eq(user.id, post.userId)
-    )
-    .select(({ user, post }) => ({
-      userName: user.name,
-      postTitle: post?.title, // post is optional
-    }))
-)
-```
-
 ## Subqueries
 
 Subqueries allow you to use the result of one query as input to another. They're different from using a live query collection directly - subqueries are embedded within the query itself.
 
-### Subqueries in FROM Clauses
+### Subqueries in `from` Clauses
 
 Use a subquery as the main source:
 
@@ -527,7 +563,7 @@ const activeUserPosts = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-### Subqueries in JOIN Clauses
+### Subqueries in `join` Clauses
 
 Join with a subquery result:
 
@@ -551,9 +587,9 @@ const userRecentPosts = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-### Subquery Caching
+### Subquery deduplication  
 
-When the same subquery is used multiple times within a query, it's automatically cached and executed only once:
+When the same subquery is used multiple times within a query, it's automatically deduplicated and executed only once:
 
 ```ts
 const complexQuery = createCollection(liveQueryCollectionOptions({
@@ -636,7 +672,8 @@ const departmentStats = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-> **Note**: In `groupBy` queries, the properties in your `select` clause must either be:
+> [!NOTE]
+> In `groupBy` queries, the properties in your `select` clause must either be:
 > - An aggregate function (like `count`, `sum`, `avg`)
 > - A property that was used in the `groupBy` clause
 > 
@@ -684,9 +721,11 @@ const orderStats = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
+See the [Aggregate Functions](#aggregate-functions) section for a complete list of available aggregate functions.
+
 ### Having Clauses
 
-Filter aggregated results using `having`:
+Filter aggregated results using `having` - this is similar to the `where` clause, but is applied after the aggregation has been performed.
 
 ```ts
 const highValueCustomers = createLiveQueryCollection((q) =>
@@ -756,7 +795,7 @@ Sort results by a single column:
 const sortedUsers = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .orderBy(({ user }) => user.name, 'asc')
+    .orderBy(({ user }) => user.name)
     .select(({ user }) => ({
       id: user.id,
       name: user.name,
@@ -799,25 +838,7 @@ const recentPosts = createLiveQueryCollection((q) =>
 )
 ```
 
-### Limiting Results
-
-Limit the number of results returned:
-
-```ts
-const topUsers = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .orderBy(({ user }) => user.salary, 'desc')
-    .limit(10)
-    .select(({ user }) => ({
-      id: user.id,
-      name: user.name,
-      salary: user.salary,
-    }))
-)
-```
-
-### Pagination with Offset
+### Pagination with `limit` and `offset`
 
 Skip results using `offset`:
 
@@ -866,7 +887,7 @@ const activeUsers = createLiveQueryCollection(buildUserQuery({ activeOnly: true,
 
 ### Caching Intermediate Results
 
-Create live queries that depend on other live queries for automatic caching:
+The result of a live query collection is a collection itself, and will automatically update when the underlying data changes. This means that you can use the result of a live query collection as a source in another live query collection. This pattern is useful for building complex queries where you want to cache intermediate results to make further queries faster.
 
 ```ts
 // Base query for active users
@@ -890,9 +911,9 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 )
 ```
 
-### Using Query Builder Instances
+### Reusable Query Definitions
 
-Create reusable query builder instances:
+You can use the `Query` class to create reusable query definitions. This is useful for building complex queries where you want to reuse the same query builder instance multiple times throughout your application.
 
 ```ts
 import { Query, eq } from '@tanstack/db'
@@ -1131,7 +1152,10 @@ avg(add(user.salary, coalesce(user.bonus, 0)))
 
 ## Functional Variants
 
-The functional variant API provides an alternative to the standard API, offering more flexibility for complex transformations. With functional variants, the callback functions contain actual JavaScript code that gets executed to perform the operation, giving you the full power of JavaScript at your disposal. However, these variants cannot be optimized by the planned query optimizer or use the planned index system.
+The functional variant API provides an alternative to the standard API, offering more flexibility for complex transformations. With functional variants, the callback functions contain actual code that gets executed to perform the operation, giving you the full power of JavaScript at your disposal.
+
+> [!WARNING]
+> The functional variant API cannot be optimized by the query optimizer or use collection indexes. It is intended for use in rare cases where the standard API is not sufficient.
 
 ### Functional Select
 
@@ -1193,25 +1217,30 @@ const highValueCustomers = createLiveQueryCollection((q) =>
 Functional variants excel at complex data transformations:
 
 ```ts
-const userAnalytics = createLiveQueryCollection((q) =>
+const userProfiles = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
-    .join({ post: postsCollection }, ({ user, post }) => 
-      eq(user.id, post.userId)
-    )
-    .groupBy(({ user }) => user.id)
     .fn.select((row) => {
       const user = row.user
-      const posts = row.posts || []
+      const fullName = `${user.firstName} ${user.lastName}`.trim()
+      const emailDomain = user.email.split('@')[1]
+      const ageGroup = user.age < 25 ? 'young' : user.age < 50 ? 'adult' : 'senior'
       
       return {
         userId: user.id,
-        userName: user.name,
-        postCount: posts.length,
-        totalLikes: posts.reduce((sum, post) => sum + (post.likes || 0), 0),
-        avgLikes: posts.length > 0 ? posts.reduce((sum, post) => sum + (post.likes || 0), 0) / posts.length : 0,
-        engagement: posts.length > 0 ? 'high' : 'low',
-        lastPostDate: posts.length > 0 ? Math.max(...posts.map(p => new Date(p.createdAt).getTime())) : null,
+        displayName: fullName || user.name,
+        contactInfo: {
+          email: user.email,
+          domain: emailDomain,
+          isCompanyEmail: emailDomain === 'company.com'
+        },
+        demographics: {
+          age: user.age,
+          ageGroup: ageGroup,
+          isAdult: user.age >= 18
+        },
+        status: user.active ? 'active' : 'inactive',
+        profileStrength: fullName && user.email && user.age ? 'complete' : 'incomplete'
       }
     })
 )
