@@ -2,6 +2,7 @@ import { D2, MultiSet, output } from "@electric-sql/d2mini"
 import { createCollection } from "../collection.js"
 import { compileQuery } from "./compiler/index.js"
 import { buildQuery, getQueryIR } from "./builder/index.js"
+import { convertToBasicExpression } from "./compiler/expressions.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection.js"
 import type {
@@ -14,6 +15,7 @@ import type {
 } from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@electric-sql/d2mini"
+import type { BasicExpression } from "./ir.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -170,6 +172,9 @@ export function liveQueryCollectionOptions<
   let graphCache: D2 | undefined
   let inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   let pipelineCache: ResultStream | undefined
+  let collectionWhereClausesCache:
+    | Map<string, BasicExpression<boolean>>
+    | undefined
 
   const compileBasePipeline = () => {
     graphCache = new D2()
@@ -179,10 +184,12 @@ export function liveQueryCollectionOptions<
         graphCache!.newInput<any>(),
       ])
     )
-    pipelineCache = compileQuery(
-      query,
-      inputsCache as Record<string, KeyedStream>
-    )
+
+    // Compile the query and get both pipeline and collection WHERE clauses
+    ;({
+      pipeline: pipelineCache,
+      collectionWhereClauses: collectionWhereClausesCache,
+    } = compileQuery(query, inputsCache as Record<string, KeyedStream>))
   }
 
   const maybeCompileBasePipeline = () => {
@@ -303,19 +310,54 @@ export function liveQueryCollectionOptions<
       // Unsubscribe callbacks
       const unsubscribeCallbacks = new Set<() => void>()
 
-      // Set up data flow from input collections to the compiled query
+      // Subscribe to all collections, using WHERE clause optimization when available
       Object.entries(collections).forEach(([collectionId, collection]) => {
         const input = inputs[collectionId]!
+        const collectionAlias = findCollectionAlias(collectionId, query)
+        const whereClause =
+          collectionAlias && collectionWhereClausesCache
+            ? collectionWhereClausesCache.get(collectionAlias)
+            : undefined
 
-        // Subscribe to changes
-        const unsubscribe = collection.subscribeChanges(
-          (changes: Array<ChangeMessage>) => {
-            sendChangesToInput(input, changes, collection.config.getKey)
-            maybeRunGraph()
-          },
-          { includeInitialState: true }
-        )
-        unsubscribeCallbacks.add(unsubscribe)
+        if (whereClause) {
+          // Convert WHERE clause to BasicExpression format for collection subscription
+          const whereExpression = convertToBasicExpression(
+            whereClause,
+            collectionAlias!
+          )
+
+          if (whereExpression) {
+            // Use index optimization for this collection
+            const subscription = collection.subscribeChanges(
+              (changes) => {
+                sendChangesToInput(input, changes, collection.config.getKey)
+                maybeRunGraph()
+              },
+              {
+                includeInitialState: true,
+                whereExpression: whereExpression,
+              }
+            )
+            unsubscribeCallbacks.add(subscription)
+          } else {
+            // This should not happen - if we have a whereClause but can't create whereExpression,
+            // it indicates a bug in our optimization logic
+            throw new Error(
+              `Failed to convert WHERE clause to collection filter for collection '${collectionId}'. ` +
+                `This indicates a bug in the query optimization logic.`
+            )
+          }
+        } else {
+          // No WHERE clause for this collection, use regular subscription
+          const subscription = collection.subscribeChanges(
+            (changes) => {
+              sendChangesToInput(input, changes, collection.config.getKey)
+              maybeRunGraph()
+            },
+            { includeInitialState: true }
+          )
+          unsubscribeCallbacks.add(subscription)
+        }
       })
 
       // Initial run
@@ -512,4 +554,42 @@ function extractCollectionsFromQuery(
   extractFromQuery(query)
 
   return collections
+}
+
+/**
+ * Converts WHERE expressions from the query IR into a BasicExpression for subscribeChanges
+ *
+ * @param whereExpressions Array of WHERE expressions to convert
+ * @param tableAlias The table alias used in the expressions
+ * @returns A BasicExpression that can be used with the collection's index system
+ */
+
+/**
+ * Finds the alias for a collection ID in the query
+ */
+function findCollectionAlias(
+  collectionId: string,
+  query: any
+): string | undefined {
+  // Check FROM clause
+  if (
+    query.from?.type === `collectionRef` &&
+    query.from.collection?.id === collectionId
+  ) {
+    return query.from.alias
+  }
+
+  // Check JOIN clauses
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (
+        joinClause.from?.type === `collectionRef` &&
+        joinClause.from.collection?.id === collectionId
+      ) {
+        return joinClause.from.alias
+      }
+    }
+  }
+
+  return undefined
 }

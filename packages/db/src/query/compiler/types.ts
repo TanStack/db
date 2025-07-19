@@ -1,10 +1,10 @@
 import type { QueryIR } from "../ir.js"
-import type { ResultStream } from "../../types.js"
+import type { CompilationResult } from "./index.js"
 
 /**
  * Cache for compiled subqueries to avoid duplicate compilation
  */
-export type QueryCache = WeakMap<QueryIR, ResultStream>
+export type QueryCache = WeakMap<QueryIR, CompilationResult>
 
 /**
  * Mapping from optimized queries back to their original queries for caching
