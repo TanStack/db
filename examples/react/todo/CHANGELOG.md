@@ -1,5 +1,45 @@
 # examples/react/todo
 
+## 0.0.33
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.9
+  - @tanstack/query-db-collection@0.0.9
+  - @tanstack/react-db@0.0.27
+  - @tanstack/trailbase-db-collection@0.0.3
+
+## 0.0.32
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+- Updated dependencies [[`09c6995`](https://github.com/TanStack/db/commit/09c6995ea9c8e6979d077ca63cbdd6215054ae78)]:
+  - @tanstack/trailbase-db-collection@0.0.2
+  - @tanstack/electric-db-collection@0.0.8
+  - @tanstack/query-db-collection@0.0.8
+  - @tanstack/react-db@0.0.26
+
+## 0.0.31
+
+### Patch Changes
+
+- Updated dependencies [[`20f810e`](https://github.com/TanStack/db/commit/20f810e13a7d802bf56da6f0df89b34312ebb2fd)]:
+  - @tanstack/electric-db-collection@0.0.7
+  - @tanstack/query-db-collection@0.0.7
+  - @tanstack/react-db@0.0.25
+
+## 0.0.30
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.6
+  - @tanstack/query-db-collection@0.0.6
+  - @tanstack/react-db@0.0.24
+
 ## 0.0.29
 
 ### Patch Changes

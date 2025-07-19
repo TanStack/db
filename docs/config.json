@@ -45,7 +45,12 @@
     },
     {
       "label": "Guides",
-      "children": []
+      "children": [
+        {
+          "label": "Creating Collection Options Creators",
+          "to": "collection-options-creator"
+        }
+      ]
     },
     {
       "label": "API Reference",

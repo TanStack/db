@@ -1,12 +1,18 @@
 import { createCollection } from "@tanstack/react-db"
 import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
 import { QueryClient } from "@tanstack/query-core"
+import { initClient } from "trailbase"
 import { selectConfigSchema, selectTodoSchema } from "../db/validation"
 import { api } from "./api"
+import type { SelectConfig, SelectTodo } from "../db/validation"
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
+
+// Create a TrailBase client.
+const trailBaseClient = initClient(`http://localhost:4000`)
 
 // Electric Todo Collection
 export const electricTodoCollection = createCollection(
@@ -101,6 +107,33 @@ export const queryTodoCollection = createCollection(
   })
 )
 
+type Todo = {
+  id: number
+  text: string
+  completed: boolean
+  created_at: number
+  updated_at: number
+}
+
+// TrailBase Todo Collection
+export const trailBaseTodoCollection = createCollection(
+  trailBaseCollectionOptions<SelectTodo, Todo>({
+    id: `todos`,
+    getKey: (item) => item.id,
+    schema: selectTodoSchema,
+    recordApi: trailBaseClient.records(`todos`),
+    // Re-using the example's drizzle-schema requires remapping the items.
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+      updated_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+      updated_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
+  })
+)
+
 // Electric Config Collection
 export const electricConfigCollection = createCollection(
   electricCollectionOptions({
@@ -165,6 +198,33 @@ export const queryConfigCollection = createCollection(
         })
       )
       return { txid: txids }
+    },
+  })
+)
+
+type Config = {
+  id: number
+  key: string
+  value: string
+  created_at: number
+  updated_at: number
+}
+
+// TrailBase Config Collection
+export const trailBaseConfigCollection = createCollection(
+  trailBaseCollectionOptions<SelectConfig, Config>({
+    id: `config`,
+    getKey: (item) => item.id,
+    schema: selectConfigSchema,
+    recordApi: trailBaseClient.records(`config`),
+    // Re-using the example's drizzle-schema requires remapping the items.
+    parse: {
+      created_at: (ts) => new Date(ts * 1000),
+      updated_at: (ts) => new Date(ts * 1000),
+    },
+    serialize: {
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+      updated_at: (date) => Math.floor(date.valueOf() / 1000),
     },
   })
 )

@@ -1,12 +1,16 @@
 {
-  "name": "@tanstack/query-db-collection",
-  "description": "TanStack Query collection for TanStack DB",
-  "version": "0.0.9",
+  "name": "@tanstack/trailbase-db-collection",
+  "description": "TrailBase collection for TanStack DB",
+  "version": "0.0.3",
   "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/query-core": "^5.75.7"
+    "@tanstack/store": "^0.7.0",
+    "debug": "^4.4.1",
+    "trailbase": "^0.7.1"
   },
   "devDependencies": {
+    "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
@@ -32,17 +36,17 @@
   "peerDependencies": {
     "typescript": ">=4.7"
   },
-  "author": "Kyle Mathews",
+  "author": "Sebastian Jeltsch",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/TanStack/db.git",
-    "directory": "packages/query-db-collection"
+    "directory": "packages/trailbase-db-collection"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
-    "query",
-    "tanstack",
+    "trailbase",
+    "sql",
     "optimistic",
     "typescript"
   ],

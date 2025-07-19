@@ -1,5 +1,6 @@
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
+import { type } from "arktype"
 import mitt from "mitt"
+import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import { z } from "zod"
 import { SchemaValidationError, createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
@@ -956,6 +957,99 @@ describe(`Collection`, () => {
 })
 
 describe(`Collection with schema validation`, () => {
+  it(`should validate data against arktype schema on insert`, () => {
+    // Create a Zod schema for a user
+    const userSchema = type({
+      name: `string > 0`,
+      age: `number.integer > 0`,
+      "email?": `string.email`,
+    })
+
+    // Create a collection with the schema
+    const collection = createCollection<typeof userSchema.infer>({
+      id: `test`,
+      getKey: (item) => item.name,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userSchema,
+    })
+    const mutationFn = async () => {}
+
+    // Valid data should work
+    const validUser = {
+      name: `Alice`,
+      age: 30,
+      email: `alice@example.com`,
+    }
+
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() => collection.insert(validUser))
+
+    // Invalid data should throw SchemaValidationError
+    const invalidUser = {
+      name: ``, // Empty name (fails min length)
+      age: -5, // Negative age (fails positive)
+      email: `not-an-email`, // Invalid email
+    }
+
+    try {
+      const tx2 = createTransaction({ mutationFn })
+      tx2.mutate(() => collection.insert(invalidUser))
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`insert`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        // Check that we have validation errors for each invalid field
+        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
+          true
+        )
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
+          true
+        )
+        expect(
+          error.issues.some((issue) => issue.path?.includes(`email`))
+        ).toBe(true)
+      }
+    }
+
+    // Partial updates should work with valid data
+    const tx3 = createTransaction({ mutationFn })
+    tx3.mutate(() =>
+      collection.update(`Alice`, (draft) => {
+        draft.age = 31
+      })
+    )
+
+    // Partial updates should fail with invalid data
+    try {
+      const tx4 = createTransaction({ mutationFn })
+      tx4.mutate(() =>
+        collection.update(`Alice`, (draft) => {
+          draft.age = -1
+        })
+      )
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`update`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
+          true
+        )
+      }
+    }
+  })
+
   it(`should validate data against schema on insert`, () => {
     // Create a Zod schema for a user
     const userSchema = z.object({

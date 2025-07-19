@@ -136,6 +136,22 @@ There's also an example [React todo app](./examples/react/todo) and usage exampl
 - batch and stage local changes across collections with immediate application of local optimistic updates
 - sync transactions to the backend with automatic rollbacks and management of optimistic state
 
+## 📦 Collection Types
+
+TanStack DB provides several collection types to support different backend integrations:
+
+- **`@tanstack/db`** - Core collection functionality with local-only and local-storage collections for offline-first applications
+- **`@tanstack/query-db-collection`** - Collections backed by [TanStack Query](https://tanstack.com/query) for REST APIs and GraphQL endpoints
+- **`@tanstack/electric-db-collection`** - Real-time sync collections powered by [ElectricSQL](https://electric-sql.com) for live database synchronization
+- **`@tanstack/trailbase-db-collection`** - Collections for [TrailBase](https://trailbase.io) backend integration
+
+## Framework integrations
+
+TanStack DB integrates with React & Vue with more on the way!
+
+- **`@tanstack/react-db`** - React hooks and components for using TanStack DB collections in React applications
+- **`@tanstack/vue-db`** - Vue composables for using TanStack DB collections in Vue applications
+
 ## 🔧 Install
 
 ```bash
