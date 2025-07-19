@@ -1,5 +1,13 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { SortedMap } from "./SortedMap"
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from "./query/builder/ref-proxy"
+import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
+import { OrderedIndex } from "./indexes/ordered-index.js"
+import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
+import { optimizeExpressionWithIndexes } from "./utils/index-optimization.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
@@ -8,6 +16,7 @@ import type {
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
+  CurrentStateAsChangesOptions,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -16,10 +25,14 @@ import type {
   ResolveInsertInput,
   ResolveType,
   StandardSchema,
+  SubscribeChangesOptions,
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
+import type { IndexOptions } from "./indexes/index-options.js"
+import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -214,6 +227,12 @@ export class CollectionImpl<
   // Cached size for performance
   private _size = 0
 
+  // Index storage
+  private lazyIndexes = new Map<string, LazyIndexWrapper<TKey>>()
+  private resolvedIndexes = new Map<string, BaseIndex<TKey>>()
+  private isIndexesResolved = false
+  private indexCounter = 0
+
   // Event system
   private changeListeners = new Set<ChangeListener<T, TKey>>()
   private changeKeyListeners = new Map<TKey, Set<ChangeListener<T, TKey>>>()
@@ -373,6 +392,14 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
+
+    // Resolve indexes when collection becomes ready
+    if (newStatus === `ready` && !this.isIndexesResolved) {
+      // Resolve indexes asynchronously without blocking
+      this.resolveAllIndexes().catch((error) => {
+        console.warn(`Failed to resolve indexes:`, error)
+      })
+    }
   }
 
   /**
@@ -772,8 +799,16 @@ export class CollectionImpl<
         return true
       })
 
+      // Update indexes for the filtered events
+      if (filteredEvents.length > 0) {
+        this.updateIndexes(filteredEvents)
+      }
       this.emitEvents(filteredEvents)
     } else {
+      // Update indexes for all events
+      if (filteredEventsBySyncStatus.length > 0) {
+        this.updateIndexes(filteredEventsBySyncStatus)
+      }
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus)
     }
@@ -1217,6 +1252,11 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
+      // Update indexes for all events before emitting
+      if (events.length > 0) {
+        this.updateIndexes(events)
+      }
+
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
@@ -1261,6 +1301,157 @@ export class CollectionImpl<
     }
 
     return `KEY::${this.id}/${key}`
+  }
+
+  /**
+   * Creates an index on a collection for faster queries.
+   * Indexes significantly improve query performance by allowing binary search
+   * and range queries instead of full scans.
+   *
+   * @template TResolver - The type of the index resolver (constructor or async loader)
+   * @param indexCallback - Function that extracts the indexed value from each item
+   * @param config - Configuration including index type and type-specific options
+   * @returns An index proxy that provides access to the index when ready
+   *
+   * @example
+   * // Create a default ordered index
+   * const ageIndex = collection.createIndex((row) => row.age)
+   *
+   * // Create a ordered index with custom options
+   * const ageIndex = collection.createIndex((row) => row.age, {
+   *   indexType: OrderedIndex,
+   *   options: { compareFn: customComparator },
+   *   name: 'age_btree'
+   * })
+   *
+   * // Create an async-loaded index
+   * const textIndex = collection.createIndex((row) => row.content, {
+   *   indexType: async () => {
+   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
+   *     return FullTextIndex
+   *   },
+   *   options: { language: 'en' }
+   * })
+   */
+  public createIndex<
+    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
+  >(
+    indexCallback: (row: SingleRowRefProxy<T>) => any,
+    config: IndexOptions<TResolver> = {}
+  ): IndexProxy<TKey> {
+    this.validateCollectionUsable(`createIndex`)
+
+    const indexId = `${++this.indexCounter}`
+    const singleRowRefProxy = createSingleRowRefProxy<T>()
+    const indexExpression = indexCallback(singleRowRefProxy)
+    const expression = toExpression(indexExpression)
+
+    // Default to OrderedIndex if no type specified
+    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
+
+    // Create lazy wrapper
+    const lazyIndex = new LazyIndexWrapper<TKey>(
+      indexId,
+      expression,
+      config.name,
+      resolver,
+      config.options,
+      this.entries()
+    )
+
+    this.lazyIndexes.set(indexId, lazyIndex)
+
+    // For synchronous constructors (classes), resolve immediately
+    // For async loaders, wait for collection to be ready
+    if (typeof resolver === `function` && resolver.prototype) {
+      // This is a constructor - resolve immediately and synchronously
+      try {
+        const resolvedIndex = lazyIndex.getResolved() // This should work since constructor resolved it
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch {
+        // Fallback to async resolution
+        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+          console.warn(`Failed to resolve single index:`, error)
+        })
+      }
+    } else if (this.isIndexesResolved) {
+      // Async loader but indexes are already resolved - resolve this one
+      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+        console.warn(`Failed to resolve single index:`, error)
+      })
+    }
+
+    return new IndexProxy(indexId, lazyIndex)
+  }
+
+  /**
+   * Resolve all lazy indexes (called when collection first syncs)
+   * @private
+   */
+  private async resolveAllIndexes(): Promise<void> {
+    if (this.isIndexesResolved) return
+
+    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
+      async ([indexId, lazyIndex]) => {
+        const resolvedIndex = await lazyIndex.resolve()
+
+        // Build index with current data
+        resolvedIndex.build(this.entries())
+
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+        return { indexId, resolvedIndex }
+      }
+    )
+
+    await Promise.all(resolutionPromises)
+    this.isIndexesResolved = true
+  }
+
+  /**
+   * Resolve a single index immediately
+   * @private
+   */
+  private async resolveSingleIndex(
+    indexId: string,
+    lazyIndex: LazyIndexWrapper<TKey>
+  ): Promise<BaseIndex<TKey>> {
+    const resolvedIndex = await lazyIndex.resolve()
+    resolvedIndex.build(this.entries())
+    this.resolvedIndexes.set(indexId, resolvedIndex)
+    return resolvedIndex
+  }
+
+  /**
+   * Get resolved indexes for query optimization
+   */
+  get indexes(): Map<string, BaseIndex<TKey>> {
+    return this.resolvedIndexes
+  }
+
+  /**
+   * Updates all indexes when the collection changes
+   * @private
+   */
+  private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
+    for (const index of this.resolvedIndexes.values()) {
+      for (const change of changes) {
+        switch (change.type) {
+          case `insert`:
+            index.add(change.key, change.value)
+            break
+          case `update`:
+            if (change.previousValue) {
+              index.update(change.key, change.previousValue, change.value)
+            } else {
+              index.add(change.key, change.value)
+            }
+            break
+          case `delete`:
+            index.remove(change.key, change.value)
+            break
+        }
+      }
+    }
   }
 
   private deepEqual(a: any, b: any): boolean {
@@ -1903,20 +2094,142 @@ export class CollectionImpl<
 
   /**
    * Returns the current state of the collection as an array of changes
+   * @param options - Options including optional where filter
    * @returns An array of changes
+   * @example
+   * // Get all items as changes
+   * const allChanges = collection.currentStateAsChanges()
+   *
+   * // Get only items matching a condition
+   * const activeChanges = collection.currentStateAsChanges({
+   *   where: (row) => row.status === 'active'
+   * })
    */
-  public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    return Array.from(this.entries()).map(([key, value]) => ({
-      type: `insert`,
-      key,
-      value,
-    }))
+  public currentStateAsChanges(
+    options: CurrentStateAsChangesOptions<T> = {}
+  ): Array<ChangeMessage<T>> {
+    if (!options.where) {
+      // No filtering, return all items
+      const result: Array<ChangeMessage<T>> = []
+      for (const [key, value] of this.entries()) {
+        result.push({
+          type: `insert`,
+          key,
+          value,
+        })
+      }
+      return result
+    }
+
+    // There's a where clause, let's see if we can use an index
+    const result: Array<ChangeMessage<T>> = []
+
+    try {
+      // Create the single-row refProxy for the callback
+      const singleRowRefProxy = createSingleRowRefProxy<T>()
+
+      // Execute the callback to get the expression
+      const whereExpression = options.where(singleRowRefProxy)
+
+      // Convert the result to a BasicExpression
+      const expression = toExpression(whereExpression)
+
+      // Try to optimize the query using indexes
+      const optimizationResult = optimizeExpressionWithIndexes(
+        expression,
+        this.indexes
+      )
+
+      if (optimizationResult.canOptimize) {
+        // Use index optimization
+        for (const key of optimizationResult.matchingKeys) {
+          const value = this.get(key)
+          if (value !== undefined) {
+            result.push({
+              type: `insert`,
+              key,
+              value,
+            })
+          }
+        }
+      } else {
+        // No index found or complex expression, fall back to full scan with filter
+        const filterFn = this.createFilterFunction(options.where)
+
+        for (const [key, value] of this.entries()) {
+          if (filterFn(value)) {
+            result.push({
+              type: `insert`,
+              key,
+              value,
+            })
+          }
+        }
+      }
+    } catch (error) {
+      // If anything goes wrong with the where clause, fall back to full scan
+      console.warn(
+        `Error processing where clause, falling back to full scan:`,
+        error
+      )
+
+      const filterFn = this.createFilterFunction(options.where)
+
+      for (const [key, value] of this.entries()) {
+        if (filterFn(value)) {
+          result.push({
+            type: `insert`,
+            key,
+            value,
+          })
+        }
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Creates a filter function from a where callback
+   * @private
+   */
+  private createFilterFunction(
+    whereCallback: (row: SingleRowRefProxy<T>) => any
+  ): (item: T) => boolean {
+    return (item: T): boolean => {
+      try {
+        // First try the RefProxy approach for query builder functions
+        const singleRowRefProxy = createSingleRowRefProxy<T>()
+        const whereExpression = whereCallback(singleRowRefProxy)
+        const expression = toExpression(whereExpression)
+        const evaluator = compileSingleRowExpression(expression)
+        const result = evaluator(item as Record<string, unknown>)
+        // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
+        return result
+      } catch {
+        // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
+        try {
+          // Create a simple proxy that returns actual values for arithmetic operations
+          const simpleProxy = new Proxy(item as any, {
+            get(target, prop) {
+              return target[prop]
+            },
+          }) as SingleRowRefProxy<T>
+
+          const result = whereCallback(simpleProxy)
+          return result
+        } catch {
+          // If both approaches fail, exclude the item
+          return false
+        }
+      }
+    }
   }
 
   /**
    * Subscribe to changes in the collection
    * @param callback - Function called when items change
-   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
@@ -1933,25 +2246,101 @@ export class CollectionImpl<
    * const unsubscribe = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
+   *
+   * @example
+   * // Subscribe only to changes matching a condition
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   where: (row) => row.status === 'active'
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
+    options: SubscribeChangesOptions<T> = {}
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
 
-    if (includeInitialState) {
-      // First send the current state as changes
-      callback(this.currentStateAsChanges())
+    // Create a filtered callback if where clause is provided
+    const filteredCallback = options.where
+      ? this.createFilteredCallback(callback, options.where)
+      : callback
+
+    if (options.includeInitialState) {
+      // First send the current state as changes (filtered if needed)
+      const initialChanges = this.currentStateAsChanges({
+        where: options.where,
+      })
+      filteredCallback(initialChanges)
     }
 
     // Add to batched listeners
-    this.changeListeners.add(callback)
+    this.changeListeners.add(filteredCallback)
 
     return () => {
-      this.changeListeners.delete(callback)
+      this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
+    }
+  }
+
+  /**
+   * Creates a filtered callback that only calls the original callback with changes that match the where clause
+   * @private
+   */
+  private createFilteredCallback(
+    originalCallback: (changes: Array<ChangeMessage<T>>) => void,
+    whereCallback: (row: SingleRowRefProxy<T>) => any
+  ): (changes: Array<ChangeMessage<T>>) => void {
+    const filterFn = this.createFilterFunction(whereCallback)
+
+    return (changes: Array<ChangeMessage<T>>) => {
+      const filteredChanges: Array<ChangeMessage<T>> = []
+
+      for (const change of changes) {
+        if (change.type === `insert`) {
+          // For inserts, check if the new value matches the filter
+          if (filterFn(change.value)) {
+            filteredChanges.push(change)
+          }
+        } else if (change.type === `update`) {
+          // For updates, we need to check both old and new values
+          const newValueMatches = filterFn(change.value)
+          const oldValueMatches = change.previousValue
+            ? filterFn(change.previousValue)
+            : false
+
+          if (newValueMatches && oldValueMatches) {
+            // Both old and new match: emit update
+            filteredChanges.push(change)
+          } else if (newValueMatches && !oldValueMatches) {
+            // New matches but old didn't: emit insert
+            filteredChanges.push({
+              ...change,
+              type: `insert`,
+            })
+          } else if (!newValueMatches && oldValueMatches) {
+            // Old matched but new doesn't: emit delete
+            filteredChanges.push({
+              ...change,
+              type: `delete`,
+              value: change.previousValue!, // Use the previous value for the delete
+            })
+          }
+          // If neither matches, don't emit anything
+        } else {
+          // For deletes, include if the previous value would have matched
+          // (so subscribers know something they were tracking was deleted)
+          if (filterFn(change.value)) {
+            filteredChanges.push(change)
+          }
+        }
+      }
+
+      if (filteredChanges.length > 0) {
+        originalCallback(filteredChanges)
+      }
     }
   }
 

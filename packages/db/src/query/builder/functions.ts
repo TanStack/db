@@ -265,3 +265,17 @@ export function max(
 ): Aggregate<number> {
   return new Aggregate(`max`, [toExpression(arg)])
 }
+
+/**
+ * List of comparison function names that can be used with indexes
+ */
+export const comparisonFunctions = [
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `in`,
+  `like`,
+  `ilike`,
+] as const
