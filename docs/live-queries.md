@@ -37,7 +37,7 @@ Live queries are just collections that automatically update when their underlyin
 - [Select Projections](#select-projections)
 - [Joins](#joins)
 - [Subqueries](#subqueries)
-- [groupBy and Aggregations](#group-by-and-aggregations)
+- [groupBy and Aggregations](#groupby-and-aggregations)
 - [Order By, Limit, and Offset](#order-by-limit-and-offset)
 - [Composable Queries](#composable-queries)
 - [Expression Functions Reference](#expression-functions-reference)
@@ -294,7 +294,7 @@ or(condition1, condition2)
 not(condition)
 ```
 
-For a complete reference of all available functions, see the [Functions Reference](#functions-reference) section.
+For a complete reference of all available functions, see the [Expression Functions Reference](#expression-functions-reference) section.
 
 ## Select Projections
 
@@ -360,6 +360,8 @@ const userProfiles = createLiveQueryCollection((q) =>
 Create computed fields using expressions:
 
 ```ts
+import { gt, length } from '@tanstack/db'
+
 const userStats = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
@@ -377,7 +379,7 @@ const userStats = createLiveQueryCollection((q) =>
 Transform your data using built-in functions:
 
 ````ts
-import { concat } from '@tanstack/db'
+import { concat, upper, gt } from '@tanstack/db'
 
 const formattedUsers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
@@ -408,7 +410,7 @@ For a complete list of available functions, see the [Expression Functions Refere
 
 Use `join` to combine data from multiple collections. Joins default to `left` join type and only support equality conditions.
 
-Joins in Tanstack DB are a way to combine data from multiple collections, and are conceptionally very similar to SQL joins. When two collections are joined, the result is a new collection that contains the combined data as single rows. The new collection is a live query collection, and will automatically update when the underlying data changes.
+Joins in TanStack DB are a way to combine data from multiple collections, and are conceptually very similar to SQL joins. When two collections are joined, the result is a new collection that contains the combined data as single rows. The new collection is a live query collection, and will automatically update when the underlying data changes.
 
 A `join` without a `select` will return row objects that are namespaced with the aliases of the joined collections.
 
@@ -477,11 +479,10 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 )
 ```
 
-Or using the alases `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` methods:
+Or using the aliases `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` methods:
 
 ### Left Join
 ```ts
-
 // Left join - all users, even without posts
 const allUsers = createLiveQueryCollection((q) =>
   q
@@ -670,6 +671,8 @@ In this example, the `activeUsers` subquery is used twice but executed only once
 Build complex queries with multiple levels of nesting:
 
 ```ts
+import { count } from '@tanstack/db'
+
 const topUsers = createCollection(liveQueryCollectionOptions({
   query: (q) => {
     // Build the post count subquery
@@ -721,6 +724,8 @@ groupBy(
 Group users by their department and count them:
 
 ```ts
+import { count, avg } from '@tanstack/db'
+
 const departmentStats = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
@@ -956,6 +961,8 @@ Build complex queries by composing smaller, reusable parts. This approach makes 
 Build queries based on runtime conditions:
 
 ```ts
+import { Query, eq } from '@tanstack/db'
+
 function buildUserQuery(options: { activeOnly?: boolean; limit?: number }) {
   let query = new Query().from({ user: usersCollection })
   
@@ -1037,7 +1044,7 @@ const userPosts = createLiveQueryCollection((q) =>
 Use `Ref<MyType>` to create reusable callback functions:
 
 ```ts
-import { Ref, eq, gt } from '@tanstack/db'
+import { Ref, eq, gt, and } from '@tanstack/db'
 
 // Create reusable callbacks
 const isActiveUser = (user: Ref<User>) => eq(user.active, true)
