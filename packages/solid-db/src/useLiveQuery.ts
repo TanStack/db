@@ -259,12 +259,6 @@ export function useLiveQuery(
       // Update status ref whenever the effect runs
       setStatus(currentCollection.status)
 
-      // Clean up previous subscription
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-        currentUnsubscribe = null
-      }
-
       // Initialize state with current collection data
       state.clear()
       for (const [key, value] of currentCollection.entries()) {
@@ -305,7 +299,7 @@ export function useLiveQuery(
         currentCollection.preload().catch(console.error)
       }
 
-      // Cleanup when effect is invalidated
+      // Cleanup when computed is invalidated
       onCleanup(() => {
         if (currentUnsubscribe) {
           currentUnsubscribe()
@@ -316,14 +310,6 @@ export function useLiveQuery(
     undefined,
     { name: `TanstackDBSyncComputed` }
   )
-
-  // Cleanup on unmount (only if we're in a component context)
-  onCleanup(() => {
-    if (currentUnsubscribe) {
-      currentUnsubscribe()
-      currentUnsubscribe = null
-    }
-  })
 
   return {
     state,
