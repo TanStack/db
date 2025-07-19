@@ -2299,15 +2299,39 @@ export class CollectionImpl<
       const filteredChanges: Array<ChangeMessage<T>> = []
 
       for (const change of changes) {
-        // For inserts and updates, check if the new value matches the filter
-        if (change.type === `insert` || change.type === `update`) {
+        if (change.type === `insert`) {
+          // For inserts, check if the new value matches the filter
           if (filterFn(change.value)) {
             filteredChanges.push(change)
           }
-        }
-        // For deletes, include if the previous value would have matched
-        // (so subscribers know something they were tracking was deleted)
-        else {
+        } else if (change.type === `update`) {
+          // For updates, we need to check both old and new values
+          const newValueMatches = filterFn(change.value)
+          const oldValueMatches = change.previousValue
+            ? filterFn(change.previousValue)
+            : false
+
+          if (newValueMatches && oldValueMatches) {
+            // Both old and new match: emit update
+            filteredChanges.push(change)
+          } else if (newValueMatches && !oldValueMatches) {
+            // New matches but old didn't: emit insert
+            filteredChanges.push({
+              ...change,
+              type: `insert`,
+            })
+          } else if (!newValueMatches && oldValueMatches) {
+            // Old matched but new doesn't: emit delete
+            filteredChanges.push({
+              ...change,
+              type: `delete`,
+              value: change.previousValue!, // Use the previous value for the delete
+            })
+          }
+          // If neither matches, don't emit anything
+        } else {
+          // For deletes, include if the previous value would have matched
+          // (so subscribers know something they were tracking was deleted)
           if (filterFn(change.value)) {
             filteredChanges.push(change)
           }

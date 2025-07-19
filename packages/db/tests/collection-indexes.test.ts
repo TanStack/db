@@ -433,7 +433,7 @@ describe(`Collection Indexes`, () => {
       expect(activeChanges).toHaveLength(1)
       expect(activeChanges[0]?.value.name).toBe(`Bob`)
 
-      // Change active item to inactive (should trigger but item no longer matches filter)
+      // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
       const tx2 = createTransaction({ mutationFn })
       tx2.mutate(() =>
@@ -443,8 +443,11 @@ describe(`Collection Indexes`, () => {
       )
       await tx2.isPersisted.promise
 
-      // Should trigger update but filtered out because no longer matches
-      expect(activeChanges).toHaveLength(0)
+      // Should trigger delete event for item that no longer matches filter
+      expect(activeChanges).toHaveLength(1)
+      expect(activeChanges[0]?.type).toBe(`delete`)
+      expect(activeChanges[0]?.key).toBe(`1`)
+      expect(activeChanges[0]?.value.status).toBe(`active`) // Should be the previous value
 
       unsubscribe()
     })
@@ -1213,7 +1216,7 @@ describe(`Collection Indexes`, () => {
 
         expect(changes).toHaveLength(0)
 
-        // Change an active item to inactive (should not trigger because item no longer matches)
+        // Change an active item to inactive (should trigger delete event for item leaving filter)
         changes.length = 0
         const tx3 = createTransaction({ mutationFn })
         tx3.mutate(() =>
@@ -1223,7 +1226,10 @@ describe(`Collection Indexes`, () => {
         )
         await tx3.isPersisted.promise
 
-        expect(changes).toHaveLength(0) // No longer matches filter
+        expect(changes).toHaveLength(1) // Should emit delete event for item leaving filter
+        expect(changes[0]?.type).toBe(`delete`)
+        expect(changes[0]?.key).toBe(`1`)
+        expect(changes[0]?.value.status).toBe(`active`) // Should be the previous value
 
         unsubscribe()
       })
