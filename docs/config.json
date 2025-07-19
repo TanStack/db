@@ -20,6 +20,10 @@
         {
           "label": "Installation",
           "to": "installation"
+        },
+        {
+          "label": "Live Queries",
+          "to": "live-queries"
         }
       ],
       "frameworks": [
