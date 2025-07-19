@@ -40,7 +40,7 @@ Live queries are just collections that automatically update when their underlyin
 - [groupBy and Aggregations](#group-by-and-aggregations)
 - [Order By, Limit, and Offset](#order-by-limit-and-offset)
 - [Composable Queries](#composable-queries)
-- [Functions Reference](#functions-reference)
+- [Expression Functions Reference](#expression-functions-reference)
 - [Functional Variants](#functional-variants)
 
 ## Creating Live Query Collections
@@ -199,7 +199,7 @@ const userNames = createCollection(liveQueryCollectionOptions({
 
 Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with `and` logic.
 
-The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Functions Reference](#functions-reference) section.
+The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Expression Functions Reference](#expression-functions-reference) section.
 
 ### Method Signature
 
@@ -300,7 +300,7 @@ For a complete reference of all available functions, see the [Functions Referenc
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.
 
-Similar to the `where` clause, the `select` method takes a callback function that receives an object containing your table aliases and returns an object with the fields you want to include in your results. These can be combined with functions from the [Functions Reference](#functions-reference) section to create computed fields. You can also use the spread operator to include all fields from a table.
+Similar to the `where` clause, the `select` method takes a callback function that receives an object containing your table aliases and returns an object with the fields you want to include in your results. These can be combined with functions from the [Expression Functions Reference](#expression-functions-reference) section to create computed fields. You can also use the spread operator to include all fields from a table.
 
 ### Method Signature
 
@@ -402,7 +402,7 @@ Result type:
 */
 ````
 
-For a complete list of available functions, see the [Functions Reference](#functions-reference) section.
+For a complete list of available functions, see the [Expression Functions Reference](#expression-functions-reference) section.
 
 ## Joins
 
@@ -1082,7 +1082,7 @@ const highValueCustomers = createCollection(liveQueryCollectionOptions({
 
 This approach makes your query logic more modular and testable.
 
-## Functions Reference
+## Expression Functions Reference
 
 The query system provides a comprehensive set of functions for filtering, transforming, and aggregating data.
 
