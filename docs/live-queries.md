@@ -7,7 +7,9 @@ id: live-queries
 
 TanStack DB provides a powerful, type-safe query system that allows you to fetch, filter, transform, and aggregate data from collections using a SQL-like fluent API. All queries are **live** by default, meaning they automatically update when the underlying data changes.
 
-The query system is built around a fluent API similar to SQL query builders like Kysely or Drizzle. The query builder doesn't perform operations in the order of method calls - instead, it composes your query into an optimal incremental pipeline that gets compiled and executed efficiently. Each method returns a new query builder, allowing you to chain operations together.
+The query system is built around an API similar to SQL query builders like Kysely or Drizzle where you chain methods together to compose your query. The query builder doesn't perform operations in the order of method calls - instead, it composes your query into an optimal incremental pipeline that gets compiled and executed efficiently. Each method returns a new query builder, allowing you to chain operations together.
+
+Live queries resolve to collections that automatically update when their underlying data changes. You can subscribe to changes, iterate over results, and use all the standard collection methods.
 
 ```ts
 import { createCollection, liveQueryCollectionOptions, eq } from '@tanstack/db'
@@ -27,8 +29,6 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 
 The result types are automatically inferred from your query structure, providing full TypeScript support. When you use a `select` clause, the result type matches your projection. Without `select`, you get the full schema with proper join optionality.
 
-Live queries are just collections that automatically update when their underlying data changes. You can subscribe to changes, iterate over results, and use all the standard collection methods.
-
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)
@@ -45,7 +45,7 @@ Live queries are just collections that automatically update when their underlyin
 
 ## Creating Live Query Collections
 
-Live queries are collections that automatically update when their underlying data changes. You can create them using `liveQueryCollectionOptions` with `createCollection`, or use the convenience function `createLiveQueryCollection`.
+To create a live query collection, you can use `liveQueryCollectionOptions` with `createCollection`, or use the convenience function `createLiveQueryCollection`.
 
 ### Using liveQueryCollectionOptions
 
@@ -199,7 +199,9 @@ const userNames = createCollection(liveQueryCollectionOptions({
 
 Use `where` clauses to filter your data based on conditions. You can chain multiple `where` calls - they are combined with `and` logic.
 
-The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Expression Functions Reference](#expression-functions-reference) section.
+The `where` method takes a callback function that receives an object containing your table aliases and returns a boolean expression. You build these expressions using comparison functions like `eq()`, `gt()`, and logical operators like `and()` and `or()`. This declarative approach allows the query system to optimize your filters efficiently. These are described in more detail in the [Expression Functions Reference](#expression-functions-reference) section. This is very similar to how you construct queries using Kysely or Drizzle.
+
+It's important to note that the `where` method is not a function that is executed on each row or the results, its a way to describe the query that will be executed. This declarative approach works well for almost all use cases, but if you need to use a more complex condition, there is the functional variant as `fn.where` which is described in the [Functional Variants](#functional-variants) section.
 
 ### Method Signature
 
@@ -296,7 +298,7 @@ not(condition)
 
 For a complete reference of all available functions, see the [Expression Functions Reference](#expression-functions-reference) section.
 
-## Select Projections
+## Select
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.
 
@@ -313,7 +315,7 @@ select(
 **Parameters:**
 - `projection` - A callback function that receives the row object with table aliases and returns the selected fields object
 
-### Basic Projections
+### Basic Selects
 
 Select specific fields from your data:
 
@@ -503,6 +505,7 @@ Result type:
 ```
 
 ### Right Join
+
 ```ts
 // Right join - all posts, even without users
 const allPosts = createLiveQueryCollection((q) =>
@@ -591,7 +594,11 @@ const userPostComments = createLiveQueryCollection((q) =>
 
 ## Subqueries
 
-Subqueries allow you to use the result of one query as input to another. They're different from using a live query collection directly - subqueries are embedded within the query itself.
+Subqueries allow you to use the result of one query as input to another, they are embedded within the query itself and are compile to a single query pipeline. They are very similar to SQL subqueries that are executed as part of a single operation.
+
+Note that subqueries are not the same as using a live query result in a `from` or `join` clause in a new query. When you do that the intermediate result is fully computed and accessible to you, subqueries are internal to their parent query and not materialised to a collection themselves and so are more efficient.
+
+See the [Caching Intermediate Results](#caching-intermediate-results) section for more details on using live query results in a `from` or `join` clause in a new query.
 
 ### Subqueries in `from` Clauses
 
