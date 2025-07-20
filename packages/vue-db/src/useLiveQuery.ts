@@ -111,7 +111,7 @@ export interface UseLiveQueryReturnWithCollection<
  */
 // Overload 1: Accept just the query function
 export function useLiveQuery<TContext extends Context>(
-  queryFn: () => (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -204,19 +204,21 @@ export function useLiveQuery(
   configOrQueryOrCollection: any
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = computed(() => {
+    if (
+      typeof configOrQueryOrCollection === `function` &&
+      configOrQueryOrCollection.length === 1
+    ) {
+      return createLiveQueryCollection({
+        query: configOrQueryOrCollection,
+        startSync: true,
+      })
+    }
+
     const configOrQueryOrCollectionVal = toValue(configOrQueryOrCollection)
 
     if (configOrQueryOrCollectionVal instanceof CollectionImpl) {
       configOrQueryOrCollectionVal.startSyncImmediate()
       return configOrQueryOrCollectionVal
-    }
-
-    // Ensure we always start sync for Vue hooks
-    if (typeof configOrQueryOrCollectionVal === `function`) {
-      return createLiveQueryCollection({
-        query: configOrQueryOrCollectionVal,
-        startSync: true,
-      })
     }
 
     return createLiveQueryCollection({

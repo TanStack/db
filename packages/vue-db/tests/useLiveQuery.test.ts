@@ -108,16 +108,15 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state, data } = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ persons: collection })
-          .where(({ persons }) => gt(persons.age, 30))
-          .select(({ persons }) => ({
-            id: persons.id,
-            name: persons.name,
-            age: persons.age,
-          }))
+    const { state, data } = useLiveQuery((q) =>
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => gt(persons.age, 30))
+        .select(({ persons }) => ({
+          id: persons.id,
+          name: persons.name,
+          age: persons.age,
+        }))
     )
 
     // Wait for Vue reactivity to update
@@ -143,16 +142,15 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state, data } = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ collection })
-          .where(({ collection: c }) => gt(c.age, 30))
-          .select(({ collection: c }) => ({
-            id: c.id,
-            name: c.name,
-          }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+    const { state, data } = useLiveQuery((q) =>
+      q
+        .from({ collection })
+        .where(({ collection: c }) => gt(c.age, 30))
+        .select(({ collection: c }) => ({
+          id: c.id,
+          name: c.name,
+        }))
+        .orderBy(({ collection: c }) => c.id, `asc`)
     )
 
     // Wait for collection to sync
@@ -294,18 +292,17 @@ describe(`Query Collections`, () => {
       })
     )
 
-    const { state } = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ issues: issueCollection })
-          .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
-          )
-          .select(({ issues, persons }) => ({
-            id: issues.id,
-            title: issues.title,
-            name: persons.name,
-          }))
+    const { state } = useLiveQuery((q) =>
+      q
+        .from({ issues: issueCollection })
+        .join({ persons: personCollection }, ({ issues, persons }) =>
+          eq(issues.userId, persons.id)
+        )
+        .select(({ issues, persons }) => ({
+          id: issues.id,
+          title: issues.title,
+          name: persons.name,
+        }))
     )
 
     // Wait for collections to sync
@@ -407,16 +404,15 @@ describe(`Query Collections`, () => {
 
     const minAge = ref(30)
 
-    const { state } = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ collection })
-          .where(({ collection: c }) => gt(c.age, minAge.value))
-          .select(({ collection: c }) => ({
-            id: c.id,
-            name: c.name,
-            age: c.age,
-          }))
+    const { state } = useLiveQuery((q) =>
+      q
+        .from({ collection })
+        .where(({ collection: c }) => gt(c.age, minAge.value))
+        .select(({ collection: c }) => ({
+          id: c.id,
+          name: c.name,
+          age: c.age,
+        }))
     )
 
     // Wait for collection to sync
@@ -473,32 +469,30 @@ describe(`Query Collections`, () => {
 
     // Initial query
     const { state: _initialState, collection: initialCollection } =
-      useLiveQuery(
-        () => (q) =>
-          q
-            .from({ collection })
-            .where(({ collection: c }) => gt(c.age, 30))
-            .select(({ collection: c }) => ({
-              id: c.id,
-              name: c.name,
-              team: c.team,
-            }))
-            .orderBy(({ collection: c }) => c.id, `asc`)
+      useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+            team: c.team,
+          }))
+          .orderBy(({ collection: c }) => c.id, `asc`)
       )
 
     // Wait for collection to sync
     await waitForVueUpdate()
 
     // Grouped query derived from initial query
-    const { state: groupedState } = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ queryResult: initialCollection() })
-          .groupBy(({ queryResult }) => queryResult.team)
-          .select(({ queryResult }) => ({
-            team: queryResult.team,
-            count: count(queryResult.id),
-          }))
+    const { state: groupedState } = useLiveQuery((q) =>
+      q
+        .from({ queryResult: initialCollection() })
+        .groupBy(({ queryResult }) => queryResult.team)
+        .select(({ queryResult }) => ({
+          team: queryResult.team,
+          count: count(queryResult.id),
+        }))
     )
 
     // Wait for grouped query to sync
@@ -585,18 +579,17 @@ describe(`Query Collections`, () => {
     )
 
     // Render the hook with a query that joins persons and issues
-    const queryResult = useLiveQuery(
-      () => (q) =>
-        q
-          .from({ issues: issueCollection })
-          .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
-          )
-          .select(({ issues, persons }) => ({
-            id: issues.id,
-            title: issues.title,
-            name: persons.name,
-          }))
+    const queryResult = useLiveQuery((q) =>
+      q
+        .from({ issues: issueCollection })
+        .join({ persons: personCollection }, ({ issues, persons }) =>
+          eq(issues.userId, persons.id)
+        )
+        .select(({ issues, persons }) => ({
+          id: issues.id,
+          title: issues.title,
+          name: persons.name,
+        }))
     )
 
     const { state } = queryResult
@@ -863,15 +856,14 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery(
-        () => (q) =>
-          q
-            .from({ persons: collection })
-            .where(({ persons }) => gt(persons.age, 30))
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            }))
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
       )
 
       // Initially isReady should be false (collection is in idle state)
@@ -978,15 +970,14 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery(
-        () => (q) =>
-          q
-            .from({ persons: collection })
-            .where(({ persons }) => gt(persons.age, 30))
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            }))
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
       )
 
       expect(isReady.value).toBe(false)
@@ -1015,15 +1006,14 @@ describe(`Query Collections`, () => {
         })
       )
 
-      const { isReady } = useLiveQuery(
-        () => (q) =>
-          q
-            .from({ persons: collection })
-            .where(({ persons }) => gt(persons.age, 30))
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            }))
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
       )
 
       await waitForVueUpdate()
@@ -1084,18 +1074,17 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const { isReady } = useLiveQuery(
-        () => (q) =>
-          q
-            .from({ issues: issueCollection })
-            .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
-            )
-            .select(({ issues, persons }) => ({
-              id: issues.id,
-              title: issues.title,
-              name: persons.name,
-            }))
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)
+          )
+          .select(({ issues, persons }) => ({
+            id: issues.id,
+            title: issues.title,
+            name: persons.name,
+          }))
       )
 
       expect(isReady.value).toBe(false)
@@ -1147,15 +1136,14 @@ describe(`Query Collections`, () => {
       })
 
       const minAge = ref(30)
-      const { isReady } = useLiveQuery(
-        () => (q) =>
-          q
-            .from({ collection })
-            .where(({ collection: c }) => gt(c.age, minAge.value))
-            .select(({ collection: c }) => ({
-              id: c.id,
-              name: c.name,
-            }))
+      const { isReady } = useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, minAge.value))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
       )
 
       expect(isReady.value).toBe(false)
