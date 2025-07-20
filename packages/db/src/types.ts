@@ -378,6 +378,15 @@ export interface CollectionConfig<
    */
   startSync?: boolean
   /**
+   * Auto-indexing mode for the collection.
+   * When enabled, indexes will be automatically created for simple where expressions.
+   * @default "eager"
+   * @description
+   * - "off": No automatic indexing
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+   */
+  autoIndex?: `off` | `eager`
+  /**
    * Optional function to compare two items.
    * This is used to order the items in the collection.
    * @param x The first item to compare

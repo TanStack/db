@@ -6,6 +6,7 @@ import {
 } from "./query/builder/ref-proxy"
 import { OrderedIndex } from "./indexes/ordered-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
+import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
@@ -426,7 +427,11 @@ export class CollectionImpl<
       a.compareCreatedAt(b)
     )
 
-    this.config = config
+    // Set default values for optional config properties
+    this.config = {
+      ...config,
+      autoIndex: config.autoIndex ?? `eager`,
+    }
 
     // Store in global collections store
     collectionsStore.set(this.id, this)
@@ -1359,12 +1364,18 @@ export class CollectionImpl<
 
     this.lazyIndexes.set(indexId, lazyIndex)
 
-    // For synchronous constructors (classes), resolve immediately
-    // For async loaders, wait for collection to be ready
-    if (typeof resolver === `function` && resolver.prototype) {
-      // This is a constructor - resolve immediately and synchronously
+    // For OrderedIndex, resolve immediately and synchronously
+    if ((resolver as unknown) === OrderedIndex) {
       try {
-        const resolvedIndex = lazyIndex.getResolved() // This should work since constructor resolved it
+        const resolvedIndex = lazyIndex.getResolved()
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch (error) {
+        console.warn(`Failed to resolve OrderedIndex:`, error)
+      }
+    } else if (typeof resolver === `function` && resolver.prototype) {
+      // Other synchronous constructors - resolve immediately
+      try {
+        const resolvedIndex = lazyIndex.getResolved()
         this.resolvedIndexes.set(indexId, resolvedIndex)
       } catch {
         // Fallback to async resolution
@@ -2159,6 +2170,11 @@ export class CollectionImpl<
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
+
+    // Auto-index for where expressions if enabled
+    if (options.whereExpression) {
+      ensureIndexForExpression(options.whereExpression, this)
+    }
 
     // Create a filtered callback if where clause is provided
     const filteredCallback =
