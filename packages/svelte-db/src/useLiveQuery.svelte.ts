@@ -318,12 +318,6 @@ export function useLiveQuery(
     }
   })
 
-  const isReady = $derived(status === `ready`)
-  const isIdle = $derived(status === `idle`)
-  const isLoading = $derived(status === `loading` || status === `initialCommit`)
-  const isError = $derived(status === `error`)
-  const isCleanedUp = $derived(status === `cleaned-up`)
-
   return {
     get state() {
       return state
@@ -338,19 +332,19 @@ export function useLiveQuery(
       return status
     },
     get isLoading() {
-      return isLoading
+      return status === `loading` || status === `initialCommit`
     },
     get isReady() {
-      return isReady
+      return status === `ready`
     },
     get isIdle() {
-      return isIdle
+      return status === `idle`
     },
     get isError() {
-      return isError
+      return status === `error`
     },
     get isCleanedUp() {
-      return isCleanedUp
+      return status === `cleaned-up`
     },
   }
 }
