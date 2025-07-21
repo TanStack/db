@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from "@tanstack/store"
+import {
+  ExpectedDeleteTypeError,
+  ExpectedInsertTypeError,
+  ExpectedUpdateTypeError,
+  TimeoutWaitingForIdsError,
+} from "./errors"
 import type { Event, RecordApi } from "trailbase"
 
 import type {
@@ -131,7 +137,7 @@ export function trailBaseCollectionOptions<
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         unsubscribe()
-        reject(new Error(`Timeout waiting for ids: ${ids}`))
+        reject(new TimeoutWaitingForIdsError(ids.toString()))
       }, timeout)
 
       const unsubscribe = seenIds.subscribe((value) => {
@@ -144,34 +150,8 @@ export function trailBaseCollectionOptions<
     })
   }
 
-  const weakSeenIds = new WeakRef(seenIds)
-  const cleanupTimer = setInterval(() => {
-    const seen = weakSeenIds.deref()
-    if (seen) {
-      seen.setState((curr) => {
-        const now = Date.now()
-        let anyExpired = false
-
-        const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-          const expired = now - v > 300 * 1000
-          anyExpired = anyExpired || expired
-          return !expired
-        })
-
-        if (anyExpired) {
-          return new Map(notExpired)
-        }
-        return curr
-      })
-    } else {
-      clearInterval(cleanupTimer)
-    }
-  }, 120 * 1000)
-
-  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
-
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
-  const cancel = () => {
+  const cancelEventReader = () => {
     if (eventReader) {
       eventReader.cancel()
       eventReader.releaseLock()
@@ -179,6 +159,7 @@ export function trailBaseCollectionOptions<
     }
   }
 
+  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
@@ -221,7 +202,6 @@ export function trailBaseCollectionOptions<
         }
 
         commit()
-        markReady()
       }
 
       // Afterwards subscribe.
@@ -272,10 +252,35 @@ export function trailBaseCollectionOptions<
         try {
           await initialFetch()
         } catch (e) {
-          cancel()
-          markReady()
+          cancelEventReader()
           throw e
+        } finally {
+          // Mark ready both if everything went well or if there's an error to
+          // avoid blocking apps waiting for `.preload()` to finish.
+          markReady()
         }
+
+        // Lastly, start a periodic cleanup task that will be removed when the
+        // reader closes.
+        const periodicCleanupTask = setInterval(() => {
+          seenIds.setState((curr) => {
+            const now = Date.now()
+            let anyExpired = false
+
+            const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
+              const expired = now - v > 300 * 1000
+              anyExpired = anyExpired || expired
+              return !expired
+            })
+
+            if (anyExpired) {
+              return new Map(notExpired)
+            }
+            return curr
+          })
+        }, 120 * 1000)
+
+        reader.closed.finally(() => clearInterval(periodicCleanupTask))
       }
 
       start()
@@ -295,7 +300,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map((tx) => {
           const { type, modified } = tx
           if (type !== `insert`) {
-            throw new Error(`Expected 'insert', got: ${type}`)
+            throw new ExpectedInsertTypeError(type)
           }
           return serialIns(modified)
         })
@@ -313,7 +318,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map(async (tx) => {
           const { type, changes, key } = tx
           if (type !== `update`) {
-            throw new Error(`Expected 'update', got: ${type}`)
+            throw new ExpectedUpdateTypeError(type)
           }
 
           await config.recordApi.update(key, serialUpd(changes))
@@ -332,7 +337,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map(async (tx) => {
           const { type, key } = tx
           if (type !== `delete`) {
-            throw new Error(`Expected 'delete', got: ${type}`)
+            throw new ExpectedDeleteTypeError(type)
           }
 
           await config.recordApi.delete(key)
@@ -346,7 +351,7 @@ export function trailBaseCollectionOptions<
       await awaitIds(ids)
     },
     utils: {
-      cancel,
+      cancel: cancelEventReader,
     },
   }
 }

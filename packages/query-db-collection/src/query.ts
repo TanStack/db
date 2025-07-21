@@ -1,4 +1,10 @@
 import { QueryObserver } from "@tanstack/query-core"
+import {
+  GetKeyRequiredError,
+  QueryClientRequiredError,
+  QueryFnRequiredError,
+  QueryKeyRequiredError,
+} from "./errors"
 import type {
   QueryClient,
   QueryFunctionContext,
@@ -253,20 +259,21 @@ export function queryCollectionOptions<
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryKey) {
-    throw new Error(`[QueryCollection] queryKey must be provided.`)
+    throw new QueryKeyRequiredError()
   }
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryFn) {
-    throw new Error(`[QueryCollection] queryFn must be provided.`)
+    throw new QueryFnRequiredError()
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryClient) {
-    throw new Error(`[QueryCollection] queryClient must be provided.`)
+    throw new QueryClientRequiredError()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
-    throw new Error(`[QueryCollection] getKey must be provided.`)
+    throw new GetKeyRequiredError()
   }
 
   const internalSync: SyncConfig<TItem>[`sync`] = (params) => {

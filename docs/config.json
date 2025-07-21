@@ -51,6 +51,10 @@
       "label": "Guides",
       "children": [
         {
+          "label": "Error Handling",
+          "to": "error-handling"
+        },
+        {
           "label": "Creating Collection Options Creators",
           "to": "collection-options-creator"
         }

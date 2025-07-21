@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { eq } from "../../../src/query/builder/functions.js"
+import {
+  OnlyOneSourceAllowedError,
+  QueryMustHaveFromClauseError,
+} from "../../../src/errors"
 
 // Test schema
 interface Employee {
@@ -91,7 +95,7 @@ describe(`QueryBuilder.from`, () => {
 
     expect(() => {
       builder.from({ incomplete: incompleteSubQuery as any })
-    }).toThrow(`Query must have a from clause`)
+    }).toThrow(QueryMustHaveFromClauseError)
   })
 
   it(`throws error with multiple sources`, () => {
@@ -102,6 +106,6 @@ describe(`QueryBuilder.from`, () => {
         employees: employeesCollection,
         departments: departmentsCollection,
       } as any)
-    }).toThrow(`Only one source is allowed in the from clause`)
+    }).toThrow(OnlyOneSourceAllowedError)
   })
 })

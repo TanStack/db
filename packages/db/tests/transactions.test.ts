@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection"
+import {
+  MissingMutationFunctionError,
+  TransactionAlreadyCompletedRollbackError,
+  TransactionNotPendingCommitError,
+  TransactionNotPendingMutateError,
+} from "../src/errors"
 
 describe(`Transactions`, () => {
   it(`calling createTransaction creates a transaction`, () => {
@@ -22,9 +28,7 @@ describe(`Transactions`, () => {
   })
   it(`thows an error if you don't pass in mutationFn`, () => {
     // @ts-expect-error missing argument on purpose
-    expect(() => createTransaction({})).toThrowError(
-      `mutationFn is required when creating a transaction`
-    )
+    expect(() => createTransaction({})).toThrow(MissingMutationFunctionError)
   })
   it(`thows an error if call mutate or commit or rollback when it's completed`, async () => {
     const transaction = createTransaction({
@@ -33,14 +37,14 @@ describe(`Transactions`, () => {
 
     await transaction.commit()
 
-    await expect(transaction.commit()).rejects.toThrowError(
-      `You can no longer call .commit() as the transaction is no longer pending`
+    await expect(transaction.commit()).rejects.toThrow(
+      TransactionNotPendingCommitError
     )
-    expect(() => transaction.rollback()).toThrowError(
-      `You can no longer call .rollback() as the transaction is already completed`
+    expect(() => transaction.rollback()).toThrow(
+      TransactionAlreadyCompletedRollbackError
     )
-    expect(() => transaction.mutate(() => {})).toThrowError(
-      `You can no longer call .mutate() as the transaction is no longer pending`
+    expect(() => transaction.mutate(() => {})).toThrow(
+      TransactionNotPendingMutateError
     )
   })
   it(`should allow manually controlling the transaction lifecycle`, () => {
