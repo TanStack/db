@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
+import {
+  NoStorageAvailableError,
+  NoStorageEventApiError,
+  StorageKeyRequiredError,
+} from "../src/errors"
 import type { StorageEventApi } from "../src/local-storage"
 
 // Mock storage implementation for testing that properly implements Storage interface
@@ -129,7 +134,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (item: any) => item.id,
         })
-      ).toThrow(`[LocalStorageCollection] storageKey must be provided.`)
+      ).toThrow(StorageKeyRequiredError)
     })
 
     it(`should throw error when no storage is available`, () => {
@@ -144,7 +149,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (item: any) => item.id,
         })
-      ).toThrow(`[LocalStorageCollection] No storage available.`)
+      ).toThrow(NoStorageAvailableError)
 
       // Restore window
       globalThis.window = originalWindow
@@ -162,7 +167,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           getKey: (item: any) => item.id,
         })
-      ).toThrow(`[LocalStorageCollection] No storage event API available.`)
+      ).toThrow(NoStorageEventApiError)
 
       // Restore window
       globalThis.window = originalWindow

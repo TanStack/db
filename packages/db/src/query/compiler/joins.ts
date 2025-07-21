@@ -4,10 +4,23 @@ import {
   join as joinOperator,
   map,
 } from "@electric-sql/d2mini"
+import {
+  CollectionInputNotFoundError,
+  InvalidJoinConditionSameTableError,
+  InvalidJoinConditionTableMismatchError,
+  InvalidJoinConditionWrongTablesError,
+  UnsupportedJoinSourceTypeError,
+  UnsupportedJoinTypeError,
+} from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery } from "./index.js"
 import type { IStreamBuilder, JoinType } from "@electric-sql/d2mini"
-import type { CollectionRef, JoinClause, QueryRef } from "../ir.js"
+import type {
+  BasicExpression,
+  CollectionRef,
+  JoinClause,
+  QueryRef,
+} from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -75,18 +88,26 @@ function processJoin(
         ? `full`
         : (joinClause.type as JoinType)
 
+  // Analyze which table each expression refers to and swap if necessary
+  const { mainExpr, joinedExpr } = analyzeJoinExpressions(
+    joinClause.left,
+    joinClause.right,
+    mainTableAlias,
+    joinedTableAlias
+  )
+
   // Pre-compile the join expressions
-  const compiledLeftExpr = compileExpression(joinClause.left)
-  const compiledRightExpr = compileExpression(joinClause.right)
+  const compiledMainExpr = compileExpression(mainExpr)
+  const compiledJoinedExpr = compileExpression(joinedExpr)
 
   // Prepare the main pipeline for joining
   const mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the left side of the join condition
-      const leftKey = compiledLeftExpr(namespacedRow)
+      // Extract the join key from the main table expression
+      const mainKey = compiledMainExpr(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
-      return [leftKey, [currentKey, namespacedRow]] as [
+      return [mainKey, [currentKey, namespacedRow]] as [
         unknown,
         [string, typeof namespacedRow],
       ]
@@ -99,11 +120,11 @@ function processJoin(
       // Wrap the row in a namespaced structure
       const namespacedRow: NamespacedRow = { [joinedTableAlias]: row }
 
-      // Extract the join key from the right side of the join condition
-      const rightKey = compiledRightExpr(namespacedRow)
+      // Extract the join key from the joined table expression
+      const joinedKey = compiledJoinedExpr(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
-      return [rightKey, [currentKey, namespacedRow]] as [
+      return [joinedKey, [currentKey, namespacedRow]] as [
         unknown,
         [string, typeof namespacedRow],
       ]
@@ -112,13 +133,90 @@ function processJoin(
 
   // Apply the join operation
   if (![`inner`, `left`, `right`, `full`].includes(joinType)) {
-    throw new Error(`Unsupported join type: ${joinClause.type}`)
+    throw new UnsupportedJoinTypeError(joinClause.type)
   }
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinType),
     consolidate(),
     processJoinResults(joinClause.type)
   )
+}
+
+/**
+ * Analyzes join expressions to determine which refers to which table
+ * and returns them in the correct order (main table expression first, joined table expression second)
+ */
+function analyzeJoinExpressions(
+  left: BasicExpression,
+  right: BasicExpression,
+  mainTableAlias: string,
+  joinedTableAlias: string
+): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
+  const leftTableAlias = getTableAliasFromExpression(left)
+  const rightTableAlias = getTableAliasFromExpression(right)
+
+  // If left expression refers to main table and right refers to joined table, keep as is
+  if (
+    leftTableAlias === mainTableAlias &&
+    rightTableAlias === joinedTableAlias
+  ) {
+    return { mainExpr: left, joinedExpr: right }
+  }
+
+  // If left expression refers to joined table and right refers to main table, swap them
+  if (
+    leftTableAlias === joinedTableAlias &&
+    rightTableAlias === mainTableAlias
+  ) {
+    return { mainExpr: right, joinedExpr: left }
+  }
+
+  // If both expressions refer to the same alias, this is an invalid join
+  if (leftTableAlias === rightTableAlias) {
+    throw new InvalidJoinConditionSameTableError(leftTableAlias || `unknown`)
+  }
+
+  // If one expression doesn't refer to either table, this is an invalid join
+  if (!leftTableAlias || !rightTableAlias) {
+    throw new InvalidJoinConditionTableMismatchError(
+      mainTableAlias,
+      joinedTableAlias
+    )
+  }
+
+  // If expressions refer to tables not involved in this join, this is an invalid join
+  throw new InvalidJoinConditionWrongTablesError(
+    leftTableAlias,
+    rightTableAlias,
+    mainTableAlias,
+    joinedTableAlias
+  )
+}
+
+/**
+ * Extracts the table alias from a join expression
+ */
+function getTableAliasFromExpression(expr: BasicExpression): string | null {
+  switch (expr.type) {
+    case `ref`:
+      // PropRef path has the table alias as the first element
+      return expr.path[0] || null
+    case `func`: {
+      // For function expressions, we need to check if all arguments refer to the same table
+      const tableAliases = new Set<string>()
+      for (const arg of expr.args) {
+        const alias = getTableAliasFromExpression(arg)
+        if (alias) {
+          tableAliases.add(alias)
+        }
+      }
+      // If all arguments refer to the same table, return that table alias
+      return tableAliases.size === 1 ? Array.from(tableAliases)[0]! : null
+    }
+    default:
+      // Values (type='val') don't reference any table
+      return null
+  }
 }
 
 /**
@@ -134,9 +232,7 @@ function processJoinSource(
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
-        throw new Error(
-          `Input for collection "${from.collection.id}" not found in inputs map`
-        )
+        throw new CollectionInputNotFoundError(from.collection.id)
       }
       return { alias: from.alias, input }
     }
@@ -145,12 +241,15 @@ function processJoinSource(
       const originalQuery = queryMapping.get(from.query) || from.query
 
       // Recursively compile the sub-query with cache
-      const subQueryInput = compileQuery(
+      const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
         cache,
         queryMapping
       )
+
+      // Extract the pipeline from the compilation result
+      const subQueryInput = subQueryResult.pipeline
 
       // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
       // We need to extract just the value for use in parent queries
@@ -164,7 +263,7 @@ function processJoinSource(
       return { alias: from.alias, input: extractedInput as KeyedStream }
     }
     default:
-      throw new Error(`Unsupported join source type: ${(from as any).type}`)
+      throw new UnsupportedJoinSourceTypeError((from as any).type)
   }
 }
 

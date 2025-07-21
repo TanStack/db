@@ -169,7 +169,7 @@ describe(`Query2 Subqueries`, () => {
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
-      const pipeline = compileQuery(builtQuery, { issues: issuesInput })
+      const { pipeline } = compileQuery(builtQuery, { issues: issuesInput })
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -261,7 +261,7 @@ describe(`Query2 Subqueries`, () => {
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
       const usersInput = createUserInput(graph)
-      const pipeline = compileQuery(builtQuery, {
+      const { pipeline } = compileQuery(builtQuery, {
         issues: issuesInput,
         users: usersInput,
       })
@@ -321,7 +321,7 @@ describe(`Query2 Subqueries`, () => {
       // Execute the aggregate query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
-      const pipeline = compileQuery(builtQuery, { issues: issuesInput })
+      const { pipeline } = compileQuery(builtQuery, { issues: issuesInput })
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(

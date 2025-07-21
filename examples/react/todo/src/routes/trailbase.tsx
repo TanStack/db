@@ -20,7 +20,7 @@ export const Route = createFileRoute(`/trailbase`)({
 })
 
 function TrailBasePage() {
-  // Get data using live queries with Electric collections
+  // Get data using live queries with TrailBase collections
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todo: trailBaseTodoCollection })

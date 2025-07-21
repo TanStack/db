@@ -32,22 +32,24 @@ const sampleDepartments: Array<Department> = [
   { id: 3, name: `Marketing`, budget: 60000 },
 ]
 
-function createUsersCollection() {
+function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<User>({
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
+      autoIndex,
     })
   )
 }
 
-function createDepartmentsCollection() {
+function createDepartmentsCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Department>({
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: sampleDepartments,
+      autoIndex,
     })
   )
 }
@@ -84,14 +86,14 @@ const expectedResults = {
   },
 } as const
 
-function testJoinType(joinType: JoinType) {
-  describe(`${joinType} joins`, () => {
+function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
+  describe(`${joinType} joins with autoIndex ${autoIndex}`, () => {
     let usersCollection: ReturnType<typeof createUsersCollection>
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
     beforeEach(() => {
-      usersCollection = createUsersCollection()
-      departmentsCollection = createDepartmentsCollection()
+      usersCollection = createUsersCollection(autoIndex)
+      departmentsCollection = createDepartmentsCollection(autoIndex)
     })
 
     test(`should perform ${joinType} join with explicit select`, () => {
@@ -456,167 +458,456 @@ function testJoinType(joinType: JoinType) {
   })
 }
 
-describe(`Query JOIN Operations`, () => {
-  // Generate tests for each join type
-  joinTypes.forEach((joinType) => {
-    testJoinType(joinType)
-  })
-
-  describe(`Complex Join Scenarios`, () => {
-    let usersCollection: ReturnType<typeof createUsersCollection>
-    let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
-
-    beforeEach(() => {
-      usersCollection = createUsersCollection()
-      departmentsCollection = createDepartmentsCollection()
+function createJoinTests(autoIndex: `off` | `eager`): void {
+  describe(`with autoIndex ${autoIndex}`, () => {
+    // Generate tests for each join type
+    joinTypes.forEach((joinType) => {
+      testJoinType(joinType, autoIndex)
     })
 
-    test(`should handle multiple simultaneous updates`, () => {
-      const innerJoinQuery = createLiveQueryCollection({
-        startSync: true,
-        query: (q) =>
-          q
-            .from({ user: usersCollection })
-            .join(
-              { dept: departmentsCollection },
-              ({ user, dept }) => eq(user.department_id, dept.id),
-              `inner`
-            )
-            .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
-            })),
+    describe(`Complex Join Scenarios`, () => {
+      let usersCollection: ReturnType<typeof createUsersCollection>
+      let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
+
+      beforeEach(() => {
+        usersCollection = createUsersCollection(autoIndex)
+        departmentsCollection = createDepartmentsCollection(autoIndex)
       })
 
-      expect(innerJoinQuery.size).toBe(3)
+      test(`should handle multiple simultaneous updates`, () => {
+        const innerJoinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `inner`
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
 
-      // Perform multiple operations in a single transaction
-      usersCollection.utils.begin()
-      departmentsCollection.utils.begin()
+        expect(innerJoinQuery.size).toBe(3)
 
-      // Delete Alice
-      const alice = sampleUsers.find((u) => u.id === 1)!
-      usersCollection.utils.write({ type: `delete`, value: alice })
+        // Perform multiple operations in a single transaction
+        usersCollection.utils.begin()
+        departmentsCollection.utils.begin()
 
-      // Add new user Eve to Engineering
-      const eve: User = {
-        id: 5,
-        name: `Eve`,
-        email: `eve@example.com`,
-        department_id: 1,
-      }
-      usersCollection.utils.write({ type: `insert`, value: eve })
+        // Delete Alice
+        const alice = sampleUsers.find((u) => u.id === 1)!
+        usersCollection.utils.write({ type: `delete`, value: alice })
 
-      // Add new department IT
-      const itDept: Department = { id: 4, name: `IT`, budget: 120000 }
-      departmentsCollection.utils.write({ type: `insert`, value: itDept })
+        // Add new user Eve to Engineering
+        const eve: User = {
+          id: 5,
+          name: `Eve`,
+          email: `eve@example.com`,
+          department_id: 1,
+        }
+        usersCollection.utils.write({ type: `insert`, value: eve })
 
-      // Update Dave to join IT
-      const updatedDave: User = {
-        ...sampleUsers.find((u) => u.id === 4)!,
-        department_id: 4,
-      }
-      usersCollection.utils.write({ type: `update`, value: updatedDave })
+        // Add new department IT
+        const itDept: Department = { id: 4, name: `IT`, budget: 120000 }
+        departmentsCollection.utils.write({ type: `insert`, value: itDept })
 
-      usersCollection.utils.commit()
-      departmentsCollection.utils.commit()
+        // Update Dave to join IT
+        const updatedDave: User = {
+          ...sampleUsers.find((u) => u.id === 4)!,
+          department_id: 4,
+        }
+        usersCollection.utils.write({ type: `update`, value: updatedDave })
 
-      // Should still have 4 results: Bob+Eng, Charlie+Sales, Eve+Eng, Dave+IT
-      expect(innerJoinQuery.size).toBe(4)
+        usersCollection.utils.commit()
+        departmentsCollection.utils.commit()
 
-      const resultNames = innerJoinQuery.toArray.map((r) => r.user_name).sort()
-      expect(resultNames).toEqual([`Bob`, `Charlie`, `Dave`, `Eve`])
+        // Should still have 4 results: Bob+Eng, Charlie+Sales, Eve+Eng, Dave+IT
+        expect(innerJoinQuery.size).toBe(4)
 
-      const daveResult = innerJoinQuery.toArray.find(
-        (r) => r.user_name === `Dave`
-      )
-      expect(daveResult).toMatchObject({
-        user_name: `Dave`,
-        department_name: `IT`,
+        const resultNames = innerJoinQuery.toArray
+          .map((r) => r.user_name)
+          .sort()
+        expect(resultNames).toEqual([`Bob`, `Charlie`, `Dave`, `Eve`])
+
+        const daveResult = innerJoinQuery.toArray.find(
+          (r) => r.user_name === `Dave`
+        )
+        expect(daveResult).toMatchObject({
+          user_name: `Dave`,
+          department_name: `IT`,
+        })
+      })
+
+      test(`should handle empty collections`, () => {
+        const emptyUsers = createCollection(
+          mockSyncCollectionOptions<User>({
+            id: `empty-users`,
+            getKey: (user) => user.id,
+            initialData: [],
+          })
+        )
+
+        const innerJoinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: emptyUsers })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `inner`
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
+
+        expect(innerJoinQuery.size).toBe(0)
+
+        // Add user to empty collection
+        const newUser: User = {
+          id: 1,
+          name: `Alice`,
+          email: `alice@example.com`,
+          department_id: 1,
+        }
+        emptyUsers.utils.begin()
+        emptyUsers.utils.write({ type: `insert`, value: newUser })
+        emptyUsers.utils.commit()
+
+        expect(innerJoinQuery.size).toBe(1)
+        const result = innerJoinQuery.get(`[1,1]`)
+        expect(result).toMatchObject({
+          user_name: `Alice`,
+          department_name: `Engineering`,
+        })
+      })
+
+      test(`should handle null join keys correctly`, () => {
+        // Test with user that has null department_id
+        const leftJoinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                `left`
+              )
+              .select(({ user, dept }) => ({
+                user_id: user.id,
+                user_name: user.name,
+                department_id: user.department_id,
+                department_name: dept.name,
+              })),
+        })
+
+        const results = leftJoinQuery.toArray
+        expect(results).toHaveLength(4)
+
+        // Dave has null department_id
+        const dave = results.find((r) => r.user_name === `Dave`)
+        expect(dave).toMatchObject({
+          user_id: 4,
+          user_name: `Dave`,
+          department_id: undefined,
+          department_name: undefined,
+        })
+
+        // Other users should have department names
+        const alice = results.find((r) => r.user_name === `Alice`)
+        expect(alice?.department_name).toBe(`Engineering`)
       })
     })
 
-    test(`should handle empty collections`, () => {
-      const emptyUsers = createCollection(
-        mockSyncCollectionOptions<User>({
-          id: `empty-users`,
+    test(`should self-join`, () => {
+      // This test reproduces the exact scenario from the bug report
+      type SelfJoinUser = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      const selfJoinSampleUsers: Array<SelfJoinUser> = [
+        { id: 1, name: `Alice`, parentId: undefined },
+        { id: 2, name: `Bob`, parentId: 1 },
+        { id: 3, name: `Charlie`, parentId: 1 },
+        { id: 4, name: `Dave`, parentId: 2 },
+        { id: 5, name: `Eve`, parentId: 3 },
+      ]
+
+      const selfJoinUsersCollection = createCollection(
+        mockSyncCollectionOptions<SelfJoinUser>({
+          id: `test-users-self-join`,
           getKey: (user) => user.id,
-          initialData: [],
+          initialData: selfJoinSampleUsers,
         })
       )
 
-      const innerJoinQuery = createLiveQueryCollection({
+      const selfJoinQuery = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
           q
-            .from({ user: emptyUsers })
+            .from({ users: selfJoinUsersCollection })
             .join(
-              { dept: departmentsCollection },
-              ({ user, dept }) => eq(user.department_id, dept.id),
+              { parentUsers: selfJoinUsersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
               `inner`
             )
-            .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
+            .select(({ users, parentUsers }) => ({
+              user_id: users.id,
+              user_name: users.name,
+              parent_id: parentUsers.id,
+              parent_name: parentUsers.name,
             })),
       })
 
-      expect(innerJoinQuery.size).toBe(0)
+      const results = selfJoinQuery.toArray
 
-      // Add user to empty collection
-      const newUser: User = {
-        id: 1,
-        name: `Alice`,
-        email: `alice@example.com`,
-        department_id: 1,
-      }
-      emptyUsers.utils.begin()
-      emptyUsers.utils.write({ type: `insert`, value: newUser })
-      emptyUsers.utils.commit()
+      // Should have 4 results: Bob->Alice, Charlie->Alice, Dave->Bob, Eve->Charlie
+      expect(results).toHaveLength(4)
 
-      expect(innerJoinQuery.size).toBe(1)
-      const result = innerJoinQuery.get(`[1,1]`)
-      expect(result).toMatchObject({
-        user_name: `Alice`,
-        department_name: `Engineering`,
+      // Check specific relationships
+      const bobResult = results.find((r) => r.user_name === `Bob`)
+      expect(bobResult).toMatchObject({
+        user_id: 2,
+        user_name: `Bob`,
+        parent_id: 1,
+        parent_name: `Alice`,
       })
+
+      const daveResult = results.find((r) => r.user_name === `Dave`)
+      expect(daveResult).toMatchObject({
+        user_id: 4,
+        user_name: `Dave`,
+        parent_id: 2,
+        parent_name: `Bob`,
+      })
+
+      // Alice should not appear as a user (she has no parent)
+      const aliceAsUser = results.find((r) => r.user_name === `Alice`)
+      expect(aliceAsUser).toBeUndefined()
+
+      // Alice should appear as a parent
+      const aliceAsParent = results.find((r) => r.parent_name === `Alice`)
+      expect(aliceAsParent).toBeDefined()
     })
 
-    test(`should handle null join keys correctly`, () => {
-      // Test with user that has null department_id
-      const leftJoinQuery = createLiveQueryCollection({
+    test(`should handle both directions of eq expression in joins`, () => {
+      // Test that both eq(users.parentId, parentUsers.id) and eq(parentUsers.id, users.parentId) work
+      type BidirectionalUser = {
+        id: number
+        name: string
+        parentId: number | undefined
+      }
+
+      const bidirectionalSampleUsers: Array<BidirectionalUser> = [
+        { id: 1, name: `Alice`, parentId: undefined },
+        { id: 2, name: `Bob`, parentId: 1 },
+        { id: 3, name: `Charlie`, parentId: 1 },
+      ]
+
+      const bidirectionalUsersCollection = createCollection(
+        mockSyncCollectionOptions<BidirectionalUser>({
+          id: `test-users-bidirectional`,
+          getKey: (user) => user.id,
+          initialData: bidirectionalSampleUsers,
+        })
+      )
+
+      // Test forward direction: eq(users.parentId, parentUsers.id)
+      const forwardJoinQuery = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
           q
-            .from({ user: usersCollection })
+            .from({ users: bidirectionalUsersCollection })
             .join(
-              { dept: departmentsCollection },
-              ({ user, dept }) => eq(user.department_id, dept.id),
-              `left`
+              { parentUsers: bidirectionalUsersCollection },
+              ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
+              `inner`
             )
-            .select(({ user, dept }) => ({
-              user_id: user.id,
-              user_name: user.name,
-              department_id: user.department_id,
-              department_name: dept.name,
+            .select(({ users, parentUsers }) => ({
+              user_name: users.name,
+              parent_name: parentUsers.name,
             })),
       })
 
-      const results = leftJoinQuery.toArray
-      expect(results).toHaveLength(4)
+      const forwardResults = forwardJoinQuery.toArray
+      expect(forwardResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
-      // Dave has null department_id
-      const dave = results.find((r) => r.user_name === `Dave`)
-      expect(dave).toMatchObject({
-        user_id: 4,
-        user_name: `Dave`,
-        department_id: undefined,
-        department_name: undefined,
+      // Test reverse direction: eq(parentUsers.id, users.parentId)
+      const reverseJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ users: bidirectionalUsersCollection })
+            .join(
+              { parentUsers: bidirectionalUsersCollection },
+              ({ users, parentUsers }) => eq(parentUsers.id, users.parentId),
+              `inner`
+            )
+            .select(({ users, parentUsers }) => ({
+              user_name: users.name,
+              parent_name: parentUsers.name,
+            })),
       })
 
-      // Other users should have department names
-      const alice = results.find((r) => r.user_name === `Alice`)
-      expect(alice?.department_name).toBe(`Engineering`)
+      const reverseResults = reverseJoinQuery.toArray
+      expect(reverseResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
+
+      // Both should produce identical results
+      expect(forwardResults).toEqual(reverseResults)
+
+      // Verify the results are correct
+      const bobForward = forwardResults.find((r) => r.user_name === `Bob`)
+      const bobReverse = reverseResults.find((r) => r.user_name === `Bob`)
+      expect(bobForward).toEqual(bobReverse)
+      expect(bobForward).toMatchObject({
+        user_name: `Bob`,
+        parent_name: `Alice`,
+      })
+    })
+
+    test(`should throw error when both expressions refer to the same table`, () => {
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-same-table`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
+      expect(() => {
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
+              `inner`
+            ),
+        })
+      }).toThrow(
+        `Invalid join condition: both expressions refer to the same table "user"`
+      )
+    })
+
+    test(`should throw error when expressions don't reference table aliases`, () => {
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-no-refs`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
+      expect(() => {
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              () => eq(1, 2), // Constants, no table references
+              `inner`
+            ),
+        })
+      }).toThrow(
+        `Invalid join condition: both expressions refer to the same table "unknown"`
+      )
+    })
+
+    test(`should throw error when expressions reference tables not involved in join`, () => {
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-wrong-table`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
+      // This test demonstrates the error when trying to reference a table not in the join
+      // We'll use a different approach - create a query that references a non-existent table alias
+      expect(() => {
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
+              `inner`
+            ),
+        })
+      }).toThrow(
+        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
+      )
+    })
+
+    test(`should throw error when one expression references table not in join`, () => {
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-one-wrong-table`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
+      expect(() => {
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
+              `inner`
+            ),
+        })
+      }).toThrow(
+        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
+      )
+    })
+
+    test(`should throw error when function expression has mixed table references`, () => {
+      const usersCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-mixed-refs`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+        })
+      )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
+      expect(() => {
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ user: usersCollection }).join(
+              { dept: departmentsCollection },
+              ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
+              `inner`
+            ),
+        })
+      }).toThrow(
+        `Invalid join condition: both expressions refer to the same table "user"`
+      )
     })
   })
+}
+
+describe(`Query JOIN Operations`, () => {
+  createJoinTests(`off`)
+  createJoinTests(`eager`)
 })

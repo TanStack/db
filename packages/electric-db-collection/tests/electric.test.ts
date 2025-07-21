@@ -250,7 +250,7 @@ describe(`Electric Integration`, () => {
         // @ts-expect-error
         collection.utils.awaitTxId(`123`)
       ).rejects.toThrowErrorMatchingInlineSnapshot(
-        `[TypeError: Expected number in awaitTxId, received string]`
+        `[ExpectedNumberInAwaitTxIdError: Expected number in awaitTxId, received string]`
       )
 
       // The txid should be tracked and awaitTxId should resolve immediately

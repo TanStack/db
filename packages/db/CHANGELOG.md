@@ -1,5 +1,151 @@
 # @tanstack/db
 
+## 0.0.29
+
+### Patch Changes
+
+- Automatically restart collections from cleaned-up state when operations are called ([#285](https://github.com/TanStack/db/pull/285))
+
+  Collections in a `cleaned-up` state now automatically restart when operations like `insert()`, `update()`, or `delete()` are called on them. This matches the behavior of other collection access patterns and provides a better developer experience by avoiding unnecessary errors.
+
+- Add collection index system for optimized queries and subscriptions ([#257](https://github.com/TanStack/db/pull/257))
+
+  This release introduces a comprehensive index system for collections that enables fast lookups and query optimization:
+
+- Enabled live queries to use the collection indexes ([#258](https://github.com/TanStack/db/pull/258))
+
+  Live queries now use the collection indexes for many queries, using the optimized query pipeline to push where clauses to the collection, which is then able to use the index to filter the data.
+
+- Added an auto-indexing system that creates indexes on collection eagerly when querying, this is a performance optimization that can be disabled by setting the autoIndex option to `off`. ([#292](https://github.com/TanStack/db/pull/292))
+
+- feat: Replace string-based errors with named error classes for better error handling ([#297](https://github.com/TanStack/db/pull/297))
+
+  This comprehensive update replaces all string-based error throws throughout the TanStack DB codebase with named error classes, providing better type safety and developer experience.
+
+  ## New Features
+  - **Root `TanStackDBError` class** - all errors inherit from a common base for unified error handling
+  - **Named error classes** organized by package and functional area
+  - **Type-safe error handling** using `instanceof` checks instead of string matching
+  - **Package-specific error definitions** - each adapter has its own error classes
+  - **Better IDE support** with autocomplete for error types
+
+  ## Package Structure
+
+  ### Core Package (`@tanstack/db`)
+
+  Contains generic errors used across the ecosystem:
+  - Collection configuration, state, and operation errors
+  - Transaction lifecycle and mutation errors
+  - Query building, compilation, and execution errors
+  - Storage and serialization errors
+
+  ### Adapter Packages
+
+  Each adapter now exports its own specific error classes:
+  - **`@tanstack/electric-db-collection`**: Electric-specific errors
+  - **`@tanstack/trailbase-db-collection`**: TrailBase-specific errors
+  - **`@tanstack/query-db-collection`**: Query collection specific errors
+
+  ## Breaking Changes
+  - Error handling code using string matching will need to be updated to use `instanceof` checks
+  - Some error messages may have slight formatting changes
+  - Adapter-specific errors now need to be imported from their respective packages
+
+  ## Migration Guide
+
+  ### Core DB Errors
+
+  **Before:**
+
+  ```ts
+  try {
+    collection.insert(data)
+  } catch (error) {
+    if (error.message.includes("already exists")) {
+      // Handle duplicate key error
+    }
+  }
+  ```
+
+  **After:**
+
+  ```ts
+  import { DuplicateKeyError } from "@tanstack/db"
+
+  try {
+    collection.insert(data)
+  } catch (error) {
+    if (error instanceof DuplicateKeyError) {
+      // Type-safe error handling
+    }
+  }
+  ```
+
+  ### Adapter-Specific Errors
+
+  **Before:**
+
+  ```ts
+  // Electric collection errors were imported from @tanstack/db
+  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  ```
+
+  **After:**
+
+  ```ts
+  // Now import from the specific adapter package
+  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  ```
+
+  ### Unified Error Handling
+
+  **New:**
+
+  ```ts
+  import { TanStackDBError } from "@tanstack/db"
+
+  try {
+    // Any TanStack DB operation
+  } catch (error) {
+    if (error instanceof TanStackDBError) {
+      // Handle all TanStack DB errors uniformly
+      console.log("TanStack DB error:", error.message)
+    }
+  }
+  ```
+
+  ## Benefits
+  - **Type Safety**: All errors now have specific types that can be caught with `instanceof`
+  - **Unified Error Handling**: Root `TanStackDBError` class allows catching all library errors with a single check
+  - **Better Package Separation**: Each adapter manages its own error types
+  - **Developer Experience**: Better IDE support with autocomplete for error types
+  - **Maintainability**: Error definitions are co-located with their usage
+  - **Consistency**: Uniform error handling patterns across the entire codebase
+
+  All error classes maintain the same error messages and behavior while providing better structure and package separation.
+
+## 0.0.28
+
+### Patch Changes
+
+- fixed an issue with joins where a specific order of references in the `eq()` expression was required, and added additional validation ([#291](https://github.com/TanStack/db/pull/291))
+
+- Add comprehensive documentation for creating collection options creators ([#284](https://github.com/TanStack/db/pull/284))
+
+  This adds a new documentation page `collection-options-creator.md` that provides detailed guidance for developers building collection options creators. The documentation covers:
+  - Core requirements and configuration interfaces
+  - Sync implementation patterns with transaction lifecycle (begin, write, commit, markReady)
+  - Data parsing and type conversion using field-specific conversions
+  - Two distinct mutation handler patterns:
+    - Pattern A: User-provided handlers (Electric SQL, Query style)
+    - Pattern B: Built-in handlers (Trailbase, WebSocket style)
+  - Complete WebSocket collection example with full round-trip flow
+  - Managing optimistic state with various strategies (transaction IDs, ID-based tracking, refetch, timestamps)
+  - Best practices for deduplication, error handling, and testing
+  - Row update modes and advanced configuration options
+
+  The documentation helps developers understand when to create custom collections versus using the query collection, and provides practical examples following the established patterns from existing collection implementations.
+
 ## 0.0.27
 
 ### Patch Changes

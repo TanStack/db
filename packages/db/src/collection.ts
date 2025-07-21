@@ -1,13 +1,51 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { SortedMap } from "./SortedMap"
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from "./query/builder/ref-proxy"
+import { OrderedIndex } from "./indexes/ordered-index.js"
+import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
+import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
+import {
+  CollectionInErrorStateError,
+  CollectionIsInErrorStateError,
+  CollectionRequiresConfigError,
+  CollectionRequiresSyncConfigError,
+  DeleteKeyNotFoundError,
+  DuplicateKeyError,
+  DuplicateKeySyncError,
+  InvalidCollectionStatusTransitionError,
+  InvalidSchemaError,
+  KeyUpdateNotAllowedError,
+  MissingDeleteHandlerError,
+  MissingInsertHandlerError,
+  MissingUpdateArgumentError,
+  MissingUpdateHandlerError,
+  NegativeActiveSubscribersError,
+  NoKeysPassedToDeleteError,
+  NoKeysPassedToUpdateError,
+  NoPendingSyncTransactionCommitError,
+  NoPendingSyncTransactionWriteError,
+  SchemaMustBeSynchronousError,
+  SchemaValidationError,
+  SyncCleanupError,
+  SyncTransactionAlreadyCommittedError,
+  SyncTransactionAlreadyCommittedWriteError,
+  UndefinedKeyError,
+  UpdateKeyNotFoundError,
+} from "./errors"
+import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
+  CurrentStateAsChangesOptions,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -16,10 +54,13 @@ import type {
   ResolveInsertInput,
   ResolveType,
   StandardSchema,
+  SubscribeChangesOptions,
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
+import type { IndexOptions } from "./indexes/index-options.js"
+import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -163,35 +204,6 @@ export function createCollection<
   >
 }
 
-/**
- * Custom error class for schema validation errors
- */
-export class SchemaValidationError extends Error {
-  type: `insert` | `update`
-  issues: ReadonlyArray<{
-    message: string
-    path?: ReadonlyArray<string | number | symbol>
-  }>
-
-  constructor(
-    type: `insert` | `update`,
-    issues: ReadonlyArray<{
-      message: string
-      path?: ReadonlyArray<string | number | symbol>
-    }>,
-    message?: string
-  ) {
-    const defaultMessage = `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
-      .map((issue) => `\n- ${issue.message} - path: ${issue.path}`)
-      .join(``)}`
-
-    super(message || defaultMessage)
-    this.name = `SchemaValidationError`
-    this.type = type
-    this.issues = issues
-  }
-}
-
 export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -213,6 +225,12 @@ export class CollectionImpl<
 
   // Cached size for performance
   private _size = 0
+
+  // Index storage
+  private lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
+  private resolvedIndexes = new Map<number, BaseIndex<TKey>>()
+  private isIndexesResolved = false
+  private indexCounter = 0
 
   // Event system
   private changeListeners = new Set<ChangeListener<T, TKey>>()
@@ -323,15 +341,11 @@ export class CollectionImpl<
   private validateCollectionUsable(operation: string): void {
     switch (this._status) {
       case `error`:
-        throw new Error(
-          `Cannot perform ${operation} on collection "${this.id}" - collection is in error state. ` +
-            `Try calling cleanup() and restarting the collection.`
-        )
+        throw new CollectionInErrorStateError(operation, this.id)
       case `cleaned-up`:
-        throw new Error(
-          `Cannot perform ${operation} on collection "${this.id}" - collection has been cleaned up. ` +
-            `The collection will automatically restart on next access.`
-        )
+        // Automatically restart the collection when operations are called on cleaned-up collections
+        this.startSync()
+        break
     }
   }
 
@@ -360,9 +374,7 @@ export class CollectionImpl<
     }
 
     if (!validTransitions[from].includes(to)) {
-      throw new Error(
-        `Invalid collection status transition from "${from}" to "${to}" for collection "${this.id}"`
-      )
+      throw new InvalidCollectionStatusTransitionError(from, to, this.id)
     }
   }
 
@@ -373,6 +385,14 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
+
+    // Resolve indexes when collection becomes ready
+    if (newStatus === `ready` && !this.isIndexesResolved) {
+      // Resolve indexes asynchronously without blocking
+      this.resolveAllIndexes().catch((error) => {
+        console.warn(`Failed to resolve indexes:`, error)
+      })
+    }
   }
 
   /**
@@ -384,7 +404,7 @@ export class CollectionImpl<
   constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
     // eslint-disable-next-line
     if (!config) {
-      throw new Error(`Collection requires a config`)
+      throw new CollectionRequiresConfigError()
     }
     if (config.id) {
       this.id = config.id
@@ -394,14 +414,18 @@ export class CollectionImpl<
 
     // eslint-disable-next-line
     if (!config.sync) {
-      throw new Error(`Collection requires a sync config`)
+      throw new CollectionRequiresSyncConfigError()
     }
 
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b)
     )
 
-    this.config = config
+    // Set default values for optional config properties
+    this.config = {
+      ...config,
+      autoIndex: config.autoIndex ?? `eager`,
+    }
 
     // Store in global collections store
     collectionsStore.set(this.id, this)
@@ -453,12 +477,10 @@ export class CollectionImpl<
               this.pendingSyncedTransactions.length - 1
             ]
           if (!pendingTransaction) {
-            throw new Error(`No pending sync transaction to write to`)
+            throw new NoPendingSyncTransactionWriteError()
           }
           if (pendingTransaction.committed) {
-            throw new Error(
-              `The pending sync transaction is already committed, you can't still write to it.`
-            )
+            throw new SyncTransactionAlreadyCommittedWriteError()
           }
           const key = this.getKeyFromItem(messageWithoutKey.value)
 
@@ -470,9 +492,7 @@ export class CollectionImpl<
                 (op) => op.key === key && op.type === `delete`
               )
             ) {
-              throw new Error(
-                `Cannot insert document with key "${key}" from sync because it already exists in the collection "${this.id}"`
-              )
+              throw new DuplicateKeySyncError(key, this.id)
             }
           }
 
@@ -488,12 +508,10 @@ export class CollectionImpl<
               this.pendingSyncedTransactions.length - 1
             ]
           if (!pendingTransaction) {
-            throw new Error(`No pending sync transaction to commit`)
+            throw new NoPendingSyncTransactionCommitError()
           }
           if (pendingTransaction.committed) {
-            throw new Error(
-              `The pending sync transaction is already committed, you can't commit it again.`
-            )
+            throw new SyncTransactionAlreadyCommittedError()
           }
 
           pendingTransaction.committed = true
@@ -535,7 +553,7 @@ export class CollectionImpl<
       }
 
       if (this._status === `error`) {
-        reject(new Error(`Collection is in error state`))
+        reject(new CollectionIsInErrorStateError())
         return
       }
 
@@ -580,16 +598,12 @@ export class CollectionImpl<
       queueMicrotask(() => {
         if (error instanceof Error) {
           // Preserve the original error and stack trace
-          const wrappedError = new Error(
-            `Collection "${this.id}" sync cleanup function threw an error: ${error.message}`
-          )
+          const wrappedError = new SyncCleanupError(this.id, error)
           wrappedError.cause = error
           wrappedError.stack = error.stack
           throw wrappedError
         } else {
-          throw new Error(
-            `Collection "${this.id}" sync cleanup function threw an error: ${String(error)}`
-          )
+          throw new SyncCleanupError(this.id, error as Error | string)
         }
       })
     }
@@ -666,9 +680,7 @@ export class CollectionImpl<
       this.activeSubscribersCount = 0
       this.startGCTimer()
     } else if (this.activeSubscribersCount < 0) {
-      throw new Error(
-        `Active subscribers count is negative - this should never happen`
-      )
+      throw new NegativeActiveSubscribersError()
     }
   }
 
@@ -772,8 +784,16 @@ export class CollectionImpl<
         return true
       })
 
+      // Update indexes for the filtered events
+      if (filteredEvents.length > 0) {
+        this.updateIndexes(filteredEvents)
+      }
       this.emitEvents(filteredEvents)
     } else {
+      // Update indexes for all events
+      if (filteredEventsBySyncStatus.length > 0) {
+        this.updateIndexes(filteredEventsBySyncStatus)
+      }
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus)
     }
@@ -1217,6 +1237,11 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
+      // Update indexes for all events before emitting
+      if (events.length > 0) {
+        this.updateIndexes(events)
+      }
+
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
@@ -1246,7 +1271,7 @@ export class CollectionImpl<
       return schema as StandardSchema<T>
     }
 
-    throw new Error(`Schema must implement the standard-schema interface`)
+    throw new InvalidSchemaError()
   }
 
   public getKeyFromItem(item: T): TKey {
@@ -1255,12 +1280,167 @@ export class CollectionImpl<
 
   public generateGlobalKey(key: any, item: any): string {
     if (typeof key === `undefined`) {
-      throw new Error(
-        `An object was created without a defined key: ${JSON.stringify(item)}`
-      )
+      throw new UndefinedKeyError(item)
     }
 
     return `KEY::${this.id}/${key}`
+  }
+
+  /**
+   * Creates an index on a collection for faster queries.
+   * Indexes significantly improve query performance by allowing binary search
+   * and range queries instead of full scans.
+   *
+   * @template TResolver - The type of the index resolver (constructor or async loader)
+   * @param indexCallback - Function that extracts the indexed value from each item
+   * @param config - Configuration including index type and type-specific options
+   * @returns An index proxy that provides access to the index when ready
+   *
+   * @example
+   * // Create a default ordered index
+   * const ageIndex = collection.createIndex((row) => row.age)
+   *
+   * // Create a ordered index with custom options
+   * const ageIndex = collection.createIndex((row) => row.age, {
+   *   indexType: OrderedIndex,
+   *   options: { compareFn: customComparator },
+   *   name: 'age_btree'
+   * })
+   *
+   * // Create an async-loaded index
+   * const textIndex = collection.createIndex((row) => row.content, {
+   *   indexType: async () => {
+   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
+   *     return FullTextIndex
+   *   },
+   *   options: { language: 'en' }
+   * })
+   */
+  public createIndex<
+    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
+  >(
+    indexCallback: (row: SingleRowRefProxy<T>) => any,
+    config: IndexOptions<TResolver> = {}
+  ): IndexProxy<TKey> {
+    this.validateCollectionUsable(`createIndex`)
+
+    const indexId = ++this.indexCounter
+    const singleRowRefProxy = createSingleRowRefProxy<T>()
+    const indexExpression = indexCallback(singleRowRefProxy)
+    const expression = toExpression(indexExpression)
+
+    // Default to OrderedIndex if no type specified
+    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
+
+    // Create lazy wrapper
+    const lazyIndex = new LazyIndexWrapper<TKey>(
+      indexId,
+      expression,
+      config.name,
+      resolver,
+      config.options,
+      this.entries()
+    )
+
+    this.lazyIndexes.set(indexId, lazyIndex)
+
+    // For OrderedIndex, resolve immediately and synchronously
+    if ((resolver as unknown) === OrderedIndex) {
+      try {
+        const resolvedIndex = lazyIndex.getResolved()
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch (error) {
+        console.warn(`Failed to resolve OrderedIndex:`, error)
+      }
+    } else if (typeof resolver === `function` && resolver.prototype) {
+      // Other synchronous constructors - resolve immediately
+      try {
+        const resolvedIndex = lazyIndex.getResolved()
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch {
+        // Fallback to async resolution
+        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+          console.warn(`Failed to resolve single index:`, error)
+        })
+      }
+    } else if (this.isIndexesResolved) {
+      // Async loader but indexes are already resolved - resolve this one
+      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+        console.warn(`Failed to resolve single index:`, error)
+      })
+    }
+
+    return new IndexProxy(indexId, lazyIndex)
+  }
+
+  /**
+   * Resolve all lazy indexes (called when collection first syncs)
+   * @private
+   */
+  private async resolveAllIndexes(): Promise<void> {
+    if (this.isIndexesResolved) return
+
+    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
+      async ([indexId, lazyIndex]) => {
+        const resolvedIndex = await lazyIndex.resolve()
+
+        // Build index with current data
+        resolvedIndex.build(this.entries())
+
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+        return { indexId, resolvedIndex }
+      }
+    )
+
+    await Promise.all(resolutionPromises)
+    this.isIndexesResolved = true
+  }
+
+  /**
+   * Resolve a single index immediately
+   * @private
+   */
+  private async resolveSingleIndex(
+    indexId: number,
+    lazyIndex: LazyIndexWrapper<TKey>
+  ): Promise<BaseIndex<TKey>> {
+    const resolvedIndex = await lazyIndex.resolve()
+    resolvedIndex.build(this.entries())
+    this.resolvedIndexes.set(indexId, resolvedIndex)
+    return resolvedIndex
+  }
+
+  /**
+   * Get resolved indexes for query optimization
+   */
+  get indexes(): Map<number, BaseIndex<TKey>> {
+    return this.resolvedIndexes
+  }
+
+  /**
+   * Updates all indexes when the collection changes
+   * @private
+   */
+  private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
+    for (const index of this.resolvedIndexes.values()) {
+      for (const change of changes) {
+        switch (change.type) {
+          case `insert`:
+            index.add(change.key, change.value)
+            break
+          case `update`:
+            if (change.previousValue) {
+              index.update(change.key, change.previousValue, change.value)
+            } else {
+              index.add(change.key, change.value)
+            }
+            break
+          case `delete`:
+            index.remove(change.key, change.value)
+            break
+        }
+      }
+    }
   }
 
   private deepEqual(a: any, b: any): boolean {
@@ -1314,7 +1494,7 @@ export class CollectionImpl<
 
         // Ensure validation is synchronous
         if (result instanceof Promise) {
-          throw new TypeError(`Schema validation must be synchronous`)
+          throw new SchemaMustBeSynchronousError()
         }
 
         // If validation fails, throw a SchemaValidationError with the issues
@@ -1337,7 +1517,7 @@ export class CollectionImpl<
 
     // Ensure validation is synchronous
     if (result instanceof Promise) {
-      throw new TypeError(`Schema validation must be synchronous`)
+      throw new SchemaMustBeSynchronousError()
     }
 
     // If validation fails, throw a SchemaValidationError with the issues
@@ -1397,9 +1577,7 @@ export class CollectionImpl<
 
     // If no ambient transaction exists, check for an onInsert handler early
     if (!ambientTransaction && !this.config.onInsert) {
-      throw new Error(
-        `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
-      )
+      throw new MissingInsertHandlerError()
     }
 
     const items = Array.isArray(data) ? data : [data]
@@ -1413,7 +1591,7 @@ export class CollectionImpl<
       // Check if an item with this ID already exists in the collection
       const key = this.getKeyFromItem(validatedData)
       if (this.has(key)) {
-        throw `Cannot insert document with ID "${key}" because it already exists in the collection`
+        throw new DuplicateKeyError(key)
       }
       const globalKey = this.generateGlobalKey(key, item)
 
@@ -1552,7 +1730,7 @@ export class CollectionImpl<
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
     if (typeof keys === `undefined`) {
-      throw new Error(`The first argument to update is missing`)
+      throw new MissingUpdateArgumentError()
     }
 
     this.validateCollectionUsable(`update`)
@@ -1561,16 +1739,14 @@ export class CollectionImpl<
 
     // If no ambient transaction exists, check for an onUpdate handler early
     if (!ambientTransaction && !this.config.onUpdate) {
-      throw new Error(
-        `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
-      )
+      throw new MissingUpdateHandlerError()
     }
 
     const isArray = Array.isArray(keys)
     const keysArray = isArray ? keys : [keys]
 
     if (isArray && keysArray.length === 0) {
-      throw new Error(`No keys were passed to update`)
+      throw new NoKeysPassedToUpdateError()
     }
 
     const callback =
@@ -1582,9 +1758,7 @@ export class CollectionImpl<
     const currentObjects = keysArray.map((key) => {
       const item = this.get(key)
       if (!item) {
-        throw new Error(
-          `The key "${key}" was passed to update but an object for this key was not found in the collection`
-        )
+        throw new UpdateKeyNotFoundError(key)
       }
 
       return item
@@ -1635,9 +1809,7 @@ export class CollectionImpl<
         const modifiedItemId = this.getKeyFromItem(modifiedItem)
 
         if (originalItemId !== modifiedItemId) {
-          throw new Error(
-            `Updating the key of an item is not allowed. Original key: "${originalItemId}", Attempted new key: "${modifiedItemId}". Please delete the old item and create a new one if a key change is necessary.`
-          )
+          throw new KeyUpdateNotAllowedError(originalItemId, modifiedItemId)
         }
 
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
@@ -1751,13 +1923,11 @@ export class CollectionImpl<
 
     // If no ambient transaction exists, check for an onDelete handler early
     if (!ambientTransaction && !this.config.onDelete) {
-      throw new Error(
-        `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
-      )
+      throw new MissingDeleteHandlerError()
     }
 
     if (Array.isArray(keys) && keys.length === 0) {
-      throw new Error(`No keys were passed to delete`)
+      throw new NoKeysPassedToDeleteError()
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
@@ -1765,9 +1935,7 @@ export class CollectionImpl<
 
     for (const key of keysArray) {
       if (!this.has(key)) {
-        throw new Error(
-          `Collection.delete was called with key '${key}' but there is no item in the collection with this key`
-        )
+        throw new DeleteKeyNotFoundError(key)
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
       const mutation: PendingMutation<T, `delete`, this> = {
@@ -1903,20 +2071,32 @@ export class CollectionImpl<
 
   /**
    * Returns the current state of the collection as an array of changes
+   * @param options - Options including optional where filter
    * @returns An array of changes
+   * @example
+   * // Get all items as changes
+   * const allChanges = collection.currentStateAsChanges()
+   *
+   * // Get only items matching a condition
+   * const activeChanges = collection.currentStateAsChanges({
+   *   where: (row) => row.status === 'active'
+   * })
+   *
+   * // Get only items using a pre-compiled expression
+   * const activeChanges = collection.currentStateAsChanges({
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
-  public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    return Array.from(this.entries()).map(([key, value]) => ({
-      type: `insert`,
-      key,
-      value,
-    }))
+  public currentStateAsChanges(
+    options: CurrentStateAsChangesOptions<T> = {}
+  ): Array<ChangeMessage<T>> {
+    return currentStateAsChanges(this, options)
   }
 
   /**
    * Subscribe to changes in the collection
    * @param callback - Function called when items change
-   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
@@ -1933,24 +2113,57 @@ export class CollectionImpl<
    * const unsubscribe = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
+   *
+   * @example
+   * // Subscribe only to changes matching a condition
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   where: (row) => row.status === 'active'
+   * })
+   *
+   * @example
+   * // Subscribe using a pre-compiled expression
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
+    options: SubscribeChangesOptions<T> = {}
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
 
-    if (includeInitialState) {
-      // First send the current state as changes
-      callback(this.currentStateAsChanges())
+    // Auto-index for where expressions if enabled
+    if (options.whereExpression) {
+      ensureIndexForExpression(options.whereExpression, this)
+    }
+
+    // Create a filtered callback if where clause is provided
+    const filteredCallback =
+      options.where || options.whereExpression
+        ? createFilteredCallback(callback, options)
+        : callback
+
+    if (options.includeInitialState) {
+      // First send the current state as changes (filtered if needed)
+      const initialChanges = this.currentStateAsChanges({
+        where: options.where,
+        whereExpression: options.whereExpression,
+      })
+      filteredCallback(initialChanges)
     }
 
     // Add to batched listeners
-    this.changeListeners.add(callback)
+    this.changeListeners.add(filteredCallback)
 
     return () => {
-      this.changeListeners.delete(callback)
+      this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
     }
   }
