@@ -2109,7 +2109,9 @@ export class CollectionImpl<
     options: CurrentStateAsChangesOptions<T> = {}
   ): Array<ChangeMessage<T>> {
     // Helper function to collect filtered results
-    const collectFilteredResults = (filterFn?: (value: T) => boolean): Array<ChangeMessage<T>> => {
+    const collectFilteredResults = (
+      filterFn?: (value: T) => boolean
+    ): Array<ChangeMessage<T>> => {
       const result: Array<ChangeMessage<T>> = []
       for (const [key, value] of this.entries()) {
         // If no filter function is provided, include all items
@@ -2192,7 +2194,7 @@ export class CollectionImpl<
         const expression = toExpression(whereExpression)
         const evaluator = compileSingleRowExpression(expression)
         const result = evaluator(item as Record<string, unknown>)
-        // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
+        // WHERE clauses should always evaluate to boolean predicates
         return result
       } catch {
         // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
@@ -2295,9 +2297,8 @@ export class CollectionImpl<
         } else if (change.type === `update`) {
           // For updates, we need to check both old and new values
           const newValueMatches = filterFn(change.value)
-          const oldValueMatches = change.previousValue
-            ? filterFn(change.previousValue)
-            : false
+          const oldValueMatches =
+            change.previousValue && filterFn(change.previousValue)
 
           if (newValueMatches && oldValueMatches) {
             // Both old and new match: emit update

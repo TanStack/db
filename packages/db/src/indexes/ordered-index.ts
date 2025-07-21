@@ -44,8 +44,9 @@ export class OrderedIndex<
     try {
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
-      console.warn(`Failed to evaluate index expression for key ${key}:`, error)
-      return
+      throw new Error(
+        `Failed to evaluate index expression for key ${key}: ${error}`
+      )
     }
 
     // Check if this value already exists
