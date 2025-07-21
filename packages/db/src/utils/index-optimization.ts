@@ -145,6 +145,137 @@ export function canOptimizeExpression<TKey extends string | number>(
 }
 
 /**
+ * Optimizes compound range queries on the same field
+ * Example: WHERE age > 5 AND age < 10
+ */
+function optimizeCompoundRangeQuery<TKey extends string | number>(
+  expression: BasicExpression,
+  indexes: Map<number, BaseIndex<TKey>>
+): OptimizationResult<TKey> {
+  if (expression.type !== `func` || expression.args.length < 2) {
+    return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  // Group range operations by field
+  const fieldOperations = new Map<
+    string,
+    Array<{
+      operation: `gt` | `gte` | `lt` | `lte`
+      value: any
+    }>
+  >()
+
+  // Collect all range operations from AND arguments
+  for (const arg of expression.args) {
+    if (arg.type === `func` && [`gt`, `gte`, `lt`, `lte`].includes(arg.name)) {
+      const rangeOp = arg as any
+      if (rangeOp.args.length === 2) {
+        const leftArg = rangeOp.args[0]!
+        const rightArg = rangeOp.args[1]!
+
+        // Check both directions: field op value AND value op field
+        let fieldArg: BasicExpression | null = null
+        let valueArg: BasicExpression | null = null
+        let operation = rangeOp.name as `gt` | `gte` | `lt` | `lte`
+
+        if (leftArg.type === `ref` && rightArg.type === `val`) {
+          // field op value
+          fieldArg = leftArg
+          valueArg = rightArg
+        } else if (leftArg.type === `val` && rightArg.type === `ref`) {
+          // value op field - need to flip the operation
+          fieldArg = rightArg
+          valueArg = leftArg
+
+          // Flip the operation for reverse comparison
+          switch (operation) {
+            case `gt`:
+              operation = `lt`
+              break
+            case `gte`:
+              operation = `lte`
+              break
+            case `lt`:
+              operation = `gt`
+              break
+            case `lte`:
+              operation = `gte`
+              break
+          }
+        }
+
+        if (fieldArg && valueArg) {
+          const fieldPath = (fieldArg as any).path
+          const fieldKey = fieldPath.join(`.`)
+          const value = (valueArg as any).value
+
+          if (!fieldOperations.has(fieldKey)) {
+            fieldOperations.set(fieldKey, [])
+          }
+          fieldOperations.get(fieldKey)!.push({ operation, value })
+        }
+      }
+    }
+  }
+
+  // Check if we have multiple operations on the same field
+  for (const [fieldKey, operations] of fieldOperations) {
+    if (operations.length >= 2) {
+      const fieldPath = fieldKey.split(`.`)
+      const index = findIndexForField(indexes, fieldPath)
+
+      if (index && index.supports(`gt`) && index.supports(`lt`)) {
+        // Build range query options
+        let from: any = undefined
+        let to: any = undefined
+        let fromInclusive = true
+        let toInclusive = true
+
+        for (const { operation, value } of operations) {
+          switch (operation) {
+            case `gt`:
+              if (from === undefined || value > from) {
+                from = value
+                fromInclusive = false
+              }
+              break
+            case `gte`:
+              if (from === undefined || value > from) {
+                from = value
+                fromInclusive = true
+              }
+              break
+            case `lt`:
+              if (to === undefined || value < to) {
+                to = value
+                toInclusive = false
+              }
+              break
+            case `lte`:
+              if (to === undefined || value < to) {
+                to = value
+                toInclusive = true
+              }
+              break
+          }
+        }
+
+        const matchingKeys = (index as any).rangeQuery({
+          from,
+          to,
+          fromInclusive,
+          toInclusive,
+        })
+
+        return { canOptimize: true, matchingKeys }
+      }
+    }
+  }
+
+  return { canOptimize: false, matchingKeys: new Set() }
+}
+
+/**
  * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
  */
 function optimizeSimpleComparison<TKey extends string | number>(
@@ -253,6 +384,12 @@ function optimizeAndExpression<TKey extends string | number>(
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
+  }
+
+  // First, try to optimize compound range queries on the same field
+  const compoundRangeResult = optimizeCompoundRangeQuery(expression, indexes)
+  if (compoundRangeResult.canOptimize) {
+    return compoundRangeResult
   }
 
   const results: Array<OptimizationResult<TKey>> = []

@@ -55,19 +55,50 @@ function createIndexUsageTracker(collection: any): {
     // Track lookup calls (new unified method)
     const originalLookup = index.lookup.bind(index)
     index.lookup = function (operation: any, value: any) {
-      stats.rangeQueryCalls++
-      stats.indexesUsed.push(String(indexId))
-      stats.queriesExecuted.push({
-        type: `index`,
-        operation,
-        field: index.expression?.path?.join(`.`),
-        value,
-      })
+      // Only track non-range operations to avoid double counting
+      // Range operations (gt, gte, lt, lte) are handled by rangeQuery tracking
+      if (![`gt`, `gte`, `lt`, `lte`].includes(operation)) {
+        stats.rangeQueryCalls++
+        stats.indexesUsed.push(String(indexId))
+        stats.queriesExecuted.push({
+          type: `index`,
+          operation,
+          field: index.expression?.path?.join(`.`),
+          value,
+        })
+      }
       return originalLookup(operation, value)
+    }
+
+    // Track rangeQuery calls (for compound range queries)
+    if (index.rangeQuery) {
+      const originalRangeQuery = index.rangeQuery.bind(index)
+      index.rangeQuery = function (options: any) {
+        stats.rangeQueryCalls++
+        stats.indexesUsed.push(String(indexId))
+
+        // Determine the actual operations from the options
+        const operations: Array<string> = []
+        if (options.from !== undefined) {
+          operations.push(options.fromInclusive ? `gte` : `gt`)
+        }
+        if (options.to !== undefined) {
+          operations.push(options.toInclusive ? `lte` : `lt`)
+        }
+
+        stats.queriesExecuted.push({
+          type: `index`,
+          operation: operations.join(` AND `),
+          field: index.expression?.path?.join(`.`),
+          value: options,
+        })
+        return originalRangeQuery(options)
+      }
     }
 
     originalMethods.set(indexId, {
       lookup: originalLookup,
+      rangeQuery: index.rangeQuery ? index.rangeQuery.bind(index) : undefined,
     })
   }
 
@@ -95,6 +126,9 @@ function createIndexUsageTracker(collection: any): {
       const original = originalMethods.get(indexId)
       if (original) {
         index.lookup = original.lookup
+        if (original.rangeQuery) {
+          index.rangeQuery = original.rangeQuery
+        }
       }
     }
     collection.entries = originalEntries
@@ -258,7 +292,7 @@ describe(`Collection Indexes`, () => {
     it(`should create an index on a simple field`, () => {
       const index = collection.createIndex((row) => row.status)
 
-      expect(typeof index.id).toBe('number')
+      expect(typeof index.id).toBe(`number`)
       expect(index.id).toBeGreaterThan(0)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
@@ -711,27 +745,21 @@ describe(`Collection Indexes`, () => {
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Bob`, `Diana`])
 
-        // Verify 100% index usage - should use age index twice
+        // Verify 100% index usage - should use age index once with compound range query
         expectIndexUsage(tracker.stats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 2, // gt and lt operations
+          indexCallCount: 1, // Single compound range query (gt and lt combined)
           fullScanCallCount: 0,
         })
 
-        // Verify both operations used the age index
-        expect(tracker.stats.queriesExecuted).toHaveLength(2)
+        // Verify compound range query was used
+        expect(tracker.stats.queriesExecuted).toHaveLength(1)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
-          operation: `gt`,
+          operation: `gt AND lt`,
           field: `age`,
-          value: 25,
-        })
-        expect(tracker.stats.queriesExecuted[1]).toMatchObject({
-          type: `index`,
-          operation: `lt`,
-          field: `age`,
-          value: 35,
+          value: { from: 25, fromInclusive: false, to: 35, toInclusive: false },
         })
       })
     })
@@ -766,7 +794,7 @@ describe(`Collection Indexes`, () => {
           type: `index`,
           operation: `gte`,
           field: `age`,
-          value: 25,
+          value: { from: 25, fromInclusive: true },
         })
       })
     })
@@ -850,29 +878,23 @@ describe(`Collection Indexes`, () => {
         const names = result.map((r) => r.value.name).sort()
         expect(names).toEqual([`Alice`, `Bob`, `Diana`])
 
-        // Verify 100% index usage - should use age index twice + status index once
+        // Verify 100% index usage - should use age index once (compound) + status index once
         expectIndexUsage(tracker.stats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 3,
+          indexCallCount: 2, // Compound range query + status equality
           fullScanCallCount: 0,
         })
 
         // Verify the operations
-        expect(tracker.stats.queriesExecuted).toHaveLength(3)
+        expect(tracker.stats.queriesExecuted).toHaveLength(2)
         expect(tracker.stats.queriesExecuted[0]).toMatchObject({
           type: `index`,
-          operation: `gte`,
+          operation: `gte AND lte`,
           field: `age`,
-          value: 25,
+          value: { from: 25, fromInclusive: true, to: 30, toInclusive: true },
         })
         expect(tracker.stats.queriesExecuted[1]).toMatchObject({
-          type: `index`,
-          operation: `lte`,
-          field: `age`,
-          value: 30,
-        })
-        expect(tracker.stats.queriesExecuted[2]).toMatchObject({
           type: `index`,
           operation: `eq`,
           field: `status`,
@@ -1108,7 +1130,12 @@ describe(`Collection Indexes`, () => {
         // Verify specific indexes were used
         expect(tracker.stats.indexesUsed).toHaveLength(3)
         expect(tracker.stats.queriesExecuted).toEqual([
-          { type: `index`, operation: `gte`, field: `age`, value: 30 },
+          {
+            type: `index`,
+            operation: `gte`,
+            field: `age`,
+            value: { from: 30, fromInclusive: true },
+          },
           { type: `index`, operation: `eq`, field: `status`, value: `active` },
           { type: `index`, operation: `eq`, field: `name`, value: `Alice` },
         ])

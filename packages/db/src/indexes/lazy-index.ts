@@ -234,9 +234,9 @@ export class IndexProxy<TKey extends string | number = string | number> {
     return resolved.equalityLookup?.(value) ?? new Set()
   }
 
-  rangeQuery(operation: string, value: any): Set<TKey> {
+  rangeQuery(options: any): Set<TKey> {
     const resolved = this.index as any
-    return resolved.rangeQuery?.(operation, value) ?? new Set()
+    return resolved.rangeQuery?.(options) ?? new Set()
   }
 
   inArrayLookup(values: Array<any>): Set<TKey> {

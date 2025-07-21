@@ -11,6 +11,16 @@ export interface OrderedIndexOptions {
 }
 
 /**
+ * Options for range queries
+ */
+export interface RangeQueryOptions {
+  from?: any
+  to?: any
+  fromInclusive?: boolean
+  toInclusive?: boolean
+}
+
+/**
  * Ordered index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
  */
@@ -150,10 +160,16 @@ export class OrderedIndex<
         result = this.equalityLookup(value)
         break
       case `gt`:
+        result = this.rangeQuery({ from: value, fromInclusive: false })
+        break
       case `gte`:
+        result = this.rangeQuery({ from: value, fromInclusive: true })
+        break
       case `lt`:
+        result = this.rangeQuery({ to: value, toInclusive: false })
+        break
       case `lte`:
-        result = this.rangeQuery(operation, value)
+        result = this.rangeQuery({ to: value, toInclusive: true })
         break
       case `in`:
         result = this.inArrayLookup(value)
@@ -183,50 +199,70 @@ export class OrderedIndex<
   }
 
   /**
-   * Performs a range query
+   * Performs a range query with options
+   * This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
    */
-  rangeQuery(operation: `gt` | `gte` | `lt` | `lte`, value: any): Set<TKey> {
+  rangeQuery(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    // Use binary search to find the starting position
-    const insertIndex = findInsertPosition(
-      this.orderedEntries,
-      value,
-      this.compareFn
-    )
+    if (this.orderedEntries.length === 0) {
+      return result
+    }
 
+    // Find start position
     let startIndex = 0
-    let endIndex = this.orderedEntries.length
+    if (from !== undefined) {
+      const fromInsertIndex = findInsertPosition(
+        this.orderedEntries,
+        from,
+        this.compareFn
+      )
 
-    switch (operation) {
-      case `lt`:
-        endIndex = insertIndex
-        break
-      case `lte`:
-        endIndex = insertIndex
-        // Include the value if it exists
+      if (fromInclusive) {
+        // Include values equal to 'from'
+        startIndex = fromInsertIndex
+      } else {
+        // Exclude values equal to 'from'
+        startIndex = fromInsertIndex
+        // Skip the value if it exists at this position
         if (
-          insertIndex < this.orderedEntries.length &&
-          this.compareFn(this.orderedEntries[insertIndex]![0], value) === 0
+          startIndex < this.orderedEntries.length &&
+          this.compareFn(this.orderedEntries[startIndex]![0], from) === 0
         ) {
-          endIndex = insertIndex + 1
+          startIndex++
         }
-        break
-      case `gt`:
-        startIndex = insertIndex
-        // Skip the value if it exists
+      }
+    }
+
+    // Find end position
+    let endIndex = this.orderedEntries.length
+    if (to !== undefined) {
+      const toInsertIndex = findInsertPosition(
+        this.orderedEntries,
+        to,
+        this.compareFn
+      )
+
+      if (toInclusive) {
+        // Include values equal to 'to'
+        endIndex = toInsertIndex
+        // Include the value if it exists at this position
         if (
-          insertIndex < this.orderedEntries.length &&
-          this.compareFn(this.orderedEntries[insertIndex]![0], value) === 0
+          toInsertIndex < this.orderedEntries.length &&
+          this.compareFn(this.orderedEntries[toInsertIndex]![0], to) === 0
         ) {
-          startIndex = insertIndex + 1
+          endIndex = toInsertIndex + 1
         }
-        endIndex = this.orderedEntries.length
-        break
-      case `gte`:
-        startIndex = insertIndex
-        endIndex = this.orderedEntries.length
-        break
+      } else {
+        // Exclude values equal to 'to'
+        endIndex = toInsertIndex
+      }
+    }
+
+    // Ensure startIndex doesn't exceed endIndex
+    if (startIndex >= endIndex) {
+      return result
     }
 
     // Collect keys from the range
