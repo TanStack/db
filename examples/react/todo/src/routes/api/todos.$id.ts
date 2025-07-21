@@ -16,6 +16,19 @@ async function generateTxId(tx: any): Promise<Txid> {
   return parseInt(txid, 10)
 }
 
+// Get current WAL LSN for Materialize tracking
+async function getCurrentLSN(tx: any): Promise<string> {
+  const result = await tx`SELECT pg_current_wal_lsn() as lsn`
+  console.log(`getCurrentLSN`, { result })
+  const lsn = result[0]?.lsn
+
+  if (lsn === undefined) {
+    throw new Error(`Failed to get current LSN`)
+  }
+
+  return lsn
+}
+
 export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
   GET: async ({ params }) => {
     try {
@@ -43,9 +56,13 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
       const { id } = params
       const body = await request.json()
       const todoData = validateUpdateTodo(body)
+      console.log(`Updating todo ${id}:`, todoData)
 
       let txid!: Txid
+      let beforeLSN!: string
+      let afterLSN!: string
       const updatedTodo = await sql.begin(async (tx) => {
+        beforeLSN = await getCurrentLSN(tx)
         txid = await generateTxId(tx)
 
         const [result] = await tx`
@@ -59,10 +76,11 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
           throw new Error(`Todo not found`)
         }
 
+        afterLSN = await getCurrentLSN(tx)
         return result
       })
 
-      return json({ todo: updatedTodo, txid })
+      return json({ todo: updatedTodo, txid, beforeLSN, afterLSN })
     } catch (error) {
       if (error instanceof Error && error.message === `Todo not found`) {
         return json({ error: `Todo not found` }, { status: 404 })
@@ -81,9 +99,13 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
   DELETE: async ({ params }) => {
     try {
       const { id } = params
+      console.log(`Deleting todo ${id}`)
 
       let txid!: Txid
+      let beforeLSN!: string
+      let afterLSN!: string
       await sql.begin(async (tx) => {
+        beforeLSN = await getCurrentLSN(tx)
         txid = await generateTxId(tx)
 
         const [result] = await tx`
@@ -95,9 +117,11 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
         if (!result) {
           throw new Error(`Todo not found`)
         }
+
+        afterLSN = await getCurrentLSN(tx)
       })
 
-      return json({ success: true, txid })
+      return json({ success: true, txid, beforeLSN, afterLSN })
     } catch (error) {
       if (error instanceof Error && error.message === `Todo not found`) {
         return json({ error: `Todo not found` }, { status: 404 })

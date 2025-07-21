@@ -237,6 +237,16 @@ export const materializeTodoCollection = createCollection(
     websocketUrl: `ws://localhost:5173/api/todos-ws`,
     getKey: (item) => item.id,
     schema: selectTodoSchema,
+    // Parse timestamps from Materialize format (milliseconds with precision) to Date objects
+    parse: {
+      created_at: (ts: string) => new Date(parseFloat(ts)),
+      updated_at: (ts: string) => new Date(parseFloat(ts)),
+    },
+    // Serialize Date objects to milliseconds string for Materialize
+    serialize: {
+      created_at: (date: Date) => date.valueOf().toString(),
+      updated_at: (date: Date) => date.valueOf().toString(),
+    },
     onInsert: async ({ transaction }) => {
       const {
         id: _id,
@@ -284,6 +294,19 @@ export const materializeConfigCollection = createCollection(
     websocketUrl: `ws://localhost:5173/api/todos-ws`,
     getKey: (item) => item.id,
     schema: selectConfigSchema,
+    // Parse timestamps from Materialize format (milliseconds with precision) to Date objects
+    parse: {
+      created_at: (ts: string) => {
+        console.log({ ts })
+        return new Date(parseFloat(ts))
+      },
+      updated_at: (ts: string) => new Date(parseFloat(ts)),
+    },
+    // Serialize Date objects to milliseconds string for Materialize
+    serialize: {
+      created_at: (date: Date) => date.valueOf().toString(),
+      updated_at: (date: Date) => date.valueOf().toString(),
+    },
     onInsert: async ({ transaction }) => {
       const modified = transaction.mutations[0].modified
       const response = await api.config.create(modified)

@@ -16,6 +16,19 @@ async function generateTxId(tx: any): Promise<Txid> {
   return parseInt(txid, 10)
 }
 
+// Get current WAL LSN for Materialize tracking
+async function getCurrentLSN(tx: any): Promise<string> {
+  const result = await tx`SELECT pg_current_wal_lsn() as lsn`
+  console.log(`getCurrentLSN`, { result })
+  const lsn = result[0]?.lsn
+
+  if (lsn === undefined) {
+    throw new Error(`Failed to get current LSN`)
+  }
+
+  return lsn
+}
+
 export const ServerRoute = createServerFileRoute(`/api/config`).methods({
   GET: async ({ request: _request }) => {
     try {
@@ -39,17 +52,22 @@ export const ServerRoute = createServerFileRoute(`/api/config`).methods({
       const configData = validateInsertConfig(body)
 
       let txid!: Txid
+      let beforeLSN!: string
+      let afterLSN!: string
       const newConfig = await sql.begin(async (tx) => {
+        beforeLSN = await getCurrentLSN(tx)
         txid = await generateTxId(tx)
 
         const [result] = await tx`
           INSERT INTO config ${tx(configData)}
           RETURNING *
         `
+
+        afterLSN = await getCurrentLSN(tx)
         return result
       })
 
-      return json({ config: newConfig, txid }, { status: 201 })
+      return json({ config: newConfig, txid, beforeLSN, afterLSN }, { status: 201 })
     } catch (error) {
       console.error(`Error creating config:`, error)
       return json(

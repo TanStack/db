@@ -1,7 +1,9 @@
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
+import { collectionsStore } from "@tanstack/db"
 import type {
   CollectionConfig,
+  CollectionImpl,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   ResolveType,
@@ -55,6 +57,28 @@ export interface MaterializeCollectionConfig<
    * Defaults to false
    */
   startSync?: boolean
+
+  /**
+   * Optional field parsers for converting server data to client format
+   * Similar to TrailBase's parse option
+   * @example
+   * parse: {
+   *   created_at: (ts: string) => new Date(parseFloat(ts)),
+   *   updated_at: (ts: string) => new Date(parseFloat(ts))
+   * }
+   */
+  parse?: Record<string, (value: any) => any>
+
+  /**
+   * Optional field serializers for converting client data to server format
+   * Similar to TrailBase's serialize option
+   * @example
+   * serialize: {
+   *   created_at: (date: Date) => date.valueOf().toString(),
+   *   updated_at: (date: Date) => date.valueOf().toString()
+   * }
+   */
+  serialize?: Record<string, (value: any) => any>
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -121,7 +145,7 @@ export interface MaterializeProxyMessage<T = any> {
   type: `data` | `lsn`
   mz_timestamp?: number
   mz_progressed?: boolean
-  mz_diff?: number
+  mz_diff?: string
   row?: T
   value?: LSN // For LSN messages
 }
@@ -181,7 +205,9 @@ export interface MaterializeCollectionUtils extends UtilsRecord {
  * Creates a sync configuration for Materialize real-time data synchronization
  */
 function createMaterializeSync<T extends object = Record<string, unknown>>(
-  websocketUrl: string
+  websocketUrl: string,
+  parse?: Record<string, (value: any) => any>,
+  getKey?: Record<string, (value: any) => any>
 ): SyncConfig<T, string | number> & { utils: MaterializeCollectionUtils } {
   let ws: WebSocket | null = null
   const connectionState = new Store<ConnectionState>(`disconnected`)
@@ -217,6 +243,7 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
   let write: ((message: any) => void) | null = null
   let commit: (() => void) | null = null
   let markReady: (() => void) | null = null
+  let collection: CollectionImpl | null = null
 
   const refresh = async (): Promise<void> => {
     if (!isConnected()) {
@@ -384,20 +411,34 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
             // Handle data messages from the proxy
             begin()
 
+            // Apply parse transformations to convert server data to client format
+            let parsedRow = msg.row
+            if (parse) {
+              parsedRow = { ...msg.row }
+              for (const [field, parser] of Object.entries(parse)) {
+                if (parsedRow[field] !== undefined) {
+                  parsedRow[field] = parser(parsedRow[field])
+                }
+              }
+            }
+
+            console.log({ parsedRow })
+
             // Determine operation type from mz_diff
             let operationType: `insert` | `update` | `delete` = `insert`
+            console.log({ msg })
             if (msg.mz_diff !== undefined) {
               operationType =
-                msg.mz_diff > 0
-                  ? `insert`
-                  : msg.mz_diff < 0
-                    ? `delete`
-                    : `update`
+                msg.mz_diff === `-1`
+                  ? `delete`
+                  : msg.mz_diff === `1` && collection.has(getKey(parsedRow))
+                    ? `update`
+                    : `insert`
             }
 
             write({
               type: operationType,
-              value: msg.row,
+              value: parsedRow,
               metadata: {
                 mz_timestamp: msg.mz_timestamp,
                 mz_diff: msg.mz_diff,
@@ -442,6 +483,7 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
     write = params.write
     commit = params.commit
     markReady = params.markReady
+    collection = params.collection
 
     await connect()
   }
@@ -473,7 +515,7 @@ export function materializeCollectionOptions<
 >(config: MaterializeCollectionConfig<TExplicit, TSchema, TFallback>) {
   const { utils, sync } = createMaterializeSync<
     ResolveType<TExplicit, TSchema, TFallback>
-  >(config.websocketUrl)
+  >(config.websocketUrl, config.parse, config.getKey)
 
   // Create wrapper handlers for direct persistence operations with LSN tracking
   const wrappedOnInsert = config.onInsert

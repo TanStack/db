@@ -206,6 +206,7 @@ function Navigation() {
     [`/query`, `Query`, `bg-green-700 hover:bg-green-800`],
     [`/electric`, `Electric`, `bg-blue-500 hover:bg-blue-600`],
     [`/trailbase`, `TrailBase`, `bg-purple-600 hover:bg-purple-700`],
+    [`/materialize`, `Materialize`, `bg-orange-600 hover:bg-orange-700`],
   ]
 
   return (
