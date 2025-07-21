@@ -11,23 +11,27 @@ export class QueryCollectionError extends TanStackDBError {
 export class QueryKeyRequiredError extends QueryCollectionError {
   constructor() {
     super(`[QueryCollection] queryKey must be provided.`)
+    this.name = `QueryKeyRequiredError`
   }
 }
 
 export class QueryFnRequiredError extends QueryCollectionError {
   constructor() {
     super(`[QueryCollection] queryFn must be provided.`)
+    this.name = `QueryFnRequiredError`
   }
 }
 
 export class QueryClientRequiredError extends QueryCollectionError {
   constructor() {
     super(`[QueryCollection] queryClient must be provided.`)
+    this.name = `QueryClientRequiredError`
   }
 }
 
 export class GetKeyRequiredError extends QueryCollectionError {
   constructor() {
     super(`[QueryCollection] getKey must be provided.`)
+    this.name = `GetKeyRequiredError`
   }
 }
