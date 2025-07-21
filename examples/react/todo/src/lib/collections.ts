@@ -1,5 +1,6 @@
 import { createCollection } from "@tanstack/react-db"
 import { electricCollectionOptions } from "@tanstack/electric-db-collection"
+import { materializeCollectionOptions } from "@tanstack/materialize-db-collection"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
 import { QueryClient } from "@tanstack/query-core"
@@ -225,6 +226,81 @@ export const trailBaseConfigCollection = createCollection(
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
       updated_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
+  })
+)
+
+// Materialize Todo Collection
+export const materializeTodoCollection = createCollection(
+  materializeCollectionOptions({
+    id: `todos`,
+    websocketUrl: `ws://localhost:5173/api/todos-ws`,
+    getKey: (item) => item.id,
+    schema: selectTodoSchema,
+    onInsert: async ({ transaction }) => {
+      const {
+        id: _id,
+        created_at: _f,
+        updated_at: _ff,
+        ...modified
+      } = transaction.mutations[0].modified
+      const response = await api.todos.create(modified)
+      return { beforeLSN: response.beforeLSN, afterLSN: response.afterLSN }
+    },
+    onUpdate: async ({ transaction }) => {
+      const responses = await Promise.all(
+        transaction.mutations.map(async (mutation) => {
+          const { original, changes } = mutation
+          const response = await api.todos.update(original.id, changes)
+          return response
+        })
+      )
+      // For multiple mutations, use the first beforeLSN and last afterLSN
+      return {
+        beforeLSN: responses[0].beforeLSN,
+        afterLSN: responses[responses.length - 1].afterLSN,
+      }
+    },
+    onDelete: async ({ transaction }) => {
+      const responses = await Promise.all(
+        transaction.mutations.map(async (mutation) => {
+          const { original } = mutation
+          const response = await api.todos.delete(original.id)
+          return response
+        })
+      )
+      return {
+        beforeLSN: responses[0].beforeLSN,
+        afterLSN: responses[responses.length - 1].afterLSN,
+      }
+    },
+  })
+)
+
+// Materialize Config Collection
+export const materializeConfigCollection = createCollection(
+  materializeCollectionOptions({
+    id: `config`,
+    websocketUrl: `ws://localhost:5173/api/todos-ws`,
+    getKey: (item) => item.id,
+    schema: selectConfigSchema,
+    onInsert: async ({ transaction }) => {
+      const modified = transaction.mutations[0].modified
+      const response = await api.config.create(modified)
+      return { beforeLSN: response.beforeLSN, afterLSN: response.afterLSN }
+    },
+    onUpdate: async ({ transaction }) => {
+      const responses = await Promise.all(
+        transaction.mutations.map(async (mutation) => {
+          const { original, changes } = mutation
+          const response = await api.config.update(original.id, changes)
+          return response
+        })
+      )
+      return {
+        beforeLSN: responses[0].beforeLSN,
+        afterLSN: responses[responses.length - 1].afterLSN,
+      }
     },
   })
 )

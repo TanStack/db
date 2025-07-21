@@ -6,6 +6,7 @@ services:
       POSTGRES_DB: todo_app
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "-c wal_level=logical"
     ports:
       - "54322:5432"
     volumes:
@@ -42,6 +43,18 @@ services:
     volumes:
       - ./traildepot:/app/traildepot
     command: "/app/trail --data-dir /app/traildepot run --address 0.0.0.0:4000 --dev"
+
+  materialize:
+    image: materialize/materialized:latest
+    ports:
+      - "127.0.0.1:6875:6875"
+      - "127.0.0.1:6876:6876"
+      - "127.0.0.1:6878:6878"
+    volumes:
+      - ./mz-init:/docker-entrypoint-initdb.d
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteTsConfigPaths from "vite-tsconfig-paths"
+import { materializeWebSocketPlugin } from "./vite-plugins/materialize-ws"
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -18,5 +19,6 @@ export default defineConfig({
       },
     }),
     react(),
+    materializeWebSocketPlugin(),
   ],
 })

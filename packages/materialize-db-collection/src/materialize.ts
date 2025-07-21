@@ -1,10 +1,10 @@
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
-import WebSocket from "ws"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -303,14 +303,25 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
       }
 
       connectionState.setState(`connecting`)
-      ws = new WebSocket(websocketUrl)
+
+      // Create WebSocket based on environment
+      if (typeof window !== `undefined`) {
+        // Browser environment
+        ws = new WebSocket(websocketUrl)
+      } else {
+        // Node.js environment - this should not happen in the browser build
+        // But if it does, we'll create a stub that will fail gracefully
+        throw new Error(
+          `Materialize collection requires browser WebSocket API. Server-side usage is not currently supported.`
+        )
+      }
 
       const timeout = setTimeout(() => {
         reject(new Error(`Connection timeout`))
         disconnect()
       }, 10000)
 
-      ws.on(`open`, () => {
+      const handleOpen = () => {
         clearTimeout(timeout)
         connectionState.setState(`connected`)
         debug(`Connected to Materialize proxy at %s`, websocketUrl)
@@ -319,9 +330,10 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
           markReady()
         }
         resolve()
-      })
+      }
 
-      ws.on(`message`, (data) => {
+      const handleMessage = (event: any) => {
+        const data = typeof event === `string` ? event : event.data
         try {
           const msg = JSON.parse(data.toString()) as MaterializeProxyMessage
           debug(`Received message: %o`, msg)
@@ -397,19 +409,31 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
         } catch (error) {
           debug(`Error parsing message: %o`, error)
         }
-      })
+      }
 
-      ws.on(`error`, (error) => {
+      const handleError = (error: any) => {
         clearTimeout(timeout)
         debug(`WebSocket error: %o`, error)
         connectionState.setState(`error`)
         reject(error)
-      })
+      }
 
-      ws.on(`close`, () => {
+      const handleClose = () => {
         debug(`WebSocket connection closed`)
         connectionState.setState(`disconnected`)
-      })
+      }
+
+      // Set up event listeners
+      if (!ws) {
+        reject(new Error(`Failed to create WebSocket connection`))
+        return
+      }
+
+      // Browser WebSocket event listeners
+      ws.addEventListener(`open`, handleOpen)
+      ws.addEventListener(`message`, handleMessage)
+      ws.addEventListener(`error`, handleError)
+      ws.addEventListener(`close`, handleClose)
     })
   }
 

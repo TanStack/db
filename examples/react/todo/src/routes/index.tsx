@@ -42,6 +42,14 @@ function HomePage() {
               </div>
             </button>
           </Link>
+          <Link to="/materialize" className="block w-full">
+            <button className="w-full px-6 py-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-left">
+              <div className="font-semibold">Materialize Collections</div>
+              <div className="text-sm opacity-90 mt-1">
+                Real-time streaming with Materialize
+              </div>
+            </button>
+          </Link>
         </div>
 
         <div className="mt-8 text-xs text-center text-gray-500">

@@ -4,6 +4,7 @@
   "version": "0.0.33",
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.0.9",
+    "@tanstack/materialize-db-collection": "workspace:*",
     "@tanstack/query-core": "^5.75.7",
     "@tanstack/query-db-collection": "^0.0.9",
     "@tanstack/react-db": "^0.0.27",
@@ -19,7 +20,8 @@
     "react-dom": "^19.1.0",
     "tailwindcss": "^4.1.11",
     "trailbase": "^0.7.1",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
@@ -30,6 +32,7 @@
     "@types/pg": "^8.11.11",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.26.1",
     "@typescript-eslint/parser": "^8.26.1",
     "@vitejs/plugin-react": "^4.6.0",

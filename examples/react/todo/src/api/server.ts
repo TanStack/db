@@ -39,6 +39,18 @@ async function generateTxId(tx: any): Promise<Txid> {
   return parseInt(txid, 10)
 }
 
+// Get current WAL LSN for Materialize tracking
+async function getCurrentLSN(tx: any): Promise<string> {
+  const result = await tx`SELECT pg_current_wal_lsn() as lsn`
+  const lsn = result[0]?.lsn
+
+  if (lsn === undefined) {
+    throw new Error(`Failed to get current LSN`)
+  }
+
+  return lsn
+}
+
 // ===== TODOS API =====
 
 // GET all todos
@@ -81,17 +93,22 @@ app.post(`/api/todos`, async (req, res) => {
     const todoData = validateInsertTodo(req.body)
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     const newTodo = await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
         INSERT INTO todos ${tx(todoData)}
         RETURNING *
       `
+
+      afterLSN = await getCurrentLSN(tx)
       return result
     })
 
-    return res.status(201).json({ todo: newTodo, txid })
+    return res.status(201).json({ todo: newTodo, txid, beforeLSN, afterLSN })
   } catch (error) {
     console.error(`Error creating todo:`, error)
     return res.status(500).json({
@@ -108,7 +125,10 @@ app.put(`/api/todos/:id`, async (req, res) => {
     const todoData = validateUpdateTodo(req.body)
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     const updatedTodo = await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
@@ -122,10 +142,13 @@ app.put(`/api/todos/:id`, async (req, res) => {
         throw new Error(`Todo not found`)
       }
 
+      afterLSN = await getCurrentLSN(tx)
       return result
     })
 
-    return res.status(200).json({ todo: updatedTodo, txid })
+    return res
+      .status(200)
+      .json({ todo: updatedTodo, txid, beforeLSN, afterLSN })
   } catch (error) {
     if (error instanceof Error && error.message === `Todo not found`) {
       return res.status(404).json({ error: `Todo not found` })
@@ -145,7 +168,10 @@ app.delete(`/api/todos/:id`, async (req, res) => {
     const { id } = req.params
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
@@ -157,9 +183,11 @@ app.delete(`/api/todos/:id`, async (req, res) => {
       if (!result) {
         throw new Error(`Todo not found`)
       }
+
+      afterLSN = await getCurrentLSN(tx)
     })
 
-    return res.status(200).json({ success: true, txid })
+    return res.status(200).json({ success: true, txid, beforeLSN, afterLSN })
   } catch (error) {
     if (error instanceof Error && error.message === `Todo not found`) {
       return res.status(404).json({ error: `Todo not found` })
@@ -216,17 +244,24 @@ app.post(`/api/config`, async (req, res) => {
     const configData = validateInsertConfig(req.body)
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     const newConfig = await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
         INSERT INTO config ${tx(configData)}
         RETURNING *
       `
+
+      afterLSN = await getCurrentLSN(tx)
       return result
     })
 
-    return res.status(201).json({ config: newConfig, txid })
+    return res
+      .status(201)
+      .json({ config: newConfig, txid, beforeLSN, afterLSN })
   } catch (error) {
     console.error(`Error creating config:`, error)
     return res.status(500).json({
@@ -243,7 +278,10 @@ app.put(`/api/config/:id`, async (req, res) => {
     const configData = validateUpdateConfig(req.body)
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     const updatedConfig = await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
@@ -257,10 +295,13 @@ app.put(`/api/config/:id`, async (req, res) => {
         throw new Error(`Config not found`)
       }
 
+      afterLSN = await getCurrentLSN(tx)
       return result
     })
 
-    return res.status(200).json({ config: updatedConfig, txid })
+    return res
+      .status(200)
+      .json({ config: updatedConfig, txid, beforeLSN, afterLSN })
   } catch (error) {
     if (error instanceof Error && error.message === `Config not found`) {
       return res.status(404).json({ error: `Config not found` })
@@ -280,7 +321,10 @@ app.delete(`/api/config/:id`, async (req, res) => {
     const { id } = req.params
 
     let txid!: Txid
+    let beforeLSN!: string
+    let afterLSN!: string
     await sql.begin(async (tx) => {
+      beforeLSN = await getCurrentLSN(tx)
       txid = await generateTxId(tx)
 
       const [result] = await tx`
@@ -292,9 +336,11 @@ app.delete(`/api/config/:id`, async (req, res) => {
       if (!result) {
         throw new Error(`Config not found`)
       }
+
+      afterLSN = await getCurrentLSN(tx)
     })
 
-    return res.status(200).json({ success: true, txid })
+    return res.status(200).json({ success: true, txid, beforeLSN, afterLSN })
   } catch (error) {
     if (error instanceof Error && error.message === `Config not found`) {
       return res.status(404).json({ error: `Config not found` })
@@ -305,6 +351,23 @@ app.delete(`/api/config/:id`, async (req, res) => {
       error: `Failed to delete config`,
       details: error instanceof Error ? error.message : String(error),
     })
+  }
+})
+
+// API endpoint to get current LSN from PostgreSQL
+app.get("/api/materialize/lsn", async (req, res) => {
+  try {
+    const result = await sql`SELECT pg_current_wal_lsn() as lsn`
+    const lsn = result[0]?.lsn
+
+    if (!lsn) {
+      throw new Error("Failed to get current LSN")
+    }
+
+    res.json({ lsn })
+  } catch (error) {
+    console.error("Error getting LSN:", error)
+    res.status(500).json({ error: "Failed to get LSN" })
   }
 })
 

@@ -18,7 +18,7 @@
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
     "lint": "pnpm --filter \"./packages/**\" lint",
-    "lint-all": "eslint . --fix",
+    "lint-fix": "pnpm --filter \"./packages/**\" lint --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test"
   },
