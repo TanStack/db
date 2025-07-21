@@ -67,7 +67,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * @returns Reactive object with query data, state, and status information
  * @example
  * // Basic query with object syntax
- * const { data, isLoading } = useLiveQuery((q) =>
+ * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
@@ -75,16 +75,16 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *
  * @example
  * // With reactive dependencies
- * const minPriority = ref(5)
- * const { data, state } = useLiveQuery(
+ * let minPriority = $state(5)
+ * const todosQuery = useLiveQuery(
  *   (q) => q.from({ todos: todosCollection })
- *          .where(({ todos }) => gt(todos.priority, minPriority.value)),
- *   [minPriority] // Re-run when minPriority changes
+ *          .where(({ todos }) => gt(todos.priority, minPriority)),
+ *   [() => minPriority] // Re-run when minPriority changes
  * )
  *
  * @example
  * // Join pattern
- * const { data } = useLiveQuery((q) =>
+ * const issuesQuery = useLiveQuery((q) =>
  *   q.from({ issues: issueCollection })
  *    .join({ persons: personCollection }, ({ issues, persons }) =>
  *      eq(issues.userId, persons.id)
@@ -98,16 +98,22 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *
  * @example
  * // Handle loading and error states in template
- * const { data, isLoading, isError, status } = useLiveQuery((q) =>
+ * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todoCollection })
  * )
  *
  * // In template:
- * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error: {{ status }}</div>
- * // <ul v-else>
- * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
- * // </ul>
+ * // {#if todosQuery.isLoading}
+ * //   <div>Loading...</div>
+ * // {:else if todosQuery.isError}
+ * //   <div>Error: {todosQuery.status}</div>
+ * // {:else}
+ * //   <ul>
+ * //     {#each todosQuery.data as todo (todo.id)}
+ * //       <li>{todo.text}</li>
+ * //     {/each}
+ * //   </ul>
+ * // {/if}
  */
 // Overload 1: Accept just the query function
 export function useLiveQuery<TContext extends Context>(
@@ -122,30 +128,35 @@ export function useLiveQuery<TContext extends Context>(
  * @returns Reactive object with query data, state, and status information
  * @example
  * // Basic config object usage
- * const { data, status } = useLiveQuery({
+ * const todosQuery = useLiveQuery({
  *   query: (q) => q.from({ todos: todosCollection }),
  *   gcTime: 60000
  * })
  *
  * @example
  * // With reactive dependencies
- * const filter = ref('active')
- * const { data, isReady } = useLiveQuery({
+ * let filter = $state('active')
+ * const todosQuery = useLiveQuery({
  *   query: (q) => q.from({ todos: todosCollection })
- *                  .where(({ todos }) => eq(todos.status, filter.value))
- * }, [filter])
+ *                  .where(({ todos }) => eq(todos.status, filter))
+ * }, [() => filter])
  *
  * @example
  * // Handle all states uniformly
- * const { data, isLoading, isReady, isError } = useLiveQuery({
+ * const itemsQuery = useLiveQuery({
  *   query: (q) => q.from({ items: itemCollection })
  * })
  *
  * // In template:
- * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Something went wrong</div>
- * // <div v-else-if="!isReady">Preparing...</div>
- * // <div v-else>{{ data.length }} items loaded</div>
+ * // {#if itemsQuery.isLoading}
+ * //   <div>Loading...</div>
+ * // {:else if itemsQuery.isError}
+ * //   <div>Something went wrong</div>
+ * // {:else if !itemsQuery.isReady}
+ * //   <div>Preparing...</div>
+ * // {:else}
+ * //   <div>{itemsQuery.data.length} items loaded</div>
+ * // {/if}
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
@@ -162,35 +173,39 @@ export function useLiveQuery<TContext extends Context>(
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
  * )
- * const { data, collection } = useLiveQuery(myLiveQuery)
+ * const queryResult = useLiveQuery(myLiveQuery)
  *
  * @example
  * // Reactive query collection reference
- * const selectedQuery = ref(todosQuery)
- * const { data, collection } = useLiveQuery(selectedQuery)
+ * let selectedQuery = $state(todosQuery)
+ * const queryResult = useLiveQuery(() => selectedQuery)
  *
  * // Switch queries reactively
- * selectedQuery.value = archiveQuery
+ * selectedQuery = archiveQuery
  *
  * @example
  * // Access query collection methods directly
- * const { data, collection, isReady } = useLiveQuery(existingQuery)
+ * const queryResult = useLiveQuery(existingQuery)
  *
  * // Use underlying collection for mutations
  * const handleToggle = (id) => {
- *   collection.value.update(id, draft => { draft.completed = !draft.completed })
+ *   queryResult.collection.update(id, draft => { draft.completed = !draft.completed })
  * }
  *
  * @example
  * // Handle states consistently
- * const { data, isLoading, isError } = useLiveQuery(sharedQuery)
+ * const queryResult = useLiveQuery(sharedQuery)
  *
  * // In template:
- * // <div v-if="isLoading">Loading...</div>
- * // <div v-else-if="isError">Error loading data</div>
- * // <div v-else>
- * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
- * // </div>
+ * // {#if queryResult.isLoading}
+ * //   <div>Loading...</div>
+ * // {:else if queryResult.isError}
+ * //   <div>Error loading data</div>
+ * // {:else}
+ * //   {#each queryResult.data as item (item.id)}
+ * //     <Item {...item} />
+ * //   {/each}
+ * // {/if}
  */
 // Overload 3: Accept pre-created live query collection (can be reactive)
 export function useLiveQuery<
