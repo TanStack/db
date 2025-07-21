@@ -782,6 +782,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         })
       )
 
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
       expect(() => {
         createLiveQueryCollection({
           startSync: true,
@@ -806,6 +808,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         })
       )
 
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
       expect(() => {
         createLiveQueryCollection({
           startSync: true,
@@ -829,6 +833,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           initialData: sampleUsers,
         })
       )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
 
       // This test demonstrates the error when trying to reference a table not in the join
       // We'll use a different approach - create a query that references a non-existent table alias
@@ -856,6 +862,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         })
       )
 
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
+
       expect(() => {
         createLiveQueryCollection({
           startSync: true,
@@ -879,6 +887,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           initialData: sampleUsers,
         })
       )
+
+      const departmentsCollection = createDepartmentsCollection(autoIndex)
 
       expect(() => {
         createLiveQueryCollection({
