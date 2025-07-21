@@ -2108,22 +2108,28 @@ export class CollectionImpl<
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions<T> = {}
   ): Array<ChangeMessage<T>> {
-    if (!options.where) {
-      // No filtering, return all items
+    // Helper function to collect filtered results
+    const collectFilteredResults = (filterFn?: (value: T) => boolean): Array<ChangeMessage<T>> => {
       const result: Array<ChangeMessage<T>> = []
       for (const [key, value] of this.entries()) {
-        result.push({
-          type: `insert`,
-          key,
-          value,
-        })
+        // If no filter function is provided, include all items
+        if (filterFn?.(value) ?? true) {
+          result.push({
+            type: `insert`,
+            key,
+            value,
+          })
+        }
       }
       return result
     }
 
-    // There's a where clause, let's see if we can use an index
-    const result: Array<ChangeMessage<T>> = []
+    if (!options.where) {
+      // No filtering, return all items
+      return collectFilteredResults()
+    }
 
+    // There's a where clause, let's see if we can use an index
     try {
       // Create the single-row refProxy for the callback
       const singleRowRefProxy = createSingleRowRefProxy<T>()
@@ -2142,6 +2148,7 @@ export class CollectionImpl<
 
       if (optimizationResult.canOptimize) {
         // Use index optimization
+        const result: Array<ChangeMessage<T>> = []
         for (const key of optimizationResult.matchingKeys) {
           const value = this.get(key)
           if (value !== undefined) {
@@ -2152,19 +2159,11 @@ export class CollectionImpl<
             })
           }
         }
+        return result
       } else {
         // No index found or complex expression, fall back to full scan with filter
         const filterFn = this.createFilterFunction(options.where)
-
-        for (const [key, value] of this.entries()) {
-          if (filterFn(value)) {
-            result.push({
-              type: `insert`,
-              key,
-              value,
-            })
-          }
-        }
+        return collectFilteredResults(filterFn)
       }
     } catch (error) {
       // If anything goes wrong with the where clause, fall back to full scan
@@ -2174,19 +2173,8 @@ export class CollectionImpl<
       )
 
       const filterFn = this.createFilterFunction(options.where)
-
-      for (const [key, value] of this.entries()) {
-        if (filterFn(value)) {
-          result.push({
-            type: `insert`,
-            key,
-            value,
-          })
-        }
-      }
+      return collectFilteredResults(filterFn)
     }
-
-    return result
   }
 
   /**
