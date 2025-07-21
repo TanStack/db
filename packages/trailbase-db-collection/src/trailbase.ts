@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from "@tanstack/store"
+import {
+  ExpectedDeleteTypeError,
+  ExpectedInsertTypeError,
+  ExpectedUpdateTypeError,
+  TimeoutWaitingForIdsError,
+} from "./errors"
 import type { Event, RecordApi } from "trailbase"
 
 import type {
@@ -131,7 +137,7 @@ export function trailBaseCollectionOptions<
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         unsubscribe()
-        reject(new Error(`Timeout waiting for ids: ${ids}`))
+        reject(new TimeoutWaitingForIdsError(ids.toString()))
       }, timeout)
 
       const unsubscribe = seenIds.subscribe((value) => {
@@ -294,7 +300,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map((tx) => {
           const { type, modified } = tx
           if (type !== `insert`) {
-            throw new Error(`Expected 'insert', got: ${type}`)
+            throw new ExpectedInsertTypeError(type)
           }
           return serialIns(modified)
         })
@@ -312,7 +318,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map(async (tx) => {
           const { type, changes, key } = tx
           if (type !== `update`) {
-            throw new Error(`Expected 'update', got: ${type}`)
+            throw new ExpectedUpdateTypeError(type)
           }
 
           await config.recordApi.update(key, serialUpd(changes))
@@ -331,7 +337,7 @@ export function trailBaseCollectionOptions<
         params.transaction.mutations.map(async (tx) => {
           const { type, key } = tx
           if (type !== `delete`) {
-            throw new Error(`Expected 'delete', got: ${type}`)
+            throw new ExpectedDeleteTypeError(type)
           }
 
           await config.recordApi.delete(key)

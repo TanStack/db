@@ -5,6 +5,13 @@ import {
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
+import {
+  ElectricDeleteHandlerMustReturnTxIdError,
+  ElectricInsertHandlerMustReturnTxIdError,
+  ElectricUpdateHandlerMustReturnTxIdError,
+  ExpectedNumberInAwaitTxIdError,
+  TimeoutWaitingForTxIdError,
+} from "./errors"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
@@ -300,9 +307,7 @@ export function electricCollectionOptions<
   ): Promise<boolean> => {
     debug(`awaitTxId called with txid %d`, txId)
     if (typeof txId !== `number`) {
-      throw new TypeError(
-        `Expected number in awaitTxId, received ${typeof txId}`
-      )
+      throw new ExpectedNumberInAwaitTxIdError(typeof txId)
     }
 
     const hasTxid = seenTxids.state.has(txId)
@@ -311,7 +316,7 @@ export function electricCollectionOptions<
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         unsubscribe()
-        reject(new Error(`Timeout waiting for txId: ${txId}`))
+        reject(new TimeoutWaitingForTxIdError(txId))
       }, timeout)
 
       const unsubscribe = seenTxids.subscribe(() => {
@@ -338,9 +343,7 @@ export function electricCollectionOptions<
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
-          throw new Error(
-            `Electric collection onInsert handler must return a txid or array of txids`
-          )
+          throw new ElectricInsertHandlerMustReturnTxIdError()
         }
 
         // Handle both single txid and array of txids
@@ -366,9 +369,7 @@ export function electricCollectionOptions<
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
         if (!txid) {
-          throw new Error(
-            `Electric collection onUpdate handler must return a txid or array of txids`
-          )
+          throw new ElectricUpdateHandlerMustReturnTxIdError()
         }
 
         // Handle both single txid and array of txids
@@ -390,9 +391,7 @@ export function electricCollectionOptions<
       ) => {
         const handlerResult = await config.onDelete!(params)
         if (!handlerResult.txid) {
-          throw new Error(
-            `Electric collection onDelete handler must return a txid or array of txids`
-          )
+          throw new ElectricDeleteHandlerMustReturnTxIdError()
         }
 
         // Handle both single txid and array of txids
@@ -475,13 +474,13 @@ function createElectricSync<T extends Row<unknown>>(
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
-        onError: (params) => {
+        onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
           markReady()
 
           if (shapeOptions.onError) {
-            return shapeOptions.onError(params)
+            return shapeOptions.onError(errorParams)
           }
 
           return
