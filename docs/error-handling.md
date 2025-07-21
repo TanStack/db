@@ -9,6 +9,19 @@ TanStack DB provides comprehensive error handling capabilities to ensure robust 
 
 ## Error Types
 
+TanStack DB provides named error classes for better error handling and type safety. All error classes can be imported from `@tanstack/db`:
+
+```ts
+import {
+  SchemaValidationError,
+  CollectionInErrorStateError,
+  DuplicateKeyError,
+  MissingHandlerError,
+  TransactionError,
+  // ... and many more
+} from "@tanstack/db"
+```
+
 ### SchemaValidationError
 
 Thrown when data doesn't match the collection's schema during insert or update operations:
@@ -168,10 +181,12 @@ try {
 Collections in an `error` state cannot perform operations and must be manually recovered:
 
 ```ts
+import { CollectionInErrorStateError } from "@tanstack/db"
+
 try {
   todoCollection.insert(newTodo)
 } catch (error) {
-  if (error.message.includes("collection is in error state")) {
+  if (error instanceof CollectionInErrorStateError) {
     // Collection needs to be cleaned up and restarted
     await todoCollection.cleanup()
     
@@ -202,10 +217,14 @@ todoCollection.insert(newTodo)
 Inserting items with existing keys will throw:
 
 ```ts
+import { DuplicateKeyError } from "@tanstack/db"
+
 try {
   todoCollection.insert({ id: "existing-id", text: "Todo" })
 } catch (error) {
-  // Error: Cannot insert document with ID "existing-id" because it already exists in the collection
+  if (error instanceof DuplicateKeyError) {
+    console.log(`Duplicate key: ${error.message}`)
+  }
 }
 ```
 
@@ -384,9 +403,23 @@ tx.rollback() // Error: You can no longer call .rollback() as the transaction is
 
 ## Best Practices
 
-1. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
-2. **Check collection status** - Use `isError`, `isLoading`, `isReady` flags in React components
-3. **Handle transaction promises** - Always handle `isPersisted.promise` rejections
+1. **Use instanceof checks** - Use `instanceof` instead of string matching for error handling:
+   ```ts
+   // ✅ Good - type-safe error handling
+   if (error instanceof SchemaValidationError) {
+     // Handle validation error
+   }
+   
+   // ❌ Avoid - brittle string matching  
+   if (error.message.includes("validation failed")) {
+     // Handle validation error
+   }
+   ```
+
+2. **Import specific error types** - Import only the error classes you need for better tree-shaking
+3. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
+4. **Check collection status** - Use `isError`, `isLoading`, `isReady` flags in React components
+5. **Handle transaction promises** - Always handle `isPersisted.promise` rejections
 
 ## Example: Complete Error Handling
 
@@ -394,6 +427,7 @@ tx.rollback() // Error: You can no longer call .rollback() as the transaction is
 import { 
   createCollection, 
   SchemaValidationError,
+  DuplicateKeyError,
   createTransaction
 } from "@tanstack/db"
 import { useLiveQuery } from "@tanstack/react-db"
@@ -442,7 +476,7 @@ const TodoApp = () => {
     } catch (error) {
       if (error instanceof SchemaValidationError) {
         alert(`Validation error: ${error.issues[0]?.message}`)
-      } else if (error.message?.includes("already exists")) {
+      } else if (error instanceof DuplicateKeyError) {
         alert("A todo with this ID already exists")
       } else {
         alert(`Failed to add todo: ${error.message}`)

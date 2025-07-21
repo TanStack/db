@@ -1,3 +1,11 @@
+import {
+  InvalidStorageDataFormatError,
+  InvalidStorageObjectFormatError,
+  NoStorageAvailableError,
+  NoStorageEventApiError,
+  SerializationError,
+  StorageKeyRequiredError,
+} from "./errors"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
@@ -136,10 +144,9 @@ function validateJsonSerializable(value: any, operation: string): void {
   try {
     JSON.stringify(value)
   } catch (error) {
-    throw new Error(
-      `Cannot ${operation} item because it cannot be JSON serialized: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+    throw new SerializationError(
+      operation,
+      error instanceof Error ? error.message : String(error)
     )
   }
 }
@@ -204,7 +211,7 @@ export function localStorageCollectionOptions<
 
   // Validate required parameters
   if (!config.storageKey) {
-    throw new Error(`[LocalStorageCollection] storageKey must be provided.`)
+    throw new StorageKeyRequiredError()
   }
 
   // Default to window.localStorage if no storage is provided
@@ -213,9 +220,7 @@ export function localStorageCollectionOptions<
     (typeof window !== `undefined` ? window.localStorage : null)
 
   if (!storage) {
-    throw new Error(
-      `[LocalStorageCollection] No storage available. Please provide a storage option or ensure window.localStorage is available.`
-    )
+    throw new NoStorageAvailableError()
   }
 
   // Default to window for storage events if not provided
@@ -223,9 +228,7 @@ export function localStorageCollectionOptions<
     config.storageEventApi || (typeof window !== `undefined` ? window : null)
 
   if (!storageEventApi) {
-    throw new Error(
-      `[LocalStorageCollection] No storage event API available. Please provide a storageEventApi option or ensure window is available.`
-    )
+    throw new NoStorageEventApiError()
   }
 
   // Track the last known state to detect changes
@@ -471,15 +474,11 @@ function loadFromStorage<T extends object>(
           const storedItem = value as StoredItem<T>
           dataMap.set(key, storedItem)
         } else {
-          throw new Error(
-            `[LocalStorageCollection] Invalid data format in storage key "${storageKey}" for key "${key}".`
-          )
+          throw new InvalidStorageDataFormatError(storageKey, key)
         }
       })
     } else {
-      throw new Error(
-        `[LocalStorageCollection] Invalid data format in storage key "${storageKey}". Expected object format.`
-      )
+      throw new InvalidStorageObjectFormatError(storageKey)
     }
 
     return dataMap

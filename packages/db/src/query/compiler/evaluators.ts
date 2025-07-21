@@ -1,3 +1,8 @@
+import {
+  EmptyReferencePathError,
+  UnknownExpressionTypeError,
+  UnknownFunctionError,
+} from "../../errors.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
@@ -29,7 +34,7 @@ export function compileExpression(expr: BasicExpression): CompiledExpression {
     }
 
     default:
-      throw new Error(`Unknown expression type: ${(expr as any).type}`)
+      throw new UnknownExpressionTypeError((expr as any).type)
   }
 }
 
@@ -40,7 +45,7 @@ function compileRef(ref: PropRef): CompiledExpression {
   const [tableAlias, ...propertyPath] = ref.path
 
   if (!tableAlias) {
-    throw new Error(`Reference path cannot be empty`)
+    throw new EmptyReferencePathError()
   }
 
   // Pre-compile the property path navigation
@@ -283,7 +288,7 @@ function compileFunction(func: Func): CompiledExpression {
     }
 
     default:
-      throw new Error(`Unknown function: ${func.name}`)
+      throw new UnknownFunctionError(func.name)
   }
 }
 

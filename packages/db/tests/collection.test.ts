@@ -2,7 +2,16 @@ import { type } from "arktype"
 import mitt from "mitt"
 import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import { z } from "zod"
-import { SchemaValidationError, createCollection } from "../src/collection"
+import { createCollection } from "../src/collection"
+import {
+  CollectionRequiresConfigError,
+  DuplicateKeyError,
+  KeyUpdateNotAllowedError,
+  MissingDeleteHandlerError,
+  MissingInsertHandlerError,
+  MissingUpdateHandlerError,
+  SchemaValidationError,
+} from "../src/errors"
 import { createTransaction } from "../src/transactions"
 import type {
   ChangeMessage,
@@ -15,7 +24,7 @@ import type {
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
-    expect(() => createCollection()).toThrow(`Collection requires a config`)
+    expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
@@ -48,25 +57,19 @@ describe(`Collection`, () => {
     // Verify that insert throws an error
     expect(() => {
       collection.insert({ value: `new value` })
-    }).toThrow(
-      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
-    )
+    }).toThrow(MissingInsertHandlerError)
 
     // Verify that update throws an error
     expect(() => {
       collection.update(`initial`, (draft) => {
         draft.value = `updated value`
       })
-    }).toThrow(
-      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
-    )
+    }).toThrow(MissingUpdateHandlerError)
 
     // Verify that delete throws an error
     expect(() => {
       collection.delete(`initial`)
-    }).toThrow(
-      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
-    )
+    }).toThrow(MissingDeleteHandlerError)
   })
 
   it(`should throw an error when trying to update an item's ID`, async () => {
@@ -101,9 +104,7 @@ describe(`Collection`, () => {
           draft.value = `updated value`
         })
       })
-    }).toThrow(
-      `Updating the key of an item is not allowed. Original key: "item-1", Attempted new key: "item-2". Please delete the old item and create a new one if a key change is necessary.`
-    )
+    }).toThrow(KeyUpdateNotAllowedError)
   })
 
   it(`It shouldn't expose any state until the initial sync is finished`, () => {
@@ -566,9 +567,7 @@ describe(`Collection`, () => {
     // Try to insert a document with the same ID
     expect(() => {
       tx.mutate(() => collection.insert({ id: 1, value: `duplicate value` }))
-    }).toThrow(
-      `Cannot insert document with ID "1" because it already exists in the collection`
-    )
+    }).toThrow(DuplicateKeyError)
 
     // Should be able to insert a document with a different ID
     const tx2 = createTransaction({ mutationFn })
@@ -725,25 +724,19 @@ describe(`Collection`, () => {
     // Test insert without handler
     expect(() => {
       collection.insert({ id: 2, value: `should fail` })
-    }).toThrow(
-      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
-    )
+    }).toThrow(MissingInsertHandlerError)
 
     // Test update without handler
     expect(() => {
       collection.update(1, (draft) => {
         draft.value = `should fail`
       })
-    }).toThrow(
-      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
-    )
+    }).toThrow(MissingUpdateHandlerError)
 
     // Test delete without handler
     expect(() => {
       collection.delete(`1`) // Convert number to string to match expected type
-    }).toThrow(
-      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
-    )
+    }).toThrow(MissingDeleteHandlerError)
   })
 
   it(`should not apply optimistic updates when optimistic: false`, async () => {

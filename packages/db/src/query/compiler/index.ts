@@ -1,5 +1,12 @@
 import { distinct, filter, map } from "@electric-sql/d2mini"
 import { optimizeQuery } from "../optimizer.js"
+import {
+  CollectionInputNotFoundError,
+  DistinctRequiresSelectError,
+  HavingRequiresGroupByError,
+  LimitOffsetRequireOrderByError,
+  UnsupportedFromTypeError,
+} from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
@@ -107,7 +114,7 @@ export function compileQuery(
   }
 
   if (query.distinct && !query.fnSelect && !query.select) {
-    throw new Error(`DISTINCT requires a SELECT clause.`)
+    throw new DistinctRequiresSelectError()
   }
 
   // Process the SELECT clause early - always create __select_results
@@ -182,7 +189,7 @@ export function compileQuery(
       : false
 
     if (!hasAggregates) {
-      throw new Error(`HAVING clause requires GROUP BY clause`)
+      throw new HavingRequiresGroupByError()
     }
   }
 
@@ -231,9 +238,7 @@ export function compileQuery(
     return result
   } else if (query.limit !== undefined || query.offset !== undefined) {
     // If there's a limit or offset without orderBy, throw an error
-    throw new Error(
-      `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
-    )
+    throw new LimitOffsetRequireOrderByError()
   }
 
   // Final step: extract the __select_results and return tuple format (no orderBy)
@@ -267,9 +272,7 @@ function processFrom(
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
-        throw new Error(
-          `Input for collection "${from.collection.id}" not found in inputs map`
-        )
+        throw new CollectionInputNotFoundError(from.collection.id)
       }
       return { alias: from.alias, input }
     }
@@ -297,7 +300,7 @@ function processFrom(
       return { alias: from.alias, input: extractedInput }
     }
     default:
-      throw new Error(`Unsupported FROM type: ${(from as any).type}`)
+      throw new UnsupportedFromTypeError((from as any).type)
   }
 }
 

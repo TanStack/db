@@ -811,7 +811,7 @@ describe(`Query JOIN Operations`, () => {
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same table "null"`
+        `Invalid join condition: both expressions refer to the same table "unknown"`
       )
     })
 

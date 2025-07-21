@@ -1,5 +1,12 @@
 import { CollectionImpl } from "../../collection.js"
 import { CollectionRef, QueryRef } from "../ir.js"
+import {
+  InvalidSourceError,
+  JoinConditionMustBeEqualityError,
+  OnlyOneSourceAllowedError,
+  QueryMustHaveFromClauseError,
+  SubQueryMustHaveFromClauseError,
+} from "../../errors.js"
 import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
 import type { NamespacedRow } from "../../types.js"
 import type {
@@ -45,7 +52,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     context: string
   ): [string, CollectionRef | QueryRef] {
     if (Object.keys(source).length !== 1) {
-      throw new Error(`Only one source is allowed in the ${context}`)
+      throw new OnlyOneSourceAllowedError(context)
     }
 
     const alias = Object.keys(source)[0]!
@@ -58,13 +65,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     } else if (sourceValue instanceof BaseQueryBuilder) {
       const subQuery = sourceValue._getQuery()
       if (!(subQuery as Partial<QueryIR>).from) {
-        throw new Error(
-          `A sub query passed to a ${context} must have a from clause itself`
-        )
+        throw new SubQueryMustHaveFromClauseError(context)
       }
       ref = new QueryRef(subQuery, alias)
     } else {
-      throw new Error(`Invalid source`)
+      throw new InvalidSourceError()
     }
 
     return [alias, ref]
@@ -166,7 +171,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       left = onExpression.args[0]!
       right = onExpression.args[1]!
     } else {
-      throw new Error(`Join condition must be an equality expression`)
+      throw new JoinConditionMustBeEqualityError()
     }
 
     const joinClause: JoinClause = {
@@ -725,7 +730,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
   _getQuery(): QueryIR {
     if (!this.query.from) {
-      throw new Error(`Query must have a from clause`)
+      throw new QueryMustHaveFromClauseError()
     }
     return this.query as QueryIR
   }

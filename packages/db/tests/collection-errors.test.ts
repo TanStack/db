@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/collection"
+import {
+  CollectionInErrorStateError,
+  InvalidCollectionStatusTransitionError,
+  SyncCleanupError,
+} from "../src/errors"
 
 describe(`Collection Error Handling`, () => {
   let originalQueueMicrotask: typeof queueMicrotask
@@ -53,7 +58,17 @@ describe(`Collection Error Handling`, () => {
       // Get the microtask callback and verify it throws the expected error
       const microtaskCallback = mockQueueMicrotask.mock.calls[0]?.[0]
       expect(microtaskCallback).toBeDefined()
-      expect(() => microtaskCallback()).toThrow(
+      expect(() => microtaskCallback()).toThrow(SyncCleanupError)
+
+      let caughtError: Error | undefined
+      try {
+        microtaskCallback()
+      } catch (error) {
+        caughtError = error as Error
+      }
+
+      expect(caughtError).toBeInstanceOf(SyncCleanupError)
+      expect(caughtError?.message).toBe(
         `Collection "error-test-collection" sync cleanup function threw an error: Sync cleanup failed`
       )
     })
@@ -214,7 +229,17 @@ describe(`Collection Error Handling`, () => {
       for (const call of mockQueueMicrotask.mock.calls) {
         const microtaskCallback = call[0]
         expect(microtaskCallback).toBeDefined()
-        expect(() => microtaskCallback()).toThrow(
+        expect(() => microtaskCallback()).toThrow(SyncCleanupError)
+
+        let caughtError: Error | undefined
+        try {
+          microtaskCallback()
+        } catch (error) {
+          caughtError = error as Error
+        }
+
+        expect(caughtError).toBeInstanceOf(SyncCleanupError)
+        expect(caughtError?.message).toBe(
           `Collection "multiple-cleanup-test" sync cleanup function threw an error: Cleanup error`
         )
       }
@@ -244,23 +269,17 @@ describe(`Collection Error Handling`, () => {
       // Now operations should be blocked with helpful messages
       expect(() => {
         collection.insert({ id: `1`, name: `test` })
-      }).toThrow(
-        `Cannot perform insert on collection "error-status-test" - collection is in error state. Try calling cleanup() and restarting the collection.`
-      )
+      }).toThrow(CollectionInErrorStateError)
 
       expect(() => {
         collection.update(`1`, (draft) => {
           draft.name = `updated`
         })
-      }).toThrow(
-        `Cannot perform update on collection "error-status-test" - collection is in error state. Try calling cleanup() and restarting the collection.`
-      )
+      }).toThrow(CollectionInErrorStateError)
 
       expect(() => {
         collection.delete(`1`)
-      }).toThrow(
-        `Cannot perform delete on collection "error-status-test" - collection is in error state. Try calling cleanup() and restarting the collection.`
-      )
+      }).toThrow(CollectionInErrorStateError)
     })
 
     it(`should automatically restart collection when operations are called on cleaned-up collection`, async () => {
@@ -354,9 +373,7 @@ describe(`Collection Error Handling`, () => {
       // Test invalid transition
       expect(() => {
         collectionImpl.validateStatusTransition(`ready`, `loading`)
-      }).toThrow(
-        `Invalid collection status transition from "ready" to "loading" for collection "transition-test"`
-      )
+      }).toThrow(InvalidCollectionStatusTransitionError)
 
       // Test valid transition
       expect(() => {

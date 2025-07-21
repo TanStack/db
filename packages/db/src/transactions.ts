@@ -1,4 +1,10 @@
 import { createDeferred } from "./deferred"
+import {
+  MissingMutationFunctionError,
+  TransactionAlreadyCompletedRollbackError,
+  TransactionNotPendingCommitError,
+  TransactionNotPendingMutateError,
+} from "./errors"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -124,7 +130,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   constructor(config: TransactionConfig<T>) {
     if (typeof config.mutationFn === `undefined`) {
-      throw `mutationFn is required when creating a transaction`
+      throw new MissingMutationFunctionError()
     }
     this.id = config.id ?? crypto.randomUUID()
     this.mutationFn = config.mutationFn
@@ -186,7 +192,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    */
   mutate(callback: () => void): Transaction<T> {
     if (this.state !== `pending`) {
-      throw `You can no longer call .mutate() as the transaction is no longer pending`
+      throw new TransactionNotPendingMutateError()
     }
 
     registerTransaction(this)
@@ -260,7 +266,7 @@ class Transaction<T extends object = Record<string, unknown>> {
   rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
     const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
-      throw `You can no longer call .rollback() as the transaction is already completed`
+      throw new TransactionAlreadyCompletedRollbackError()
     }
 
     this.setState(`failed`)
@@ -342,7 +348,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    */
   async commit(): Promise<Transaction<T>> {
     if (this.state !== `pending`) {
-      throw `You can no longer call .commit() as the transaction is no longer pending`
+      throw new TransactionNotPendingCommitError()
     }
 
     this.setState(`persisting`)

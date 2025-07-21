@@ -4,6 +4,14 @@ import {
   join as joinOperator,
   map,
 } from "@electric-sql/d2mini"
+import {
+  CollectionInputNotFoundError,
+  InvalidJoinConditionSameTableError,
+  InvalidJoinConditionTableMismatchError,
+  InvalidJoinConditionWrongTablesError,
+  UnsupportedJoinSourceTypeError,
+  UnsupportedJoinTypeError,
+} from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery } from "./index.js"
 import type { IStreamBuilder, JoinType } from "@electric-sql/d2mini"
@@ -125,7 +133,7 @@ function processJoin(
 
   // Apply the join operation
   if (![`inner`, `left`, `right`, `full`].includes(joinType)) {
-    throw new Error(`Unsupported join type: ${joinClause.type}`)
+    throw new UnsupportedJoinTypeError(joinClause.type)
   }
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinType),
@@ -165,21 +173,23 @@ function analyzeJoinExpressions(
 
   // If both expressions refer to the same alias, this is an invalid join
   if (leftTableAlias === rightTableAlias) {
-    throw new Error(
-      `Invalid join condition: both expressions refer to the same table "${leftTableAlias}"`
-    )
+    throw new InvalidJoinConditionSameTableError(leftTableAlias || `unknown`)
   }
 
   // If one expression doesn't refer to either table, this is an invalid join
   if (!leftTableAlias || !rightTableAlias) {
-    throw new Error(
-      `Invalid join condition: expressions must reference table aliases "${mainTableAlias}" and "${joinedTableAlias}"`
+    throw new InvalidJoinConditionTableMismatchError(
+      mainTableAlias,
+      joinedTableAlias
     )
   }
 
   // If expressions refer to tables not involved in this join, this is an invalid join
-  throw new Error(
-    `Invalid join condition: expressions reference tables "${leftTableAlias}" and "${rightTableAlias}" but join is between "${mainTableAlias}" and "${joinedTableAlias}"`
+  throw new InvalidJoinConditionWrongTablesError(
+    leftTableAlias,
+    rightTableAlias,
+    mainTableAlias,
+    joinedTableAlias
   )
 }
 
@@ -222,9 +232,7 @@ function processJoinSource(
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
-        throw new Error(
-          `Input for collection "${from.collection.id}" not found in inputs map`
-        )
+        throw new CollectionInputNotFoundError(from.collection.id)
       }
       return { alias: from.alias, input }
     }
@@ -252,7 +260,7 @@ function processJoinSource(
       return { alias: from.alias, input: extractedInput as KeyedStream }
     }
     default:
-      throw new Error(`Unsupported join source type: ${(from as any).type}`)
+      throw new UnsupportedJoinSourceTypeError((from as any).type)
   }
 }
 

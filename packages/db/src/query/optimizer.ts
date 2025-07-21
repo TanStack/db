@@ -116,6 +116,7 @@
  */
 
 import { deepEquals } from "../utils.js"
+import { CannotCombineEmptyExpressionListError } from "../errors.js"
 import {
   CollectionRef as CollectionRefClass,
   Func,
@@ -726,7 +727,7 @@ function combineWithAnd(
   expressions: Array<BasicExpression<boolean>>
 ): BasicExpression<boolean> {
   if (expressions.length === 0) {
-    throw new Error(`Cannot combine empty expression list`)
+    throw new CannotCombineEmptyExpressionListError()
   }
 
   if (expressions.length === 1) {

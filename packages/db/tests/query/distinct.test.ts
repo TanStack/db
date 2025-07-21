@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "vitest"
 import { concat, createLiveQueryCollection } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
+import { DistinctRequiresSelectError } from "../../src/errors"
 
 // Sample data types for comprehensive DISTINCT testing
 type User = {
@@ -183,7 +184,7 @@ describe(`Query DISTINCT Execution`, () => {
           startSync: true,
           query: (q) => q.from({ users: usersCollection }).distinct(),
         })
-      ).toThrow(`DISTINCT requires a SELECT clause.`)
+      ).toThrow(DistinctRequiresSelectError)
     })
   })
 
