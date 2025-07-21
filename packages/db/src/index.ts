@@ -4,9 +4,11 @@ export * from "./SortedMap"
 export * from "./transactions"
 export * from "./types"
 export * from "./errors"
-export * from "./utils"
 export * from "./proxy"
 export * from "./query/index.js"
+export * from "./optimistic-action"
+export * from "./local-only"
+export * from "./local-storage"
 
 // Re-export some stuff explicitly to ensure the type & value is exported
-export { Collection } from "./collection"
+export type { Collection } from "./collection"

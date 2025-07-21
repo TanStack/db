@@ -1,515 +1,622 @@
-import { describe, expect, it } from "vitest"
-import { D2, MessageType, MultiSet, output } from "@electric-sql/d2ts"
-import { compileQueryPipeline } from "../../src/query/pipeline-compiler.js"
-import type { RootStreamBuilder } from "@electric-sql/d2ts"
-import type { Query } from "../../src/query/schema.js"
+import { beforeEach, describe, expect, test } from "vitest"
+import { createLiveQueryCollection, eq } from "../../src/query/index.js"
+import { createCollection } from "../../src/collection.js"
+import { mockSyncCollectionOptions } from "../utls.js"
 
-describe(`Query - JOIN Clauses`, () => {
-  // Sample data for users
-  type User = {
-    id: number
-    name: string
-    email: string
-    role: string
-  }
+// Sample data types for join testing
+type User = {
+  id: number
+  name: string
+  email: string
+  department_id: number | undefined
+}
 
-  // Sample data for products
-  type Product = {
-    id: number
-    name: string
-    price: number
-    category: string
-    creatorId: number
-  }
+type Department = {
+  id: number
+  name: string
+  budget: number
+}
 
-  // Sample data for orders
-  type Order = {
-    id: number
-    userId: number
-    productId: number
-    quantity: number
-    orderDate: string
-  }
+// Sample user data
+const sampleUsers: Array<User> = [
+  { id: 1, name: `Alice`, email: `alice@example.com`, department_id: 1 },
+  { id: 2, name: `Bob`, email: `bob@example.com`, department_id: 1 },
+  { id: 3, name: `Charlie`, email: `charlie@example.com`, department_id: 2 },
+  { id: 4, name: `Dave`, email: `dave@example.com`, department_id: undefined },
+]
 
-  type Schema = {
-    orders: Order
-    users: User
-    products: Product
-  }
+// Sample department data
+const sampleDepartments: Array<Department> = [
+  { id: 1, name: `Engineering`, budget: 100000 },
+  { id: 2, name: `Sales`, budget: 80000 },
+  { id: 3, name: `Marketing`, budget: 60000 },
+]
 
-  type Context = {
-    baseSchema: Schema
-    schema: Schema
-  }
+function createUsersCollection() {
+  return createCollection(
+    mockSyncCollectionOptions<User>({
+      id: `test-users`,
+      getKey: (user) => user.id,
+      initialData: sampleUsers,
+    })
+  )
+}
 
-  // Sample users
-  const users: Array<User> = [
-    {
-      id: 1,
-      name: `Alice Johnson`,
-      email: `alice@example.com`,
-      role: `admin`,
-    },
-    {
-      id: 2,
-      name: `Bob Smith`,
-      email: `bob@example.com`,
-      role: `user`,
-    },
-    {
-      id: 3,
-      name: `Carol Williams`,
-      email: `carol@example.com`,
-      role: `user`,
-    },
-    {
-      id: 4,
-      name: `Dave Brown`,
-      email: `dave@example.com`,
-      role: `manager`,
-    },
-  ]
+function createDepartmentsCollection() {
+  return createCollection(
+    mockSyncCollectionOptions<Department>({
+      id: `test-departments`,
+      getKey: (dept) => dept.id,
+      initialData: sampleDepartments,
+    })
+  )
+}
 
-  // Sample products
-  const products: Array<Product> = [
-    {
-      id: 1,
-      name: `Laptop`,
-      price: 1200,
-      category: `Electronics`,
-      creatorId: 1,
-    },
-    {
-      id: 2,
-      name: `Smartphone`,
-      price: 800,
-      category: `Electronics`,
-      creatorId: 1,
-    },
-    {
-      id: 3,
-      name: `Desk Chair`,
-      price: 250,
-      category: `Furniture`,
-      creatorId: 2,
-    },
-    {
-      id: 4,
-      name: `Coffee Table`,
-      price: 180,
-      category: `Furniture`,
-      creatorId: 2,
-    },
-    {
-      id: 5,
-      name: `Headphones`,
-      price: 150,
-      category: `Electronics`,
-      creatorId: 3,
-    },
-  ]
+// Join types to test
+const joinTypes = [`inner`, `left`, `right`, `full`] as const
+type JoinType = (typeof joinTypes)[number]
 
-  // Sample orders
-  const orders: Array<Order> = [
-    {
-      id: 1,
-      userId: 1,
-      productId: 1,
-      quantity: 1,
-      orderDate: `2023-01-15`,
-    },
-    {
-      id: 2,
-      userId: 1,
-      productId: 5,
-      quantity: 2,
-      orderDate: `2023-01-16`,
-    },
-    {
-      id: 3,
-      userId: 2,
-      productId: 3,
-      quantity: 1,
-      orderDate: `2023-02-10`,
-    },
-    {
-      id: 4,
-      userId: 3,
-      productId: 2,
-      quantity: 1,
-      orderDate: `2023-02-20`,
-    },
-    {
-      id: 5,
-      userId: 4,
-      productId: 4,
-      quantity: 2,
-      orderDate: `2023-03-05`,
-    },
-  ]
+// Expected results for each join type
+const expectedResults = {
+  inner: {
+    initialCount: 3, // Alice+Eng, Bob+Eng, Charlie+Sales
+    userNames: [`Alice`, `Bob`, `Charlie`],
+    includesDave: false,
+    includesMarketing: false,
+  },
+  left: {
+    initialCount: 4, // All users (Dave has null dept)
+    userNames: [`Alice`, `Bob`, `Charlie`, `Dave`],
+    includesDave: true,
+    includesMarketing: false,
+  },
+  right: {
+    initialCount: 4, // Alice+Eng, Bob+Eng, Charlie+Sales, null+Marketing
+    userNames: [`Alice`, `Bob`, `Charlie`], // null user not counted
+    includesDave: false,
+    includesMarketing: true,
+  },
+  full: {
+    initialCount: 5, // Alice+Eng, Bob+Eng, Charlie+Sales, Dave+null, null+Marketing
+    userNames: [`Alice`, `Bob`, `Charlie`, `Dave`],
+    includesDave: true,
+    includesMarketing: true,
+  },
+} as const
 
-  function runQueryWithJoins<T extends Record<string, any>>(
-    mainData: Array<T>,
-    query: Query,
-    additionalData: Record<string, Array<any>> = {}
-  ): Array<any> {
-    const graph = new D2({ initialFrontier: 0 })
+function testJoinType(joinType: JoinType) {
+  describe(`${joinType} joins`, () => {
+    let usersCollection: ReturnType<typeof createUsersCollection>
+    let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
-    // Create inputs for each table
-    const mainInput = graph.newInput<T>()
-    const inputs: Record<string, RootStreamBuilder<any>> = {
-      [query.from]: mainInput,
-    }
+    beforeEach(() => {
+      usersCollection = createUsersCollection()
+      departmentsCollection = createDepartmentsCollection()
+    })
 
-    // Create inputs for each joined table
-    if (query.join) {
-      for (const joinClause of query.join) {
-        const tableName = joinClause.from
-        inputs[tableName] = graph.newInput<any>()
-      }
-    }
-
-    // Compile the query with the unified inputs map
-    const pipeline = compileQueryPipeline(query, inputs)
-
-    // Create a sink to collect the results
-    const results: Array<any> = []
-    pipeline.pipe(
-      output((message) => {
-        if (message.type === MessageType.DATA) {
-          const data = message.data.collection.getInner().map(([item]) => item)
-          results.push(...data)
-        }
+    test(`should perform ${joinType} join with explicit select`, () => {
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType
+            )
+            .select(({ user, dept }) => ({
+              user_name: user.name,
+              department_name: dept.name,
+              budget: dept.budget,
+            })),
       })
-    )
 
-    // Finalize the graph
-    graph.finalize()
+      const results = joinQuery.toArray
+      const expected = expectedResults[joinType]
 
-    // Send data to the main input
-    mainInput.sendData(0, new MultiSet(mainData.map((d) => [d, 1])))
-    mainInput.sendFrontier(1)
+      expect(results).toHaveLength(expected.initialCount)
 
-    // Send data to the joined inputs
-    if (query.join) {
-      for (const joinClause of query.join) {
-        const tableName = joinClause.from
-        const data = additionalData[tableName] || []
-        const input = inputs[tableName]
+      // Check specific behaviors for each join type
+      if (joinType === `inner`) {
+        // Inner join should only include matching records
+        const userNames = results.map((r) => r.user_name).sort()
+        expect(userNames).toEqual([`Alice`, `Bob`, `Charlie`])
 
-        if (input && data.length > 0) {
-          input.sendData(0, new MultiSet(data.map((d) => [d, 1])))
-          input.sendFrontier(1)
+        const alice = results.find((r) => r.user_name === `Alice`)
+        expect(alice).toMatchObject({
+          user_name: `Alice`,
+          department_name: `Engineering`,
+          budget: 100000,
+        })
+      }
+
+      if (joinType === `left`) {
+        // Left join should include all users, even Dave with null department
+        const userNames = results.map((r) => r.user_name).sort()
+        expect(userNames).toEqual([`Alice`, `Bob`, `Charlie`, `Dave`])
+
+        const dave = results.find((r) => r.user_name === `Dave`)
+        expect(dave).toMatchObject({
+          user_name: `Dave`,
+          department_name: undefined,
+          budget: undefined,
+        })
+      }
+
+      if (joinType === `right`) {
+        // Right join should include all departments, even Marketing with no users
+        const departmentNames = results.map((r) => r.department_name).sort()
+        expect(departmentNames).toEqual([
+          `Engineering`,
+          `Engineering`,
+          `Marketing`,
+          `Sales`,
+        ])
+
+        const marketing = results.find((r) => r.department_name === `Marketing`)
+        expect(marketing).toMatchObject({
+          user_name: undefined,
+          department_name: `Marketing`,
+          budget: 60000,
+        })
+      }
+
+      if (joinType === `full`) {
+        // Full join should include all users and all departments
+        expect(results).toHaveLength(5)
+
+        const dave = results.find((r) => r.user_name === `Dave`)
+        expect(dave).toMatchObject({
+          user_name: `Dave`,
+          department_name: undefined,
+          budget: undefined,
+        })
+
+        const marketing = results.find((r) => r.department_name === `Marketing`)
+        expect(marketing).toMatchObject({
+          user_name: undefined,
+          department_name: `Marketing`,
+          budget: 60000,
+        })
+      }
+    })
+
+    test(`should perform ${joinType} join without select (namespaced result)`, () => {
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType
+            ),
+      })
+
+      const results = joinQuery.toArray as Array<
+        Partial<(typeof joinQuery.toArray)[number]>
+      > // Type coercion to allow undefined properties in tests
+      const expected = expectedResults[joinType]
+
+      expect(results).toHaveLength(expected.initialCount)
+
+      switch (joinType) {
+        case `inner`: {
+          // Inner join: all results should have both user and dept
+          results.forEach((result) => {
+            expect(result).toHaveProperty(`user`)
+            expect(result).toHaveProperty(`dept`)
+          })
+          break
+        }
+        case `left`: {
+          // Left join: all results have user, but Dave (id=4) has no dept
+          results.forEach((result) => {
+            expect(result).toHaveProperty(`user`)
+          })
+          results
+            .filter((result) => result.user?.id === 4)
+            .forEach((result) => {
+              expect(result).not.toHaveProperty(`dept`)
+            })
+          results
+            .filter((result) => result.user?.id !== 4)
+            .forEach((result) => {
+              expect(result).toHaveProperty(`dept`)
+            })
+          break
+        }
+        case `right`: {
+          // Right join: all results have dept, but Marketing dept has no user
+          results.forEach((result) => {
+            expect(result).toHaveProperty(`dept`)
+          })
+          // Results with matching users should have user property
+          results
+            .filter((result) => result.dept?.id !== 3)
+            .forEach((result) => {
+              expect(result).toHaveProperty(`user`)
+            })
+          // Marketing department (id=3) should not have user
+          results
+            .filter((result) => result.dept?.id === 3)
+            .forEach((result) => {
+              expect(result).not.toHaveProperty(`user`)
+            })
+          break
+        }
+        case `full`: {
+          // Full join: combination of left and right behaviors
+          // Dave (user id=4) should have user but no dept
+          results
+            .filter((result) => result.user?.id === 4)
+            .forEach((result) => {
+              expect(result).toHaveProperty(`user`)
+              expect(result).not.toHaveProperty(`dept`)
+            })
+          // Marketing (dept id=3) should have dept but no user
+          results
+            .filter((result) => result.dept?.id === 3)
+            .forEach((result) => {
+              expect(result).toHaveProperty(`dept`)
+              expect(result).not.toHaveProperty(`user`)
+            })
+          // Matched records should have both
+          results
+            .filter((result) => result.user?.id !== 4 && result.dept?.id !== 3)
+            .forEach((result) => {
+              expect(result).toHaveProperty(`user`)
+              expect(result).toHaveProperty(`dept`)
+            })
+          break
         }
       }
-    }
-
-    graph.run()
-    return results
-  }
-
-  it(`should support basic INNER JOIN`, () => {
-    const query: Query<Context> = {
-      select: [
-        { order_id: `@orders.id` },
-        { user_name: `@users.name` },
-        { product_name: `@products.name` },
-        { quantity: `@orders.quantity` },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
-
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
     })
 
-    // Inner join should only include records with matches in all tables
-    expect(results).toHaveLength(5) // All our sample data matches
+    test(`should handle live updates for ${joinType} joins - insert matching record`, () => {
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType
+            )
+            .select(({ user, dept }) => ({
+              user_name: user.name,
+              department_name: dept.name,
+            })),
+      })
 
-    // Check a specific result
-    const firstOrder = results.find((r) => r.order_id === 1)
-    expect(firstOrder).toBeDefined()
-    expect(firstOrder.user_name).toBe(`Alice Johnson`)
-    expect(firstOrder.product_name).toBe(`Laptop`)
-    expect(firstOrder.quantity).toBe(1)
-  })
+      const initialSize = joinQuery.size
 
-  it(`should support LEFT JOIN`, () => {
-    // Create an order without a matching product
-    const ordersWithMissing = [
-      ...orders,
-      {
-        id: 6,
-        userId: 3,
-        productId: 99, // Non-existent product
-        quantity: 1,
-        orderDate: `2023-04-01`,
-      },
-    ]
+      // Insert a new user with existing department
+      const newUser: User = {
+        id: 5,
+        name: `Eve`,
+        email: `eve@example.com`,
+        department_id: 1, // Engineering
+      }
 
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          productId: `@orders.productId`,
-          product_name: `@products.name`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `left`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
+      usersCollection.utils.begin()
+      usersCollection.utils.write({ type: `insert`, value: newUser })
+      usersCollection.utils.commit()
 
-    const results = runQueryWithJoins(ordersWithMissing, query, {
-      products,
+      // For all join types, adding a matching user should increase the count
+      expect(joinQuery.size).toBe(initialSize + 1)
+
+      const eve = joinQuery.get(5)
+      if (eve) {
+        expect(eve).toMatchObject({
+          user_name: `Eve`,
+          department_name: `Engineering`,
+        })
+      }
     })
 
-    // Left join should include all records from the left side
-    expect(results).toHaveLength(6) // 5 with matching products + 1 without
+    test(`should handle live updates for ${joinType} joins - delete record`, () => {
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              joinType
+            )
+            .select(({ user, dept }) => ({
+              user_name: user.name,
+              department_name: dept.name,
+            })),
+      })
 
-    // The last order should have a null product name
-    const lastOrder = results.find((r) => r.order_id === 6)
-    expect(lastOrder).toBeDefined()
-    expect(lastOrder.productId).toBe(99)
-    expect(lastOrder.product_name).toBeNull()
-  })
+      const initialSize = joinQuery.size
 
-  it(`should support RIGHT JOIN`, () => {
-    // Exclude one product from orders
-    const partialOrders = orders.filter((o) => o.productId !== 4)
+      // Delete Alice (user 1) - she has a matching department
+      const alice = sampleUsers.find((u) => u.id === 1)!
+      usersCollection.utils.begin()
+      usersCollection.utils.write({ type: `delete`, value: alice })
+      usersCollection.utils.commit()
 
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          product_id: `@products.id`,
-          product_name: `@products.name`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `right`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
-
-    const results = runQueryWithJoins(partialOrders, query, {
-      products,
+      // The behavior depends on join type
+      if (joinType === `inner` || joinType === `left`) {
+        // Alice was contributing to the result, so count decreases
+        expect(joinQuery.size).toBe(initialSize - 1)
+        expect(joinQuery.get(1)).toBeUndefined()
+      } else {
+        // (joinType === `right` || joinType === `full`)
+        // Alice was contributing, but the behavior might be different
+        // This will depend on the exact implementation
+        expect(joinQuery.get(1)).toBeUndefined()
+      }
     })
 
-    // Right join should include all records from the right side
-    expect(results).toHaveLength(5) // All products should be included
+    if (joinType === `left` || joinType === `full`) {
+      test(`should handle null to match transition for ${joinType} joins`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                joinType
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
 
-    // Product 4 should appear with null order info
-    const product4 = results.find((r) => r.product_id === 4)
-    expect(product4).toBeDefined()
-    expect(product4.product_name).toBe(`Coffee Table`)
-    expect(product4.order_id).toBeNull()
-  })
+        // Initially Dave has null department
+        const daveBefore = joinQuery.get(`[4,undefined]`)
+        expect(daveBefore).toMatchObject({
+          user_name: `Dave`,
+          department_name: undefined,
+        })
 
-  it(`should support FULL JOIN`, () => {
-    // Add an order with no matching product
-    const ordersWithMissing = [
-      ...orders,
-      {
-        id: 6,
-        userId: 3,
-        productId: 99, // Non-existent product
-        quantity: 1,
-        orderDate: `2023-04-01`,
-      },
-    ]
+        const daveBefore2 = joinQuery.get(`[4,1]`)
+        expect(daveBefore2).toBeUndefined()
 
-    // Add a product with no matching orders
-    const productsWithExtra = [
-      ...products,
-      {
-        id: 6,
-        name: `TV`,
-        price: 900,
-        category: `Electronics`,
-        creatorId: 1,
-      },
-    ]
+        // Update Dave to have a department
+        const updatedDave: User = {
+          ...sampleUsers.find((u) => u.id === 4)!,
+          department_id: 1, // Engineering
+        }
 
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          productId: `@orders.productId`,
-          product_id: `@products.id`,
-          product_name: `@products.name`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `full`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
+        usersCollection.utils.begin()
+        usersCollection.utils.write({ type: `update`, value: updatedDave })
+        usersCollection.utils.commit()
+
+        const daveAfter = joinQuery.get(`[4,1]`)
+        expect(daveAfter).toMatchObject({
+          user_name: `Dave`,
+          department_name: `Engineering`,
+        })
+
+        const daveAfter2 = joinQuery.get(`[4,undefined]`)
+        expect(daveAfter2).toBeUndefined()
+      })
     }
 
-    const results = runQueryWithJoins(ordersWithMissing, query, {
-      products: productsWithExtra,
-    })
+    if (joinType === `right` || joinType === `full`) {
+      test(`should handle unmatched department for ${joinType} joins`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(user.department_id, dept.id),
+                joinType
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
 
-    // Full join should include all records from both sides
-    expect(results).toHaveLength(7) // 5 matches + 1 order-only + 1 product-only
+        // Initially Marketing has no users
+        const marketingResults = joinQuery.toArray.filter(
+          (r) => r.department_name === `Marketing`
+        )
+        expect(marketingResults).toHaveLength(1)
+        expect(marketingResults[0]?.user_name).toBeUndefined()
 
-    // Order with no matching product
-    const noProductOrder = results.find((r) => r.order_id === 6)
-    expect(noProductOrder).toBeDefined()
-    expect(noProductOrder.productId).toBe(99)
-    expect(noProductOrder.product_name).toBeNull()
+        // Insert a user for Marketing department
+        const newUser: User = {
+          id: 5,
+          name: `Eve`,
+          email: `eve@example.com`,
+          department_id: 3, // Marketing
+        }
 
-    // Product with no matching order
-    const noOrderProduct = results.find((r) => r.product_id === 6)
-    expect(noOrderProduct).toBeDefined()
-    expect(noOrderProduct.product_name).toBe(`TV`)
-    expect(noOrderProduct.order_id).toBeNull()
-  })
+        usersCollection.utils.begin()
+        usersCollection.utils.write({ type: `insert`, value: newUser })
+        usersCollection.utils.commit()
 
-  it(`should support join conditions in SELECT`, () => {
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          user_name: `@users.name`,
-          product_name: `@products.name`,
-          price: `@products.price`,
-          quantity: `@orders.quantity`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
-
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
-    })
-
-    // Check we have all the basic fields
-    expect(results).toHaveLength(5)
-    expect(results[0].order_id).toBeDefined()
-    expect(results[0].user_name).toBeDefined()
-    expect(results[0].product_name).toBeDefined()
-    expect(results[0].price).toBeDefined()
-    expect(results[0].quantity).toBeDefined()
-  })
-
-  it(`should support filtering with WHERE on joined data`, () => {
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          user_name: `@users.name`,
-          product_name: `@products.name`,
-          category: `@products.category`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-      // Filter to only include electronics orders
-      where: [`@products.category`, `=`, `Electronics`],
-    }
-
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
-    })
-
-    // Only 3 orders are for electronic products
-    expect(results).toHaveLength(3)
-
-    // All results should be for electronics
-    for (const result of results) {
-      expect(result.category).toBe(`Electronics`)
+        // Should now have Eve in Marketing instead of null
+        const updatedMarketingResults = joinQuery.toArray.filter(
+          (r) => r.department_name === `Marketing`
+        )
+        expect(updatedMarketingResults).toHaveLength(1)
+        expect(updatedMarketingResults[0]).toMatchObject({
+          user_name: `Eve`,
+          department_name: `Marketing`,
+        })
+      })
     }
   })
+}
 
-  it(`should support filtering with a WHERE clause on the join`, () => {
-    const query: Query<Context> = {
-      select: [
-        {
-          order_id: `@orders.id`,
-          user_name: `@users.name`,
-          product_name: `@products.name`,
-        },
-      ],
-      from: `orders`,
-      join: [
-        {
-          type: `inner`,
-          from: `users`,
-          on: [`@orders.userId`, `=`, `@users.id`],
-          // Only join with admin users
-          where: [`@users.role`, `=`, `admin`],
-        },
-        {
-          type: `inner`,
-          from: `products`,
-          on: [`@orders.productId`, `=`, `@products.id`],
-        },
-      ],
-    }
+describe(`Query JOIN Operations`, () => {
+  // Generate tests for each join type
+  joinTypes.forEach((joinType) => {
+    testJoinType(joinType)
+  })
 
-    const results = runQueryWithJoins(orders, query, {
-      users,
-      products,
+  describe(`Complex Join Scenarios`, () => {
+    let usersCollection: ReturnType<typeof createUsersCollection>
+    let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
+
+    beforeEach(() => {
+      usersCollection = createUsersCollection()
+      departmentsCollection = createDepartmentsCollection()
     })
 
-    // Only 2 orders were placed by admin users (Alice)
-    expect(results).toHaveLength(2)
+    test(`should handle multiple simultaneous updates`, () => {
+      const innerJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              `inner`
+            )
+            .select(({ user, dept }) => ({
+              user_name: user.name,
+              department_name: dept.name,
+            })),
+      })
 
-    // All results should be for the admin user
-    for (const result of results) {
-      expect(result.user_name).toBe(`Alice Johnson`)
-    }
+      expect(innerJoinQuery.size).toBe(3)
+
+      // Perform multiple operations in a single transaction
+      usersCollection.utils.begin()
+      departmentsCollection.utils.begin()
+
+      // Delete Alice
+      const alice = sampleUsers.find((u) => u.id === 1)!
+      usersCollection.utils.write({ type: `delete`, value: alice })
+
+      // Add new user Eve to Engineering
+      const eve: User = {
+        id: 5,
+        name: `Eve`,
+        email: `eve@example.com`,
+        department_id: 1,
+      }
+      usersCollection.utils.write({ type: `insert`, value: eve })
+
+      // Add new department IT
+      const itDept: Department = { id: 4, name: `IT`, budget: 120000 }
+      departmentsCollection.utils.write({ type: `insert`, value: itDept })
+
+      // Update Dave to join IT
+      const updatedDave: User = {
+        ...sampleUsers.find((u) => u.id === 4)!,
+        department_id: 4,
+      }
+      usersCollection.utils.write({ type: `update`, value: updatedDave })
+
+      usersCollection.utils.commit()
+      departmentsCollection.utils.commit()
+
+      // Should still have 4 results: Bob+Eng, Charlie+Sales, Eve+Eng, Dave+IT
+      expect(innerJoinQuery.size).toBe(4)
+
+      const resultNames = innerJoinQuery.toArray.map((r) => r.user_name).sort()
+      expect(resultNames).toEqual([`Bob`, `Charlie`, `Dave`, `Eve`])
+
+      const daveResult = innerJoinQuery.toArray.find(
+        (r) => r.user_name === `Dave`
+      )
+      expect(daveResult).toMatchObject({
+        user_name: `Dave`,
+        department_name: `IT`,
+      })
+    })
+
+    test(`should handle empty collections`, () => {
+      const emptyUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `empty-users`,
+          getKey: (user) => user.id,
+          initialData: [],
+        })
+      )
+
+      const innerJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: emptyUsers })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              `inner`
+            )
+            .select(({ user, dept }) => ({
+              user_name: user.name,
+              department_name: dept.name,
+            })),
+      })
+
+      expect(innerJoinQuery.size).toBe(0)
+
+      // Add user to empty collection
+      const newUser: User = {
+        id: 1,
+        name: `Alice`,
+        email: `alice@example.com`,
+        department_id: 1,
+      }
+      emptyUsers.utils.begin()
+      emptyUsers.utils.write({ type: `insert`, value: newUser })
+      emptyUsers.utils.commit()
+
+      expect(innerJoinQuery.size).toBe(1)
+      const result = innerJoinQuery.get(`[1,1]`)
+      expect(result).toMatchObject({
+        user_name: `Alice`,
+        department_name: `Engineering`,
+      })
+    })
+
+    test(`should handle null join keys correctly`, () => {
+      // Test with user that has null department_id
+      const leftJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .join(
+              { dept: departmentsCollection },
+              ({ user, dept }) => eq(user.department_id, dept.id),
+              `left`
+            )
+            .select(({ user, dept }) => ({
+              user_id: user.id,
+              user_name: user.name,
+              department_id: user.department_id,
+              department_name: dept.name,
+            })),
+      })
+
+      const results = leftJoinQuery.toArray
+      expect(results).toHaveLength(4)
+
+      // Dave has null department_id
+      const dave = results.find((r) => r.user_name === `Dave`)
+      expect(dave).toMatchObject({
+        user_id: 4,
+        user_name: `Dave`,
+        department_id: undefined,
+        department_name: undefined,
+      })
+
+      // Other users should have department names
+      const alice = results.find((r) => r.user_name === `Alice`)
+      expect(alice?.department_name).toBe(`Engineering`)
+    })
   })
 })
