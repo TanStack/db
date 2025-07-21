@@ -1,5 +1,7 @@
+import { TanStackDBError } from "@tanstack/db"
+
 // TrailBase DB Collection Errors
-export class TrailBaseDBCollectionError extends Error {
+export class TrailBaseDBCollectionError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `TrailBaseDBCollectionError`

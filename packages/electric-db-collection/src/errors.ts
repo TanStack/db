@@ -1,5 +1,7 @@
+import { TanStackDBError } from "@tanstack/db"
+
 // Electric DB Collection Errors
-export class ElectricDBCollectionError extends Error {
+export class ElectricDBCollectionError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `ElectricDBCollectionError`

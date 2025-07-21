@@ -11,6 +11,7 @@ This comprehensive update replaces all string-based error throws throughout the 
 
 ## New Features
 
+- **Root `TanStackDBError` class** - all errors inherit from a common base for unified error handling
 - **Named error classes** organized by package and functional area
 - **Type-safe error handling** using `instanceof` checks instead of string matching
 - **Package-specific error definitions** - each adapter has its own error classes
@@ -77,9 +78,25 @@ import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
 import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
 ```
 
+### Unified Error Handling
+**New:**
+```ts
+import { TanStackDBError } from "@tanstack/db"
+
+try {
+  // Any TanStack DB operation
+} catch (error) {
+  if (error instanceof TanStackDBError) {
+    // Handle all TanStack DB errors uniformly
+    console.log('TanStack DB error:', error.message)
+  }
+}
+```
+
 ## Benefits
 
 - **Type Safety**: All errors now have specific types that can be caught with `instanceof`
+- **Unified Error Handling**: Root `TanStackDBError` class allows catching all library errors with a single check
 - **Better Package Separation**: Each adapter manages its own error types
 - **Developer Experience**: Better IDE support with autocomplete for error types  
 - **Maintainability**: Error definitions are co-located with their usage

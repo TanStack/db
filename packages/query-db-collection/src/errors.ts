@@ -1,5 +1,7 @@
+import { TanStackDBError } from "@tanstack/db"
+
 // Query Collection Errors
-export class QueryCollectionError extends Error {
+export class QueryCollectionError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `QueryCollectionError`

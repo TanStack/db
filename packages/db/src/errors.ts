@@ -1,5 +1,13 @@
+// Root error class for all TanStack DB errors
+export class TanStackDBError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = `TanStackDBError`
+  }
+}
+
 // Base error classes
-export class NonRetriableError extends Error {
+export class NonRetriableError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `NonRetriableError`
@@ -7,7 +15,7 @@ export class NonRetriableError extends Error {
 }
 
 // Schema validation error (exported from index for backward compatibility)
-export class SchemaValidationError extends Error {
+export class SchemaValidationError extends TanStackDBError {
   type: `insert` | `update`
   issues: ReadonlyArray<{
     message: string
@@ -34,7 +42,7 @@ export class SchemaValidationError extends Error {
 }
 
 // Collection Configuration Errors
-export class CollectionConfigurationError extends Error {
+export class CollectionConfigurationError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `CollectionConfigurationError`
@@ -66,7 +74,7 @@ export class SchemaMustBeSynchronousError extends CollectionConfigurationError {
 }
 
 // Collection State Errors
-export class CollectionStateError extends Error {
+export class CollectionStateError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `CollectionStateError`
@@ -102,7 +110,7 @@ export class NegativeActiveSubscribersError extends CollectionStateError {
 }
 
 // Collection Operation Errors
-export class CollectionOperationError extends Error {
+export class CollectionOperationError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `CollectionOperationError`
@@ -176,7 +184,7 @@ export class DeleteKeyNotFoundError extends CollectionOperationError {
 }
 
 // Collection Handler Errors
-export class MissingHandlerError extends Error {
+export class MissingHandlerError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `MissingHandlerError`
@@ -208,7 +216,7 @@ export class MissingDeleteHandlerError extends MissingHandlerError {
 }
 
 // Transaction Errors
-export class TransactionError extends Error {
+export class TransactionError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `TransactionError`
@@ -274,7 +282,7 @@ export class SyncTransactionAlreadyCommittedError extends TransactionError {
 }
 
 // Query Builder Errors
-export class QueryBuilderError extends Error {
+export class QueryBuilderError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `QueryBuilderError`
@@ -312,7 +320,7 @@ export class QueryMustHaveFromClauseError extends QueryBuilderError {
 }
 
 // Query Compilation Errors
-export class QueryCompilationError extends Error {
+export class QueryCompilationError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `QueryCompilationError`
@@ -370,7 +378,7 @@ export class UnknownFunctionError extends QueryCompilationError {
 }
 
 // JOIN Operation Errors
-export class JoinError extends Error {
+export class JoinError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `JoinError`
@@ -419,7 +427,7 @@ export class UnsupportedJoinSourceTypeError extends JoinError {
 }
 
 // GROUP BY and Aggregation Errors
-export class GroupByError extends Error {
+export class GroupByError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `GroupByError`
@@ -455,7 +463,7 @@ export class UnknownHavingExpressionTypeError extends GroupByError {
 }
 
 // Storage Errors
-export class StorageError extends Error {
+export class StorageError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `StorageError`
@@ -517,7 +525,7 @@ export class InvalidStorageObjectFormatError extends LocalStorageCollectionError
 }
 
 // Sync Cleanup Errors
-export class SyncCleanupError extends Error {
+export class SyncCleanupError extends TanStackDBError {
   constructor(collectionId: string, error: Error | string) {
     const message = error instanceof Error ? error.message : String(error)
     super(
@@ -528,7 +536,7 @@ export class SyncCleanupError extends Error {
 }
 
 // Query Optimizer Errors
-export class QueryOptimizerError extends Error {
+export class QueryOptimizerError extends TanStackDBError {
   constructor(message: string) {
     super(message)
     this.name = `QueryOptimizerError`
