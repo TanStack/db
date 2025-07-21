@@ -9,7 +9,7 @@ TanStack DB provides comprehensive error handling capabilities to ensure robust 
 
 ## Error Types
 
-TanStack DB provides named error classes for better error handling and type safety. All error classes can be imported from `@tanstack/db`:
+TanStack DB provides named error classes for better error handling and type safety. All error classes can be imported from `@tanstack/db` (or more commonly, the framework-specific package e.g. `@tanstack/react-db`):
 
 ```ts
 import {
