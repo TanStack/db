@@ -163,7 +163,7 @@ function analyzeJoinExpressions(
     return { mainExpr: right, joinedExpr: left }
   }
 
-  // If both expressions refer to the same table, this is an invalid join
+  // If both expressions refer to the same alias, this is an invalid join
   if (leftTableAlias === rightTableAlias) {
     throw new Error(
       `Invalid join condition: both expressions refer to the same table "${leftTableAlias}"`
@@ -203,10 +203,8 @@ function getTableAliasFromExpression(expr: BasicExpression): string | null {
       // If all arguments refer to the same table, return that table alias
       return tableAliases.size === 1 ? Array.from(tableAliases)[0]! : null
     }
-    case `val`:
-      // Values don't reference any table
-      return null
     default:
+      // Values (type='val') don't reference any table
       return null
   }
 }
