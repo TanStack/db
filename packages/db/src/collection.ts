@@ -228,8 +228,8 @@ export class CollectionImpl<
   private _size = 0
 
   // Index storage
-  private lazyIndexes = new Map<string, LazyIndexWrapper<TKey>>()
-  private resolvedIndexes = new Map<string, BaseIndex<TKey>>()
+  private lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
+  private resolvedIndexes = new Map<number, BaseIndex<TKey>>()
   private isIndexesResolved = false
   private indexCounter = 0
 
@@ -1341,7 +1341,7 @@ export class CollectionImpl<
   ): IndexProxy<TKey> {
     this.validateCollectionUsable(`createIndex`)
 
-    const indexId = `${++this.indexCounter}`
+    const indexId = ++this.indexCounter
     const singleRowRefProxy = createSingleRowRefProxy<T>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
@@ -1412,7 +1412,7 @@ export class CollectionImpl<
    * @private
    */
   private async resolveSingleIndex(
-    indexId: string,
+    indexId: number,
     lazyIndex: LazyIndexWrapper<TKey>
   ): Promise<BaseIndex<TKey>> {
     const resolvedIndex = await lazyIndex.resolve()
@@ -1424,7 +1424,7 @@ export class CollectionImpl<
   /**
    * Get resolved indexes for query optimization
    */
-  get indexes(): Map<string, BaseIndex<TKey>> {
+  get indexes(): Map<number, BaseIndex<TKey>> {
     return this.resolvedIndexes
   }
 

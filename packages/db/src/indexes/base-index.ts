@@ -28,7 +28,7 @@ export interface IndexStats {
 export abstract class BaseIndex<
   TKey extends string | number = string | number,
 > {
-  public readonly id: string
+  public readonly id: number
   public readonly name?: string
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
@@ -38,7 +38,7 @@ export abstract class BaseIndex<
   protected lastUpdated = new Date()
 
   constructor(
-    id: string,
+    id: number,
     expression: BasicExpression,
     name?: string,
     options?: any
@@ -105,7 +105,7 @@ export abstract class BaseIndex<
  */
 export type IndexConstructor<TKey extends string | number = string | number> =
   new (
-    id: string,
+    id: number,
     expression: BasicExpression,
     name?: string,
     options?: any

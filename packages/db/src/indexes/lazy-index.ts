@@ -41,7 +41,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
   private resolvedIndex: BaseIndex<TKey> | null = null
 
   constructor(
-    private id: string,
+    private id: number,
     private expression: BasicExpression,
     private name: string | undefined,
     private resolver: IndexResolver<TKey>,
@@ -101,7 +101,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
   /**
    * Get the index ID
    */
-  getId(): string {
+  getId(): number {
     return this.id
   }
 
@@ -130,7 +130,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
  */
 export class IndexProxy<TKey extends string | number = string | number> {
   constructor(
-    private indexId: string,
+    private indexId: number,
     private lazyIndex: LazyIndexWrapper<TKey>
   ) {}
 
@@ -158,7 +158,7 @@ export class IndexProxy<TKey extends string | number = string | number> {
   /**
    * Get the index ID
    */
-  get id(): string {
+  get id(): number {
     return this.indexId
   }
 

@@ -56,7 +56,7 @@ function createIndexUsageTracker(collection: any): {
     const originalLookup = index.lookup.bind(index)
     index.lookup = function (operation: any, value: any) {
       stats.rangeQueryCalls++
-      stats.indexesUsed.push(indexId)
+      stats.indexesUsed.push(String(indexId))
       stats.queriesExecuted.push({
         type: `index`,
         operation,
@@ -258,7 +258,8 @@ describe(`Collection Indexes`, () => {
     it(`should create an index on a simple field`, () => {
       const index = collection.createIndex((row) => row.status)
 
-      expect(index.id).toMatch(/^\d+$/)
+      expect(typeof index.id).toBe('number')
+      expect(index.id).toBeGreaterThan(0)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
       expect(index.indexedKeysSet.size).toBe(5)

@@ -30,7 +30,7 @@ export interface OptimizationResult<TKey> {
  * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
-  indexes: Map<string, BaseIndex<TKey>>,
+  indexes: Map<number, BaseIndex<TKey>>,
   fieldPath: Array<string>
 ): BaseIndex<TKey> | undefined {
   for (const index of indexes.values()) {
@@ -79,7 +79,7 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
  */
 export function optimizeExpressionWithIndexes<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   return optimizeQueryRecursive(expression, indexes)
 }
@@ -89,7 +89,7 @@ export function optimizeExpressionWithIndexes<TKey extends string | number>(
  */
 function optimizeQueryRecursive<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -119,7 +119,7 @@ function optimizeQueryRecursive<TKey extends string | number>(
  */
 export function canOptimizeExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): boolean {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -149,7 +149,7 @@ export function canOptimizeExpression<TKey extends string | number>(
  */
 function optimizeSimpleComparison<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -218,7 +218,7 @@ function optimizeSimpleComparison<TKey extends string | number>(
  */
 function canOptimizeSimpleComparison<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false
@@ -249,7 +249,7 @@ function canOptimizeSimpleComparison<TKey extends string | number>(
  */
 function optimizeAndExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -280,7 +280,7 @@ function optimizeAndExpression<TKey extends string | number>(
  */
 function canOptimizeAndExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
@@ -295,7 +295,7 @@ function canOptimizeAndExpression<TKey extends string | number>(
  */
 function optimizeOrExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -326,7 +326,7 @@ function optimizeOrExpression<TKey extends string | number>(
  */
 function canOptimizeOrExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
@@ -341,7 +341,7 @@ function canOptimizeOrExpression<TKey extends string | number>(
  */
 function optimizeInArrayExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -386,7 +386,7 @@ function optimizeInArrayExpression<TKey extends string | number>(
  */
 function canOptimizeInArrayExpression<TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<string, BaseIndex<TKey>>
+  indexes: Map<number, BaseIndex<TKey>>
 ): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false
