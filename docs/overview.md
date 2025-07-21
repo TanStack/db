@@ -82,6 +82,8 @@ Live queries support joins across collections. This allows you to:
 
 Every query returns another collection which can _also_ be queried.
 
+For more details on live queries, see the [Live Queries](live-queries.md) documentation.
+
 ### Making optimistic mutations
 
 Collections support `insert`, `update` and `delete` operations. When called, by default they trigger the corresponding `onInsert`, `onUpdate`, `onDelete` handlers which are responsible for writing the mutation to the backend.
@@ -223,7 +225,7 @@ The Electric collection requires two Electric-specific options:
   - `params` to specify the `table` to sync and any optional `where` clauses, etc.
 - `getKey` &mdash; identifies the id for the rows being synced into the collection
 
-When you create the collection, sync starts automatically.
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
 Electric shapes allow you to filter data using where clauses:
 
@@ -293,7 +295,7 @@ This collection requires the following TrailBase-specific options:
 - `parse` — maps `(v: Todo[k]) => SelectTodo[k]`.
 - `serialize` — maps `(v: SelectTodo[k]) => Todo[k]`.
 
-When you create the collection, sync starts automatically.
+A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
 
 #### `LocalStorageCollection`
@@ -499,7 +501,7 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [query-builder tests](../packages/db/tests/query/query-builder) for many more usage examples.
+See the [Live Queries](live-queries.md) documentation for more details.
 
 ### Transactional mutators
 
