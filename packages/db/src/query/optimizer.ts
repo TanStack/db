@@ -122,6 +122,7 @@ import {
   Func,
   QueryRef as QueryRefClass,
 } from "./ir.js"
+import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
 import type { BasicExpression, From, QueryIR } from "./ir.js"
 
 /**
@@ -145,6 +146,16 @@ export interface GroupedWhereClauses {
 }
 
 /**
+ * Result of query optimization including both the optimized query and collection-specific WHERE clauses
+ */
+export interface OptimizationResult {
+  /** The optimized query with WHERE clauses potentially moved to subqueries */
+  optimizedQuery: QueryIR
+  /** Map of collection aliases to their extracted WHERE clauses for index optimization */
+  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+}
+
+/**
  * Main query optimizer entry point that lifts WHERE clauses into subqueries.
  *
  * This function implements multi-level predicate pushdown optimization by recursively
@@ -152,7 +163,7 @@ export interface GroupedWhereClauses {
  * sources as possible, then removing redundant subqueries.
  *
  * @param query - The QueryIR to optimize
- * @returns A new QueryIR with optimizations applied (or original if no optimization possible)
+ * @returns An OptimizationResult with the optimized query and collection WHERE clause mapping
  *
  * @example
  * ```typescript
@@ -162,11 +173,15 @@ export interface GroupedWhereClauses {
  *   where: [eq(u.dept_id, 1), gt(p.views, 100)]
  * }
  *
- * const optimized = optimizeQuery(originalQuery)
+ * const { optimizedQuery, collectionWhereClauses } = optimizeQuery(originalQuery)
  * // Result: Single-source clauses moved to deepest possible subqueries
+ * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
  * ```
  */
-export function optimizeQuery(query: QueryIR): QueryIR {
+export function optimizeQuery(query: QueryIR): OptimizationResult {
+  // First, extract collection WHERE clauses before optimization
+  const collectionWhereClauses = extractCollectionWhereClauses(query)
+
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
   let previousOptimized: QueryIR | undefined
@@ -186,7 +201,80 @@ export function optimizeQuery(query: QueryIR): QueryIR {
   // Remove redundant subqueries
   const cleaned = removeRedundantSubqueries(optimized)
 
-  return cleaned
+  return {
+    optimizedQuery: cleaned,
+    collectionWhereClauses,
+  }
+}
+
+/**
+ * Extracts collection-specific WHERE clauses from a query for index optimization.
+ * This analyzes the original query to identify WHERE clauses that can be pushed down
+ * to specific collections, but only for simple queries without joins.
+ *
+ * @param query - The original QueryIR to analyze
+ * @returns Map of collection aliases to their WHERE clauses
+ */
+function extractCollectionWhereClauses(
+  query: QueryIR
+): Map<string, BasicExpression<boolean>> {
+  const collectionWhereClauses = new Map<string, BasicExpression<boolean>>()
+
+  // Only analyze queries that have WHERE clauses
+  if (!query.where || query.where.length === 0) {
+    return collectionWhereClauses
+  }
+
+  // Split all AND clauses at the root level for granular analysis
+  const splitWhereClauses = splitAndClauses(query.where)
+
+  // Analyze each WHERE clause to determine which sources it touches
+  const analyzedClauses = splitWhereClauses.map((clause) =>
+    analyzeWhereClause(clause)
+  )
+
+  // Group clauses by single-source vs multi-source
+  const groupedClauses = groupWhereClauses(analyzedClauses)
+
+  // Only include single-source clauses that reference collections directly
+  // and can be converted to BasicExpression format for collection indexes
+  for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
+    // Check if this source alias corresponds to a collection reference
+    if (isCollectionReference(query, sourceAlias)) {
+      // Check if the WHERE clause can be converted to collection-compatible format
+      if (isConvertibleToCollectionFilter(whereClause)) {
+        collectionWhereClauses.set(sourceAlias, whereClause)
+      }
+    }
+  }
+
+  return collectionWhereClauses
+}
+
+/**
+ * Determines if a source alias refers to a collection reference (not a subquery).
+ * This is used to identify WHERE clauses that can be pushed down to collection subscriptions.
+ *
+ * @param query - The query to analyze
+ * @param sourceAlias - The source alias to check
+ * @returns True if the alias refers to a collection reference
+ */
+function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
+  // Check the FROM clause
+  if (query.from.alias === sourceAlias) {
+    return query.from.type === `collectionRef`
+  }
+
+  // Check JOIN clauses
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.alias === sourceAlias) {
+        return joinClause.from.type === `collectionRef`
+      }
+    }
+  }
+
+  return false
 }
 
 /**

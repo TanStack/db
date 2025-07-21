@@ -1,5 +1,12 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { SortedMap } from "./SortedMap"
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from "./query/builder/ref-proxy"
+import { OrderedIndex } from "./indexes/ordered-index.js"
+import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
+import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
 import {
   CollectionInErrorStateError,
@@ -29,13 +36,16 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from "./errors"
+import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type {
   ChangeListener,
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
+  CurrentStateAsChangesOptions,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -44,10 +54,13 @@ import type {
   ResolveInsertInput,
   ResolveType,
   StandardSchema,
+  SubscribeChangesOptions,
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
 } from "./types"
+import type { IndexOptions } from "./indexes/index-options.js"
+import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 
 // Store collections in memory
 export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
@@ -213,6 +226,12 @@ export class CollectionImpl<
   // Cached size for performance
   private _size = 0
 
+  // Index storage
+  private lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
+  private resolvedIndexes = new Map<number, BaseIndex<TKey>>()
+  private isIndexesResolved = false
+  private indexCounter = 0
+
   // Event system
   private changeListeners = new Set<ChangeListener<T, TKey>>()
   private changeKeyListeners = new Map<TKey, Set<ChangeListener<T, TKey>>>()
@@ -366,6 +385,14 @@ export class CollectionImpl<
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
+
+    // Resolve indexes when collection becomes ready
+    if (newStatus === `ready` && !this.isIndexesResolved) {
+      // Resolve indexes asynchronously without blocking
+      this.resolveAllIndexes().catch((error) => {
+        console.warn(`Failed to resolve indexes:`, error)
+      })
+    }
   }
 
   /**
@@ -394,7 +421,11 @@ export class CollectionImpl<
       a.compareCreatedAt(b)
     )
 
-    this.config = config
+    // Set default values for optional config properties
+    this.config = {
+      ...config,
+      autoIndex: config.autoIndex ?? `eager`,
+    }
 
     // Store in global collections store
     collectionsStore.set(this.id, this)
@@ -753,8 +784,16 @@ export class CollectionImpl<
         return true
       })
 
+      // Update indexes for the filtered events
+      if (filteredEvents.length > 0) {
+        this.updateIndexes(filteredEvents)
+      }
       this.emitEvents(filteredEvents)
     } else {
+      // Update indexes for all events
+      if (filteredEventsBySyncStatus.length > 0) {
+        this.updateIndexes(filteredEventsBySyncStatus)
+      }
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus)
     }
@@ -1198,6 +1237,11 @@ export class CollectionImpl<
       // Update cached size after synced data changes
       this._size = this.calculateSize()
 
+      // Update indexes for all events before emitting
+      if (events.length > 0) {
+        this.updateIndexes(events)
+      }
+
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
@@ -1240,6 +1284,163 @@ export class CollectionImpl<
     }
 
     return `KEY::${this.id}/${key}`
+  }
+
+  /**
+   * Creates an index on a collection for faster queries.
+   * Indexes significantly improve query performance by allowing binary search
+   * and range queries instead of full scans.
+   *
+   * @template TResolver - The type of the index resolver (constructor or async loader)
+   * @param indexCallback - Function that extracts the indexed value from each item
+   * @param config - Configuration including index type and type-specific options
+   * @returns An index proxy that provides access to the index when ready
+   *
+   * @example
+   * // Create a default ordered index
+   * const ageIndex = collection.createIndex((row) => row.age)
+   *
+   * // Create a ordered index with custom options
+   * const ageIndex = collection.createIndex((row) => row.age, {
+   *   indexType: OrderedIndex,
+   *   options: { compareFn: customComparator },
+   *   name: 'age_btree'
+   * })
+   *
+   * // Create an async-loaded index
+   * const textIndex = collection.createIndex((row) => row.content, {
+   *   indexType: async () => {
+   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
+   *     return FullTextIndex
+   *   },
+   *   options: { language: 'en' }
+   * })
+   */
+  public createIndex<
+    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
+  >(
+    indexCallback: (row: SingleRowRefProxy<T>) => any,
+    config: IndexOptions<TResolver> = {}
+  ): IndexProxy<TKey> {
+    this.validateCollectionUsable(`createIndex`)
+
+    const indexId = ++this.indexCounter
+    const singleRowRefProxy = createSingleRowRefProxy<T>()
+    const indexExpression = indexCallback(singleRowRefProxy)
+    const expression = toExpression(indexExpression)
+
+    // Default to OrderedIndex if no type specified
+    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
+
+    // Create lazy wrapper
+    const lazyIndex = new LazyIndexWrapper<TKey>(
+      indexId,
+      expression,
+      config.name,
+      resolver,
+      config.options,
+      this.entries()
+    )
+
+    this.lazyIndexes.set(indexId, lazyIndex)
+
+    // For OrderedIndex, resolve immediately and synchronously
+    if ((resolver as unknown) === OrderedIndex) {
+      try {
+        const resolvedIndex = lazyIndex.getResolved()
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch (error) {
+        console.warn(`Failed to resolve OrderedIndex:`, error)
+      }
+    } else if (typeof resolver === `function` && resolver.prototype) {
+      // Other synchronous constructors - resolve immediately
+      try {
+        const resolvedIndex = lazyIndex.getResolved()
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+      } catch {
+        // Fallback to async resolution
+        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+          console.warn(`Failed to resolve single index:`, error)
+        })
+      }
+    } else if (this.isIndexesResolved) {
+      // Async loader but indexes are already resolved - resolve this one
+      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+        console.warn(`Failed to resolve single index:`, error)
+      })
+    }
+
+    return new IndexProxy(indexId, lazyIndex)
+  }
+
+  /**
+   * Resolve all lazy indexes (called when collection first syncs)
+   * @private
+   */
+  private async resolveAllIndexes(): Promise<void> {
+    if (this.isIndexesResolved) return
+
+    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
+      async ([indexId, lazyIndex]) => {
+        const resolvedIndex = await lazyIndex.resolve()
+
+        // Build index with current data
+        resolvedIndex.build(this.entries())
+
+        this.resolvedIndexes.set(indexId, resolvedIndex)
+        return { indexId, resolvedIndex }
+      }
+    )
+
+    await Promise.all(resolutionPromises)
+    this.isIndexesResolved = true
+  }
+
+  /**
+   * Resolve a single index immediately
+   * @private
+   */
+  private async resolveSingleIndex(
+    indexId: number,
+    lazyIndex: LazyIndexWrapper<TKey>
+  ): Promise<BaseIndex<TKey>> {
+    const resolvedIndex = await lazyIndex.resolve()
+    resolvedIndex.build(this.entries())
+    this.resolvedIndexes.set(indexId, resolvedIndex)
+    return resolvedIndex
+  }
+
+  /**
+   * Get resolved indexes for query optimization
+   */
+  get indexes(): Map<number, BaseIndex<TKey>> {
+    return this.resolvedIndexes
+  }
+
+  /**
+   * Updates all indexes when the collection changes
+   * @private
+   */
+  private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
+    for (const index of this.resolvedIndexes.values()) {
+      for (const change of changes) {
+        switch (change.type) {
+          case `insert`:
+            index.add(change.key, change.value)
+            break
+          case `update`:
+            if (change.previousValue) {
+              index.update(change.key, change.previousValue, change.value)
+            } else {
+              index.add(change.key, change.value)
+            }
+            break
+          case `delete`:
+            index.remove(change.key, change.value)
+            break
+        }
+      }
+    }
   }
 
   private deepEqual(a: any, b: any): boolean {
@@ -1870,20 +2071,32 @@ export class CollectionImpl<
 
   /**
    * Returns the current state of the collection as an array of changes
+   * @param options - Options including optional where filter
    * @returns An array of changes
+   * @example
+   * // Get all items as changes
+   * const allChanges = collection.currentStateAsChanges()
+   *
+   * // Get only items matching a condition
+   * const activeChanges = collection.currentStateAsChanges({
+   *   where: (row) => row.status === 'active'
+   * })
+   *
+   * // Get only items using a pre-compiled expression
+   * const activeChanges = collection.currentStateAsChanges({
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
-  public currentStateAsChanges(): Array<ChangeMessage<T>> {
-    return Array.from(this.entries()).map(([key, value]) => ({
-      type: `insert`,
-      key,
-      value,
-    }))
+  public currentStateAsChanges(
+    options: CurrentStateAsChangesOptions<T> = {}
+  ): Array<ChangeMessage<T>> {
+    return currentStateAsChanges(this, options)
   }
 
   /**
    * Subscribe to changes in the collection
    * @param callback - Function called when items change
-   * @param options.includeInitialState - If true, immediately calls callback with current data
+   * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
@@ -1900,24 +2113,57 @@ export class CollectionImpl<
    * const unsubscribe = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
+   *
+   * @example
+   * // Subscribe only to changes matching a condition
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   where: (row) => row.status === 'active'
+   * })
+   *
+   * @example
+   * // Subscribe using a pre-compiled expression
+   * const unsubscribe = collection.subscribeChanges((changes) => {
+   *   updateUI(changes)
+   * }, {
+   *   includeInitialState: true,
+   *   whereExpression: eq(row.status, 'active')
+   * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<T>>) => void,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
+    options: SubscribeChangesOptions<T> = {}
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
 
-    if (includeInitialState) {
-      // First send the current state as changes
-      callback(this.currentStateAsChanges())
+    // Auto-index for where expressions if enabled
+    if (options.whereExpression) {
+      ensureIndexForExpression(options.whereExpression, this)
+    }
+
+    // Create a filtered callback if where clause is provided
+    const filteredCallback =
+      options.where || options.whereExpression
+        ? createFilteredCallback(callback, options)
+        : callback
+
+    if (options.includeInitialState) {
+      // First send the current state as changes (filtered if needed)
+      const initialChanges = this.currentStateAsChanges({
+        where: options.where,
+        whereExpression: options.whereExpression,
+      })
+      filteredCallback(initialChanges)
     }
 
     // Add to batched listeners
-    this.changeListeners.add(callback)
+    this.changeListeners.add(filteredCallback)
 
     return () => {
-      this.changeListeners.delete(callback)
+      this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
     }
   }

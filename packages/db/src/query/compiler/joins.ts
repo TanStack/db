@@ -241,12 +241,15 @@ function processJoinSource(
       const originalQuery = queryMapping.get(from.query) || from.query
 
       // Recursively compile the sub-query with cache
-      const subQueryInput = compileQuery(
+      const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
         cache,
         queryMapping
       )
+
+      // Extract the pipeline from the compilation result
+      const subQueryInput = subQueryResult.pipeline
 
       // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
       // We need to extract just the value for use in parent queries

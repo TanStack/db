@@ -3,6 +3,9 @@ import type { Collection } from "./collection"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
+import type { BasicExpression } from "./query/ir.js"
+
 /**
  * Helper type to extract the output type from a standard schema
  *
@@ -375,6 +378,15 @@ export interface CollectionConfig<
    */
   startSync?: boolean
   /**
+   * Auto-indexing mode for the collection.
+   * When enabled, indexes will be automatically created for simple where expressions.
+   * @default "eager"
+   * @description
+   * - "off": No automatic indexing
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+   */
+  autoIndex?: `off` | `eager`
+  /**
    * Optional function to compare two items.
    * This is used to order the items in the collection.
    * @param x The first item to compare
@@ -554,6 +566,32 @@ export type KeyedNamespacedRow = [unknown, NamespacedRow]
  * a `select` clause.
  */
 export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
+
+/**
+ * Options for subscribing to collection changes
+ */
+export interface SubscribeChangesOptions<
+  T extends object = Record<string, unknown>,
+> {
+  /** Whether to include the current state as initial changes */
+  includeInitialState?: boolean
+  /** Filter changes using a where expression */
+  where?: (row: SingleRowRefProxy<T>) => any
+  /** Pre-compiled expression for filtering changes */
+  whereExpression?: BasicExpression<boolean>
+}
+
+/**
+ * Options for getting current state as changes
+ */
+export interface CurrentStateAsChangesOptions<
+  T extends object = Record<string, unknown>,
+> {
+  /** Filter the current state using a where expression */
+  where?: (row: SingleRowRefProxy<T>) => any
+  /** Pre-compiled expression for filtering the current state */
+  whereExpression?: BasicExpression<boolean>
+}
 
 /**
  * Function type for listening to collection changes

@@ -12,7 +12,12 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
-import type { CollectionRef, QueryIR, QueryRef } from "../ir.js"
+import type {
+  BasicExpression,
+  CollectionRef,
+  QueryIR,
+  QueryRef,
+} from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -21,19 +26,29 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 
 /**
+ * Result of query compilation including both the pipeline and collection-specific WHERE clauses
+ */
+export interface CompilationResult {
+  /** The compiled query pipeline */
+  pipeline: ResultStream
+  /** Map of collection aliases to their WHERE clauses for index optimization */
+  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+}
+
+/**
  * Compiles a query2 IR into a D2 pipeline
  * @param rawQuery The query IR to compile
  * @param inputs Mapping of collection names to input streams
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional mapping from optimized queries to original queries
- * @returns A stream builder representing the compiled query
+ * @returns A CompilationResult with the pipeline and collection WHERE clauses
  */
 export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
-): ResultStream {
+): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult = cache.get(rawQuery)
   if (cachedResult) {
@@ -41,7 +56,8 @@ export function compileQuery(
   }
 
   // Optimize the query before compilation
-  const query = optimizeQuery(rawQuery)
+  const { optimizedQuery: query, collectionWhereClauses } =
+    optimizeQuery(rawQuery)
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -89,11 +105,9 @@ export function compileQuery(
 
   // Process the WHERE clause if it exists
   if (query.where && query.where.length > 0) {
-    // Compile all WHERE expressions
-    const compiledWheres = query.where.map((where) => compileExpression(where))
-
     // Apply each WHERE condition as a filter (they are ANDed together)
-    for (const compiledWhere of compiledWheres) {
+    for (const where of query.where) {
+      const compiledWhere = compileExpression(where)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return compiledWhere(namespacedRow)
@@ -234,8 +248,13 @@ export function compileQuery(
 
     const result = resultPipeline
     // Cache the result before returning (use original query as key)
-    cache.set(rawQuery, result)
-    return result
+    const compilationResult = {
+      pipeline: result,
+      collectionWhereClauses,
+    }
+    cache.set(rawQuery, compilationResult)
+
+    return compilationResult
   } else if (query.limit !== undefined || query.offset !== undefined) {
     // If there's a limit or offset without orderBy, throw an error
     throw new LimitOffsetRequireOrderByError()
@@ -255,8 +274,13 @@ export function compileQuery(
 
   const result = resultPipeline
   // Cache the result before returning (use original query as key)
-  cache.set(rawQuery, result)
-  return result
+  const compilationResult = {
+    pipeline: result,
+    collectionWhereClauses,
+  }
+  cache.set(rawQuery, compilationResult)
+
+  return compilationResult
 }
 
 /**
@@ -281,12 +305,15 @@ function processFrom(
       const originalQuery = queryMapping.get(from.query) || from.query
 
       // Recursively compile the sub-query with cache
-      const subQueryInput = compileQuery(
+      const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
         cache,
         queryMapping
       )
+
+      // Extract the pipeline from the compilation result
+      const subQueryInput = subQueryResult.pipeline
 
       // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
       // We need to extract just the value for use in parent queries
