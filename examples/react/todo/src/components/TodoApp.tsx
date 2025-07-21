@@ -122,9 +122,8 @@ export function TodoApp({
               className="absolute w-12 h-full text-[30px] text-[#e6e6e6] hover:text-[#4d4d4d]"
               disabled={todos.length === 0}
               onClick={() => {
-                const todosToToggle = activeTodos.length > 0
-                  ? activeTodos
-                  : completedTodos
+                const todosToToggle =
+                  activeTodos.length > 0 ? activeTodos : completedTodos
 
                 todoCollection.update(
                   todosToToggle.map((todo) => todo.id),
