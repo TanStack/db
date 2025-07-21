@@ -144,34 +144,8 @@ export function trailBaseCollectionOptions<
     })
   }
 
-  const weakSeenIds = new WeakRef(seenIds)
-  const cleanupTimer = setInterval(() => {
-    const seen = weakSeenIds.deref()
-    if (seen) {
-      seen.setState((curr) => {
-        const now = Date.now()
-        let anyExpired = false
-
-        const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-          const expired = now - v > 300 * 1000
-          anyExpired = anyExpired || expired
-          return !expired
-        })
-
-        if (anyExpired) {
-          return new Map(notExpired)
-        }
-        return curr
-      })
-    } else {
-      clearInterval(cleanupTimer)
-    }
-  }, 120 * 1000)
-
-  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
-
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
-  const cancel = () => {
+  const cancelEventReader = () => {
     if (eventReader) {
       eventReader.cancel()
       eventReader.releaseLock()
@@ -179,6 +153,7 @@ export function trailBaseCollectionOptions<
     }
   }
 
+  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
@@ -221,7 +196,6 @@ export function trailBaseCollectionOptions<
         }
 
         commit()
-        markReady()
       }
 
       // Afterwards subscribe.
@@ -272,10 +246,35 @@ export function trailBaseCollectionOptions<
         try {
           await initialFetch()
         } catch (e) {
-          cancel()
-          markReady()
+          cancelEventReader()
           throw e
+        } finally {
+          // Mark ready both if everything went well or if there's an error to
+          // avoid blocking apps waiting for `.preload()` to finish.
+          markReady()
         }
+
+        // Lastly, start a periodic cleanup task that will be removed when the
+        // reader closes.
+        const periodicCleanupTask = setInterval(() => {
+          seenIds.setState((curr) => {
+            const now = Date.now()
+            let anyExpired = false
+
+            const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
+              const expired = now - v > 300 * 1000
+              anyExpired = anyExpired || expired
+              return !expired
+            })
+
+            if (anyExpired) {
+              return new Map(notExpired)
+            }
+            return curr
+          })
+        }, 120 * 1000)
+
+        reader.closed.finally(() => clearInterval(periodicCleanupTask))
       }
 
       start()
@@ -346,7 +345,7 @@ export function trailBaseCollectionOptions<
       await awaitIds(ids)
     },
     utils: {
-      cancel,
+      cancel: cancelEventReader,
     },
   }
 }
