@@ -1149,18 +1149,6 @@ describe(`QueryCollection`, () => {
       expect(() => {
         collection.utils.syncDelete(`999`)
       }).toThrow(/does not exist/)
-
-      // Test that requireExistence: false works
-      expect(() => {
-        collection.utils.syncUpdate(
-          { id: `999`, name: `Optional` },
-          { requireExistence: false }
-        )
-      }).not.toThrow()
-
-      expect(() => {
-        collection.utils.syncDelete(`999`, { requireExistence: false })
-      }).not.toThrow()
     })
 
     it(`should handle syncBatch validation errors`, async () => {

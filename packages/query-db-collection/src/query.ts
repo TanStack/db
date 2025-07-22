@@ -1,9 +1,18 @@
 import { QueryObserver } from "@tanstack/query-core"
 import {
+  DeleteOperationItemNotFoundError,
+  DuplicateKeyInBatchError,
   GetKeyRequiredError,
+  InvalidItemStructureError,
+  InvalidSyncOperationError,
+  ItemNotFoundError,
+  MissingKeyFieldError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
+  SyncNotInitializedError,
+  UnknownOperationTypeError,
+  UpdateOperationItemNotFoundError,
 } from "./errors"
 import type {
   QueryClient,
@@ -244,18 +253,11 @@ export interface QueryCollectionUtils<
 > extends UtilsRecord {
   refetch: RefetchFn
   syncInsert: (data: TInsertInput | Array<TInsertInput>) => void
-  syncUpdate: (
-    updates: Partial<TItem> | Array<Partial<TItem>>,
-    options?: { requireExistence?: boolean }
-  ) => void
-  syncDelete: (
-    keys: TKey | Array<TKey>,
-    options?: { requireExistence?: boolean }
-  ) => void
+  syncUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
+  syncDelete: (keys: TKey | Array<TKey>) => void
   syncUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
   syncBatch: (
-    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>,
-    options?: { requireExistence?: boolean }
+    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>
   ) => void
 }
 
@@ -485,9 +487,7 @@ export function queryCollectionOptions<
    */
   const syncInsert = (data: TInsertInput | Array<TInsertInput>): void => {
     if (!syncFunctions) {
-      throw new Error(
-        `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
-      )
+      throw new SyncNotInitializedError()
     }
 
     const { begin, write, commit } = syncFunctions
@@ -502,7 +502,7 @@ export function queryCollectionOptions<
         validatedData = item as unknown as TItem
         getKey(validatedData) // This will throw if the item doesn't have the required key
       } catch (error) {
-        throw new Error(`Invalid item structure: ${error}`)
+        throw new InvalidItemStructureError(String(error))
       }
 
       validatedItems.push(validatedData)
@@ -532,18 +532,14 @@ export function queryCollectionOptions<
    * @throws {Error} If collection is not ready or items don't exist
    */
   const syncUpdate = (
-    updates: Partial<TItem> | Array<Partial<TItem>>,
-    options?: { requireExistence?: boolean }
+    updates: Partial<TItem> | Array<Partial<TItem>>
   ): void => {
     if (!syncFunctions) {
-      throw new Error(
-        `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
-      )
+      throw new SyncNotInitializedError()
     }
 
     const { begin, write, commit, collection } = syncFunctions
     const items = Array.isArray(updates) ? updates : [updates]
-    const { requireExistence = true } = options ?? {}
 
     // Validate all items and prepare full objects for update
     const itemsToUpdate: Array<TItem> = []
@@ -553,22 +549,13 @@ export function queryCollectionOptions<
       try {
         key = getKey(partialItem as TItem) as TKey
       } catch (error) {
-        throw new Error(`Update item must contain the key field: ${error}`)
-      }
-
-      if (requireExistence && !collection.has(key)) {
-        throw new Error(
-          `Item with key '${key}' does not exist. Use requireExistence: false to skip missing items.`
-        )
+        throw new MissingKeyFieldError(`Update`, String(error))
       }
 
       // Get existing item and merge with update
       const existingItem = collection.get(key)
       if (!existingItem) {
-        if (requireExistence) {
-          throw new Error(`Item with key '${key}' does not exist.`)
-        }
-        continue
+        throw new ItemNotFoundError(key)
       }
 
       const mergedItem = { ...existingItem, ...partialItem } as TItem
@@ -602,33 +589,22 @@ export function queryCollectionOptions<
    * @param options - Optional configuration for existence checks
    * @throws {Error} If collection is not ready or items don't exist
    */
-  const syncDelete = (
-    keys: TKey | Array<TKey>,
-    options?: { requireExistence?: boolean }
-  ): void => {
+  const syncDelete = (keys: TKey | Array<TKey>): void => {
     if (!syncFunctions) {
-      throw new Error(
-        `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
-      )
+      throw new SyncNotInitializedError()
     }
 
     const { begin, write, commit, collection } = syncFunctions
     const keyArray = Array.isArray(keys) ? keys : [keys]
-    const { requireExistence = true } = options ?? {}
     const itemsToDelete: Array<TItem> = []
 
     // Collect items to delete and validate existence
     for (const key of keyArray) {
-      if (requireExistence && !collection.has(key)) {
-        throw new Error(
-          `Item with key '${key}' does not exist. Use requireExistence: false to skip missing items.`
-        )
-      }
-
       const item = collection.get(key)
-      if (item) {
-        itemsToDelete.push(item)
+      if (!item) {
+        throw new ItemNotFoundError(key)
       }
+      itemsToDelete.push(item)
     }
 
     if (itemsToDelete.length === 0) {
@@ -659,9 +635,7 @@ export function queryCollectionOptions<
    */
   const syncUpsert = (data: Partial<TItem> | Array<Partial<TItem>>): void => {
     if (!syncFunctions) {
-      throw new Error(
-        `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
-      )
+      throw new SyncNotInitializedError()
     }
 
     const { begin, write, commit, collection } = syncFunctions
@@ -676,7 +650,7 @@ export function queryCollectionOptions<
       try {
         key = getKey(partialItem as TItem) as TKey
       } catch (error) {
-        throw new Error(`Upsert item must contain the key field: ${error}`)
+        throw new MissingKeyFieldError(`Upsert`, String(error))
       }
 
       const exists = collection.has(key)
@@ -721,17 +695,13 @@ export function queryCollectionOptions<
    * @param options - Optional configuration for validation and existence checks
    */
   const syncBatch = (
-    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>,
-    options?: { requireExistence?: boolean }
+    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>
   ): void => {
     if (!syncFunctions) {
-      throw new Error(
-        `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
-      )
+      throw new SyncNotInitializedError()
     }
 
     const { begin, write, commit, collection } = syncFunctions
-    const { requireExistence = true } = options ?? {}
 
     // Validate operations and check for conflicts
     const seenKeys = new Set<TKey>()
@@ -750,14 +720,12 @@ export function queryCollectionOptions<
             value = operation.data as unknown as TItem
             key = getKey(value) as TKey
           } catch (error) {
-            throw new Error(`Invalid insert operation: ${error}`)
+            throw new InvalidSyncOperationError(String(error))
           }
 
           // Check for duplicate keys within batch
           if (seenKeys.has(key)) {
-            throw new Error(
-              `Duplicate key '${key}' found within batch operations`
-            )
+            throw new DuplicateKeyInBatchError(key)
           }
           seenKeys.add(key)
 
@@ -769,35 +737,23 @@ export function queryCollectionOptions<
           try {
             key = getKey(operation.data as TItem) as TKey
           } catch (error) {
-            throw new Error(`Invalid update operation: ${error}`)
+            throw new InvalidSyncOperationError(String(error))
           }
 
           // Check for duplicate keys within batch
           if (seenKeys.has(key)) {
-            throw new Error(
-              `Duplicate key '${key}' found within batch operations`
-            )
+            throw new DuplicateKeyInBatchError(key)
           }
           seenKeys.add(key)
 
-          if (requireExistence && !collection.has(key)) {
-            throw new Error(
-              `Update operation: Item with key '${key}' does not exist`
-            )
-          }
-
           // Get existing item and merge with update
           const existingItem = collection.get(key)
-          if (!existingItem && requireExistence) {
-            throw new Error(
-              `Update operation: Item with key '${key}' does not exist`
-            )
+          if (!existingItem) {
+            throw new UpdateOperationItemNotFoundError(key)
           }
 
-          if (existingItem) {
-            value = { ...existingItem, ...operation.data } as TItem
-            processedOperations.push({ type: `update`, value })
-          }
+          value = { ...existingItem, ...operation.data } as TItem
+          processedOperations.push({ type: `update`, value })
           break
         }
 
@@ -806,22 +762,15 @@ export function queryCollectionOptions<
 
           // Check for duplicate keys within batch
           if (seenKeys.has(key)) {
-            throw new Error(
-              `Duplicate key '${key}' found within batch operations`
-            )
+            throw new DuplicateKeyInBatchError(key)
           }
           seenKeys.add(key)
 
-          if (requireExistence && !collection.has(key)) {
-            throw new Error(
-              `Delete operation: Item with key '${key}' does not exist`
-            )
-          }
-
           const item = collection.get(key)
-          if (item) {
-            processedOperations.push({ type: `delete`, value: item })
+          if (!item) {
+            throw new DeleteOperationItemNotFoundError(key)
           }
+          processedOperations.push({ type: `delete`, value: item })
           break
         }
 
@@ -829,14 +778,12 @@ export function queryCollectionOptions<
           try {
             key = getKey(operation.data as TItem) as TKey
           } catch (error) {
-            throw new Error(`Invalid upsert operation: ${error}`)
+            throw new InvalidSyncOperationError(String(error))
           }
 
           // Check for duplicate keys within batch
           if (seenKeys.has(key)) {
-            throw new Error(
-              `Duplicate key '${key}' found within batch operations`
-            )
+            throw new DuplicateKeyInBatchError(key)
           }
           seenKeys.add(key)
 
@@ -855,7 +802,7 @@ export function queryCollectionOptions<
         }
 
         default:
-          throw new Error(`Unknown operation type: ${(operation as any).type}`)
+          throw new UnknownOperationTypeError((operation as any).type)
       }
     }
 
