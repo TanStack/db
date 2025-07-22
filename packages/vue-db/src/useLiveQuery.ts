@@ -18,7 +18,7 @@ import type {
   LiveQueryCollectionConfig,
   QueryBuilder,
 } from "@tanstack/db"
-import type { ComputedRef, MaybeRefOrGetter } from "vue"
+import type { MaybeRefOrGetter } from "vue"
 
 /**
  * Return type for useLiveQuery hook
@@ -33,15 +33,15 @@ import type { ComputedRef, MaybeRefOrGetter } from "vue"
  * @property isCleanedUp - True when query has been cleaned up
  */
 export interface UseLiveQueryReturn<T extends object> {
-  state: () => Map<string | number, T>
-  data: () => Array<T>
-  collection: () => Collection<T, string | number, {}>
-  status: () => CollectionStatus
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
+  state: Map<string | number, T>
+  data: Array<T>
+  collection: Collection<T, string | number, {}>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 export interface UseLiveQueryReturnWithCollection<
@@ -49,15 +49,15 @@ export interface UseLiveQueryReturnWithCollection<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 > {
-  state: () => Map<TKey, T>
-  data: () => Array<T>
-  collection: () => Collection<T, TKey, TUtils>
-  status: () => CollectionStatus
-  isLoading: ComputedRef<boolean>
-  isReady: ComputedRef<boolean>
-  isIdle: ComputedRef<boolean>
-  isError: ComputedRef<boolean>
-  isCleanedUp: ComputedRef<boolean>
+  state: Map<TKey, T>
+  data: Array<T>
+  collection: Collection<T, TKey, TUtils>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 /**
@@ -300,18 +300,41 @@ export function useLiveQuery(
     onScopeDispose(clean)
   }
 
+  const isLoading = computed(
+    () => status.value === `loading` || status.value === `initialCommit`
+  )
+  const isReady = computed(() => status.value === `ready`)
+  const isIdle = computed(() => status.value === `idle`)
+  const isError = computed(() => status.value === `error`)
+  const isCleanedUp = computed(() => status.value === `cleaned-up`)
+
   return {
-    state: () => state.value,
-    data: () => internalData.value,
-    collection: () => collection.value,
-    status: () => status.value,
-    // TODO: () => val
-    isLoading: computed(
-      () => status.value === `loading` || status.value === `initialCommit`
-    ),
-    isReady: computed(() => status.value === `ready`),
-    isIdle: computed(() => status.value === `idle`),
-    isError: computed(() => status.value === `error`),
-    isCleanedUp: computed(() => status.value === `cleaned-up`),
+    get state() {
+      return state.value
+    },
+    get data() {
+      return internalData.value
+    },
+    get collection() {
+      return collection.value
+    },
+    get status() {
+      return status.value
+    },
+    get isLoading() {
+      return isLoading.value
+    },
+    get isReady() {
+      return isReady.value
+    },
+    get isIdle() {
+      return isIdle.value
+    },
+    get isError() {
+      return isError.value
+    },
+    get isCleanedUp() {
+      return isCleanedUp.value
+    },
   }
 }
