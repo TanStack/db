@@ -167,7 +167,7 @@ export function useLiveQuery<TContext extends Context>(
 
 /**
  * Subscribe to an existing query collection (can be reactive)
- * @param liveQueryCollection - Pre-created query collection to subscribe to (can be a ref)
+ * @param liveQueryCollection - Pre-created query collection to subscribe to (can be a getter)
  * @returns Reactive object with query data, state, and status information
  * @example
  * // Using pre-created query collection
@@ -293,7 +293,7 @@ export function useLiveQuery(
   $effect(() => {
     const currentCollection = collection
 
-    // Update status ref whenever the effect runs
+    // Update status state whenever the effect runs
     status = currentCollection.status
 
     // Clean up previous subscription
@@ -332,7 +332,7 @@ export function useLiveQuery(
 
         // Update the data array to maintain sorted order
         syncDataFromCollection(currentCollection)
-        // Update status ref on every change
+        // Update status state on every change
         status = currentCollection.status
       }
     )
