@@ -5,6 +5,7 @@
   "scripts": {
     "build": "svelte-package --input ./src --output ./dist",
     "test": "npx vitest --run",
+    "test:types": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint . --fix"
   },
   "files": [

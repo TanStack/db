@@ -245,7 +245,7 @@ export function useLiveQuery(
       typeof unwrappedParam.id === `string`
 
     if (isCollection) {
-      // It's already a collection, ensure sync is started for Vue hooks
+      // It's already a collection, ensure sync is started for Svelte helpers
       unwrappedParam.startSyncImmediate()
       return unwrappedParam
     }
@@ -253,7 +253,7 @@ export function useLiveQuery(
     // Reference deps to make computed reactive to them
     deps.forEach((dep) => toValue(dep))
 
-    // Ensure we always start sync for Vue hooks
+    // Ensure we always start sync for Svelte helpers
     if (typeof unwrappedParam === `function`) {
       return createLiveQueryCollection({
         query: unwrappedParam,
