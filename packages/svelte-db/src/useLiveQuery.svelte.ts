@@ -223,7 +223,7 @@ export function useLiveQuery(
   deps: Array<() => unknown> = []
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
-    // First check if the original parameter might be a ref/getter
+    // First check if the original parameter might be a getter
     // by seeing if toValue returns something different than the original
     let unwrappedParam = configOrQueryOrCollection
     try {

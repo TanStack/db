@@ -9,13 +9,16 @@ Usage example:
 ```svelte
 <script lang="ts">
 import { useLiveQuery } from "@tanstack/svelte-db"
+import { eq } from "@tanstack/db"
 import { todoCollection } from "$lib/collections"
 
-const query = useLiveQuery((query) =>
-  query.from({ todoCollection }).where("@completed", "=", false)
+const todosQuery = useLiveQuery((query) =>
+  query
+    .from({ todos: todoCollection })
+    .where(({ todos }) => eq(todos.completed, false))
 )
 </script>
 
 
-<List items={query.data} />
+<List items={todosQuery.data} />
 ```
