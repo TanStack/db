@@ -1,3 +1,4 @@
+import { untrack } from "svelte"
 import { createLiveQueryCollection } from "@tanstack/db"
 import { SvelteMap } from "svelte/reactivity"
 import type {
@@ -222,7 +223,18 @@ export function useLiveQuery(
   deps: Array<() => unknown> = []
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
-    const unwrappedParam = toValue(configOrQueryOrCollection)
+    // First check if the original parameter might be a ref/getter
+    // by seeing if toValue returns something different than the original
+    let unwrappedParam = configOrQueryOrCollection
+    try {
+      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
+      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
+        unwrappedParam = potentiallyUnwrapped
+      }
+    } catch {
+      // If toValue fails, use original parameter
+      unwrappedParam = configOrQueryOrCollection
+    }
 
     // Check if it's already a collection by checking for specific collection methods
     const isCollection =
@@ -268,8 +280,10 @@ export function useLiveQuery(
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>
   ) => {
-    internalData = []
-    internalData.push(...Array.from(currentCollection.values()))
+    untrack(() => {
+      internalData = []
+      internalData.push(...Array.from(currentCollection.values()))
+    })
   }
 
   // Track current unsubscribe function
@@ -288,10 +302,12 @@ export function useLiveQuery(
     }
 
     // Initialize state with current collection data
-    state.clear()
-    for (const [key, value] of currentCollection.entries()) {
-      state.set(key, value)
-    }
+    untrack(() => {
+      state.clear()
+      for (const [key, value] of currentCollection.entries()) {
+        state.set(key, value)
+      }
+    })
 
     // Initialize data array in correct order
     syncDataFromCollection(currentCollection)
@@ -300,17 +316,19 @@ export function useLiveQuery(
     currentUnsubscribe = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
-        for (const change of changes) {
-          switch (change.type) {
-            case `insert`:
-            case `update`:
-              state.set(change.key, change.value)
-              break
-            case `delete`:
-              state.delete(change.key)
-              break
+        untrack(() => {
+          for (const change of changes) {
+            switch (change.type) {
+              case `insert`:
+              case `update`:
+                state.set(change.key, change.value)
+                break
+              case `delete`:
+                state.delete(change.key)
+                break
+            }
           }
-        }
+        })
 
         // Update the data array to maintain sorted order
         syncDataFromCollection(currentCollection)
