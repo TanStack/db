@@ -20,19 +20,6 @@ async function generateTxId(tx: any): Promise<Txid> {
   return parseInt(txid, 10)
 }
 
-// Get current WAL LSN for Materialize tracking
-async function getCurrentLSN(tx: any): Promise<string> {
-  const result = await tx`SELECT pg_current_wal_lsn() as lsn`
-  console.log(`getCurrentLSN`, { result })
-  const lsn = result[0]?.lsn
-
-  if (lsn === undefined) {
-    throw new Error(`Failed to get current LSN`)
-  }
-
-  return lsn
-}
-
 export const ServerRoute = createServerFileRoute(`/api/todos`).methods({
   GET: async ({ request: _request }) => {
     try {
@@ -55,21 +42,26 @@ export const ServerRoute = createServerFileRoute(`/api/todos`).methods({
       const todoData = validateInsertTodo(body)
       console.log(`Creating todo:`, todoData)
 
+      // Capture LSN before transaction
+      const beforeLSNResult = await sql`SELECT pg_current_wal_lsn() as lsn`
+      const beforeLSN = beforeLSNResult[0]?.lsn
+      if (!beforeLSN) throw new Error(`Failed to get beforeLSN`)
+
       let txid!: Txid
-      let beforeLSN!: string
-      let afterLSN!: string
       const newTodo = await sql.begin(async (tx) => {
-        beforeLSN = await getCurrentLSN(tx)
         txid = await generateTxId(tx)
 
         const [result] = await tx`
           INSERT INTO todos ${tx(todoData)}
           RETURNING *
         `
-
-        afterLSN = await getCurrentLSN(tx)
         return result
       })
+
+      // Capture LSN after transaction completes
+      const afterLSNResult = await sql`SELECT pg_current_wal_lsn() as lsn`
+      const afterLSN = afterLSNResult[0]?.lsn
+      if (!afterLSN) throw new Error(`Failed to get afterLSN`)
 
       return json({ todo: newTodo, txid, beforeLSN, afterLSN }, { status: 201 })
     } catch (error) {

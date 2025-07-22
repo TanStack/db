@@ -1,9 +1,7 @@
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
-import { collectionsStore } from "@tanstack/db"
 import type {
   CollectionConfig,
-  CollectionImpl,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   ResolveType,
@@ -19,6 +17,35 @@ const debug = DebugModule.debug(`ts/db:materialize`)
  * Type representing a Log Sequence Number (LSN) in Materialize
  */
 export type LSN = string
+
+/**
+ * Convert a PostgreSQL LSN in the form `XXXXXXXX/XXXXXXXX` into a bigint.
+ * The high 32 bits are multiplied by 2^32 and added to the low 32 bits.
+ */
+function pgLsnToBigInt(lsn: string): bigint {
+  const [hi, lo] = lsn.split(`/`)
+  return (BigInt(`0x${hi}`) << 32n) + BigInt(`0x${lo}`)
+}
+
+/**
+ * Convert a Materialize LSN (numeric string) to bigint for comparison.
+ */
+function materializeLsnToBigInt(lsn: string): bigint {
+  return BigInt(lsn)
+}
+
+/**
+ * Normalize an LSN to bigint for comparison, handling both PostgreSQL and Materialize formats.
+ */
+function normalizeLsn(lsn: string): bigint {
+  if (lsn.includes(`/`)) {
+    // PostgreSQL format: "0/1ABAAE0"
+    return pgLsnToBigInt(lsn)
+  } else {
+    // Materialize format: "28027616"
+    return materializeLsnToBigInt(lsn)
+  }
+}
 
 /**
  * Configuration interface for Materialize collection options
@@ -207,7 +234,7 @@ export interface MaterializeCollectionUtils extends UtilsRecord {
 function createMaterializeSync<T extends object = Record<string, unknown>>(
   websocketUrl: string,
   parse?: Record<string, (value: any) => any>,
-  getKey?: Record<string, (value: any) => any>
+  getKey?: (item: T) => string | number
 ): SyncConfig<T, string | number> & { utils: MaterializeCollectionUtils } {
   let ws: WebSocket | null = null
   const connectionState = new Store<ConnectionState>(`disconnected`)
@@ -221,6 +248,13 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
       ws.close()
       ws = null
       connectionState.setState(`disconnected`)
+    }
+
+    // Clean up any pending buffer timer and process remaining messages
+    if (bufferTimer) {
+      clearTimeout(bufferTimer)
+      bufferTimer = null
+      processBufferedMessages()
     }
 
     // Clean up pending syncs
@@ -243,7 +277,301 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
   let write: ((message: any) => void) | null = null
   let commit: (() => void) | null = null
   let markReady: (() => void) | null = null
-  let collection: CollectionImpl | null = null
+  let collection: any = null
+
+  // Message buffering for differential dataflow merging
+  const messageBuffer: Map<string, Array<MaterializeProxyMessage>> = new Map()
+  let bufferTimer: NodeJS.Timeout | null = null
+
+  const processBufferedMessages = () => {
+    if (!begin || !write || !commit || !getKey) return
+
+    debug(`Processing ${messageBuffer.size} timestamp groups`)
+
+    // Process each timestamp group
+    messageBuffer.forEach((messages, timestamp) => {
+      debug(
+        `Processing timestamp ${timestamp} with ${messages.length} messages`
+      )
+
+      // Group messages by key within this timestamp
+      const messagesByKey = new Map<any, Array<MaterializeProxyMessage>>()
+
+      messages.forEach((msg) => {
+        if (msg.type === `data` && msg.row) {
+          // Apply parse transformations first to get the correct key
+          let parsedRow = msg.row
+          if (parse) {
+            parsedRow = { ...msg.row }
+            for (const [field, parser] of Object.entries(parse)) {
+              if (parsedRow[field] !== undefined) {
+                parsedRow[field] = parser(parsedRow[field])
+              }
+            }
+          }
+
+          const key = getKey(parsedRow as T)
+          if (!messagesByKey.has(key)) {
+            messagesByKey.set(key, [])
+          }
+          messagesByKey.get(key)!.push({ ...msg, row: parsedRow })
+        }
+      })
+
+      // Process each key's operations using differential dataflow principles
+      const finalOperations: Array<{
+        type: `insert` | `update` | `delete`
+        value: any
+        metadata: any
+      }> = []
+
+      messagesByKey.forEach((keyMessages, key) => {
+        debug(`Processing key ${key} with ${keyMessages.length} messages`)
+
+        // Separate inserts and deletes first
+        const inserts = keyMessages.filter(
+          (msg) => parseInt(msg.mz_diff || `0`, 10) > 0
+        )
+        const deletes = keyMessages.filter(
+          (msg) => parseInt(msg.mz_diff || `0`, 10) < 0
+        )
+
+        debug(`  Inserts: ${inserts.length}, Deletes: ${deletes.length}`)
+
+        // Check if this is an update (has both inserts and deletes)
+        const hasInserts = inserts.length > 0
+        const hasDeletes = deletes.length > 0
+        const isUpdate = hasInserts && hasDeletes
+
+        // Sum all mz_diff values for this key at this timestamp
+        const totalDiff = keyMessages.reduce((sum, msg) => {
+          const diff = parseInt(msg.mz_diff || `0`, 10)
+          debug(`  Message diff: ${diff}`)
+          return sum + diff
+        }, 0)
+
+        debug(`  Total diff for key ${key}: ${totalDiff}`)
+        debug(`  Is update (has both inserts and deletes): ${isUpdate}`)
+
+        // CRITICAL FIX: Don't skip if it's an update, even if totalDiff === 0
+        if (totalDiff === 0 && !isUpdate) {
+          // Operations cancel out and it's not an update - no change needed
+          debug(
+            `  Operations for key ${key} cancel out (not an update), skipping`
+          )
+          return
+        }
+
+        if (totalDiff === 0 && isUpdate) {
+          debug(
+            `  Total diff is 0 but this is an UPDATE - processing with row-level counting`
+          )
+        }
+
+        // Determine operation type
+        let operationType: `insert` | `update` | `delete`
+        let valueToUse: any
+
+        if (isUpdate) {
+          // This is an update - determine the final state that should exist
+          // Key insight: In differential dataflow, the final state is determined by
+          // what has a net positive multiplicity after all changes
+
+          // Group messages by actual row content to see what the final state should be
+          const rowCounts = new Map<string, { row: any; count: number }>()
+
+          keyMessages.forEach((msg) => {
+            const rowKey = JSON.stringify(msg.row)
+            const diff = parseInt(msg.mz_diff || `0`, 10)
+
+            if (!rowCounts.has(rowKey)) {
+              rowCounts.set(rowKey, { row: msg.row, count: 0 })
+            }
+            rowCounts.get(rowKey)!.count += diff
+          })
+
+          // Find the row with positive count (this is what should exist)
+          let finalRow: any = null
+          debug(`    Row-level counting for key ${key}:`)
+          for (const [rowKey, data] of rowCounts.entries()) {
+            debug(`      Row content: ${rowKey}`)
+            debug(`      Count: ${data.count}`)
+            if (data.count > 0) {
+              finalRow = data.row
+              debug(
+                `      ^ This row has positive count (+${data.count}), selecting as final state`
+              )
+              debug(`      Final row data:`, finalRow)
+            } else if (data.count < 0) {
+              debug(
+                `      ^ This row has negative count (${data.count}), will be removed`
+              )
+            } else {
+              debug(`      ^ This row has zero count, operations canceled out`)
+            }
+          }
+
+          if (!finalRow) {
+            debug(
+              `  Warning: Update detected but no row has positive count, using latest insert`
+            )
+            finalRow = inserts[inserts.length - 1]?.row
+          }
+
+          valueToUse = finalRow
+          operationType = `update`
+          debug(`  UPDATE operation determined for key ${key}`)
+          debug(`  Final value to apply:`, valueToUse)
+          debug(
+            `  This should match the PostgreSQL state (row with positive multiplicity)`
+          )
+
+          finalOperations.push({
+            type: operationType,
+            value: valueToUse,
+            metadata: {
+              mz_timestamp: keyMessages[0]?.mz_timestamp || 0,
+              mz_diff: `1`,
+              original_diff: `1`,
+            },
+          })
+        } else if (totalDiff > 0) {
+          // Net positive with no deletes - pure insert
+          const latestInsert = inserts[inserts.length - 1]
+          if (!latestInsert) {
+            debug(`  Warning: Net positive but no insert found, skipping`)
+            return
+          }
+
+          valueToUse = latestInsert.row
+          operationType = collection?.has(key) ? `update` : `insert`
+          debug(`  Net positive (${totalDiff}), operation: ${operationType}`)
+
+          finalOperations.push({
+            type: operationType,
+            value: valueToUse,
+            metadata: {
+              mz_timestamp: latestInsert.mz_timestamp,
+              mz_diff: totalDiff.toString(),
+              original_diff: latestInsert.mz_diff,
+            },
+          })
+        } else if (totalDiff < 0) {
+          // Net negative with no inserts - pure delete
+          const messageForDelete = deletes[0]
+          if (!messageForDelete) {
+            debug(`  Warning: Net negative but no delete found, skipping`)
+            return
+          }
+
+          valueToUse = messageForDelete.row
+          operationType = `delete`
+          debug(`  Net negative (${totalDiff}), operation: ${operationType}`)
+
+          finalOperations.push({
+            type: operationType,
+            value: valueToUse,
+            metadata: {
+              mz_timestamp: messageForDelete.mz_timestamp,
+              mz_diff: totalDiff.toString(),
+              original_diff: messageForDelete.mz_diff,
+            },
+          })
+        }
+        // If totalDiff === 0, operations cancel out, do nothing
+      })
+
+      // Apply all final operations for this timestamp
+      if (finalOperations.length > 0 && begin && write && commit) {
+        debug(
+          `Applying ${finalOperations.length} final operations for timestamp ${timestamp}`
+        )
+        begin()
+
+        finalOperations.forEach((op, index) => {
+          debug(`  Operation ${index + 1}: ${op.type}`)
+          debug(`  Value being applied to collection:`, op.value)
+          debug(`  Metadata:`, op.metadata)
+          write!(op)
+        })
+
+        commit()
+        if (markReady) {
+          markReady()
+        }
+        debug(`All operations for timestamp ${timestamp} applied successfully`)
+      } else {
+        debug(
+          `No operations to apply for timestamp ${timestamp} (operations: ${finalOperations.length}, handlers ready: ${!!(begin && write && commit)})`
+        )
+      }
+    })
+
+    // Clear processed messages
+    messageBuffer.clear()
+  }
+
+  const bufferMessage = (msg: MaterializeProxyMessage) => {
+    if (msg.type !== `data` || !msg.mz_timestamp) return false
+
+    const timestamp = msg.mz_timestamp.toString()
+
+    if (!messageBuffer.has(timestamp)) {
+      messageBuffer.set(timestamp, [])
+      debug(`Created new buffer for timestamp ${timestamp}`)
+    } else {
+      debug(`Adding to existing buffer for timestamp ${timestamp}`)
+    }
+
+    // Check if this exact message is already in the buffer (this might be the problem!)
+    const existingMessages = messageBuffer.get(timestamp)!
+    const msgJson = JSON.stringify(msg)
+    const isDuplicate = existingMessages.some(
+      (existing) => JSON.stringify(existing) === msgJson
+    )
+
+    if (isDuplicate) {
+      debug(`⚠️  DUPLICATE MESSAGE DETECTED - same message already in buffer!`)
+      debug(`  Duplicate: mz_diff=${msg.mz_diff}, row=`, msg.row)
+      // Still add it because differential dataflow can have legitimate duplicates
+    }
+
+    messageBuffer.get(timestamp)!.push(msg)
+    const bufferedMessages = messageBuffer.get(timestamp)!
+    debug(
+      `Buffered message for timestamp ${timestamp}, total buffered: ${bufferedMessages.length}`
+    )
+    debug(`  Message: mz_diff=${msg.mz_diff}, row=`, msg.row)
+    debug(
+      `  All messages in buffer for this timestamp:`,
+      bufferedMessages.map((m) => ({ diff: m.mz_diff, row: m.row }))
+    )
+
+    // Reset timer to batch messages with the same timestamp
+    if (bufferTimer) {
+      debug(`Clearing existing buffer timer`)
+      clearTimeout(bufferTimer)
+    }
+
+    debug(`Setting new buffer timer for 50ms delay`)
+    bufferTimer = setTimeout(() => {
+      debug(
+        `⏰ Buffer timer expired, processing ${messageBuffer.size} timestamp groups`
+      )
+      debug(
+        `Messages in buffer at timer expiry:`,
+        Array.from(messageBuffer.entries()).map(([ts, msgs]) => ({
+          timestamp: ts,
+          count: msgs.length,
+        }))
+      )
+      processBufferedMessages()
+      bufferTimer = null
+      debug(`Buffer timer cleared after processing`)
+    }, 50) // 50ms delay to collect all messages with same timestamp
+
+    return true
+  }
 
   const refresh = async (): Promise<void> => {
     if (!isConnected()) {
@@ -276,22 +604,14 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
       debug(`No current LSN, waiting for initial LSN`)
     }
 
-    // Check if we've already seen an LSN greater than beforeLSN
-    if (currentLSN && currentLSN > beforeLSN) {
+    // Check if we've already seen an LSN greater than or equal to afterLSN
+    if (currentLSN && normalizeLsn(currentLSN) >= normalizeLsn(afterLSN)) {
       debug(
-        `Current LSN %s > beforeLSN %s, waiting for afterLSN`,
+        `Current LSN %s >= afterLSN %s, sync already confirmed`,
         currentLSN,
-        beforeLSN
+        afterLSN
       )
-
-      // Wait additional time to see if afterLSN comes through
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      const finalLSN = getCurrentLSN()
-      if (finalLSN && finalLSN >= afterLSN) {
-        debug(`Found afterLSN %s, sync confirmed`, afterLSN)
-        return true
-      }
+      return true
     }
 
     return new Promise((resolve, reject) => {
@@ -353,9 +673,6 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
         connectionState.setState(`connected`)
         debug(`Connected to Materialize proxy at %s`, websocketUrl)
 
-        if (markReady) {
-          markReady()
-        }
         resolve()
       }
 
@@ -363,7 +680,14 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
         const data = typeof event === `string` ? event : event.data
         try {
           const msg = JSON.parse(data.toString()) as MaterializeProxyMessage
-          debug(`Received message: %o`, msg)
+
+          // Debug ID specifically if this is a data message
+          if (msg.type === `data` && msg.row && msg.row.id !== undefined) {
+            debug(`Received message: %o`, msg)
+            debug(
+              `ID before processing: ${msg.row.id} (type: ${typeof msg.row.id})`
+            )
+          }
 
           if (msg.type === `lsn` && msg.value) {
             // Update current LSN
@@ -371,11 +695,11 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
             const tracker = lsnTracker.state
             tracker.currentLSN = newLSN
 
-            debug(`Updated LSN to: %s`, newLSN)
+            // debug(`Updated LSN to: %s`, newLSN)
 
             // Check pending syncs
             tracker.pendingSyncs.forEach((sync, syncId) => {
-              if (newLSN > sync.beforeLSN) {
+              if (normalizeLsn(newLSN) > normalizeLsn(sync.beforeLSN)) {
                 debug(
                   `LSN %s > beforeLSN %s for sync %s`,
                   newLSN,
@@ -388,7 +712,10 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
                   const currentTracker = lsnTracker.state
                   const currentLSN = currentTracker.currentLSN
 
-                  if (currentLSN && currentLSN >= sync.afterLSN) {
+                  if (
+                    currentLSN &&
+                    normalizeLsn(currentLSN) >= normalizeLsn(sync.afterLSN)
+                  ) {
                     debug(
                       `Found afterLSN %s, confirming sync %s`,
                       sync.afterLSN,
@@ -407,45 +734,90 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
             return
           }
 
-          if (msg.type === `data` && msg.row && begin && write && commit) {
-            // Handle data messages from the proxy
-            begin()
+          if (msg.type === `data` && msg.row) {
+            // Try to buffer the message for differential dataflow merging
+            debug(
+              `Attempting to buffer message with timestamp: ${msg.mz_timestamp}`
+            )
+            const wasBuffered = bufferMessage(msg)
 
-            // Apply parse transformations to convert server data to client format
-            let parsedRow = msg.row
-            if (parse) {
-              parsedRow = { ...msg.row }
-              for (const [field, parser] of Object.entries(parse)) {
-                if (parsedRow[field] !== undefined) {
-                  parsedRow[field] = parser(parsedRow[field])
+            if (!wasBuffered) {
+              // Fallback to immediate processing if buffering fails
+              debug(
+                `Message not buffered (no timestamp), falling back to immediate processing`
+              )
+
+              if (begin && write && commit) {
+                begin()
+
+                // Apply parse transformations to convert server data to client format
+                let parsedRow = msg.row
+                debug(`Row before parsing: %o`, parsedRow)
+                if (parsedRow.id !== undefined) {
+                  debug(
+                    `ID before parsing: ${parsedRow.id} (type: ${typeof parsedRow.id})`
+                  )
+                }
+
+                if (parse) {
+                  parsedRow = { ...msg.row }
+                  for (const [field, parser] of Object.entries(parse)) {
+                    if (parsedRow[field] !== undefined) {
+                      const oldValue = parsedRow[field]
+                      parsedRow[field] = parser(parsedRow[field])
+                      if (field === `id`) {
+                        debug(
+                          `ID parsing: ${oldValue} (${typeof oldValue}) -> ${parsedRow[field]} (${typeof parsedRow[field]})`
+                        )
+                      }
+                    }
+                  }
+                }
+
+                debug(`Row after parsing: %o`, parsedRow)
+                if (parsedRow.id !== undefined) {
+                  debug(
+                    `ID after parsing: ${parsedRow.id} (type: ${typeof parsedRow.id})`
+                  )
+                }
+
+                // Determine operation type from mz_diff
+                let operationType: `insert` | `update` | `delete` = `insert`
+                if (msg.mz_diff !== undefined) {
+                  const key = getKey?.(parsedRow as T)
+                  debug(
+                    `Operation type determination - key: ${key}, mz_diff: ${msg.mz_diff}, collection.has(key): ${collection?.has(key)}`
+                  )
+                  operationType =
+                    msg.mz_diff === `-1`
+                      ? `delete`
+                      : msg.mz_diff === `1` && collection?.has(key)
+                        ? `update`
+                        : `insert`
+                }
+
+                debug(`Final operation: ${operationType}, value: %o`, parsedRow)
+                if (parsedRow.id !== undefined) {
+                  debug(
+                    `ID being written: ${parsedRow.id} (type: ${typeof parsedRow.id})`
+                  )
+                }
+
+                write({
+                  type: operationType,
+                  value: parsedRow,
+                  metadata: {
+                    mz_timestamp: msg.mz_timestamp,
+                    mz_diff: msg.mz_diff,
+                  },
+                })
+
+                commit()
+                if (markReady) {
+                  markReady()
                 }
               }
             }
-
-            console.log({ parsedRow })
-
-            // Determine operation type from mz_diff
-            let operationType: `insert` | `update` | `delete` = `insert`
-            console.log({ msg })
-            if (msg.mz_diff !== undefined) {
-              operationType =
-                msg.mz_diff === `-1`
-                  ? `delete`
-                  : msg.mz_diff === `1` && collection.has(getKey(parsedRow))
-                    ? `update`
-                    : `insert`
-            }
-
-            write({
-              type: operationType,
-              value: parsedRow,
-              metadata: {
-                mz_timestamp: msg.mz_timestamp,
-                mz_diff: msg.mz_diff,
-              },
-            })
-
-            commit()
           }
         } catch (error) {
           debug(`Error parsing message: %o`, error)
@@ -465,6 +837,7 @@ function createMaterializeSync<T extends object = Record<string, unknown>>(
       }
 
       // Set up event listeners
+      // eslint-disable-next-line
       if (!ws) {
         reject(new Error(`Failed to create WebSocket connection`))
         return
@@ -515,7 +888,7 @@ export function materializeCollectionOptions<
 >(config: MaterializeCollectionConfig<TExplicit, TSchema, TFallback>) {
   const { utils, sync } = createMaterializeSync<
     ResolveType<TExplicit, TSchema, TFallback>
-  >(config.websocketUrl, config.parse, config.getKey)
+  >(config.websocketUrl, config.parse || {}, config.getKey)
 
   // Create wrapper handlers for direct persistence operations with LSN tracking
   const wrappedOnInsert = config.onInsert

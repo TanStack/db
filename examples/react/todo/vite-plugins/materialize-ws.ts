@@ -37,8 +37,12 @@ export function materializeWebSocketPlugin(): Plugin {
         const backend = new WebSocket(
           `ws://${mzHost}:${mzPort}/api/experimental/sql`
         )
+        // Separate connection for LSN queries
+        const lsnBackend = new WebSocket(
+          `ws://${mzHost}:${mzPort}/api/experimental/sql`
+        )
         let latestTimestamp = -Infinity
-        const authenticated = false
+        let lsnBackendReady = false
 
         backend.on(`open`, () => {
           console.log(`Connected to Materialize backend`)
@@ -63,10 +67,50 @@ export function materializeWebSocketPlugin(): Plugin {
           }, 1000)
         })
 
+        // Set up LSN backend connection
+        lsnBackend.on(`open`, () => {
+          console.log(`Connected to Materialize LSN backend`)
+          // Authenticate LSN backend
+          lsnBackend.send(
+            JSON.stringify({
+              user: `materialize`,
+              password: ``,
+            })
+          )
+        })
+
+        lsnBackend.on(`message`, (data) => {
+          try {
+            const msg = JSON.parse(data.toString())
+
+            // Only handle Row messages for LSN responses
+            if (msg.type === `Row`) {
+              const payload = msg.payload as Array<any>
+
+              // LSN query responses should have exactly one value
+              if (payload.length === 1) {
+                client.send(JSON.stringify({ type: `lsn`, value: payload[0] }))
+              }
+            } else if (msg.type === `ReadyForQuery`) {
+              // console.log(`[LSN BACKEND] Ready for queries`)
+              lsnBackendReady = true
+            }
+          } catch (error) {
+            console.error(`Error parsing LSN backend message:`, error)
+          }
+        })
+
+        lsnBackend.on(`error`, (err) => {
+          console.error(`LSN backend websocket error:`, err)
+        })
+
+        lsnBackend.on(`close`, (code, reason) => {
+          console.log(`LSN backend websocket closed:`, code, reason.toString())
+        })
+
         backend.on(`message`, (data) => {
           try {
             const msg = JSON.parse(data.toString())
-            // console.log("Received message from Materialize:", msg)
 
             // Handle different message types from Materialize WebSocket API
             if (msg.type === `Row`) {
@@ -80,19 +124,21 @@ export function materializeWebSocketPlugin(): Plugin {
               // If the logical time advanced, query the LSN from the progress subsource.
               if (mz_progressed === true && mz_ts > latestTimestamp) {
                 latestTimestamp = mz_ts
-                backend.send(
-                  JSON.stringify({
-                    queries: [
-                      { query: `SELECT lsn FROM ${progressSubsource}` },
-                    ],
-                  })
-                )
-                return
-              }
 
-              // When the payload has only one entry, it's the result of an LSN query.
-              if (payload.length === 1) {
-                client.send(JSON.stringify({ type: `lsn`, value: payload[0] }))
+                // Send LSN query on separate connection
+                if (lsnBackendReady) {
+                  lsnBackend.send(
+                    JSON.stringify({
+                      queries: [
+                        { query: `SELECT lsn FROM ${progressSubsource}` },
+                      ],
+                    })
+                  )
+                } else {
+                  console.log(
+                    `[VITE PLUGIN] LSN backend not ready, skipping query`
+                  )
+                }
                 return
               }
 
@@ -108,7 +154,7 @@ export function materializeWebSocketPlugin(): Plugin {
                   row: {
                     id: Number(id),
                     text,
-                    completed: completed === `true`,
+                    completed: completed === true,
                     created_at,
                     updated_at,
                   },
@@ -138,11 +184,13 @@ export function materializeWebSocketPlugin(): Plugin {
         client.on(`close`, () => {
           console.log(`Client disconnected from Materialize proxy`)
           backend.close()
+          lsnBackend.close()
         })
 
         client.on(`error`, (err) => {
           console.error(`Client websocket error:`, err)
           backend.close()
+          lsnBackend.close()
         })
       })
     },

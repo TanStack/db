@@ -88,8 +88,8 @@ export function TodoApp({
     >
       <div className="w-[550px]">
         <h1
-          className="text-center text-[70px] font-bold mb-4"
-          style={{ color: titleColor }}
+          className="text-center text-[70px] font-bold mb-8"
+          style={{ lineHeight: 1 }}
         >
           {title}
         </h1>
