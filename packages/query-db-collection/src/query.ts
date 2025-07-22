@@ -22,7 +22,6 @@ import type {
 } from "@tanstack/query-core"
 import type {
   ChangeMessage,
-  Collection,
   CollectionConfig,
   DeleteMutationFn,
   DeleteMutationFnParams,
@@ -315,13 +314,7 @@ export function queryCollectionOptions<
     throw new GetKeyRequiredError()
   }
 
-  const internalSync: SyncConfig<TItem>[`sync`] = (params: {
-    collection: Collection<TItem, TKey, any, any, any>
-    begin: () => void
-    write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
-    commit: () => void
-    markReady: () => void
-  }) => {
+  const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
     const observerOptions: QueryObserverOptions<
@@ -401,7 +394,7 @@ export function queryCollectionOptions<
         }
 
         currentSyncedItems.forEach((oldItem, key) => {
-          const newItem = newItemsMap.get(key as unknown as TKey)
+          const newItem = newItemsMap.get(key)
           if (!newItem) {
             write({ type: `delete`, value: oldItem })
           } else if (
@@ -458,17 +451,11 @@ export function queryCollectionOptions<
     begin: () => void
     write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
     commit: () => void
-    collection: Collection<TItem, TKey, any, any, any>
+    collection: any
   } | null = null
 
   // Enhanced internalSync that captures sync functions for manual use
-  const enhancedInternalSync: SyncConfig<TItem>[`sync`] = (params: {
-    collection: Collection<TItem, TKey, any, any, any>
-    begin: () => void
-    write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
-    commit: () => void
-    markReady: () => void
-  }) => {
+  const enhancedInternalSync: SyncConfig<TItem>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
     // Store references for manual sync operations
@@ -520,8 +507,8 @@ export function queryCollectionOptions<
     commit()
 
     // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray
-    queryClient.setQueryData(queryKey, currentData)
+    const currentData = syncFunctions.collection.toArray as Array<TItem>
+    queryClient.setQueryData(queryKey, currentData as any)
   }
 
   /**
@@ -578,8 +565,8 @@ export function queryCollectionOptions<
     commit()
 
     // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray
-    queryClient.setQueryData(queryKey, currentData)
+    const currentData = syncFunctions.collection.toArray as Array<TItem>
+    queryClient.setQueryData(queryKey, currentData as any)
   }
 
   /**
@@ -623,8 +610,8 @@ export function queryCollectionOptions<
     commit()
 
     // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray
-    queryClient.setQueryData(queryKey, currentData)
+    const currentData = syncFunctions.collection.toArray as Array<TItem>
+    queryClient.setQueryData(queryKey, currentData as any)
   }
 
   /**
@@ -684,8 +671,8 @@ export function queryCollectionOptions<
     commit()
 
     // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray
-    queryClient.setQueryData(queryKey, currentData)
+    const currentData = syncFunctions.collection.toArray as Array<TItem>
+    queryClient.setQueryData(queryKey, currentData as any)
   }
 
   /**
@@ -820,8 +807,8 @@ export function queryCollectionOptions<
     commit()
 
     // Update query cache to reflect the new state
-    const currentData = collection.toArray
-    queryClient.setQueryData(queryKey, currentData)
+    const currentData = collection.toArray as Array<TItem>
+    queryClient.setQueryData(queryKey, currentData as any)
   }
 
   // Create wrapper handlers for direct persistence operations that handle refetching
