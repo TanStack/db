@@ -803,14 +803,14 @@ export class CollectionImpl<
       if (filteredEvents.length > 0) {
         this.updateIndexes(filteredEvents)
       }
-      this.emitEvents(filteredEvents)
+      this.emitEvents(filteredEvents, triggeredByUserAction)
     } else {
       // Update indexes for all events
       if (filteredEventsBySyncStatus.length > 0) {
         this.updateIndexes(filteredEventsBySyncStatus)
       }
       // Emit all events if no pending sync transactions
-      this.emitEvents(filteredEventsBySyncStatus)
+      this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
   }
 
@@ -893,22 +893,21 @@ export class CollectionImpl<
    */
   private emitEvents(
     changes: Array<ChangeMessage<T, TKey>>,
-    endBatching = false
+    forceEmit = false
   ): void {
-    if (this.shouldBatchEvents && !endBatching) {
+    // Skip batching for user actions (forceEmit=true) to keep UI responsive
+    if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
       this.batchedEvents.push(...changes)
       return
     }
 
-    // Either we're not batching, or we're ending the batching cycle
+    // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
     let eventsToEmit = changes
 
-    if (endBatching) {
-      // End batching: combine any batched events with new events and clean up state
-      if (this.batchedEvents.length > 0) {
-        eventsToEmit = [...this.batchedEvents, ...changes]
-      }
+    // If we have batched events and this is a forced emit, combine them
+    if (this.batchedEvents.length > 0 && forceEmit) {
+      eventsToEmit = [...this.batchedEvents, ...changes]
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
@@ -1893,7 +1892,7 @@ export class CollectionImpl<
     // Add the transaction to the collection's transactions store
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(true)
 
     return directOpTransaction
   }
@@ -2006,7 +2005,7 @@ export class CollectionImpl<
     directOpTransaction.commit()
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(true)
 
     return directOpTransaction
   }
