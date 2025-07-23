@@ -1016,4 +1016,38 @@ describe(`QueryCollection`, () => {
       expect(finalItem?.name).toMatch(/^Item \d+$/)
     })
   })
+
+  it(`should call markReady when queryFn returns an empty array`, async () => {
+    const queryKey = [`emptyArrayTest`]
+    const queryFn = vi.fn().mockResolvedValue([])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `test`,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey,
+      startSync: true,
+    }
+
+    const options = queryCollectionOptions(config)
+    const collection = createCollection(options)
+
+    // Wait for the query to complete
+    await vi.waitFor(
+      () => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        // The collection should be marked as ready even with empty array
+        expect(collection.status).toBe(`ready`)
+      },
+      {
+        timeout: 1000,
+        interval: 50,
+      }
+    )
+
+    // Verify the collection is empty but ready
+    expect(collection.size).toBe(0)
+    expect(collection.status).toBe(`ready`)
+  })
 })

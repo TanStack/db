@@ -88,4 +88,58 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers1.size).toBe(2)
     expect(activeUsers2.size).toBe(2)
   })
+
+  it(`should call markReady when source collection returns empty array`, async () => {
+    // Create an empty source collection using the mock sync options
+    const emptyUsersCollection = createCollection(
+      mockSyncCollectionOptions<User>({
+        id: `empty-test-users`,
+        getKey: (user) => user.id,
+        initialData: [], // Empty initial data
+      })
+    )
+
+    // Create a live query collection that depends on the empty source collection
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ user: emptyUsersCollection })
+        .where(({ user }) => eq(user.active, true))
+    )
+
+    // This should resolve and not hang, even though the source collection is empty
+    await liveQuery.preload()
+
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(0)
+  })
+
+  it(`should call markReady when source collection sync doesn't call begin/commit (reproduction case)`, async () => {
+    // Create a collection with sync that only calls markReady (like the reproduction case)
+    const problemCollection = createCollection<User>({
+      id: `problem-collection`,
+      sync: {
+        sync: ({ markReady }) => {
+          // Simulate async operation without begin/commit (like empty queryFn case)
+          setTimeout(() => {
+            markReady()
+          }, 50)
+          return () => {} // cleanup function
+        },
+      },
+      getKey: (user) => user.id,
+    })
+
+    // Create a live query collection that depends on the problematic source collection
+    const liveQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ user: problemCollection })
+        .where(({ user }) => eq(user.active, true))
+    )
+
+    // This should resolve and not hang, even though the source collection doesn't commit data
+    await liveQuery.preload()
+
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(0)
+  })
 })
