@@ -1260,7 +1260,7 @@ describe(`Collection with schema validation`, () => {
       return new Promise((resolve) => {
         txResolvers.push(() => {
           emitter.emit(`sync`, transaction.mutations)
-          resolve()
+          resolve(null)
         })
       })
     })
