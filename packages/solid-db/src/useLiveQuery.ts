@@ -189,7 +189,7 @@ export function useLiveQuery<
 >(
   liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>
 ): {
-  state: Map<TKey, TResult>
+  state: ReactiveMap<TKey, TResult>
   data: Array<TResult>
   collection: Accessor<Collection<TResult, TKey, TUtils>>
   status: Accessor<CollectionStatus>

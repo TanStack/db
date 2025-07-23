@@ -18,13 +18,11 @@
   "packageManager": "pnpm@10.6.3",
   "dependencies": {
     "@solid-primitives/map": "^0.7.2",
-    "@tanstack/db": "workspace:*",
-    "use-sync-external-store": "^1.2.0"
+    "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
     "@electric-sql/client": "1.0.0",
     "@solidjs/testing-library": "^0.8.10",
-    "@types/use-sync-external-store": "^0.0.6",
     "@vitest/coverage-istanbul": "^3.0.9",
     "jsdom": "^26.0.0",
     "solid-js": "^1.9.7",
@@ -36,10 +34,6 @@
       "import": {
         "types": "./dist/esm/index.d.ts",
         "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
       }
     },
     "./package.json": "./package.json"
