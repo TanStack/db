@@ -30,23 +30,5 @@ export const Route = createRootRoute({
     ],
   }),
 
-  component: () => (
-    <RootDocument>
-      <Outlet />
-    </RootDocument>
-  ),
+  component: () => <Outlet />,
 })
-
-function RootDocument(props: ParentProps) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {props.children}
-        <Scripts />
-      </body>
-    </html>
-  )
-}
