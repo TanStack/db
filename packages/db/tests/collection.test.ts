@@ -1248,4 +1248,88 @@ describe(`Collection with schema validation`, () => {
     expect(thirdItem!.updatedAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
     expect(thirdItem!.id).toBe(`task-id-3`)
   })
+
+  it(`should not block user actions when keys are recently synced`, async () => {
+    // This test reproduces the issue where rapid user actions get blocked
+    // when optimistic updates back up with slow sync responses
+    const txResolvers: Array<() => void> = []
+    const emitter = mitt()
+
+    const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
+      // Simulate server operation that can be controlled
+      return new Promise((resolve) => {
+        txResolvers.push(() => {
+          emitter.emit(`sync`, transaction.mutations)
+          resolve()
+        })
+      })
+    })
+
+    const collection = createCollection<{ id: number; checked: boolean }>({
+      id: `user-action-blocking-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Initialize with checkboxes
+          begin()
+          for (let i = 1; i <= 3; i++) {
+            write({
+              type: `insert`,
+              value: { id: i, checked: false },
+            })
+          }
+          commit()
+          markReady()
+
+          // Listen for sync events
+          // @ts-expect-error don't trust mitt's typing
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+        },
+      },
+      onUpdate: mutationFn,
+    })
+
+    await collection.stateWhenReady()
+
+    // Step 1: First user action - should work fine
+    const tx1 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+    expect(collection.state.get(1)?.checked).toBe(true)
+    expect(collection.optimisticUpserts.has(1)).toBe(true)
+
+    // Step 2: Complete the transaction to trigger sync
+    txResolvers[0]?.()
+    await tx1.isPersisted.promise
+
+    // At this point, key 1 should be in recentlySyncedKeys due to the sync event
+
+    // Step 3: Try another user action on the same key immediately
+    // This should NOT be blocked (this was the bug)
+    const tx2 = collection.update(1, (draft) => {
+      draft.checked = false
+    })
+
+    // The optimistic state should be updated
+    expect(collection.state.get(1)?.checked).toBe(false)
+    expect(collection.optimisticUpserts.has(1)).toBe(true)
+
+    // The mutation function should have been called
+    expect(mutationFn).toHaveBeenCalledTimes(2)
+
+    // Clean up
+    txResolvers[1]?.()
+    await tx2.isPersisted.promise
+  })
 })
