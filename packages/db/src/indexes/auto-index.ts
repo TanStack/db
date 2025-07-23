@@ -1,4 +1,4 @@
-import { OrderedIndex } from "./ordered-index"
+import { BTreeIndex } from "./btree-index"
 import type { BasicExpression } from "../query/ir"
 import type { CollectionImpl } from "../collection"
 
@@ -46,7 +46,7 @@ export function ensureIndexForExpression<
     try {
       collection.createIndex((row) => (row as any)[fieldName], {
         name: `auto_${fieldName}`,
-        indexType: OrderedIndex,
+        indexType: BTreeIndex,
       })
     } catch (error) {
       console.warn(

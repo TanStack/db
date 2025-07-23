@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.30
+
+### Patch Changes
+
+- Remove OrderedIndex in favor of more efficient BTree index. ([#302](https://github.com/TanStack/db/pull/302))
+
 ## 0.0.29
 
 ### Patch Changes

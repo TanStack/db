@@ -4,7 +4,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from "./query/builder/ref-proxy"
-import { OrderedIndex } from "./indexes/ordered-index.js"
+import { BTreeIndex } from "./indexes/btree-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
 import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
@@ -687,7 +687,9 @@ export class CollectionImpl<
   /**
    * Recompute optimistic state from active transactions
    */
-  private recomputeOptimisticState(): void {
+  private recomputeOptimisticState(
+    triggeredByUserAction: boolean = false
+  ): void {
     // Skip redundant recalculations when we're in the middle of committing sync transactions
     if (this.isCommittingSyncTransactions) {
       return
@@ -738,13 +740,26 @@ export class CollectionImpl<
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
     // Filter out events for recently synced keys to prevent duplicates
-    const filteredEventsBySyncStatus = events.filter(
-      (event) => !this.recentlySyncedKeys.has(event.key)
-    )
+    // BUT: Only filter out events that are actually from sync operations
+    // New user transactions should NOT be filtered even if the key was recently synced
+    const filteredEventsBySyncStatus = events.filter((event) => {
+      if (!this.recentlySyncedKeys.has(event.key)) {
+        return true // Key not recently synced, allow event through
+      }
+
+      // Key was recently synced - allow if this is a user-triggered action
+      if (triggeredByUserAction) {
+        return true
+      }
+
+      // Otherwise filter out duplicate sync events
+      return false
+    })
 
     // Filter out redundant delete events if there are pending sync transactions
     // that will immediately restore the same data, but only for completed transactions
-    if (this.pendingSyncedTransactions.length > 0) {
+    // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
+    if (this.pendingSyncedTransactions.length > 0 && !triggeredByUserAction) {
       const pendingSyncKeys = new Set<TKey>()
       const completedTransactionMutations = new Set<string>()
 
@@ -788,14 +803,14 @@ export class CollectionImpl<
       if (filteredEvents.length > 0) {
         this.updateIndexes(filteredEvents)
       }
-      this.emitEvents(filteredEvents)
+      this.emitEvents(filteredEvents, triggeredByUserAction)
     } else {
       // Update indexes for all events
       if (filteredEventsBySyncStatus.length > 0) {
         this.updateIndexes(filteredEventsBySyncStatus)
       }
       // Emit all events if no pending sync transactions
-      this.emitEvents(filteredEventsBySyncStatus)
+      this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
   }
 
@@ -878,22 +893,21 @@ export class CollectionImpl<
    */
   private emitEvents(
     changes: Array<ChangeMessage<T, TKey>>,
-    endBatching = false
+    forceEmit = false
   ): void {
-    if (this.shouldBatchEvents && !endBatching) {
+    // Skip batching for user actions (forceEmit=true) to keep UI responsive
+    if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
       this.batchedEvents.push(...changes)
       return
     }
 
-    // Either we're not batching, or we're ending the batching cycle
+    // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
     let eventsToEmit = changes
 
-    if (endBatching) {
-      // End batching: combine any batched events with new events and clean up state
-      if (this.batchedEvents.length > 0) {
-        eventsToEmit = [...this.batchedEvents, ...changes]
-      }
+    // If we have batched events and this is a forced emit, combine them
+    if (this.batchedEvents.length > 0 && forceEmit) {
+      eventsToEmit = [...this.batchedEvents, ...changes]
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
@@ -1297,12 +1311,12 @@ export class CollectionImpl<
    * @returns An index proxy that provides access to the index when ready
    *
    * @example
-   * // Create a default ordered index
+   * // Create a default B+ tree index
    * const ageIndex = collection.createIndex((row) => row.age)
    *
    * // Create a ordered index with custom options
    * const ageIndex = collection.createIndex((row) => row.age, {
-   *   indexType: OrderedIndex,
+   *   indexType: BTreeIndex,
    *   options: { compareFn: customComparator },
    *   name: 'age_btree'
    * })
@@ -1316,9 +1330,7 @@ export class CollectionImpl<
    *   options: { language: 'en' }
    * })
    */
-  public createIndex<
-    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
-  >(
+  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
     indexCallback: (row: SingleRowRefProxy<T>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
@@ -1329,8 +1341,8 @@ export class CollectionImpl<
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
-    // Default to OrderedIndex if no type specified
-    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
+    // Default to BTreeIndex if no type specified
+    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
 
     // Create lazy wrapper
     const lazyIndex = new LazyIndexWrapper<TKey>(
@@ -1344,13 +1356,13 @@ export class CollectionImpl<
 
     this.lazyIndexes.set(indexId, lazyIndex)
 
-    // For OrderedIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === OrderedIndex) {
+    // For BTreeIndex, resolve immediately and synchronously
+    if ((resolver as unknown) === BTreeIndex) {
       try {
         const resolvedIndex = lazyIndex.getResolved()
         this.resolvedIndexes.set(indexId, resolvedIndex)
       } catch (error) {
-        console.warn(`Failed to resolve OrderedIndex:`, error)
+        console.warn(`Failed to resolve BTreeIndex:`, error)
       }
     } else if (typeof resolver === `function` && resolver.prototype) {
       // Other synchronous constructors - resolve immediately
@@ -1627,7 +1639,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.recomputeOptimisticState()
+      this.recomputeOptimisticState(true)
 
       return ambientTransaction
     } else {
@@ -1652,7 +1664,7 @@ export class CollectionImpl<
 
       // Add the transaction to the collection's transactions store
       this.transactions.set(directOpTransaction.id, directOpTransaction)
-      this.recomputeOptimisticState()
+      this.recomputeOptimisticState(true)
 
       return directOpTransaction
     }
@@ -1849,7 +1861,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.recomputeOptimisticState()
+      this.recomputeOptimisticState(true)
 
       return ambientTransaction
     }
@@ -1878,7 +1890,7 @@ export class CollectionImpl<
     // Add the transaction to the collection's transactions store
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(true)
 
     return directOpTransaction
   }
@@ -1965,7 +1977,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.recomputeOptimisticState()
+      this.recomputeOptimisticState(true)
 
       return ambientTransaction
     }
@@ -1991,7 +2003,7 @@ export class CollectionImpl<
     directOpTransaction.commit()
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(true)
 
     return directOpTransaction
   }
@@ -2253,6 +2265,6 @@ export class CollectionImpl<
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()
 
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(false)
   }
 }
