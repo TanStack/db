@@ -20,6 +20,8 @@ import type {
 } from "@tanstack/db"
 import type { MaybeRefOrGetter } from "vue"
 
+const NOOP = () => {}
+
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
@@ -244,16 +246,9 @@ export function useLiveQuery(
   }
 
   // Track current unsubscribe function
-  let unsub: (() => void) | null = null
-  const clean = () => {
-    if (unsub) {
-      unsub()
-      unsub = null
-    }
-  }
-
+  let cleanup: () => void = NOOP
   watchEffect(() => {
-    clean()
+    cleanup()
 
     const collectionVal = collection.value
 
@@ -267,7 +262,7 @@ export function useLiveQuery(
     syncDataFromCollection(collectionVal)
 
     // Subscribe to collection changes with granular updates
-    unsub = collectionVal.subscribeChanges(
+    cleanup = collectionVal.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         for (const change of changes) {
@@ -297,7 +292,7 @@ export function useLiveQuery(
 
   // Cleanup
   if (getCurrentScope()) {
-    onScopeDispose(clean)
+    onScopeDispose(cleanup)
   }
 
   const isLoading = computed(
