@@ -134,6 +134,7 @@
   Adds automatic lifecycle management for collections to optimize resource usage.
 
   **New Features:**
+
   - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
   - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
   - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
@@ -240,6 +241,7 @@
 ### Patch Changes
 
 - A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
+
   - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
   - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
   - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
@@ -254,6 +256,7 @@
 - Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
 
   Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
+
   - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
   - Added `utils` property to CollectionImpl
   - Added TypeScript types for utility functions and utility records

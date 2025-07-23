@@ -16,6 +16,7 @@
   This comprehensive update replaces all string-based error throws throughout the TanStack DB codebase with named error classes, providing better type safety and developer experience.
 
   ## New Features
+
   - **Root `TanStackDBError` class** - all errors inherit from a common base for unified error handling
   - **Named error classes** organized by package and functional area
   - **Type-safe error handling** using `instanceof` checks instead of string matching
@@ -27,6 +28,7 @@
   ### Core Package (`@tanstack/db`)
 
   Contains generic errors used across the ecosystem:
+
   - Collection configuration, state, and operation errors
   - Transaction lifecycle and mutation errors
   - Query building, compilation, and execution errors
@@ -35,11 +37,13 @@
   ### Adapter Packages
 
   Each adapter now exports its own specific error classes:
+
   - **`@tanstack/electric-db-collection`**: Electric-specific errors
   - **`@tanstack/trailbase-db-collection`**: TrailBase-specific errors
   - **`@tanstack/query-db-collection`**: Query collection specific errors
 
   ## Breaking Changes
+
   - Error handling code using string matching will need to be updated to use `instanceof` checks
   - Some error messages may have slight formatting changes
   - Adapter-specific errors now need to be imported from their respective packages
@@ -108,6 +112,7 @@
   ```
 
   ## Benefits
+
   - **Type Safety**: All errors now have specific types that can be caught with `instanceof`
   - **Unified Error Handling**: Root `TanStackDBError` class allows catching all library errors with a single check
   - **Better Package Separation**: Each adapter manages its own error types

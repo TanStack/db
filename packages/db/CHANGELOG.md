@@ -29,6 +29,7 @@
   This comprehensive update replaces all string-based error throws throughout the TanStack DB codebase with named error classes, providing better type safety and developer experience.
 
   ## New Features
+
   - **Root `TanStackDBError` class** - all errors inherit from a common base for unified error handling
   - **Named error classes** organized by package and functional area
   - **Type-safe error handling** using `instanceof` checks instead of string matching
@@ -40,6 +41,7 @@
   ### Core Package (`@tanstack/db`)
 
   Contains generic errors used across the ecosystem:
+
   - Collection configuration, state, and operation errors
   - Transaction lifecycle and mutation errors
   - Query building, compilation, and execution errors
@@ -48,11 +50,13 @@
   ### Adapter Packages
 
   Each adapter now exports its own specific error classes:
+
   - **`@tanstack/electric-db-collection`**: Electric-specific errors
   - **`@tanstack/trailbase-db-collection`**: TrailBase-specific errors
   - **`@tanstack/query-db-collection`**: Query collection specific errors
 
   ## Breaking Changes
+
   - Error handling code using string matching will need to be updated to use `instanceof` checks
   - Some error messages may have slight formatting changes
   - Adapter-specific errors now need to be imported from their respective packages
@@ -121,6 +125,7 @@
   ```
 
   ## Benefits
+
   - **Type Safety**: All errors now have specific types that can be caught with `instanceof`
   - **Unified Error Handling**: Root `TanStackDBError` class allows catching all library errors with a single check
   - **Better Package Separation**: Each adapter manages its own error types
@@ -139,6 +144,7 @@
 - Add comprehensive documentation for creating collection options creators ([#284](https://github.com/TanStack/db/pull/284))
 
   This adds a new documentation page `collection-options-creator.md` that provides detailed guidance for developers building collection options creators. The documentation covers:
+
   - Core requirements and configuration interfaces
   - Sync implementation patterns with transaction lifecycle (begin, write, commit, markReady)
   - Data parsing and type conversion using field-specific conversions
@@ -171,6 +177,7 @@
 - Fix iterator-based change tracking in proxy system ([#271](https://github.com/TanStack/db/pull/271))
 
   This fixes several issues with iterator-based change tracking for Maps and Sets:
+
   - **Map.entries()** now correctly updates actual Map entries instead of creating duplicate keys
   - **Map.values()** now tracks back to original Map keys using value-to-key mapping instead of using symbol placeholders
   - **Set iterators** now properly replace objects in Set when modified instead of creating symbol-keyed entries
@@ -181,6 +188,7 @@
   This brings the proxy system in line with how mature libraries like Immer handle iterator-based change tracking, using method interception rather than trying to proxy all property access.
 
 - Add explicit collection readiness detection with `isReady()` and `markReady()` ([#270](https://github.com/TanStack/db/pull/270))
+
   - Add `isReady()` method to check if a collection is ready for use
   - Add `onFirstReady()` method to register callbacks for when collection becomes ready
   - Add `markReady()` to SyncConfig interface for sync implementations to explicitly signal readiness
@@ -222,6 +230,7 @@
 ### Patch Changes
 
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+
   - Move local-only and local-storage collections to main `@tanstack/db` package
   - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
@@ -229,6 +238,7 @@
   - Update example app and documentation to use new package structure
 
   Why?
+
   - Better separation of concerns
   - Independent versioning for each collection type
   - Cleaner dependencies (electric collections don't need query deps, etc.)
@@ -292,6 +302,7 @@
   Adds automatic lifecycle management for collections to optimize resource usage.
 
   **New Features:**
+
   - Added `startSync` option (defaults to `false`, set to `true` to start syncing immediately)
   - Automatic garbage collection after `gcTime` (default 5 minutes) of inactivity
   - Collection status tracking: "idle" | "loading" | "ready" | "error" | "cleaned-up"
@@ -399,6 +410,7 @@
 - refactor the live query comparator and fix an issue with sorting with a null/undefined value in a column of non-null values ([#167](https://github.com/TanStack/db/pull/167))
 
 - A large refactor of the core `Collection` with: ([#155](https://github.com/TanStack/db/pull/155))
+
   - a change to not use Store internally and emit fine grade changes with `subscribeChanges` and `subscribeKeyChanges` methods.
   - changes to the `Collection` api to be more `Map` like for reads, with `get`, `has`, `size`, `entries`, `keys`, and `values`.
   - renames `config.getId` to `config.getKey` for consistency with the `Map` like api.
@@ -416,6 +428,7 @@
 - Expose utilities on collection instances ([#161](https://github.com/TanStack/db/pull/161))
 
   Implemented a utility exposure pattern for TanStack DB collections that allows utility functions to be passed as part of collection options and exposes them under a `.utils` namespace, with full TypeScript typing.
+
   - Refactored `createCollection` in packages/db/src/collection.ts to accept options with utilities directly
   - Added `utils` property to CollectionImpl
   - Added TypeScript types for utility functions and utility records
@@ -439,6 +452,7 @@
   When `collection.insert()`, `.update()`, or `.delete()` are called outside of an explicit transaction (i.e., not within `useOptimisticMutation`), the library now automatically creates a single-operation transaction and invokes the corresponding handler to persist the change.
 
   Key changes:
+
   - **`@tanstack/db`**: The `Collection` class now supports `onInsert`, `onUpdate`, and `onDelete` in its configuration. Direct calls to mutation methods will throw an error if the corresponding handler is not defined.
   - **`@tanstack/db-collections`**:
     - `queryCollectionOptions` now accepts the new handlers and will automatically `refetch` the collection's query after a handler successfully completes. This behavior can be disabled if the handler returns `{ refetch: false }`.
@@ -450,6 +464,7 @@
   ***
 
   The documentation and the React Todo example application have been significantly refactored to adopt the new direct persistence handler pattern as the primary way to perform mutations.
+
   - The `README.md` and `docs/overview.md` files have been updated to de-emphasize `useOptimisticMutation` for simple writes. They now showcase the much simpler API of calling `collection.insert()` directly and defining persistence logic in the collection's configuration.
   - The React Todo example (`examples/react/todo/src/App.tsx`) has been completely overhauled. All instances of `useOptimisticMutation` have been removed and replaced with the new `onInsert`, `onUpdate`, and `onDelete` handlers, resulting in cleaner and more concise code.
 
