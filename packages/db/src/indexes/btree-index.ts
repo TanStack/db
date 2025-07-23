@@ -3,7 +3,23 @@ import { BTree } from "../utils/btree.js"
 import { BaseIndex } from "./base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
-import type { OrderedIndexOptions, RangeQueryOptions } from "./ordered-index.js"
+
+/**
+ * Options for Ordered index
+ */
+export interface BTreeIndexOptions {
+  compareFn?: (a: any, b: any) => number
+}
+
+/**
+ * Options for range queries
+ */
+export interface RangeQueryOptions {
+  from?: any
+  to?: any
+  fromInclusive?: boolean
+  toInclusive?: boolean
+}
 
 /**
  * B+Tree index for sorted data with range queries
@@ -40,7 +56,7 @@ export class BTreeIndex<
     this.orderedEntries = new BTree(this.compareFn)
   }
 
-  protected initialize(_options?: OrderedIndexOptions): void {}
+  protected initialize(_options?: BTreeIndexOptions): void {}
 
   /**
    * Adds a value to the index
@@ -159,7 +175,7 @@ export class BTreeIndex<
         result = this.inArrayLookup(value)
         break
       default:
-        throw new Error(`Operation ${operation} not supported by OrderedIndex`)
+        throw new Error(`Operation ${operation} not supported by BTreeIndex`)
     }
 
     this.trackLookup(startTime)

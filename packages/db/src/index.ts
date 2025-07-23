@@ -12,7 +12,6 @@ export * from "./errors"
 
 // Index system exports
 export * from "./indexes/base-index.js"
-export * from "./indexes/ordered-index.js"
 export * from "./indexes/btree-index.js"
 export * from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"

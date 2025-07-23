@@ -4,7 +4,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from "./query/builder/ref-proxy"
-import { OrderedIndex } from "./indexes/ordered-index.js"
+import { BTreeIndex } from "./indexes/btree-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
 import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
@@ -1297,12 +1297,12 @@ export class CollectionImpl<
    * @returns An index proxy that provides access to the index when ready
    *
    * @example
-   * // Create a default ordered index
+   * // Create a default B+ tree index
    * const ageIndex = collection.createIndex((row) => row.age)
    *
    * // Create a ordered index with custom options
    * const ageIndex = collection.createIndex((row) => row.age, {
-   *   indexType: OrderedIndex,
+   *   indexType: BTreeIndex,
    *   options: { compareFn: customComparator },
    *   name: 'age_btree'
    * })
@@ -1316,9 +1316,7 @@ export class CollectionImpl<
    *   options: { language: 'en' }
    * })
    */
-  public createIndex<
-    TResolver extends IndexResolver<TKey> = typeof OrderedIndex,
-  >(
+  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
     indexCallback: (row: SingleRowRefProxy<T>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
@@ -1329,8 +1327,8 @@ export class CollectionImpl<
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
-    // Default to OrderedIndex if no type specified
-    const resolver = config.indexType ?? (OrderedIndex as unknown as TResolver)
+    // Default to BTreeIndex if no type specified
+    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
 
     // Create lazy wrapper
     const lazyIndex = new LazyIndexWrapper<TKey>(
@@ -1344,13 +1342,13 @@ export class CollectionImpl<
 
     this.lazyIndexes.set(indexId, lazyIndex)
 
-    // For OrderedIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === OrderedIndex) {
+    // For BTreeIndex, resolve immediately and synchronously
+    if ((resolver as unknown) === BTreeIndex) {
       try {
         const resolvedIndex = lazyIndex.getResolved()
         this.resolvedIndexes.set(indexId, resolvedIndex)
       } catch (error) {
-        console.warn(`Failed to resolve OrderedIndex:`, error)
+        console.warn(`Failed to resolve BTreeIndex:`, error)
       }
     } else if (typeof resolver === `function` && resolver.prototype) {
       // Other synchronous constructors - resolve immediately

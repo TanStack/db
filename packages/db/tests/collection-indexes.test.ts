@@ -13,7 +13,6 @@ import {
   lte,
   or,
 } from "../src/query/builder/functions"
-import { BTreeIndex, OrderedIndex } from "../src"
 import { expectIndexUsage, withIndexTracking } from "./utls"
 import type { MutationFn, PendingMutation } from "../src/types"
 
@@ -25,10 +24,7 @@ interface TestItem {
   score?: number
   createdAt: Date
 }
-describe.each([
-  [`ordered array`, { indexType: OrderedIndex }],
-  [`B+ Tree`, { indexType: BTreeIndex }],
-])(`Collection Indexes with %s`, (_, { indexType }) => {
+describe(`Collection Indexes`, () => {
   let collection: ReturnType<typeof createCollection<TestItem, string>>
   let testData: Array<TestItem>
   let mutationFn: MutationFn
@@ -127,7 +123,7 @@ describe.each([
 
   describe(`Index Creation`, () => {
     it(`should create an index on a simple field`, () => {
-      const index = collection.createIndex((row) => row.status, { indexType })
+      const index = collection.createIndex((row) => row.status)
 
       expect(typeof index.id).toBe(`number`)
       expect(index.id).toBeGreaterThan(0)
@@ -139,7 +135,6 @@ describe.each([
     it(`should create a named index`, () => {
       const index = collection.createIndex((row) => row.age, {
         name: `ageIndex`,
-        indexType,
       })
 
       expect(index.name).toBe(`ageIndex`)
@@ -147,10 +142,8 @@ describe.each([
     })
 
     it(`should create multiple indexes`, () => {
-      const statusIndex = collection.createIndex((row) => row.status, {
-        indexType,
-      })
-      const ageIndex = collection.createIndex((row) => row.age, { indexType })
+      const statusIndex = collection.createIndex((row) => row.status)
+      const ageIndex = collection.createIndex((row) => row.age)
 
       expect(statusIndex.id).not.toBe(ageIndex.id)
       expect(statusIndex.indexedKeysSet.size).toBe(5)
@@ -158,7 +151,7 @@ describe.each([
     })
 
     it(`should maintain ordered entries`, () => {
-      const ageIndex = collection.createIndex((row) => row.age, { indexType })
+      const ageIndex = collection.createIndex((row) => row.age)
 
       // Ages should be ordered: 22, 25, 28, 30, 35
       const orderedAges = ageIndex.orderedEntriesArray.map(([age]) => age)
@@ -166,9 +159,7 @@ describe.each([
     })
 
     it(`should handle duplicate values in index`, () => {
-      const statusIndex = collection.createIndex((row) => row.status, {
-        indexType,
-      })
+      const statusIndex = collection.createIndex((row) => row.status)
 
       // Should have 3 unique status values
       expect(statusIndex.orderedEntriesArray.length).toBe(3)
@@ -179,9 +170,7 @@ describe.each([
     })
 
     it(`should handle undefined/null values`, () => {
-      const scoreIndex = collection.createIndex((row) => row.score, {
-        indexType,
-      })
+      const scoreIndex = collection.createIndex((row) => row.score)
 
       // Should include the item with undefined score
       expect(scoreIndex.indexedKeysSet.size).toBe(5)
@@ -194,8 +183,8 @@ describe.each([
 
   describe(`Index Maintenance`, () => {
     beforeEach(() => {
-      collection.createIndex((row) => row.status, { indexType })
-      collection.createIndex((row) => row.age, { indexType })
+      collection.createIndex((row) => row.status)
+      collection.createIndex((row) => row.age)
     })
 
     it(`should reflect mutations in collection state and subscriptions`, async () => {
@@ -334,7 +323,7 @@ describe.each([
 
   describe(`Range Queries`, () => {
     beforeEach(() => {
-      collection.createIndex((row) => row.age, { indexType })
+      collection.createIndex((row) => row.age)
     })
 
     it(`should perform equality queries`, () => {
@@ -574,8 +563,8 @@ describe.each([
 
   describe(`Complex Query Optimization`, () => {
     beforeEach(() => {
-      collection.createIndex((row) => row.age, { indexType })
-      collection.createIndex((row) => row.status, { indexType })
+      collection.createIndex((row) => row.age)
+      collection.createIndex((row) => row.status)
     })
 
     it(`should optimize AND queries with range conditions using indexes`, () => {
@@ -935,15 +924,12 @@ describe.each([
       // Create multiple indexes
       collection.createIndex((row) => row.age, {
         name: `ageIndex`,
-        indexType,
       })
       collection.createIndex((row) => row.status, {
         name: `statusIndex`,
-        indexType,
       })
       collection.createIndex((row) => row.name, {
         name: `nameIndex`,
-        indexType,
       })
 
       withIndexTracking(collection, (tracker) => {
@@ -994,7 +980,7 @@ describe.each([
     })
 
     it(`should verify 100% index usage for subscriptions`, () => {
-      collection.createIndex((row) => row.status, { indexType })
+      collection.createIndex((row) => row.status)
 
       withIndexTracking(collection, (tracker) => {
         const changes: Array<any> = []
@@ -1025,8 +1011,8 @@ describe.each([
 
   describe(`Filtered Subscriptions`, () => {
     beforeEach(() => {
-      collection.createIndex((row) => row.age, { indexType })
-      collection.createIndex((row) => row.status, { indexType })
+      collection.createIndex((row) => row.age)
+      collection.createIndex((row) => row.status)
     })
 
     it(`should subscribe to filtered changes with index optimization`, async () => {
@@ -1156,7 +1142,7 @@ describe.each([
     })
 
     it(`should use indexes for filtered subscription initial state`, async () => {
-      collection.createIndex((row) => row.status, { indexType })
+      collection.createIndex((row) => row.status)
 
       await withIndexTracking(collection, (tracker) => {
         const changes: Array<any> = []
@@ -1233,9 +1219,7 @@ describe.each([
 
       await specialCollection.stateWhenReady()
 
-      const ageIndex = specialCollection.createIndex((row) => row.age, {
-        indexType,
-      })
+      const ageIndex = specialCollection.createIndex((row) => row.age)
 
       // Verify index contains all items including special values
       expect(ageIndex.indexedKeysSet.size).toBe(8) // Original 5 + 3 special
@@ -1283,7 +1267,7 @@ describe.each([
         sync: { sync: () => {} },
       })
 
-      const index = emptyCollection.createIndex((row) => row.age, { indexType })
+      const index = emptyCollection.createIndex((row) => row.age)
 
       expect(index.indexedKeysSet.size).toBe(0)
       expect(index.orderedEntriesArray).toHaveLength(0)
@@ -1291,7 +1275,7 @@ describe.each([
     })
 
     it(`should handle index updates when data changes through sync`, async () => {
-      const ageIndex = collection.createIndex((row) => row.age, { indexType })
+      const ageIndex = collection.createIndex((row) => row.age)
 
       // Original index should have 5 items
       expect(ageIndex.indexedKeysSet.size).toBe(5)
