@@ -62,9 +62,6 @@ import type {
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 
-// Store collections in memory
-export const collectionsStore = new Map<string, CollectionImpl<any, any, any>>()
-
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
@@ -426,9 +423,6 @@ export class CollectionImpl<
       ...config,
       autoIndex: config.autoIndex ?? `eager`,
     }
-
-    // Store in global collections store
-    collectionsStore.set(this.id, this)
 
     // Set up data storage with optional comparison function
     if (this.config.compare) {
