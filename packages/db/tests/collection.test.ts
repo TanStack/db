@@ -1250,13 +1250,14 @@ describe(`Collection with schema validation`, () => {
   })
 
   it(`should not block user actions when keys are recently synced`, async () => {
-    // This test reproduces the issue where rapid user actions get blocked
+    // This test reproduces the ACTUAL issue where rapid user actions get blocked
     // when optimistic updates back up with slow sync responses
     const txResolvers: Array<() => void> = []
     const emitter = mitt()
+    const changeEvents: Array<any> = []
 
     const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
-      // Simulate server operation that can be controlled
+      // Simulate SLOW server operation - this is key to reproducing the issue
       return new Promise((resolve) => {
         txResolvers.push(() => {
           emitter.emit(`sync`, transaction.mutations)
@@ -1282,7 +1283,7 @@ describe(`Collection with schema validation`, () => {
           commit()
           markReady()
 
-          // Listen for sync events
+          // Listen for sync events - this triggers the problematic batching
           // @ts-expect-error don't trust mitt's typing
           emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
             begin()
@@ -1300,36 +1301,67 @@ describe(`Collection with schema validation`, () => {
       onUpdate: mutationFn,
     })
 
+    // Listen to change events to verify they're emitted (this was the actual problem)
+    collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
     await collection.stateWhenReady()
 
-    // Step 1: First user action - should work fine
+    // CRITICAL: Simulate rapid clicking WITHOUT waiting for transactions to complete
+    // This is what actually triggers the bug - multiple pending transactions
+
+    // Step 1: First click
     const tx1 = collection.update(1, (draft) => {
       draft.checked = true
     })
     expect(collection.state.get(1)?.checked).toBe(true)
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
+    const initialEventCount = changeEvents.length
 
-    // Step 2: Complete the transaction to trigger sync
-    txResolvers[0]?.()
-    await tx1.isPersisted.promise
-
-    // At this point, key 1 should be in recentlySyncedKeys due to the sync event
-
-    // Step 3: Try another user action on the same key immediately
-    // This should NOT be blocked (this was the bug)
+    // Step 2: Second click immediately (before first completes)
     const tx2 = collection.update(1, (draft) => {
       draft.checked = false
     })
-
-    // The optimistic state should be updated
     expect(collection.state.get(1)?.checked).toBe(false)
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
 
-    // The mutation function should have been called
-    expect(mutationFn).toHaveBeenCalledTimes(2)
+    // Step 3: Third click immediately (before others complete)
+    const tx3 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+    expect(collection.state.get(1)?.checked).toBe(true)
 
-    // Clean up
-    txResolvers[1]?.()
-    await tx2.isPersisted.promise
+    // CRITICAL TEST: Verify events are still being emitted for rapid user actions
+    // Before the fix, these would be batched and UI would freeze
+    expect(changeEvents.length).toBeGreaterThan(initialEventCount)
+    expect(mutationFn).toHaveBeenCalledTimes(3)
+
+    // Now complete the first transaction to trigger sync and batching
+    txResolvers[0]?.()
+    await tx1.isPersisted.promise
+
+    // Step 4: More rapid clicks after sync starts (this is where the bug occurred)
+    const eventCountBeforeRapidClicks = changeEvents.length
+
+    const tx4 = collection.update(1, (draft) => {
+      draft.checked = false
+    })
+    const tx5 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+
+    // CRITICAL: Verify that even after sync/batching starts, user actions still emit events
+    expect(changeEvents.length).toBeGreaterThan(eventCountBeforeRapidClicks)
+    expect(collection.state.get(1)?.checked).toBe(true) // Last action should win
+
+    // Clean up remaining transactions
+    for (let i = 1; i < txResolvers.length; i++) {
+      txResolvers[i]?.()
+    }
+    await Promise.all([
+      tx2.isPersisted.promise,
+      tx3.isPersisted.promise,
+      tx4.isPersisted.promise,
+      tx5.isPersisted.promise,
+    ])
   })
 })
