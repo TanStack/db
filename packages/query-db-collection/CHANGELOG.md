@@ -1,5 +1,22 @@
 # @tanstack/query-db-collection
 
+## 0.0.14
+
+### Patch Changes
+
+- Fix LiveQueryCollection hanging when source collections have no data ([#309](https://github.com/TanStack/db/pull/309))
+
+  Fixed an issue where `LiveQueryCollection.preload()` would hang indefinitely when source collections call `markReady()` without data changes (e.g., when queryFn returns empty array).
+
+  The fix implements a proper event-based solution:
+
+  - Collections now emit empty change events when becoming ready with no data
+  - WHERE clause filtered subscriptions now correctly pass through empty ready signals
+  - Both regular and WHERE clause optimized LiveQueryCollections now work correctly with empty source collections
+
+- Updated dependencies [[`e04bd12`](https://github.com/TanStack/db/commit/e04bd1252f612d4638104368d17cb644cc85295b)]:
+  - @tanstack/db@0.0.32
+
 ## 0.0.13
 
 ### Patch Changes
