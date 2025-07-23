@@ -321,6 +321,12 @@ export class CollectionImpl<
         const callbacks = [...this.onFirstReadyCallbacks]
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
+
+        // If the collection is empty when it becomes ready, emit an empty change event
+        // to notify subscribers (like LiveQueryCollection) that the collection is ready
+        if (this.size === 0 && this.changeListeners.size > 0) {
+          this.emitEmptyReadyEvent()
+        }
       }
     }
   }
@@ -871,6 +877,17 @@ export class CollectionImpl<
       return previousUpserts.get(key)
     }
     return this.syncedData.get(key)
+  }
+
+  /**
+   * Emit an empty ready event to notify subscribers that the collection is ready
+   * This bypasses the normal empty array check in emitEvents
+   */
+  private emitEmptyReadyEvent(): void {
+    // Emit empty array directly to all listeners
+    for (const listener of this.changeListeners) {
+      listener([])
+    }
   }
 
   /**

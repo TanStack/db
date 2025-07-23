@@ -113,10 +113,38 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.size).toBe(0)
   })
 
-  it(`should call markReady when source collection sync doesn't call begin/commit (reproduction case)`, async () => {
+  it(`should call markReady when source collection sync doesn't call begin/commit (without WHERE clause)`, async () => {
     // Create a collection with sync that only calls markReady (like the reproduction case)
     const problemCollection = createCollection<User>({
       id: `problem-collection`,
+      sync: {
+        sync: ({ markReady }) => {
+          // Simulate async operation without begin/commit (like empty queryFn case)
+          setTimeout(() => {
+            markReady()
+          }, 50)
+          return () => {} // cleanup function
+        },
+      },
+      getKey: (user) => user.id,
+    })
+
+    // Create a live query collection that depends on the problematic source collection
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ user: problemCollection })
+    )
+
+    // This should resolve and not hang, even though the source collection doesn't commit data
+    await liveQuery.preload()
+
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(0)
+  })
+
+  it(`should call markReady when source collection sync doesn't call begin/commit (with WHERE clause)`, async () => {
+    // Create a collection with sync that only calls markReady (like the reproduction case)
+    const problemCollection = createCollection<User>({
+      id: `problem-collection-where`,
       sync: {
         sync: ({ markReady }) => {
           // Simulate async operation without begin/commit (like empty queryFn case)

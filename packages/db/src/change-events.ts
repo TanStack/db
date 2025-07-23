@@ -250,7 +250,9 @@ export function createFilteredCallback<T extends object>(
       }
     }
 
-    if (filteredChanges.length > 0) {
+    // Always call the original callback if we have filtered changes OR
+    // if the original changes array was empty (which indicates a ready signal)
+    if (filteredChanges.length > 0 || changes.length === 0) {
       originalCallback(filteredChanges)
     }
   }

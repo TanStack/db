@@ -360,42 +360,13 @@ export function liveQueryCollectionOptions<
         }
       })
 
-      // Poll for collection readiness in case collections become ready without data changes
-      // This handles the case where a collection calls markReady() but has no data
-      // TODO: Replace with proper event-based mechanism when available
-      let pollInterval: ReturnType<typeof setInterval> | undefined
-      let hasCalledMarkReady = false
-
-      const startPolling = () => {
-        pollInterval = setInterval(() => {
-          if (!hasCalledMarkReady && allCollectionsReady()) {
-            hasCalledMarkReady = true
-            maybeRunGraph()
-            // Stop polling once we've successfully called markReady
-            if (pollInterval) {
-              clearInterval(pollInterval)
-              pollInterval = undefined
-            }
-          }
-        }, 10) // Check every 10ms for responsiveness
-      }
-
-      // Start polling immediately
-      startPolling()
-
-      // Stop polling when cleanup is called
-      const originalCleanup = () => {
-        unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
-        if (pollInterval) {
-          clearInterval(pollInterval)
-        }
-      }
-
       // Initial run
       maybeRunGraph()
 
       // Return the unsubscribe function
-      return originalCleanup
+      return () => {
+        unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
+      }
     },
   }
 
