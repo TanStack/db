@@ -25,6 +25,7 @@ import type {
   MergeContext,
   MergeContextWithJoinType,
   OrderByCallback,
+  OrderByOptions,
   RefProxyForContext,
   ResultTypeFromSelect,
   SchemaFromSource,
@@ -478,18 +479,28 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   orderBy(
     callback: OrderByCallback<TContext>,
-    direction: OrderByDirection = `asc`,
-    nulls: `first` | `last` = `first`
+    options: OrderByDirection | OrderByOptions = `asc`
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const result = callback(refProxy)
 
+    const opts: Required<OrderByOptions> =
+      typeof options === `string`
+        ? { direction: options, nulls: `first` }
+        : {
+            direction:
+              typeof options === `string`
+                ? options
+                : (options.direction ?? `asc`),
+            nulls: options.nulls ?? `first`,
+          }
+
     // Create the new OrderBy structure with expression and direction
     const orderByClause: OrderByClause = {
       expression: toExpression(result),
-      direction,
-      nulls,
+      direction: opts.direction,
+      nulls: opts.nulls,
     }
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
