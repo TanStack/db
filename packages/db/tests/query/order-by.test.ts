@@ -55,6 +55,15 @@ interface Department {
   budget: number
 }
 
+// Test schema for nullable fields
+interface EmployeeWithNullableFields {
+  id: number
+  name: string
+  department_id: number | null
+  salary: number | null
+  hire_date: string
+}
+
 // Test data
 const employeeData: Array<Employee> = [
   {
@@ -99,6 +108,52 @@ const departmentData: Array<Department> = [
   { id: 2, name: `Sales`, budget: 300000 },
 ]
 
+// Test data with nullable fields
+const employeeWithNullableData: Array<EmployeeWithNullableFields> = [
+  {
+    id: 1,
+    name: `Alice`,
+    department_id: 1,
+    salary: 50000,
+    hire_date: `2020-01-15`,
+  },
+  {
+    id: 2,
+    name: `Bob`,
+    department_id: 2,
+    salary: null,
+    hire_date: `2019-03-20`,
+  },
+  {
+    id: 3,
+    name: `Charlie`,
+    department_id: null,
+    salary: 55000,
+    hire_date: `2021-06-10`,
+  },
+  {
+    id: 4,
+    name: `Diana`,
+    department_id: 2,
+    salary: 65000,
+    hire_date: `2018-11-05`,
+  },
+  {
+    id: 5,
+    name: `Eve`,
+    department_id: 1,
+    salary: 52000,
+    hire_date: `2022-02-28`,
+  },
+  {
+    id: 6,
+    name: `Frank`,
+    department_id: null,
+    salary: null,
+    hire_date: `2023-01-01`,
+  },
+]
+
 function createEmployeesCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Employee>({
@@ -116,6 +171,19 @@ function createDepartmentsCollection(autoIndex: `off` | `eager` = `eager`) {
       id: `test-departments`,
       getKey: (department) => department.id,
       initialData: departmentData,
+      autoIndex,
+    })
+  )
+}
+
+function createEmployeesWithNullableCollection(
+  autoIndex: `off` | `eager` = `eager`
+) {
+  return createCollection(
+    mockSyncCollectionOptions<EmployeeWithNullableFields>({
+      id: `test-employees-nullable`,
+      getKey: (employee) => employee.id,
+      initialData: employeeWithNullableData,
       autoIndex,
     })
   )
@@ -620,6 +688,220 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const results = Array.from(collection.values())
         expect(results).toHaveLength(0)
+      })
+    })
+
+    describe(`Nullable Column OrderBy`, () => {
+      let employeesWithNullableCollection: ReturnType<
+        typeof createEmployeesWithNullableCollection
+      >
+
+      beforeEach(() => {
+        employeesWithNullableCollection =
+          createEmployeesWithNullableCollection(autoIndex)
+      })
+
+      it(`orders by nullable column ascending with nulls first`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`, `first`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(6)
+
+        // Should have nulls first, then sorted by salary ascending
+        expect(results.map((r) => r.salary)).toEqual([
+          null, // Frank
+          null, // Bob
+          50000, // Alice
+          52000, // Eve
+          55000, // Charlie
+          65000, // Diana
+        ])
+      })
+
+      it(`orders by nullable column ascending with nulls last`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`, `last`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(6)
+
+        // Should have lowest salaries first, then nulls last
+        expect(results.map((r) => r.salary)).toEqual([
+          50000, // Alice
+          52000, // Eve
+          55000, // Charlie
+          65000, // Diana
+          null, // Bob
+          null, // Frank
+        ])
+      })
+
+      it(`orders by nullable column descending with nulls first`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`, `first`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(6)
+
+        // Should have nulls first, then highest salaries
+        expect(results.map((r) => r.salary)).toEqual([
+          null, // Frank
+          null, // Bob
+          65000, // Diana
+          55000, // Charlie
+          52000, // Eve
+          50000, // Alice
+        ])
+      })
+
+      it(`orders by nullable column descending with nulls last`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`, `last`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(6)
+
+        // Should have highest salaries first, then nulls last
+        expect(results.map((r) => r.salary)).toEqual([
+          65000, // Diana
+          55000, // Charlie
+          52000, // Eve
+          50000, // Alice
+          null, // Bob
+          null, // Frank
+        ])
+      })
+
+      it(`orders by multiple nullable columns`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.department_id, `asc`, `first`)
+            .orderBy(({ employees }) => employees.salary, `desc`, `last`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              department_id: employees.department_id,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(6)
+
+        // Should be ordered by department_id ASC (nulls first), then salary DESC (nulls last)
+        // Department null: Charlie (55000), Frank (null)
+        // Department 1: Alice (50000), Eve (52000)
+        // Department 2: Diana (65000), Bob (null)
+        expect(
+          results.map((r) => ({ dept: r.department_id, salary: r.salary }))
+        ).toEqual([
+          { dept: null, salary: 55000 }, // Charlie
+          { dept: null, salary: null }, // Frank
+          { dept: 1, salary: 52000 }, // Eve
+          { dept: 1, salary: 50000 }, // Alice
+          { dept: 2, salary: 65000 }, // Diana
+          { dept: 2, salary: null }, // Bob
+        ])
+      })
+
+      it(`maintains stable ordering during live updates with nullable fields`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesWithNullableCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`, `first`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        // Get initial order
+        const initialResults = Array.from(collection.values())
+        expect(initialResults.map((r) => r.salary)).toEqual([
+          null,
+          null,
+          50000,
+          52000,
+          55000,
+          65000,
+        ])
+
+        // Add a new employee with null salary
+        const newEmployee = {
+          id: 7,
+          name: `Grace`,
+          department_id: 1,
+          salary: null,
+          hire_date: `2023-01-01`,
+        }
+        employeesWithNullableCollection.utils.begin()
+        employeesWithNullableCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesWithNullableCollection.utils.commit()
+
+        // Check that ordering is maintained with new null item
+        const updatedResults = Array.from(collection.values())
+        expect(updatedResults.map((r) => r.salary)).toEqual([
+          null,
+          null,
+          null,
+          50000,
+          52000,
+          55000,
+          65000,
+        ])
+
+        // Verify the new item is in the correct position
+        const graceIndex = updatedResults.findIndex((r) => r.name === `Grace`)
+        expect(graceIndex).toBeLessThan(3) // Should be among the nulls
       })
     })
   })

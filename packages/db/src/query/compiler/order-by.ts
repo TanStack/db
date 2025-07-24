@@ -20,6 +20,7 @@ export function processOrderBy(
   const compiledOrderBy = orderByClause.map((clause) => ({
     compiledExpression: compileExpression(clause.expression),
     direction: clause.direction,
+    nulls: clause.nulls,
   }))
 
   // Create a value extractor function for the orderBy operator
@@ -60,10 +61,12 @@ export function processOrderBy(
         const arrayA = a as Array<unknown>
         const arrayB = b as Array<unknown>
         for (let i = 0; i < orderByClause.length; i++) {
-          const direction = orderByClause[i]!.direction
+          const clause = orderByClause[i]!
+          const direction = clause.direction
+          const nulls = clause.nulls
           const compareFn =
             direction === `desc` ? descComparator : ascComparator
-          const result = compareFn(arrayA[i], arrayB[i])
+          const result = compareFn(arrayA[i], arrayB[i], nulls)
           if (result !== 0) {
             return result
           }
@@ -73,11 +76,15 @@ export function processOrderBy(
 
       // Single property comparison
       if (orderByClause.length === 1) {
-        const direction = orderByClause[0]!.direction
-        return direction === `desc` ? descComparator(a, b) : ascComparator(a, b)
+        const clause = orderByClause[0]!
+        const direction = clause.direction
+        const nulls = clause.nulls
+        return direction === `desc`
+          ? descComparator(a, b, nulls)
+          : ascComparator(a, b, nulls)
       }
 
-      return ascComparator(a, b)
+      return ascComparator(a, b, `first`)
     }
   }
 

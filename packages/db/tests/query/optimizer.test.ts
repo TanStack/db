@@ -363,7 +363,13 @@ describe(`Query Optimizer`, () => {
             createValue(5)
           ),
         ],
-        orderBy: [{ expression: createPropRef(`u`, `name`), direction: `asc` }],
+        orderBy: [
+          {
+            expression: createPropRef(`u`, `name`),
+            direction: `asc`,
+            nulls: `first`,
+          },
+        ],
         limit: 10,
         offset: 5,
         fnSelect: () => ({ name: `test` }),
@@ -1150,7 +1156,11 @@ describe(`Query Optimizer`, () => {
       const subqueryWithLimitedOrder: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
         orderBy: [
-          { expression: createPropRef(`u`, `salary`), direction: `desc` },
+          {
+            expression: createPropRef(`u`, `salary`),
+            direction: `desc`,
+            nulls: `first`,
+          },
         ],
         limit: 10, // Top 10 highest paid users
       }
@@ -1305,7 +1315,13 @@ describe(`Query Optimizer`, () => {
     test(`should safely optimize ORDER BY without LIMIT/OFFSET`, () => {
       const subqueryWithOrderOnly: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
-        orderBy: [{ expression: createPropRef(`u`, `name`), direction: `asc` }],
+        orderBy: [
+          {
+            expression: createPropRef(`u`, `name`),
+            direction: `asc`,
+            nulls: `first`,
+          },
+        ],
         // No LIMIT or OFFSET - safe to optimize
       }
 
