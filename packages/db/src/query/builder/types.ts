@@ -1,5 +1,5 @@
 import type { CollectionImpl } from "../../collection.js"
-import type { Aggregate, BasicExpression } from "../ir.js"
+import type { Aggregate, BasicExpression, OrderByDirection } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
 
 export interface Context {
@@ -74,6 +74,11 @@ export type ResultTypeFromSelect<TSelectObject> = {
 export type OrderByCallback<TContext extends Context> = (
   refs: RefProxyForContext<TContext>
 ) => any
+
+export type OrderByOptions = {
+  direction?: OrderByDirection
+  nulls?: `first` | `last`
+}
 
 // Callback type for groupBy clauses
 export type GroupByCallback<TContext extends Context> = (
