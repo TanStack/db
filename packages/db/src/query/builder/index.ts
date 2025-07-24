@@ -478,7 +478,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   orderBy(
     callback: OrderByCallback<TContext>,
-    direction: OrderByDirection = `asc`
+    direction: OrderByDirection = `asc`,
+    nulls: `first` | `last` = `first`
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
@@ -488,6 +489,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const orderByClause: OrderByClause = {
       expression: toExpression(result),
       direction,
+      nulls,
     }
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
