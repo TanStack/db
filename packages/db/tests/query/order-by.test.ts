@@ -705,7 +705,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.salary, `asc`, `first`)
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `asc`,
+              nulls: `first`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
@@ -733,7 +736,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.salary, `asc`, `last`)
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `asc`,
+              nulls: `last`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
@@ -761,7 +767,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.salary, `desc`, `first`)
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `desc`,
+              nulls: `first`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
@@ -789,7 +798,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.salary, `desc`, `last`)
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `desc`,
+              nulls: `last`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
@@ -817,8 +829,14 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.department_id, `asc`, `first`)
-            .orderBy(({ employees }) => employees.salary, `desc`, `last`)
+            .orderBy(({ employees }) => employees.department_id, {
+              direction: `asc`,
+              nulls: `first`,
+            })
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `desc`,
+              nulls: `last`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
@@ -852,7 +870,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesWithNullableCollection })
-            .orderBy(({ employees }) => employees.salary, `asc`, `first`)
+            .orderBy(({ employees }) => employees.salary, {
+              direction: `asc`,
+              nulls: `first`,
+            })
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
