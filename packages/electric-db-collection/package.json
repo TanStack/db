@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/electric-db-collection",
-  "description": "Electric SQL collection for TanStack DB",
+  "description": "ElectricSQL collection for TanStack DB",
   "version": "0.0.14",
   "dependencies": {
     "@electric-sql/client": "1.0.0",

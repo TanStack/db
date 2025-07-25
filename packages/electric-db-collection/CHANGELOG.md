@@ -209,7 +209,7 @@
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
 
   - Move local-only and local-storage collections to main `@tanstack/db` package
-  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
   - Delete `@tanstack/db-collections` package (removed from repo)
   - Update example app and documentation to use new package structure

@@ -32,7 +32,7 @@ import type {
 const debug = DebugModule.debug(`ts/db:electric`)
 
 /**
- * Type representing a transaction ID in Electric SQL
+ * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
 

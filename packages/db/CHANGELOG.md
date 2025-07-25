@@ -185,7 +185,7 @@
   - Sync implementation patterns with transaction lifecycle (begin, write, commit, markReady)
   - Data parsing and type conversion using field-specific conversions
   - Two distinct mutation handler patterns:
-    - Pattern A: User-provided handlers (Electric SQL, Query style)
+    - Pattern A: User-provided handlers (ElectricSQL, Query style)
     - Pattern B: Built-in handlers (Trailbase, WebSocket style)
   - Complete WebSocket collection example with full round-trip flow
   - Managing optimistic state with various strategies (transaction IDs, ID-based tracking, refetch, timestamps)
@@ -268,7 +268,7 @@
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
 
   - Move local-only and local-storage collections to main `@tanstack/db` package
-  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
   - Delete `@tanstack/db-collections` package (removed from repo)
   - Update example app and documentation to use new package structure
