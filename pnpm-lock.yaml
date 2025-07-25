@@ -227,7 +227,7 @@ importers:
         version: 0.0.9(typescript@5.8.2)
       '@tanstack/solid-db':
         specifier: ^0.0.27
-        version: link:../../../packages/solid-db
+        version: 0.0.27(solid-js@1.9.7)
       '@tanstack/solid-router':
         specifier: ^1.129.8
         version: 1.129.8(solid-js@1.9.7)
@@ -2348,6 +2348,11 @@ packages:
   '@tanstack/server-functions-plugin@1.129.7':
     resolution: {integrity: sha512-s0foXwzTAn7FOVeZCNM7BuJr5Y/hUKt2yizsTjlG2i9kWRI8K7g0GbJPNgP86iIVGAEsKmOoJH00HUwLTVNajg==}
     engines: {node: '>=12'}
+
+  '@tanstack/solid-db@0.0.27':
+    resolution: {integrity: sha512-AfRsZp2MKiBRu36++ukXainbjHTndJf9HZyMKTRYcRheNJFPBXhlbnp4S12eYLcvSzT609YR/5mtIXhee2gpnA==}
+    peerDependencies:
+      solid-js: '>=1.9.0'
 
   '@tanstack/solid-router@1.129.8':
     resolution: {integrity: sha512-Z3ikeYs9tDOzcj3+Wsp4Yypgewk6Qh56d/bmTxEX4c5WFDL4N7LUwT5vcrqvI8HdZnz+UuphU8V+jxdfgAPBCg==}
@@ -9137,6 +9142,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
       - vite
+
+  '@tanstack/solid-db@0.0.27(solid-js@1.9.7)':
+    dependencies:
+      '@solid-primitives/map': 0.7.2(solid-js@1.9.7)
+      '@tanstack/db': link:packages/db
+      solid-js: 1.9.7
 
   '@tanstack/solid-router@1.129.8(solid-js@1.9.7)':
     dependencies:
