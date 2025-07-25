@@ -13,21 +13,10 @@
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
     "paths": {
-      "@tanstack/store": [
-        "../store/src"
-      ],
-      "@tanstack/db": [
-        "../db/src"
-      ]
+      "@tanstack/store": ["../store/src"],
+      "@tanstack/db": ["../db/src"]
     }
   },
-  "include": [
-    "src/**/*",
-    "tests",
-    "vite.config.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/**/*", "tests", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }
