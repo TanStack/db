@@ -19,11 +19,15 @@ function getObjectId(obj: object): number {
  * Handles null/undefined, strings, arrays, dates, objects, and primitives
  * Always sorts null/undefined values first
  */
-export const ascComparator = (a: any, b: any): number => {
+export const ascComparator = (
+  a: any,
+  b: any,
+  nulls: `first` | `last` = `first`
+): number => {
   // Handle null/undefined
   if (a == null && b == null) return 0
-  if (a == null) return -1
-  if (b == null) return 1
+  if (a == null) return nulls === `first` ? -1 : 1
+  if (b == null) return nulls === `first` ? 1 : -1
 
   // if a and b are both strings, compare them based on locale
   if (typeof a === `string` && typeof b === `string`) {
@@ -33,7 +37,7 @@ export const ascComparator = (a: any, b: any): number => {
   // if a and b are both arrays, compare them element by element
   if (Array.isArray(a) && Array.isArray(b)) {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      const result = ascComparator(a[i], b[i])
+      const result = ascComparator(a[i], b[i], nulls)
       if (result !== 0) {
         return result
       }
@@ -74,6 +78,10 @@ export const ascComparator = (a: any, b: any): number => {
  * Descending comparator function for ordering values
  * Handles null/undefined as largest values (opposite of ascending)
  */
-export const descComparator = (a: unknown, b: unknown): number => {
-  return ascComparator(b, a)
+export const descComparator = (
+  a: unknown,
+  b: unknown,
+  nulls: `first` | `last` = `first`
+): number => {
+  return ascComparator(b, a, nulls === `first` ? `last` : `first`)
 }

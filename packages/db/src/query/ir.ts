@@ -49,6 +49,7 @@ export type OrderBy = Array<OrderByClause>
 export type OrderByClause = {
   expression: BasicExpression
   direction: OrderByDirection
+  nulls: `first` | `last`
 }
 
 export type OrderByDirection = `asc` | `desc`
