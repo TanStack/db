@@ -19,6 +19,7 @@ import type {
   QueryIR,
 } from "../ir.js"
 import type {
+  CompareOptions,
   Context,
   GroupByCallback,
   JoinOnCallback,
@@ -485,22 +486,25 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const result = callback(refProxy)
 
-    const opts: Required<OrderByOptions> =
+    const opts: CompareOptions =
       typeof options === `string`
-        ? { direction: options, nulls: `first` }
+        ? { direction: options, nulls: `first`, stringSort: `locale` }
         : {
-            direction:
-              typeof options === `string`
-                ? options
-                : (options.direction ?? `asc`),
+            direction: options.direction ?? `asc`,
             nulls: options.nulls ?? `first`,
+            stringSort: options.stringSort ?? `locale`,
+            locale:
+              options.stringSort === `locale` ? options.locale : undefined,
+            localeOptions:
+              options.stringSort === `locale`
+                ? options.localeOptions
+                : undefined,
           }
 
     // Create the new OrderBy structure with expression and direction
     const orderByClause: OrderByClause = {
       expression: toExpression(result),
-      direction: opts.direction,
-      nulls: opts.nulls,
+      compareOptions: opts,
     }
 
     const existingOrderBy: OrderBy = this.query.orderBy || []

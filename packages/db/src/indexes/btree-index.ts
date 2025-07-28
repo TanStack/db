@@ -1,5 +1,5 @@
-import { ascComparator } from "../utils/comparison.js"
 import { BTree } from "../utils/btree.js"
+import { defaultComparator } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
@@ -43,7 +43,7 @@ export class BTreeIndex<
   private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
   private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
   private indexedKeys = new Set<TKey>()
-  private compareFn: (a: any, b: any) => number = ascComparator
+  private compareFn: (a: any, b: any) => number = defaultComparator
 
   constructor(
     id: number,
@@ -52,7 +52,7 @@ export class BTreeIndex<
     options?: any
   ) {
     super(id, expression, name, options)
-    this.compareFn = options?.compareFn ?? ascComparator
+    this.compareFn = options?.compareFn ?? defaultComparator
     this.orderedEntries = new BTree(this.compareFn)
   }
 
