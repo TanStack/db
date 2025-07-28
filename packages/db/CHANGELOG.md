@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.0.33
+
+### Patch Changes
+
+- bump d2mini to latest which has a significant speedup ([#321](https://github.com/TanStack/db/pull/321))
+
 ## 0.0.32
 
 ### Patch Changes
