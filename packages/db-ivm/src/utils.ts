@@ -100,7 +100,7 @@ export function binarySearch<T>(
   let high = array.length
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
-    const comparison = comparator(array[mid], value)
+    const comparison = comparator(array[mid]!, value)
     if (comparison < 0) {
       low = mid + 1
     } else if (comparison > 0) {

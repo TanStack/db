@@ -57,11 +57,11 @@ class TopKArray<V> implements TopK<V> {
     const index = this.#findIndex(value)
     // Generate fractional index based on the fractional indices of the elements before and after it
     const indexBefore =
-      index === 0 ? null : getIndex(this.#sortedValues[index - 1])
+      index === 0 ? null : getIndex(this.#sortedValues[index - 1]!)
     const indexAfter =
       index === this.#sortedValues.length
         ? null
-        : getIndex(this.#sortedValues[index])
+        : getIndex(this.#sortedValues[index]!)
     const fractionalIndex = generateKeyBetween(indexBefore, indexAfter)
 
     // Insert the value at the correct position
@@ -80,13 +80,13 @@ class TopKArray<V> implements TopK<V> {
         // We actually have a topK
         // because in some cases there may not be enough elements in the array to reach the start of the topK
         // e.g. [1, 2, 3] with K = 2 and offset = 3 does not have a topK
-        result.moveIn = this.#sortedValues[moveInIndex]
+        result.moveIn = this.#sortedValues[moveInIndex]!
 
         // We need to remove the element that falls out of the top K
         // The element that falls out of the top K has shifted one to the right
         // because of the element we inserted, so we find it at index topKEnd
         if (this.#topKEnd < this.#sortedValues.length) {
-          result.moveOut = this.#sortedValues[this.#topKEnd]
+          result.moveOut = this.#sortedValues[this.#topKEnd]!
         }
       }
     }
@@ -113,7 +113,7 @@ class TopKArray<V> implements TopK<V> {
       // The removed element is either before the top K or within the top K
       // If it is before the top K then the first element of the topK moves out of the topK
       // If it is within the top K then the removed element moves out of the topK
-      result.moveOut = removedElem
+      result.moveOut = removedElem!
       if (index < this.#topKStart) {
         // The removed element is before the topK
         // so actually, the first element of the topK moves out of the topK
@@ -122,7 +122,7 @@ class TopKArray<V> implements TopK<V> {
         // since we removed an element before the topK
         const moveOutIndex = this.#topKStart - 1
         if (moveOutIndex < this.#sortedValues.length) {
-          result.moveOut = this.#sortedValues[moveOutIndex]
+          result.moveOut = this.#sortedValues[moveOutIndex]!
         } else {
           // No value is moving out of the topK
           // because there are no elements in the topK
@@ -135,7 +135,7 @@ class TopKArray<V> implements TopK<V> {
       // and thus falls into the topK now
       const moveInIndex = this.#topKEnd - 1
       if (moveInIndex < this.#sortedValues.length) {
-        result.moveIn = this.#sortedValues[moveInIndex]
+        result.moveIn = this.#sortedValues[moveInIndex]!
       }
     }
 

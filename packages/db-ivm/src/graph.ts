@@ -90,7 +90,7 @@ export abstract class UnaryOperator<Tin, Tout = Tin> extends Operator<
   }
 
   inputMessages(): Array<MultiSet<Tin>> {
-    return this.inputs[0].drain() as Array<MultiSet<Tin>>
+    return this.inputs[0]!.drain() as Array<MultiSet<Tin>>
   }
 }
 
@@ -109,11 +109,11 @@ export abstract class BinaryOperator<T> extends Operator<T> {
   }
 
   inputAMessages(): Array<MultiSet<T>> {
-    return this.inputs[0].drain()
+    return this.inputs[0]!.drain()
   }
 
   inputBMessages(): Array<MultiSet<T>> {
-    return this.inputs[1].drain()
+    return this.inputs[1]!.drain()
   }
 }
 

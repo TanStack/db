@@ -1,5 +1,5 @@
 import type { MultiSet, MultiSetArray } from "./multiset.js"
-import type { DifferenceStreamReader, DifferenceStreamWriter } from "./graph.js"
+import type { DifferenceStreamReader, DifferenceStreamWriter, UnaryOperator, BinaryOperator } from "./graph.js"
 
 export type KeyValue<K, V> = [K, V]
 
@@ -21,7 +21,7 @@ export interface IDifferenceStreamWriter<T> {
 export interface ID2 {
   getNextOperatorId: () => number
   newInput: <T>() => IStreamBuilder<T>
-  addOperator: (operator: IOperator<any>) => void
+  addOperator: (operator: UnaryOperator<any> | BinaryOperator<any>) => void
   addStream: (stream: DifferenceStreamReader<any>) => void
   finalize: () => void
   step: () => void
