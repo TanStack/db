@@ -339,6 +339,31 @@ importers:
         specifier: ^2.1.20
         version: 2.1.20
 
+  packages/db-ivm:
+    dependencies:
+      fractional-indexing:
+        specifier: ^3.2.0
+        version: 3.2.0
+      murmurhash-js:
+        specifier: ^1.0.0
+        version: 1.0.0
+      sorted-btree:
+        specifier: ^1.8.1
+        version: 1.8.1
+      typescript:
+        specifier: '>=4.7'
+        version: 5.8.2
+    devDependencies:
+      '@types/debug':
+        specifier: ^4.1.12
+        version: 4.1.12
+      '@types/murmurhash-js':
+        specifier: ^1.0.6
+        version: 1.0.6
+      '@vitest/coverage-istanbul':
+        specifier: ^3.0.9
+        version: 3.0.9(vitest@3.0.9(@types/debug@4.1.12)(@types/node@22.16.5)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0))
+
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
@@ -2564,6 +2589,9 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
+
+  '@types/murmurhash-js@1.0.6':
+    resolution: {integrity: sha512-P2RRwRpevEKO0FrK5xNjxBywg0Br24tEv8K2+iWg56PtcCUNGAkaaOWKBQiUpofA8H/gmgdHXrcvSgp2uXCVAQ==}
 
   '@types/node@12.20.55':
     resolution: {integrity: sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ==}
@@ -9616,6 +9644,8 @@ snapshots:
 
   '@types/ms@2.1.0': {}
 
+  '@types/murmurhash-js@1.0.6': {}
+
   '@types/node@12.20.55': {}
 
   '@types/node@22.13.10':
@@ -9941,6 +9971,14 @@ snapshots:
       magic-string: 0.30.17
     optionalDependencies:
       vite: 6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0)
+
+  '@vitest/mocker@3.0.9(vite@6.3.5(@types/node@22.16.5)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0))':
+    dependencies:
+      '@vitest/spy': 3.0.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.17
+    optionalDependencies:
+      vite: 6.3.5(@types/node@22.16.5)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0)
 
   '@vitest/pretty-format@3.0.9':
     dependencies:
@@ -14538,7 +14576,7 @@ snapshots:
   vitest@3.0.9(@types/debug@4.1.12)(@types/node@22.16.5)(happy-dom@17.4.4)(jiti@2.4.2)(jsdom@26.0.0)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0):
     dependencies:
       '@vitest/expect': 3.0.9
-      '@vitest/mocker': 3.0.9(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0))
+      '@vitest/mocker': 3.0.9(vite@6.3.5(@types/node@22.16.5)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.7.0))
       '@vitest/pretty-format': 3.0.9
       '@vitest/runner': 3.0.9
       '@vitest/snapshot': 3.0.9
