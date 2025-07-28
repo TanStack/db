@@ -21,35 +21,15 @@
           "label": "Installation",
           "to": "installation"
         },
-        {
-          "label": "Live Queries",
-          "to": "live-queries"
-        }
       ],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
-            {
-              "label": "React Adapter",
-              "to": "framework/react/adapter"
-            }
-          ]
-        },
-        {
-          "label": "vue",
-          "children": [
-            {
-              "label": "Vue Adapter",
-              "to": "framework/vue/adapter"
-            }
-          ]
-        }
-      ]
     },
     {
       "label": "Guides",
       "children": [
+        {
+          "label": "Live Queries",
+          "to": "live-queries"
+        },
         {
           "label": "Error Handling",
           "to": "error-handling"
@@ -60,49 +40,5 @@
         }
       ]
     },
-    {
-      "label": "API Reference",
-      "children": [
-        {
-          "label": "Core API Reference",
-          "to": "reference/index"
-        }
-      ],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
-            {
-              "label": "React Hooks",
-              "to": "framework/react/reference/index"
-            }
-          ]
-        },
-        {
-          "label": "vue",
-          "children": [
-            {
-              "label": "Vue Hooks",
-              "to": "framework/vue/reference/index"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "label": "Examples",
-      "children": [],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
-            {
-              "label": "Todo List",
-              "to": "framework/react/examples/todo"
-            }
-          ]
-        }
-      ]
-    }
   ]
 }
