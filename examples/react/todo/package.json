@@ -14,6 +14,8 @@
     "drizzle-orm": "^0.44.7",
     "drizzle-zod": "^0.8.3",
     "express": "^4.21.2",
+    "firebase": "^11.2.0",
+    "@tanstack/firebase-db-collection": "file:../../../packages/firebase-db-collection",
     "postgres": "^3.4.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -43,7 +45,8 @@
     "pg": "^8.16.3",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
-    "vite": "^6.1.1"
+    "vite": "^6.1.1",
+    "firebase-tools": "^13.31.0"
   },
   "scripts": {
     "build": "vite build",
@@ -51,7 +54,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "dev": "docker compose up -d && vite dev",
+    "dev": "docker compose up -d && firebase emulators:start --only firestore & vite dev",
+    "dev:no-emulator": "docker compose up -d && vite dev",
     "lint": "eslint . --fix",
     "preview": "vite preview"
   },

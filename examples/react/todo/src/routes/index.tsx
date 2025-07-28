@@ -43,6 +43,14 @@ function HomePage() {
               </div>
             </button>
           </Link>
+          <Link to="/firebase" className="block w-full">
+            <button className="w-full px-6 py-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-left">
+              <div className="font-semibold">Firebase Collections</div>
+              <div className="text-sm opacity-90 mt-1">
+                Real-time sync with Firestore
+              </div>
+            </button>
+          </Link>
         </div>
 
         <div className="mt-8 text-xs text-center text-gray-500">

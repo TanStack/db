@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TrailbaseRouteImport } from './routes/trailbase'
 import { Route as QueryRouteImport } from './routes/query'
+import { Route as FirebaseRouteImport } from './routes/firebase'
 import { Route as ElectricRouteImport } from './routes/electric'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiTodosRouteImport } from './routes/api/todos'
@@ -26,6 +27,11 @@ const TrailbaseRoute = TrailbaseRouteImport.update({
 const QueryRoute = QueryRouteImport.update({
   id: '/query',
   path: '/query',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FirebaseRoute = FirebaseRouteImport.update({
+  id: '/firebase',
+  path: '/firebase',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ElectricRoute = ElectricRouteImport.update({
@@ -62,6 +68,7 @@ const ApiConfigIdRoute = ApiConfigIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/electric': typeof ElectricRoute
+  '/firebase': typeof FirebaseRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
   '/api/config': typeof ApiConfigRouteWithChildren
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/electric': typeof ElectricRoute
+  '/firebase': typeof FirebaseRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
   '/api/config': typeof ApiConfigRouteWithChildren
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/electric': typeof ElectricRoute
+  '/firebase': typeof FirebaseRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
   '/api/config': typeof ApiConfigRouteWithChildren
@@ -92,40 +101,16 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/electric'
-    | '/query'
-    | '/trailbase'
-    | '/api/config'
-    | '/api/todos'
-    | '/api/config/$id'
-    | '/api/todos/$id'
+  fullPaths: '/' | '/electric' | '/firebase' | '/query' | '/trailbase'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/electric'
-    | '/query'
-    | '/trailbase'
-    | '/api/config'
-    | '/api/todos'
-    | '/api/config/$id'
-    | '/api/todos/$id'
-  id:
-    | '__root__'
-    | '/'
-    | '/electric'
-    | '/query'
-    | '/trailbase'
-    | '/api/config'
-    | '/api/todos'
-    | '/api/config/$id'
-    | '/api/todos/$id'
+  to: '/' | '/electric' | '/firebase' | '/query' | '/trailbase'
+  id: '__root__' | '/' | '/electric' | '/firebase' | '/query' | '/trailbase'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ElectricRoute: typeof ElectricRoute
+  FirebaseRoute: typeof FirebaseRoute
   QueryRoute: typeof QueryRoute
   TrailbaseRoute: typeof TrailbaseRoute
   ApiConfigRoute: typeof ApiConfigRouteWithChildren
@@ -146,6 +131,13 @@ declare module '@tanstack/react-router' {
       path: '/query'
       fullPath: '/query'
       preLoaderRoute: typeof QueryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/firebase': {
+      id: '/firebase'
+      path: '/firebase'
+      fullPath: '/firebase'
+      preLoaderRoute: typeof FirebaseRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/electric': {
@@ -220,6 +212,7 @@ const ApiTodosRouteWithChildren = ApiTodosRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ElectricRoute: ElectricRoute,
+  FirebaseRoute: FirebaseRoute,
   QueryRoute: QueryRoute,
   TrailbaseRoute: TrailbaseRoute,
   ApiConfigRoute: ApiConfigRouteWithChildren,
