@@ -1,4 +1,4 @@
-import { IStreamBuilder, PipedOperator } from '../types.js'
+import type { IStreamBuilder, PipedOperator } from "../types.js"
 
 // Don't judge, this is the only way to type this function.
 // rxjs has very similar code to type its pipe function
@@ -48,7 +48,7 @@ export function pipe<T, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14,
 /**
  * Creates a new stream by piping the input stream through a series of operators
  */
-export function pipe<T>(...operators: PipedOperator<any, any>[]) {
+export function pipe<T>(...operators: Array<PipedOperator<any, any>>) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     return stream.pipe(...operators)
   }

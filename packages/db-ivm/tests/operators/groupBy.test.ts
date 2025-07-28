@@ -1,21 +1,21 @@
-import { describe, test, expect } from 'vitest'
-import { D2 } from '../../src/d2.js'
-import { MultiSet } from '../../src/multiset.js'
+import { describe, expect, test } from "vitest"
+import { D2 } from "../../src/d2.js"
+import { MultiSet } from "../../src/multiset.js"
 import {
-  groupBy,
-  sum,
-  count,
   avg,
-  min,
+  count,
+  groupBy,
   max,
   median,
+  min,
   mode,
-} from '../../src/operators/groupBy.js'
-import { output } from '../../src/operators/index.js'
+  sum,
+} from "../../src/operators/groupBy.js"
+import { output } from "../../src/operators/index.js"
 
-describe('Operators', () => {
-  describe('GroupBy operation', () => {
-    test('with no aggregate', () => {
+describe(`Operators`, () => {
+  describe(`GroupBy operation`, () => {
+    test(`with no aggregate`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -27,7 +27,7 @@ describe('Operators', () => {
         groupBy((data) => ({ category: data.category })),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -35,10 +35,10 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+        ])
       )
       graph.run()
 
@@ -52,7 +52,7 @@ describe('Operators', () => {
           [
             `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
             },
           ],
           1,
@@ -61,7 +61,7 @@ describe('Operators', () => {
           [
             `{"category":"B"}`,
             {
-              category: 'B',
+              category: `B`,
             },
           ],
           1,
@@ -71,7 +71,7 @@ describe('Operators', () => {
       expect(result).toEqual(expectedResult)
     })
 
-    test('with single sum aggregate', () => {
+    test(`with single sum aggregate`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -85,7 +85,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -93,10 +93,10 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+        ])
       )
       graph.run()
 
@@ -111,7 +111,7 @@ describe('Operators', () => {
             `{"category":"A"}`,
             {
               total: 30,
-              category: 'A',
+              category: `A`,
             },
           ],
           1,
@@ -121,7 +121,7 @@ describe('Operators', () => {
             `{"category":"B"}`,
             {
               total: 30,
-              category: 'B',
+              category: `B`,
             },
           ],
           1,
@@ -131,7 +131,7 @@ describe('Operators', () => {
       expect(result).toEqual(expectedResult)
     })
 
-    test('with sum and count aggregates', async () => {
+    test(`with sum and count aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -139,7 +139,7 @@ describe('Operators', () => {
         amount: number
       }>()
       let latestMessage: any = null
-      const messages: MultiSet<any>[] = []
+      const messages: Array<MultiSet<any>> = []
 
       input.pipe(
         groupBy(
@@ -150,12 +150,12 @@ describe('Operators', () => {
           {
             total: sum((data) => data.amount),
             count: count(),
-          },
+          }
         ),
         output((message) => {
           latestMessage = message
           messages.push(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -163,11 +163,11 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 10 }, 1],
-          [{ category: 'A', region: 'East', amount: 20 }, 1],
-          [{ category: 'A', region: 'West', amount: 30 }, 1],
-          [{ category: 'B', region: 'East', amount: 40 }, 1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 10 }, 1],
+          [{ category: `A`, region: `East`, amount: 20 }, 1],
+          [{ category: `A`, region: `West`, amount: 30 }, 1],
+          [{ category: `B`, region: `East`, amount: 40 }, 1],
+        ])
       )
       graph.run()
 
@@ -177,36 +177,36 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
               total: 30,
               count: 2,
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
             },
           ],
           1,
         ],
         [
           [
-            '{"category":"A","region":"West"}',
+            `{"category":"A","region":"West"}`,
             {
               total: 30,
               count: 1,
-              category: 'A',
-              region: 'West',
+              category: `A`,
+              region: `West`,
             },
           ],
           1,
         ],
         [
           [
-            '{"category":"B","region":"East"}',
+            `{"category":"B","region":"East"}`,
             {
               total: 40,
               count: 1,
-              category: 'B',
-              region: 'East',
+              category: `B`,
+              region: `East`,
             },
           ],
           1,
@@ -218,9 +218,9 @@ describe('Operators', () => {
       // --- Add a new record ---
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 15 }, 1],
-          [{ category: 'B', region: 'West', amount: 25 }, 1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 15 }, 1],
+          [{ category: `B`, region: `West`, amount: 25 }, 1],
+        ])
       )
 
       graph.run()
@@ -228,10 +228,10 @@ describe('Operators', () => {
       const expectedAddResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 30,
               count: 2,
             },
@@ -240,10 +240,10 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 45,
               count: 3,
             },
@@ -252,10 +252,10 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"B","region":"West"}',
+            `{"category":"B","region":"West"}`,
             {
-              category: 'B',
-              region: 'West',
+              category: `B`,
+              region: `West`,
               total: 25,
               count: 1,
             },
@@ -269,18 +269,18 @@ describe('Operators', () => {
       // --- Delete a record ---
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 20 }, -1], // Remove one of the A/East records
-        ]),
+          [{ category: `A`, region: `East`, amount: 20 }, -1], // Remove one of the A/East records
+        ])
       )
       graph.run()
 
       const expectedDeleteResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 45,
               count: 3,
             },
@@ -289,10 +289,10 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 25,
               count: 2,
             },
@@ -304,14 +304,14 @@ describe('Operators', () => {
       expect(latestMessage.getInner()).toEqual(expectedDeleteResult)
     })
 
-    test('with avg and count aggregates', () => {
+    test(`with avg and count aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
         amount: number
       }>()
       let latestMessage: any = null
-      const messages: MultiSet<any>[] = []
+      const messages: Array<MultiSet<any>> = []
 
       input.pipe(
         groupBy((data) => ({ category: data.category }), {
@@ -321,7 +321,7 @@ describe('Operators', () => {
         output((message) => {
           latestMessage = message
           messages.push(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -329,10 +329,10 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+        ])
       )
       graph.run()
 
@@ -342,9 +342,9 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               average: 15,
               count: 2,
             },
@@ -353,9 +353,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"B"}',
+            `{"category":"B"}`,
             {
-              category: 'B',
+              category: `B`,
               average: 30,
               count: 1,
             },
@@ -369,18 +369,18 @@ describe('Operators', () => {
       // --- Add a new record ---
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 30 }, 1],
-          [{ category: 'C', amount: 50 }, 1],
-        ]),
+          [{ category: `A`, amount: 30 }, 1],
+          [{ category: `C`, amount: 50 }, 1],
+        ])
       )
       graph.run()
 
       const expectedAddResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               average: 15,
               count: 2,
             },
@@ -389,9 +389,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               average: 20,
               count: 3,
             },
@@ -400,9 +400,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"C"}',
+            `{"category":"C"}`,
             {
-              category: 'C',
+              category: `C`,
               average: 50,
               count: 1,
             },
@@ -416,17 +416,17 @@ describe('Operators', () => {
       // --- Delete a record ---
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, -1], // Remove the first A record
-        ]),
+          [{ category: `A`, amount: 10 }, -1], // Remove the first A record
+        ])
       )
       graph.run()
 
       const expectedDeleteResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               average: 20,
               count: 3,
             },
@@ -435,9 +435,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               average: 25,
               count: 2,
             },
@@ -449,7 +449,7 @@ describe('Operators', () => {
       expect(latestMessage.getInner()).toEqual(expectedDeleteResult)
     })
 
-    test('with min and max aggregates', () => {
+    test(`with min and max aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -464,7 +464,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -472,12 +472,12 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'A', amount: 5 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-          [{ category: 'B', amount: 15 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `A`, amount: 5 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+          [{ category: `B`, amount: 15 }, 1],
+        ])
       )
 
       // Run the graph to process all messages
@@ -488,9 +488,9 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               minimum: 5,
               maximum: 20,
             },
@@ -499,9 +499,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"B"}',
+            `{"category":"B"}`,
             {
-              category: 'B',
+              category: `B`,
               minimum: 15,
               maximum: 30,
             },
@@ -513,7 +513,7 @@ describe('Operators', () => {
       expect(latestMessage.getInner()).toEqual(expectedResult)
     })
 
-    test('with median and mode aggregates', () => {
+    test(`with median and mode aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -528,7 +528,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -538,18 +538,18 @@ describe('Operators', () => {
         new MultiSet([
           // Category A: [10, 20, 20, 30, 50]
           // Median: 20, Mode: 20
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 2], // Added twice to test mode
-          [{ category: 'A', amount: 30 }, 1],
-          [{ category: 'A', amount: 50 }, 1],
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 2], // Added twice to test mode
+          [{ category: `A`, amount: 30 }, 1],
+          [{ category: `A`, amount: 50 }, 1],
 
           // Category B: [5, 10, 15, 20]
           // Median: 12.5 (average of 10 and 15), Mode: 5, 10, 15, 20 (all appear once)
-          [{ category: 'B', amount: 5 }, 1],
-          [{ category: 'B', amount: 10 }, 1],
-          [{ category: 'B', amount: 15 }, 1],
-          [{ category: 'B', amount: 20 }, 1],
-        ]),
+          [{ category: `B`, amount: 5 }, 1],
+          [{ category: `B`, amount: 10 }, 1],
+          [{ category: `B`, amount: 15 }, 1],
+          [{ category: `B`, amount: 20 }, 1],
+        ])
       )
 
       // Run the graph to process all messages
@@ -560,9 +560,9 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               middle: 20,
               mostFrequent: 20,
             },
@@ -571,9 +571,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"B"}',
+            `{"category":"B"}`,
             {
-              category: 'B',
+              category: `B`,
               middle: 12.5,
               mostFrequent: 5, // First encountered value with highest frequency (all values appear once)
             },
@@ -585,7 +585,7 @@ describe('Operators', () => {
       expect(latestMessage.getInner()).toEqual(expectedResult)
     })
 
-    test('complete group removal with sum aggregate', () => {
+    test(`complete group removal with sum aggregate`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -599,7 +599,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -607,11 +607,11 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-          [{ category: 'C', amount: 40 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+          [{ category: `C`, amount: 40 }, 1],
+        ])
       )
       graph.run()
 
@@ -622,7 +622,7 @@ describe('Operators', () => {
 
       // Find the group for category A
       const categoryAGroup = result.find(
-        ([key]) => key[0] === '{"category":"A"}',
+        ([key]: any) => key[0] === `{"category":"A"}`
       )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
@@ -630,9 +630,9 @@ describe('Operators', () => {
       // Now remove ALL records from category A
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, -1],
-          [{ category: 'A', amount: 20 }, -1],
-        ]),
+          [{ category: `A`, amount: 10 }, -1],
+          [{ category: `A`, amount: 20 }, -1],
+        ])
       )
       graph.run()
 
@@ -645,9 +645,9 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               total: 30,
             },
           ],
@@ -660,12 +660,12 @@ describe('Operators', () => {
       // Verify no new group with total: 0 was created by checking that
       // we don't have any positive weight entries for category A
       const positiveCategoryAEntries = result.filter(
-        ([key, , weight]) => key[0] === '{"category":"A"}' && weight > 0,
+        ([key, , weight]: any) => key[0] === `{"category":"A"}` && weight > 0
       )
       expect(positiveCategoryAEntries).toHaveLength(0)
     })
 
-    test('complete group removal with multiple aggregates', () => {
+    test(`complete group removal with multiple aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -684,11 +684,11 @@ describe('Operators', () => {
             total: sum((data) => data.amount),
             count: count(),
             average: avg((data) => data.amount),
-          },
+          }
         ),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -696,11 +696,11 @@ describe('Operators', () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 10 }, 1],
-          [{ category: 'A', region: 'East', amount: 20 }, 1],
-          [{ category: 'A', region: 'West', amount: 30 }, 1],
-          [{ category: 'B', region: 'East', amount: 40 }, 1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 10 }, 1],
+          [{ category: `A`, region: `East`, amount: 20 }, 1],
+          [{ category: `A`, region: `West`, amount: 30 }, 1],
+          [{ category: `B`, region: `East`, amount: 40 }, 1],
+        ])
       )
       graph.run()
 
@@ -711,12 +711,12 @@ describe('Operators', () => {
 
       // Find the group for category A, region East
       const categoryAEastGroup = result.find(
-        ([key]) => key[0] === '{"category":"A","region":"East"}',
+        ([key]: any) => key[0] === `{"category":"A","region":"East"}`
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
-        category: 'A',
-        region: 'East',
+        category: `A`,
+        region: `East`,
         total: 30, // 10 + 20
         count: 2,
         average: 15, // 30 / 2
@@ -725,9 +725,9 @@ describe('Operators', () => {
       // Now remove ALL records from category A, region East
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 10 }, -1],
-          [{ category: 'A', region: 'East', amount: 20 }, -1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 10 }, -1],
+          [{ category: `A`, region: `East`, amount: 20 }, -1],
+        ])
       )
       graph.run()
 
@@ -739,10 +739,10 @@ describe('Operators', () => {
       const expectedResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 30,
               count: 2,
               average: 15,
@@ -756,13 +756,13 @@ describe('Operators', () => {
 
       // Verify no new group with zero/empty values was created
       const positiveCategoryAEastEntries = result.filter(
-        ([key, , weight]) =>
-          key[0] === '{"category":"A","region":"East"}' && weight > 0,
+        ([key, , weight]: any) =>
+          key[0] === `{"category":"A","region":"East"}` && weight > 0
       )
       expect(positiveCategoryAEastEntries).toHaveLength(0)
     })
 
-    test('group removal and re-addition with sum aggregate', () => {
+    test(`group removal and re-addition with sum aggregate`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -776,7 +776,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -784,10 +784,10 @@ describe('Operators', () => {
       // Step 1: Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, 1],
-          [{ category: 'A', amount: 20 }, 1],
-          [{ category: 'B', amount: 30 }, 1],
-        ]),
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 20 }, 1],
+          [{ category: `B`, amount: 30 }, 1],
+        ])
       )
       graph.run()
 
@@ -797,16 +797,18 @@ describe('Operators', () => {
       expect(result).toHaveLength(2) // Should have 2 groups
 
       // Find the group for category A
-      let categoryAGroup = result.find(([key]) => key[0] === '{"category":"A"}')
+      const categoryAGroup = result.find(
+        ([key]: any) => key[0] === `{"category":"A"}`
+      )
       expect(categoryAGroup).toBeDefined()
       expect(categoryAGroup[0][1].total).toBe(30) // Sum of 10 + 20
 
       // Step 2: Remove ALL records from category A
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 10 }, -1],
-          [{ category: 'A', amount: 20 }, -1],
-        ]),
+          [{ category: `A`, amount: 10 }, -1],
+          [{ category: `A`, amount: 20 }, -1],
+        ])
       )
       graph.run()
 
@@ -815,9 +817,9 @@ describe('Operators', () => {
       const expectedRemovalResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               total: 30,
             },
           ],
@@ -829,9 +831,9 @@ describe('Operators', () => {
       // Step 3: Re-add records to category A with different values
       input.sendData(
         new MultiSet([
-          [{ category: 'A', amount: 50 }, 1],
-          [{ category: 'A', amount: 25 }, 1],
-        ]),
+          [{ category: `A`, amount: 50 }, 1],
+          [{ category: `A`, amount: 25 }, 1],
+        ])
       )
       graph.run()
 
@@ -840,9 +842,9 @@ describe('Operators', () => {
       const expectedReAdditionResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               total: 75, // 50 + 25 (new values, not the old 30)
             },
           ],
@@ -852,7 +854,7 @@ describe('Operators', () => {
       expect(result).toEqual(expectedReAdditionResult)
 
       // Step 4: Verify no lingering effects by adding more data
-      input.sendData(new MultiSet([[{ category: 'A', amount: 15 }, 1]]))
+      input.sendData(new MultiSet([[{ category: `A`, amount: 15 }, 1]]))
       graph.run()
 
       // Verify aggregate is updated correctly from the new baseline
@@ -860,9 +862,9 @@ describe('Operators', () => {
       const expectedUpdateResult = [
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               total: 75, // Previous total
             },
           ],
@@ -870,9 +872,9 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A"}',
+            `{"category":"A"}`,
             {
-              category: 'A',
+              category: `A`,
               total: 90, // 75 + 15
             },
           ],
@@ -882,7 +884,7 @@ describe('Operators', () => {
       expect(result).toEqual(expectedUpdateResult)
     })
 
-    test('group removal and re-addition with multiple aggregates', () => {
+    test(`group removal and re-addition with multiple aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
         category: string
@@ -903,11 +905,11 @@ describe('Operators', () => {
             average: avg((data) => data.amount),
             minimum: min((data) => data.amount),
             maximum: max((data) => data.amount),
-          },
+          }
         ),
         output((message) => {
           latestMessage = message
-        }),
+        })
       )
 
       graph.finalize()
@@ -915,11 +917,11 @@ describe('Operators', () => {
       // Step 1: Initial data
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 10 }, 1],
-          [{ category: 'A', region: 'East', amount: 20 }, 1],
-          [{ category: 'A', region: 'East', amount: 30 }, 1],
-          [{ category: 'B', region: 'West', amount: 100 }, 1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 10 }, 1],
+          [{ category: `A`, region: `East`, amount: 20 }, 1],
+          [{ category: `A`, region: `East`, amount: 30 }, 1],
+          [{ category: `B`, region: `West`, amount: 100 }, 1],
+        ])
       )
       graph.run()
 
@@ -929,13 +931,13 @@ describe('Operators', () => {
       expect(result).toHaveLength(2) // Should have 2 groups
 
       // Find the group for category A, region East
-      let categoryAEastGroup = result.find(
-        ([key]) => key[0] === '{"category":"A","region":"East"}',
+      const categoryAEastGroup = result.find(
+        ([key]: any) => key[0] === `{"category":"A","region":"East"}`
       )
       expect(categoryAEastGroup).toBeDefined()
       expect(categoryAEastGroup[0][1]).toEqual({
-        category: 'A',
-        region: 'East',
+        category: `A`,
+        region: `East`,
         total: 60, // 10 + 20 + 30
         count: 3,
         average: 20, // 60 / 3
@@ -946,10 +948,10 @@ describe('Operators', () => {
       // Step 2: Remove ALL records from category A, region East
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 10 }, -1],
-          [{ category: 'A', region: 'East', amount: 20 }, -1],
-          [{ category: 'A', region: 'East', amount: 30 }, -1],
-        ]),
+          [{ category: `A`, region: `East`, amount: 10 }, -1],
+          [{ category: `A`, region: `East`, amount: 20 }, -1],
+          [{ category: `A`, region: `East`, amount: 30 }, -1],
+        ])
       )
       graph.run()
 
@@ -958,10 +960,10 @@ describe('Operators', () => {
       const expectedRemovalResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 60,
               count: 3,
               average: 20,
@@ -977,11 +979,11 @@ describe('Operators', () => {
       // Step 3: Re-add records to category A, region East with completely different values
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 5 }, 1],
-          [{ category: 'A', region: 'East', amount: 15 }, 1],
-          [{ category: 'A', region: 'East', amount: 40 }, 1],
-          [{ category: 'A', region: 'East', amount: 40 }, 1], // Duplicate to test aggregates properly
-        ]),
+          [{ category: `A`, region: `East`, amount: 5 }, 1],
+          [{ category: `A`, region: `East`, amount: 15 }, 1],
+          [{ category: `A`, region: `East`, amount: 40 }, 1],
+          [{ category: `A`, region: `East`, amount: 40 }, 1], // Duplicate to test aggregates properly
+        ])
       )
       graph.run()
 
@@ -990,10 +992,10 @@ describe('Operators', () => {
       const expectedReAdditionResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 100, // 5 + 15 + 40 + 40 (completely new calculation)
               count: 4,
               average: 25, // 100 / 4
@@ -1009,8 +1011,8 @@ describe('Operators', () => {
       // Step 4: Remove some records and verify aggregates update correctly
       input.sendData(
         new MultiSet([
-          [{ category: 'A', region: 'East', amount: 40 }, -1], // Remove one of the 40s
-        ]),
+          [{ category: `A`, region: `East`, amount: 40 }, -1], // Remove one of the 40s
+        ])
       )
       graph.run()
 
@@ -1019,10 +1021,10 @@ describe('Operators', () => {
       const expectedPartialRemovalResult = [
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 100,
               count: 4,
               average: 25,
@@ -1034,10 +1036,10 @@ describe('Operators', () => {
         ],
         [
           [
-            '{"category":"A","region":"East"}',
+            `{"category":"A","region":"East"}`,
             {
-              category: 'A',
-              region: 'East',
+              category: `A`,
+              region: `East`,
               total: 60, // 5 + 15 + 40 (one 40 removed)
               count: 3,
               average: 20, // 60 / 3

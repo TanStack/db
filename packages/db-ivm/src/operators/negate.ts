@@ -1,8 +1,7 @@
-import { IStreamBuilder, PipedOperator } from '../types.js'
-import { DifferenceStreamWriter } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { LinearUnaryOperator } from '../graph.js'
-import { MultiSet } from '../multiset.js'
+import { DifferenceStreamWriter, LinearUnaryOperator } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import type { IStreamBuilder, PipedOperator } from "../types.js"
+import type { MultiSet } from "../multiset.js"
 
 /**
  * Operator that negates the multiplicities in the input stream
@@ -20,12 +19,12 @@ export function negate<T>(): PipedOperator<T, T> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>(),
+      new DifferenceStreamWriter<T>()
     )
     const operator = new NegateOperator<T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
-      output.writer,
+      output.writer
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

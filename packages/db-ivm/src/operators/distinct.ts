@@ -1,12 +1,9 @@
-import { IStreamBuilder } from '../types.js'
-import {
-  DifferenceStreamReader,
-  DifferenceStreamWriter,
-  UnaryOperator,
-} from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { hash } from '../utils.js'
-import { MultiSet } from '../multiset.js'
+import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import { hash } from "../utils.js"
+import { MultiSet } from "../multiset.js"
+import type { DifferenceStreamReader } from "../graph.js"
+import type { IStreamBuilder } from "../types.js"
 
 type HashedValue = string
 type Multiplicity = number
@@ -22,7 +19,7 @@ export class DistinctOperator<T> extends UnaryOperator<T> {
     id: number,
     input: DifferenceStreamReader<T>,
     output: DifferenceStreamWriter<T>,
-    by: (value: T) => any = (value: T) => value,
+    by: (value: T) => any = (value: T) => value
   ) {
     super(id, input, output)
     this.#by = by
@@ -86,13 +83,13 @@ export function distinct<T>(by: (value: T) => any = (value: T) => value) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>(),
+      new DifferenceStreamWriter<T>()
     )
     const operator = new DistinctOperator<T>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<T>,
+      stream.connectReader(),
       output.writer,
-      by,
+      by
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

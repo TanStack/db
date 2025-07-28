@@ -1,11 +1,11 @@
 import {
   DefaultMap,
   chunkedArrayPush,
-  hash,
   globalObjectIdGenerator,
-} from './utils.js'
+  hash,
+} from "./utils.js"
 
-export type MultiSetArray<T> = [T, number][]
+export type MultiSetArray<T> = Array<[T, number]>
 export type KeyedData<T> = [key: string, value: T]
 
 /**
@@ -26,7 +26,7 @@ export class MultiSet<T> {
     return JSON.stringify(Array.from(this.getInner()))
   }
 
-  static fromJSON<T>(json: string): MultiSet<T> {
+  static fromJSON<U>(json: string): MultiSet<U> {
     return new MultiSet(JSON.parse(json))
   }
 
@@ -35,7 +35,7 @@ export class MultiSet<T> {
    */
   map<U>(f: (data: T) => U): MultiSet<U> {
     return new MultiSet(
-      this.#inner.map(([data, multiplicity]) => [f(data), multiplicity]),
+      this.#inner.map(([data, multiplicity]) => [f(data), multiplicity])
     )
   }
 
@@ -51,7 +51,7 @@ export class MultiSet<T> {
    */
   negate(): MultiSet<T> {
     return new MultiSet(
-      this.#inner.map(([data, multiplicity]) => [data, -multiplicity]),
+      this.#inner.map(([data, multiplicity]) => [data, -multiplicity])
     )
   }
 
@@ -73,7 +73,7 @@ export class MultiSet<T> {
   consolidate(): MultiSet<T> {
     // Check if this looks like a keyed multiset (first item is a tuple of length 2)
     if (this.#inner.length > 0) {
-      const firstItem = this.#inner[0][0]
+      const firstItem = this.#inner[0]?.[0]
       if (Array.isArray(firstItem) && firstItem.length === 2) {
         return this.#consolidateKeyed()
       }
@@ -104,9 +104,9 @@ export class MultiSet<T> {
      * Unpacks the tuple and generates an ID based on both elements to ensure proper
      * consolidation of join results like ['A', null] and [null, 'X'].
      */
-    const getTupleId = (tuple: any[]): string => {
+    const getTupleId = (tuple: Array<any>): string => {
       if (tuple.length !== 2) {
-        throw new Error('Expected tuple of length 2')
+        throw new Error(`Expected tuple of length 2`)
       }
       const [first, second] = tuple
       return `${globalObjectIdGenerator.getStringId(first)}|${globalObjectIdGenerator.getStringId(second)}`
@@ -123,7 +123,7 @@ export class MultiSet<T> {
       const [key, value] = data
 
       // Verify key is string or number as expected for keyed multisets
-      if (typeof key !== 'string' && typeof key !== 'number') {
+      if (typeof key !== `string` && typeof key !== `number`) {
         // Found non-string/number key, fall back to unkeyed consolidation
         return this.#consolidateUnkeyed()
       }
@@ -139,10 +139,10 @@ export class MultiSet<T> {
       }
 
       // Create composite key and consolidate
-      const compositeKey = key + '|' + valueId
+      const compositeKey = key + `|` + valueId
       consolidated.set(
         compositeKey,
-        (consolidated.get(compositeKey) || 0) + multiplicity,
+        (consolidated.get(compositeKey) || 0) + multiplicity
       )
 
       // Store the original data for the first occurrence
@@ -173,9 +173,9 @@ export class MultiSet<T> {
     let hasNumber = false
     let hasOther = false
     for (const [data, _] of this.#inner) {
-      if (typeof data === 'string') {
+      if (typeof data === `string`) {
         hasString = true
-      } else if (typeof data === 'number') {
+      } else if (typeof data === `number`) {
         hasNumber = true
       } else {
         hasOther = true

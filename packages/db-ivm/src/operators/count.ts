@@ -1,7 +1,8 @@
-import { IStreamBuilder, KeyValue } from '../types.js'
-import { DifferenceStreamReader, DifferenceStreamWriter } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { ReduceOperator } from './reduce.js'
+import { DifferenceStreamWriter } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import { ReduceOperator } from "./reduce.js"
+import type { DifferenceStreamReader } from "../graph.js"
+import type { IStreamBuilder, KeyValue } from "../types.js"
 
 /**
  * Operator that counts elements by key (version-free)
@@ -10,14 +11,14 @@ export class CountOperator<K, V> extends ReduceOperator<K, V, number> {
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, V]>,
-    output: DifferenceStreamWriter<[K, number]>,
+    output: DifferenceStreamWriter<[K, number]>
   ) {
-    const countInner = (vals: [V, number][]): [number, number][] => {
-      let count = 0
+    const countInner = (vals: Array<[V, number]>): Array<[number, number]> => {
+      let totalCount = 0
       for (const [_, diff] of vals) {
-        count += diff
+        totalCount += diff
       }
-      return [[count, 1]]
+      return [[totalCount, 1]]
     }
 
     super(id, inputA, output, countInner)
@@ -28,19 +29,21 @@ export class CountOperator<K, V> extends ReduceOperator<K, V, number> {
  * Counts the number of elements by key (version-free)
  */
 export function count<
-  K extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V extends T extends KeyValue<K, infer V> ? V : never,
+  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
+  VType extends T extends KeyValue<KType, infer V> ? V : never,
   T,
 >() {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<K, number>> => {
-    const output = new StreamBuilder<KeyValue<K, number>>(
+  return (
+    stream: IStreamBuilder<T>
+  ): IStreamBuilder<KeyValue<KType, number>> => {
+    const output = new StreamBuilder<KeyValue<KType, number>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, number>>(),
+      new DifferenceStreamWriter<KeyValue<KType, number>>()
     )
-    const operator = new CountOperator<K, V>(
+    const operator = new CountOperator<KType, VType>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<K, V>>,
-      output.writer,
+      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, VType>>,
+      output.writer
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

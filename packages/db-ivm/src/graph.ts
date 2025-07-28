@@ -1,21 +1,22 @@
-import { MultiSet, MultiSetArray } from './multiset.js'
-import {
-  IOperator,
+import { MultiSet } from "./multiset.js"
+import type { MultiSetArray } from "./multiset.js"
+import type {
   IDifferenceStreamReader,
   IDifferenceStreamWriter,
-} from './types.js'
+  IOperator,
+} from "./types.js"
 
 /**
  * A read handle to a dataflow edge that receives data from a writer.
  */
 export class DifferenceStreamReader<T> implements IDifferenceStreamReader<T> {
-  #queue: MultiSet<T>[]
+  #queue: Array<MultiSet<T>>
 
-  constructor(queue: MultiSet<T>[]) {
+  constructor(queue: Array<MultiSet<T>>) {
     this.#queue = queue
   }
 
-  drain(): MultiSet<T>[] {
+  drain(): Array<MultiSet<T>> {
     const out = [...this.#queue].reverse()
     this.#queue.length = 0
     return out
@@ -30,7 +31,7 @@ export class DifferenceStreamReader<T> implements IDifferenceStreamReader<T> {
  * A write handle to a dataflow edge that is allowed to publish data.
  */
 export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
-  #queues: MultiSet<T>[][] = []
+  #queues: Array<Array<MultiSet<T>>> = []
 
   sendData(collection: MultiSet<T> | MultiSetArray<T>): void {
     if (!(collection instanceof MultiSet)) {
@@ -43,7 +44,7 @@ export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
   }
 
   newReader(): DifferenceStreamReader<T> {
-    const q: MultiSet<T>[] = []
+    const q: Array<MultiSet<T>> = []
     this.#queues.push(q)
     return new DifferenceStreamReader(q)
   }
@@ -54,13 +55,13 @@ export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
  * one outgoing edge (write handle).
  */
 export abstract class Operator<T> implements IOperator<T> {
-  protected inputs: DifferenceStreamReader<T>[]
+  protected inputs: Array<DifferenceStreamReader<T>>
   protected output: DifferenceStreamWriter<T>
 
   constructor(
     public id: number,
-    inputs: DifferenceStreamReader<T>[],
-    output: DifferenceStreamWriter<T>,
+    inputs: Array<DifferenceStreamReader<T>>,
+    output: DifferenceStreamWriter<T>
   ) {
     this.inputs = inputs
     this.output = output
@@ -83,13 +84,13 @@ export abstract class UnaryOperator<Tin, Tout = Tin> extends Operator<
   constructor(
     public id: number,
     inputA: DifferenceStreamReader<Tin>,
-    output: DifferenceStreamWriter<Tout>,
+    output: DifferenceStreamWriter<Tout>
   ) {
     super(id, [inputA], output)
   }
 
-  inputMessages(): MultiSet<Tin>[] {
-    return this.inputs[0].drain() as MultiSet<Tin>[]
+  inputMessages(): Array<MultiSet<Tin>> {
+    return this.inputs[0].drain() as Array<MultiSet<Tin>>
   }
 }
 
@@ -102,16 +103,16 @@ export abstract class BinaryOperator<T> extends Operator<T> {
     public id: number,
     inputA: DifferenceStreamReader<T>,
     inputB: DifferenceStreamReader<T>,
-    output: DifferenceStreamWriter<T>,
+    output: DifferenceStreamWriter<T>
   ) {
     super(id, [inputA, inputB], output)
   }
 
-  inputAMessages(): MultiSet<T>[] {
+  inputAMessages(): Array<MultiSet<T>> {
     return this.inputs[0].drain()
   }
 
-  inputBMessages(): MultiSet<T>[] {
+  inputBMessages(): Array<MultiSet<T>> {
     return this.inputs[1].drain()
   }
 }

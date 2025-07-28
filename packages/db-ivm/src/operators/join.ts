@@ -1,20 +1,17 @@
-import { IStreamBuilder, PipedOperator, KeyValue } from '../types.js'
-import {
-  DifferenceStreamReader,
-  DifferenceStreamWriter,
-  BinaryOperator,
-} from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { MultiSet } from '../multiset.js'
-import { Index } from '../indexes.js'
-import { negate } from './negate.js'
-import { map } from './map.js'
-import { concat } from './concat.js'
+import { BinaryOperator, DifferenceStreamWriter } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import { MultiSet } from "../multiset.js"
+import { Index } from "../indexes.js"
+import { negate } from "./negate.js"
+import { map } from "./map.js"
+import { concat } from "./concat.js"
+import type { DifferenceStreamReader } from "../graph.js"
+import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
 
 /**
  * Type of join to perform
  */
-export type JoinType = 'inner' | 'left' | 'right' | 'full' | 'anti'
+export type JoinType = `inner` | `left` | `right` | `full` | `anti`
 
 /**
  * Operator that joins two input streams
@@ -29,7 +26,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     id: number,
     inputA: DifferenceStreamReader<[K, V1]>,
     inputB: DifferenceStreamReader<[K, V2]>,
-    output: DifferenceStreamWriter<[K, [V1, V2]]>,
+    output: DifferenceStreamWriter<[K, [V1, V2]]>
   ) {
     super(id, inputA, inputB, output)
   }
@@ -92,18 +89,18 @@ export function join<
   T,
 >(
   other: IStreamBuilder<KeyValue<K, V2>>,
-  type: JoinType = 'inner',
+  type: JoinType = `inner`
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   switch (type) {
-    case 'inner':
-      return innerJoin(other) as PipedOperator<T, KeyValue<K, [V1, V2]>>
-    case 'anti':
-      return antiJoin(other) as PipedOperator<T, KeyValue<K, [V1, null]>>
-    case 'left':
-      return leftJoin(other) as PipedOperator<T, KeyValue<K, [V1, V2 | null]>>
-    case 'right':
+    case `inner`:
+      return innerJoin(other)
+    case `anti`:
+      return antiJoin(other)
+    case `left`:
+      return leftJoin(other)
+    case `right`:
       return rightJoin(other)
-    case 'full':
+    case `full`:
       return fullJoin(other)
     default:
       throw new Error(`Join type ${type} is invalid`)
@@ -120,21 +117,21 @@ export function innerJoin<
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>,
+  other: IStreamBuilder<KeyValue<K, V2>>
 ): PipedOperator<T, KeyValue<K, [V1, V2]>> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<K, [V1, V2]>> => {
     if (stream.graph !== other.graph) {
-      throw new Error('Cannot join streams from different graphs')
+      throw new Error(`Cannot join streams from different graphs`)
     }
     const output = new StreamBuilder<KeyValue<K, [V1, V2]>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, [V1, V2]>>(),
+      new DifferenceStreamWriter<KeyValue<K, [V1, V2]>>()
     )
     const operator = new JoinOperator<K, V1, V2>(
       stream.graph.getNextOperatorId(),
       stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
-      other.connectReader() as DifferenceStreamReader<KeyValue<K, V2>>,
-      output.writer,
+      other.connectReader(),
+      output.writer
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())
@@ -152,19 +149,19 @@ export function antiJoin<
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>,
+  other: IStreamBuilder<KeyValue<K, V2>>
 ): PipedOperator<T, KeyValue<K, [V1, null]>> {
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1, null]>> => {
     const matchedLeft = stream.pipe(
       innerJoin(other),
-      map(([key, [valueLeft, _valueRight]]) => [key, valueLeft]),
+      map(([key, [valueLeft, _valueRight]]) => [key, valueLeft])
     )
     const anti = stream.pipe(
       concat(matchedLeft.pipe(negate())),
       // @ts-ignore TODO: fix this
-      map(([key, value]) => [key, [value, null]]),
+      map(([key, value]) => [key, [value, null]])
     )
     return anti as IStreamBuilder<KeyValue<K, [V1, null]>>
   }
@@ -180,10 +177,10 @@ export function leftJoin<
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>,
+  other: IStreamBuilder<KeyValue<K, V2>>
 ): PipedOperator<T, KeyValue<K, [V1, V2 | null]>> {
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1, V2 | null]>> => {
     const left = stream
     const right = other
@@ -205,17 +202,17 @@ export function rightJoin<
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>,
+  other: IStreamBuilder<KeyValue<K, V2>>
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2]>> {
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1 | null, V2]>> => {
     const left = stream as IStreamBuilder<KeyValue<K, V1>>
     const right = other
     const inner = left.pipe(innerJoin(right))
     const anti = right.pipe(
       antiJoin(left),
-      map(([key, [a, b]]) => [key, [b, a]]),
+      map(([key, [a, b]]) => [key, [b, a]])
     )
     return inner.pipe(concat(anti)) as IStreamBuilder<
       KeyValue<K, [V1 | null, V2]>
@@ -233,10 +230,10 @@ export function fullJoin<
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>,
+  other: IStreamBuilder<KeyValue<K, V2>>
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1 | null, V2 | null]>> => {
     const left = stream as IStreamBuilder<KeyValue<K, V1>>
     const right = other
@@ -244,7 +241,7 @@ export function fullJoin<
     const antiLeft = left.pipe(antiJoin(right))
     const antiRight = right.pipe(
       antiJoin(left),
-      map(([key, [a, b]]) => [key, [b, a]]),
+      map(([key, [a, b]]) => [key, [b, a]])
     )
     return inner.pipe(concat(antiLeft), concat(antiRight)) as IStreamBuilder<
       KeyValue<K, [V1 | null, V2 | null]>

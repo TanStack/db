@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeAll } from 'vitest'
-import { D2 } from '../../src/d2.js'
-import { MultiSet } from '../../src/multiset.js'
-import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
+import { beforeAll, describe, expect, it } from "vitest"
+import { D2 } from "../../src/d2.js"
+import { MultiSet } from "../../src/multiset.js"
+import { topKWithFractionalIndex } from "../../src/operators/topKWithFractionalIndex.js"
 import {
   loadBTree,
   topKWithFractionalIndexBTree,
-} from '../../src/operators/topKWithFractionalIndexBTree.js'
-import { output } from '../../src/operators/index.js'
-import { MessageTracker, assertOnlyKeysAffected } from '../test-utils.js'
+} from "../../src/operators/topKWithFractionalIndexBTree.js"
+import { output } from "../../src/operators/index.js"
+import { MessageTracker, assertOnlyKeysAffected } from "../test-utils.js"
 
 // Helper function to check if indices are in lexicographic order
-function checkLexicographicOrder(results: any[]) {
+function checkLexicographicOrder(results: Array<any>) {
   // Extract values and their indices
   const valuesWithIndices = results.map(([[_, [value, index]]]) => ({
     value,
@@ -19,7 +19,7 @@ function checkLexicographicOrder(results: any[]) {
 
   // Sort by value using the same comparator as in the test
   const sortedByValue = [...valuesWithIndices].sort((a, b) =>
-    a.value.value < b.value.value ? -1 : 1,
+    a.value.value < b.value.value ? -1 : 1
   )
 
   // Check that indices are in the same order as the sorted values
@@ -37,7 +37,7 @@ function checkLexicographicOrder(results: any[]) {
 }
 
 // Helper function to verify the expected order of elements
-function verifyOrder(results: any[], expectedOrder: string[]) {
+function verifyOrder(results: Array<any>, expectedOrder: Array<string>) {
   // Extract values in the order they appear in the results
   const actualOrder = results.map(([[_, [value, __]]]) => value.value)
 
@@ -67,12 +67,12 @@ beforeAll(async () => {
   await loadBTree()
 })
 
-describe('Operators', () => {
+describe(`Operators`, () => {
   describe.each([
-    ['with array', { topK: topKWithFractionalIndex }],
-    ['with B+ tree', { topK: topKWithFractionalIndexBTree }],
-  ])('TopKWithFractionalIndex operator %s', (_, { topK }) => {
-    it('should assign fractional indices to sorted elements', () => {
+    [`with array`, { topK: topKWithFractionalIndex }],
+    [`with B+ tree`, { topK: topKWithFractionalIndexBTree }],
+  ])(`TopKWithFractionalIndex operator %s`, (_, { topK }) => {
+    it(`should assign fractional indices to sorted elements`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -83,7 +83,7 @@ describe('Operators', () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -91,12 +91,12 @@ describe('Operators', () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -109,8 +109,8 @@ describe('Operators', () => {
       const initialMessages = initialResult.messages
       expect(
         checkLexicographicOrder(
-          initialMessages.map(([item, mult]) => [item, mult]),
-        ),
+          initialMessages.map(([item, mult]) => [item, mult])
+        )
       ).toBe(true)
 
       tracker.reset()
@@ -118,9 +118,9 @@ describe('Operators', () => {
       // Now let's move 'c' to the beginning by changing its value
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: 'a-' }], 1], // This should now be first
-          [[null, { id: 3, value: 'c' }], -1], // Remove the old value
-        ]),
+          [[null, { id: 3, value: `a-` }], 1], // This should now be first
+          [[null, { id: 3, value: `c` }], -1], // Remove the old value
+        ])
       )
       graph.run()
 
@@ -131,7 +131,7 @@ describe('Operators', () => {
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
 
       // Check that only the affected key (null) produces messages
-      assertOnlyKeysAffected('topKFractional update', updateResult.messages, [
+      assertOnlyKeysAffected(`topKFractional update`, updateResult.messages, [
         null,
       ])
 
@@ -145,7 +145,7 @@ describe('Operators', () => {
       }
     })
 
-    it('should support duplicate ordering keys', () => {
+    it(`should support duplicate ordering keys`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -156,7 +156,7 @@ describe('Operators', () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -164,12 +164,12 @@ describe('Operators', () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -178,14 +178,14 @@ describe('Operators', () => {
       expect(initialResult.sortedResults.length).toBe(5) // Should have all 5 elements
       expect(
         checkLexicographicOrder(
-          initialResult.messages.map(([item, mult]) => [item, mult]),
-        ),
+          initialResult.messages.map(([item, mult]) => [item, mult])
+        )
       ).toBe(true)
 
       tracker.reset()
 
       // Now let's add a new element with a value that is already in there
-      input.sendData(new MultiSet([[[null, { id: 6, value: 'c' }], 1]]))
+      input.sendData(new MultiSet([[[null, { id: 6, value: `c` }], 1]]))
       graph.run()
 
       // Check the incremental changes
@@ -196,9 +196,9 @@ describe('Operators', () => {
 
       // Check that only the affected key (null) produces messages
       assertOnlyKeysAffected(
-        'topKFractional duplicate keys',
+        `topKFractional duplicate keys`,
         updateResult.messages,
-        [null],
+        [null]
       )
 
       // Check that the update messages maintain lexicographic order on their own
@@ -214,33 +214,33 @@ describe('Operators', () => {
       expect(updateResult.sortedResults.length).toBeGreaterThan(0) // Should have the new element
     })
 
-    it('should ignore duplicate values', () => {
+    it(`should ignore duplicate values`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
-      const allMessages: any[] = []
+      const allMessages: Array<any> = []
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        }),
+        })
       )
 
       graph.finalize()
 
       // Initial data - a, b, c, d, e
-      const entryForC = [[null, { id: 3, value: 'c' }], 1] as [
+      const entryForC = [[null, { id: 3, value: `c` }], 1] as [
         [null, { id: number; value: string }],
         number,
       ]
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
           entryForC,
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -257,7 +257,7 @@ describe('Operators', () => {
       expect(allMessages.length).toBe(1)
     })
 
-    it('should handle limit and offset correctly', () => {
+    it(`should handle limit and offset correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -271,7 +271,7 @@ describe('Operators', () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -279,12 +279,12 @@ describe('Operators', () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -301,9 +301,9 @@ describe('Operators', () => {
       })
 
       const sortedValues = sortedByIndex.map(
-        ([_key, [value, _index]]) => value.value,
+        ([_key, [value, _index]]) => value.value
       )
-      expect(sortedValues).toEqual(['b', 'c', 'd']) // Should be in correct order with offset 1, limit 3
+      expect(sortedValues).toEqual([`b`, `c`, `d`]) // Should be in correct order with offset 1, limit 3
 
       tracker.reset()
 
@@ -312,8 +312,8 @@ describe('Operators', () => {
       // Add element that should be included (between c and d)
       input.sendData(
         new MultiSet([
-          [[null, { id: 6, value: 'c+' }], 1], // This should be between c and d
-        ]),
+          [[null, { id: 6, value: `c+` }], 1], // This should be between c and d
+        ])
       )
       graph.run()
 
@@ -326,10 +326,10 @@ describe('Operators', () => {
       expect(updateResult.sortedResults.length).toBeLessThanOrEqual(3) // Should respect limit
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected('topK limit+offset', updateResult.messages, [null])
+      assertOnlyKeysAffected(`topK limit+offset`, updateResult.messages, [null])
     })
 
-    it('should handle elements moving positions correctly', () => {
+    it(`should handle elements moving positions correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -340,7 +340,7 @@ describe('Operators', () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -348,12 +348,12 @@ describe('Operators', () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -369,20 +369,20 @@ describe('Operators', () => {
       })
 
       const initialSortedValues = initialSortedByIndex.map(
-        ([_key, [value, _index]]) => value.value,
+        ([_key, [value, _index]]) => value.value
       )
-      expect(initialSortedValues).toEqual(['a', 'b', 'c', 'd', 'e']) // Should be in lexicographic order
+      expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`]) // Should be in lexicographic order
 
       tracker.reset()
 
       // Now let's swap 'b' and 'd' by changing their values
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: 'd+' }], 1], // 'b' becomes 'd+'
-          [[null, { id: 2, value: 'b' }], -1], // Remove old 'b'
-          [[null, { id: 4, value: 'b+' }], 1], // 'd' becomes 'b+'
-          [[null, { id: 4, value: 'd' }], -1], // Remove old 'd'
-        ]),
+          [[null, { id: 2, value: `d+` }], 1], // 'b' becomes 'd+'
+          [[null, { id: 2, value: `b` }], -1], // Remove old 'b'
+          [[null, { id: 4, value: `b+` }], 1], // 'd' becomes 'b+'
+          [[null, { id: 4, value: `d` }], -1], // Remove old 'd'
+        ])
       )
       graph.run()
 
@@ -392,7 +392,7 @@ describe('Operators', () => {
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected('topK move positions', updateResult.messages, [
+      assertOnlyKeysAffected(`topK move positions`, updateResult.messages, [
         null,
       ])
 
@@ -401,7 +401,7 @@ describe('Operators', () => {
       expect(updateResult.sortedResults.length).toBeGreaterThan(0) // Should have some final results
     })
 
-    it('should maintain lexicographic order through multiple updates', () => {
+    it(`should maintain lexicographic order through multiple updates`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -412,7 +412,7 @@ describe('Operators', () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -420,12 +420,12 @@ describe('Operators', () => {
       // Initial data - a, c, e, g, i
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-          [[null, { id: 7, value: 'g' }], 1],
-          [[null, { id: 9, value: 'i' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+          [[null, { id: 7, value: `g` }], 1],
+          [[null, { id: 9, value: `i` }], 1],
+        ])
       )
       graph.run()
 
@@ -438,11 +438,11 @@ describe('Operators', () => {
       // Update 1: Insert elements between existing ones - b, d, f, h
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 6, value: 'f' }], 1],
-          [[null, { id: 8, value: 'h' }], 1],
-        ]),
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 6, value: `f` }], 1],
+          [[null, { id: 8, value: `h` }], 1],
+        ])
       )
       graph.run()
 
@@ -456,11 +456,11 @@ describe('Operators', () => {
       // Update 2: Move some elements around
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: 'j' }], 1], // Move 'c' to after 'i'
-          [[null, { id: 3, value: 'c' }], -1], // Remove old 'c'
-          [[null, { id: 7, value: 'a-' }], 1], // Move 'g' to before 'a'
-          [[null, { id: 7, value: 'g' }], -1], // Remove old 'g'
-        ]),
+          [[null, { id: 3, value: `j` }], 1], // Move 'c' to after 'i'
+          [[null, { id: 3, value: `c` }], -1], // Remove old 'c'
+          [[null, { id: 7, value: `a-` }], 1], // Move 'g' to before 'a'
+          [[null, { id: 7, value: `g` }], -1], // Remove old 'g'
+        ])
       )
       graph.run()
 
@@ -471,13 +471,13 @@ describe('Operators', () => {
 
       // Check that only the affected key produces messages
       assertOnlyKeysAffected(
-        'topK lexicographic update2',
+        `topK lexicographic update2`,
         update2Result.messages,
-        [null],
+        [null]
       )
     })
 
-    it('should maintain correct order when cycling through multiple changes', () => {
+    it(`should maintain correct order when cycling through multiple changes`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
       const tracker = new MessageTracker<
@@ -488,7 +488,7 @@ describe('Operators', () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -496,12 +496,12 @@ describe('Operators', () => {
       // Initial data with 5 items: a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1],
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 1, value: `a` }], 1],
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -517,18 +517,18 @@ describe('Operators', () => {
       })
 
       const initialSortedValues = initialSortedByIndex.map(
-        ([_key, [value, _index]]) => value.value,
+        ([_key, [value, _index]]) => value.value
       )
-      expect(initialSortedValues).toEqual(['a', 'b', 'c', 'd', 'e']) // Should be in lexicographic order
+      expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`]) // Should be in lexicographic order
 
       tracker.reset()
 
       // Cycle 1: Move 'a' to position after 'b' by changing it to 'bb'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'bb' }], 1], // Move 'a' to after 'b'
-          [[null, { id: 1, value: 'a' }], -1], // Remove old 'a'
-        ]),
+          [[null, { id: 1, value: `bb` }], 1], // Move 'a' to after 'b'
+          [[null, { id: 1, value: `a` }], -1], // Remove old 'a'
+        ])
       )
       graph.run()
 
@@ -542,9 +542,9 @@ describe('Operators', () => {
       // Cycle 2: Move 'bb' to position after 'd' by changing it to 'dd'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'dd' }], 1], // Move to after 'd'
-          [[null, { id: 1, value: 'bb' }], -1], // Remove old 'bb'
-        ]),
+          [[null, { id: 1, value: `dd` }], 1], // Move to after 'd'
+          [[null, { id: 1, value: `bb` }], -1], // Remove old 'bb'
+        ])
       )
       graph.run()
 
@@ -554,7 +554,7 @@ describe('Operators', () => {
       expect(cycle2Result.messageCount).toBeGreaterThan(0) // Should have changes
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected('topK cycling update2', cycle2Result.messages, [
+      assertOnlyKeysAffected(`topK cycling update2`, cycle2Result.messages, [
         null,
       ])
 
@@ -563,16 +563,16 @@ describe('Operators', () => {
       expect(cycle2Result.sortedResults.length).toBeGreaterThan(0) // Should have final results
     })
 
-    it('should handle insertion at the start of the sorted collection', () => {
+    it(`should handle insertion at the start of the sorted collection`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
-      const allMessages: any[] = []
+      const allMessages: Array<any> = []
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -580,11 +580,11 @@ describe('Operators', () => {
       // Initial data - b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: 'b' }], 1],
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-        ]),
+          [[null, { id: 2, value: `b` }], 1],
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+        ])
       )
       graph.run()
 
@@ -596,7 +596,7 @@ describe('Operators', () => {
       expect(checkLexicographicOrder(initialResult)).toBe(true)
 
       // Keep track of the current state
-      let currentState = new Map()
+      const currentState = new Map()
       for (const [[_, [value, index]]] of initialResult) {
         currentState.set(JSON.stringify(value), [value, index])
       }
@@ -604,8 +604,8 @@ describe('Operators', () => {
       // Update: Insert element at the start - 'a'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1], // This should be inserted at the start
-        ]),
+          [[null, { id: 1, value: `a` }], 1], // This should be inserted at the start
+        ])
       )
       graph.run()
 
@@ -627,19 +627,19 @@ describe('Operators', () => {
       }
 
       // Convert to array for lexicographic order check
-      let currentStateArray = Array.from(currentState.values()).map(
-        ([value, index]) => [[null, [value, index]], 1],
+      const currentStateArray = Array.from(currentState.values()).map(
+        ([value, index]) => [[null, [value, index]], 1]
       )
 
       expect(checkLexicographicOrder(currentStateArray)).toBe(true)
 
       // Verify the order of elements
-      const expectedOrder = ['a', 'b', 'c', 'd', 'e']
+      const expectedOrder = [`a`, `b`, `c`, `d`, `e`]
       verifyOrder(currentStateArray, expectedOrder)
 
       // Check that the new element 'a' has an index that is lexicographically before 'b'
-      const aValue = { id: 1, value: 'a' }
-      const bValue = { id: 2, value: 'b' }
+      const aValue = { id: 1, value: `a` }
+      const bValue = { id: 2, value: `b` }
       const aIndex = currentState.get(JSON.stringify(aValue))[1]
       const bIndex = currentState.get(JSON.stringify(bValue))[1]
 
@@ -647,16 +647,16 @@ describe('Operators', () => {
       expect(aIndex < bIndex).toBe(true)
     })
 
-    it('should handle multiple insertion at the start of the sorted collection', () => {
+    it(`should handle multiple insertion at the start of the sorted collection`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()
-      const allMessages: any[] = []
+      const allMessages: Array<any> = []
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        }),
+        })
       )
 
       graph.finalize()
@@ -664,11 +664,11 @@ describe('Operators', () => {
       // Initial data - b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: 'c' }], 1],
-          [[null, { id: 4, value: 'd' }], 1],
-          [[null, { id: 5, value: 'e' }], 1],
-          [[null, { id: 6, value: 'f' }], 1],
-        ]),
+          [[null, { id: 3, value: `c` }], 1],
+          [[null, { id: 4, value: `d` }], 1],
+          [[null, { id: 5, value: `e` }], 1],
+          [[null, { id: 6, value: `f` }], 1],
+        ])
       )
       graph.run()
 
@@ -680,7 +680,7 @@ describe('Operators', () => {
       expect(checkLexicographicOrder(initialResult)).toBe(true)
 
       // Keep track of the current state
-      let currentState = new Map()
+      const currentState = new Map()
       for (const [[_, [value, index]]] of initialResult) {
         currentState.set(JSON.stringify(value), [value, index])
       }
@@ -688,9 +688,9 @@ describe('Operators', () => {
       // Update: Insert element at the start - 'a'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: 'a' }], 1], // This should be inserted at the start
-          [[null, { id: 2, value: 'b' }], 1], // This should be inserted at the start
-        ]),
+          [[null, { id: 1, value: `a` }], 1], // This should be inserted at the start
+          [[null, { id: 2, value: `b` }], 1], // This should be inserted at the start
+        ])
       )
       graph.run()
 
@@ -712,14 +712,14 @@ describe('Operators', () => {
       }
 
       // Convert to array for lexicographic order check
-      let currentStateArray = Array.from(currentState.values()).map(
-        ([value, index]) => [[null, [value, index]], 1],
+      const currentStateArray = Array.from(currentState.values()).map(
+        ([value, index]) => [[null, [value, index]], 1]
       )
 
       expect(checkLexicographicOrder(currentStateArray)).toBe(true)
 
       // Verify the order of elements
-      const expectedOrder = ['a', 'b', 'c', 'd', 'e', 'f']
+      const expectedOrder = [`a`, `b`, `c`, `d`, `e`, `f`]
       verifyOrder(currentStateArray, expectedOrder)
     })
   })

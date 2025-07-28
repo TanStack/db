@@ -1,7 +1,7 @@
-import { IStreamBuilder, PipedOperator } from '../types'
-import { KeyValue } from '../types.js'
-import { reduce } from './reduce.js'
-import { MultiSet } from '../multiset.js'
+import { MultiSet } from "../multiset.js"
+import { reduce } from "./reduce.js"
+import type { IStreamBuilder, PipedOperator } from "../types"
+import type { KeyValue } from "../types.js"
 
 interface TopKOptions {
   limit?: number
@@ -25,7 +25,7 @@ export function topK<
   T,
 >(
   comparator: (a: V1, b: V1) => number,
-  options?: TopKOptions,
+  options?: TopKOptions
 ): PipedOperator<T, T> {
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
@@ -39,7 +39,7 @@ export function topK<
           .getInner()
           .sort((a, b) => comparator(a[0] as V1, b[0] as V1))
         return sortedValues.slice(offset, offset + limit)
-      }),
+      })
     )
     return reduced as IStreamBuilder<T>
   }
@@ -63,13 +63,13 @@ export function topKWithIndex<
   T,
 >(
   comparator: (a: V1, b: V1) => number,
-  options?: TopKOptions,
+  options?: TopKOptions
 ): PipedOperator<T, KeyValue<K, [V1, number]>> {
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
 
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1, number]>> => {
     const reduced = stream.pipe(
       reduce<K, V1, [V1, number], T>((values) => {
@@ -78,14 +78,14 @@ export function topKWithIndex<
         let i = offset
         const sortedValues = consolidated
           .getInner()
-          .sort((a, b) => comparator(a[0] as V1, b[0] as V1))
+          .sort((a, b) => comparator(a[0], b[0]))
           .slice(offset, offset + limit)
           .map(([value, multiplicity]): [[V1, number], number] => [
             [value, i++],
             multiplicity,
           ])
         return sortedValues
-      }),
+      })
     )
     return reduced
   }

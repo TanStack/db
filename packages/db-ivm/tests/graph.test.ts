@@ -1,8 +1,9 @@
-import { describe, expect, beforeEach, test } from 'vitest'
-import { DifferenceStreamReader, DifferenceStreamWriter } from '../src/graph.js'
-import { MultiSet } from '../src/multiset.js'
+import { beforeEach, describe, expect, test } from "vitest"
+import { DifferenceStreamWriter } from "../src/graph.js"
+import { MultiSet } from "../src/multiset.js"
+import type { DifferenceStreamReader } from "../src/graph.js"
 
-describe('DifferenceStreamReader and DifferenceStreamWriter', () => {
+describe(`DifferenceStreamReader and DifferenceStreamWriter`, () => {
   let writer: DifferenceStreamWriter<number>
   let reader: DifferenceStreamReader<number>
 
@@ -11,16 +12,16 @@ describe('DifferenceStreamReader and DifferenceStreamWriter', () => {
     reader = writer.newReader()
   })
 
-  test('isEmpty returns true for empty queue', () => {
+  test(`isEmpty returns true for empty queue`, () => {
     expect(reader.isEmpty()).toBe(true)
   })
 
-  test('isEmpty returns false when queue has messages', () => {
+  test(`isEmpty returns false when queue has messages`, () => {
     writer.sendData(new MultiSet())
     expect(reader.isEmpty()).toBe(false)
   })
 
-  test('drain returns all messages', () => {
+  test(`drain returns all messages`, () => {
     writer.sendData(new MultiSet([[1, 1]]))
     writer.sendData(new MultiSet([[2, 1]]))
 
@@ -31,7 +32,7 @@ describe('DifferenceStreamReader and DifferenceStreamWriter', () => {
     expect(reader.isEmpty()).toBe(true)
   })
 
-  test('multiple readers receive the same data', () => {
+  test(`multiple readers receive the same data`, () => {
     const reader2 = writer.newReader()
 
     writer.sendData(new MultiSet([[1, 1]]))
@@ -48,7 +49,7 @@ describe('DifferenceStreamReader and DifferenceStreamWriter', () => {
     expect(messages2[1].getInner()).toEqual([[2, 1]])
   })
 
-  test('drain empties the queue', () => {
+  test(`drain empties the queue`, () => {
     writer.sendData(new MultiSet([[1, 1]]))
     writer.sendData(new MultiSet([[2, 1]]))
 

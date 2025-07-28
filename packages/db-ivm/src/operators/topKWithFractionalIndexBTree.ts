@@ -1,42 +1,45 @@
-import { IStreamBuilder, KeyValue, PipedOperator } from '../types.js'
-import { DifferenceStreamReader, DifferenceStreamWriter } from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { generateKeyBetween } from 'fractional-indexing'
+import { generateKeyBetween } from "fractional-indexing"
+import { DifferenceStreamWriter } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
 import {
+  TopKWithFractionalIndexOperator,
   getIndex,
   getValue,
-  TaggedValue,
   indexedValue,
+} from "./topKWithFractionalIndex.js"
+import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
+import type { DifferenceStreamReader } from "../graph.js"
+import type {
   IndexedValue,
+  TaggedValue,
   TopK,
   TopKChanges,
-  TopKWithFractionalIndexOperator,
   TopKWithFractionalIndexOptions,
-} from './topKWithFractionalIndex.js'
+} from "./topKWithFractionalIndex.js"
 
 interface BTree<Key, Value> {
-  nextLowerPair(key: Key): [Key, Value] | undefined
-  nextHigherPair(key: Key): [Key, Value] | undefined
-  set(key: Key, value: Value, overwrite?: boolean): boolean
-  maxKey(): Key | undefined
-  get(key: Key, defaultValue?: Value): Value | undefined
-  delete(key: Key): boolean
+  nextLowerPair: (key: Key) => [Key, Value] | undefined
+  nextHigherPair: (key: Key) => [Key, Value] | undefined
+  set: (key: Key, value: Value, overwrite?: boolean) => boolean
+  maxKey: () => Key | undefined
+  get: (key: Key, defaultValue?: Value) => Value | undefined
+  delete: (key: Key) => boolean
   size: number
 }
 
 interface BTreeClass {
   new <Key, Value>(
-    entries?: [Key, Value][],
+    entries?: Array<[Key, Value]>,
     compare?: (a: Key, b: Key) => number,
-    maxNodeSize?: number,
+    maxNodeSize?: number
   ): BTree<Key, Value>
 }
 
-let BTree: BTreeClass
+let BTree: BTreeClass | undefined
 
 export async function loadBTree() {
-  if (!BTree) {
-    const { default: BTreeClass } = await import('sorted-btree')
+  if (BTree === undefined) {
+    const { default: BTreeClass } = await import(`sorted-btree`)
     BTree = BTreeClass
   }
 }
@@ -59,11 +62,11 @@ class TopKTree<V> implements TopK<V> {
   constructor(
     offset: number,
     limit: number,
-    comparator: (a: V, b: V) => number,
+    comparator: (a: V, b: V) => number
   ) {
-    if (!BTree) {
+    if (BTree === undefined) {
       throw new Error(
-        'B+ tree not loaded. You need to call loadBTree() before using TopKTree.',
+        `B+ tree not loaded. You need to call loadBTree() before using TopKTree.`
       )
     }
 
@@ -78,7 +81,7 @@ class TopKTree<V> implements TopK<V> {
    * Ignores the value if it is already present.
    */
   insert(value: V): TopKChanges<V> {
-    let result: TopKChanges<V> = { moveIn: null, moveOut: null }
+    const result: TopKChanges<V> = { moveIn: null, moveOut: null }
 
     // Get the elements before and after the value
     const [, indexedValueBefore] = this.#tree.nextLowerPair(value) ?? [
@@ -164,7 +167,7 @@ class TopKTree<V> implements TopK<V> {
   }
 
   delete(value: V): TopKChanges<V> {
-    let result: TopKChanges<V> = { moveIn: null, moveOut: null }
+    const result: TopKChanges<V> = { moveIn: null, moveOut: null }
 
     const deletedElem = this.#tree.get(value)
     const deleted = this.#tree.delete(value)
@@ -240,14 +243,11 @@ export class TopKWithFractionalIndexBTreeOperator<
   protected override createTopK(
     offset: number,
     limit: number,
-    comparator: (
-      a: TaggedValue<V1>,
-      b: TaggedValue<V1>,
-    ) => number,
+    comparator: (a: TaggedValue<V1>, b: TaggedValue<V1>) => number
   ): TopK<TaggedValue<V1>> {
-    if (!BTree) {
+    if (BTree === undefined) {
       throw new Error(
-        'B+ tree not loaded. You need to call loadBTree() before using TopKWithFractionalIndexBTreeOperator.',
+        `B+ tree not loaded. You need to call loadBTree() before using TopKWithFractionalIndexBTreeOperator.`
       )
     }
     return new TopKTree(offset, limit, comparator)
@@ -275,29 +275,29 @@ export function topKWithFractionalIndexBTree<
   T,
 >(
   comparator: (a: V1, b: V1) => number,
-  options?: TopKWithFractionalIndexOptions,
+  options?: TopKWithFractionalIndexOptions
 ): PipedOperator<T, KeyValue<K, [V1, string]>> {
   const opts = options || {}
 
-  if (!BTree) {
+  if (BTree === undefined) {
     throw new Error(
-      'B+ tree not loaded. You need to call loadBTree() before using topKWithFractionalIndexBTree.',
+      `B+ tree not loaded. You need to call loadBTree() before using topKWithFractionalIndexBTree.`
     )
   }
 
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<K, [V1, string]>> => {
     const output = new StreamBuilder<KeyValue<K, [V1, string]>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, [V1, string]>>(),
+      new DifferenceStreamWriter<KeyValue<K, [V1, string]>>()
     )
     const operator = new TopKWithFractionalIndexOperator<K, V1>(
       stream.graph.getNextOperatorId(),
       stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
       output.writer,
       comparator,
-      opts,
+      opts
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

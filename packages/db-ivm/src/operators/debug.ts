@@ -1,10 +1,7 @@
-import { IStreamBuilder, PipedOperator } from '../types.js'
-import {
-  DifferenceStreamReader,
-  DifferenceStreamWriter,
-  UnaryOperator,
-} from '../graph.js'
-import { StreamBuilder } from '../d2.js'
+import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import type { IStreamBuilder, PipedOperator } from "../types.js"
+import type { DifferenceStreamReader } from "../graph.js"
 
 /**
  * Operator that logs debug information about the stream
@@ -18,7 +15,7 @@ export class DebugOperator<T> extends UnaryOperator<T> {
     inputA: DifferenceStreamReader<T>,
     output: DifferenceStreamWriter<T>,
     name: string,
-    indent: boolean = false,
+    indent: boolean = false
   ) {
     super(id, inputA, output)
     this.#name = name
@@ -27,7 +24,6 @@ export class DebugOperator<T> extends UnaryOperator<T> {
 
   run(): void {
     for (const message of this.inputMessages()) {
-      // eslint-disable-next-line no-console
       console.log(`debug ${this.#name} data: ${message.toString(this.#indent)}`)
       this.output.sendData(message)
     }
@@ -41,19 +37,19 @@ export class DebugOperator<T> extends UnaryOperator<T> {
  */
 export function debug<T>(
   name: string,
-  indent: boolean = false,
+  indent: boolean = false
 ): PipedOperator<T, T> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>(),
+      new DifferenceStreamWriter<T>()
     )
     const operator = new DebugOperator<T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
       output.writer,
       name,
-      indent,
+      indent
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

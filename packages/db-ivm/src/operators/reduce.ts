@@ -1,12 +1,9 @@
-import { IStreamBuilder, KeyValue } from '../types.js'
-import {
-  DifferenceStreamReader,
-  DifferenceStreamWriter,
-  UnaryOperator,
-} from '../graph.js'
-import { StreamBuilder } from '../d2.js'
-import { MultiSet } from '../multiset.js'
-import { Index } from '../indexes.js'
+import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
+import { StreamBuilder } from "../d2.js"
+import { MultiSet } from "../multiset.js"
+import { Index } from "../indexes.js"
+import type { DifferenceStreamReader } from "../graph.js"
+import type { IStreamBuilder, KeyValue } from "../types.js"
 
 /**
  * Base operator for reduction operations (version-free)
@@ -14,13 +11,13 @@ import { Index } from '../indexes.js'
 export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
   #index = new Index<K, V1>()
   #indexOut = new Index<K, V2>()
-  #f: (values: [V1, number][]) => [V2, number][]
+  #f: (values: Array<[V1, number]>) => Array<[V2, number]>
 
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, V1]>,
     output: DifferenceStreamWriter<[K, V2]>,
-    f: (values: [V1, number][]) => [V2, number][],
+    f: (values: Array<[V1, number]>) => Array<[V2, number]>
   ) {
     super(id, inputA, output)
     this.#f = f
@@ -38,7 +35,7 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     }
 
     // For each key, compute the reduction and delta
-    const result: [[K, V2], number][] = []
+    const result: Array<[[K, V2], number]> = []
     for (const key of keysTodo) {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
@@ -108,17 +105,17 @@ export function reduce<
   V1 extends T extends KeyValue<K, infer V> ? V : never,
   R,
   T,
->(f: (values: [V1, number][]) => [R, number][]) {
+>(f: (values: Array<[V1, number]>) => Array<[R, number]>) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<K, R>> => {
     const output = new StreamBuilder<KeyValue<K, R>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, R>>(),
+      new DifferenceStreamWriter<KeyValue<K, R>>()
     )
     const operator = new ReduceOperator<K, V1, R>(
       stream.graph.getNextOperatorId(),
       stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
       output.writer,
-      f,
+      f
     )
     stream.graph.addOperator(operator)
     stream.graph.addStream(output.connectReader())

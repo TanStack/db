@@ -1,4 +1,4 @@
-import murmurhash from 'murmurhash-js'
+import murmurhash from "murmurhash-js"
 
 /**
  * A map that returns a default value for keys that are not present.
@@ -6,7 +6,7 @@ import murmurhash from 'murmurhash-js'
 export class DefaultMap<K, V> extends Map<K, V> {
   constructor(
     private defaultValue: () => V,
-    entries?: Iterable<[K, V]>,
+    entries?: Iterable<[K, V]>
   ) {
     super(entries)
   }
@@ -34,7 +34,7 @@ export class DefaultMap<K, V> extends Map<K, V> {
 // 32767 is the max for Chrome 14, all others are higher
 // TODO: investigate the performance of this and other approaches
 const chunkSize = 30000
-export function chunkedArrayPush(array: unknown[], other: unknown[]) {
+export function chunkedArrayPush(array: Array<unknown>, other: Array<unknown>) {
   if (other.length <= chunkSize) {
     array.push(...other)
   } else {
@@ -51,14 +51,14 @@ const hashCache = new WeakMap()
  * Replacer function for JSON.stringify that converts unsupported types to strings
  */
 function hashReplacer(_key: string, value: any): any {
-  if (typeof value === 'bigint') {
+  if (typeof value === `bigint`) {
     return String(value)
-  } else if (typeof value === 'symbol') {
+  } else if (typeof value === `symbol`) {
     return String(value)
-  } else if (typeof value === 'function') {
+  } else if (typeof value === `function`) {
     return String(value)
   } else if (value === undefined) {
-    return 'undefined'
+    return `undefined`
   } else if (value instanceof Map) {
     return `Map(${JSON.stringify(Array.from(value.entries()), hashReplacer)})`
   } else if (value instanceof Set) {
@@ -74,7 +74,7 @@ export function hash(data: any): string {
   if (
     data === null ||
     data === undefined ||
-    (typeof data !== 'object' && typeof data !== 'function')
+    (typeof data !== `object` && typeof data !== `function`)
   ) {
     // Can't be cached in the weak map because it's not an object
     const serialized = JSON.stringify(data, hashReplacer)
@@ -92,9 +92,9 @@ export function hash(data: any): string {
 }
 
 export function binarySearch<T>(
-  array: T[],
+  array: Array<T>,
   value: T,
-  comparator: (a: T, b: T) => number,
+  comparator: (a: T, b: T) => number
 ): number {
   let low = 0
   let high = array.length
@@ -127,7 +127,7 @@ export class ObjectIdGenerator {
    */
   getId(value: any): number {
     // For primitives, use a simple hash of their string representation
-    if (typeof value !== 'object' || value === null) {
+    if (typeof value !== `object` || value === null) {
       const str = String(value)
       let hash = 0
       for (let i = 0; i < str.length; i++) {
@@ -149,9 +149,9 @@ export class ObjectIdGenerator {
    * Get a string representation of the ID for use in composite keys.
    */
   getStringId(value: any): string {
-    if (value === null) return 'null'
-    if (value === undefined) return 'undefined'
-    if (typeof value !== 'object') return `str_${String(value)}`
+    if (value === null) return `null`
+    if (value === undefined) return `undefined`
+    if (typeof value !== `object`) return `str_${String(value)}`
 
     return `obj_${this.getId(value)}`
   }

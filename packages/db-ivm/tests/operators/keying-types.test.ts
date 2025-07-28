@@ -1,7 +1,8 @@
-import { describe, it, expectTypeOf } from 'vitest'
-import { D2 } from '../../src/d2.js'
-import { keyBy, unkey, rekey, Keyed } from '../../src/operators/keying.js'
-import { IStreamBuilder } from '../../src/types.js'
+import { describe, expectTypeOf, it } from "vitest"
+import { D2 } from "../../src/d2.js"
+import { keyBy, rekey, unkey } from "../../src/operators/keying.js"
+import type { Keyed } from "../../src/operators/keying.js"
+import type { IStreamBuilder } from "../../src/types.js"
 
 interface TestItem {
   id: number
@@ -9,8 +10,8 @@ interface TestItem {
   value: number
 }
 
-describe('keying operator types', () => {
-  it('should correctly type keyBy', () => {
+describe(`keying operator types`, () => {
+  it(`should correctly type keyBy`, () => {
     const d2 = new D2()
     const input = d2.newInput<TestItem>()
 
@@ -18,7 +19,7 @@ describe('keying operator types', () => {
     expectTypeOf(keyed).toEqualTypeOf<IStreamBuilder<Keyed<number, TestItem>>>()
   })
 
-  it('should correctly type unkey', () => {
+  it(`should correctly type unkey`, () => {
     const d2 = new D2()
     const input = d2.newInput<Keyed<number, TestItem>>()
 
@@ -26,7 +27,7 @@ describe('keying operator types', () => {
     expectTypeOf(unkeyed).toEqualTypeOf<IStreamBuilder<TestItem>>()
   })
 
-  it('should correctly type rekey', () => {
+  it(`should correctly type rekey`, () => {
     const d2 = new D2()
     const input = d2.newInput<Keyed<number, TestItem>>()
 
@@ -36,7 +37,7 @@ describe('keying operator types', () => {
     >()
   })
 
-  it('should maintain type safety through chaining', () => {
+  it(`should maintain type safety through chaining`, () => {
     const d2 = new D2()
     const input = d2.newInput<TestItem>()
 

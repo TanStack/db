@@ -1,5 +1,5 @@
-import { MultiSet } from './multiset.js'
-import { DefaultMap } from './utils.js'
+import { MultiSet } from "./multiset.js"
+import { DefaultMap } from "./utils.js"
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
@@ -21,11 +21,11 @@ export class Index<K, V> {
     return `Index(${JSON.stringify(
       [...this.#inner].map(([k, valueMap]) => [k, [...valueMap]]),
       undefined,
-      indent ? '  ' : undefined,
+      indent ? `  ` : undefined
     )})`
   }
 
-  get(key: K): [V, number][] {
+  get(key: K): Array<[V, number]> {
     const valueMap = this.#inner.get(key)
     return [...valueMap.entries()]
   }
@@ -82,7 +82,7 @@ export class Index<K, V> {
   }
 
   join<V2>(other: Index<K, V2>): MultiSet<[K, [V, V2]]> {
-    const result: [[K, [V, V2]], number][] = []
+    const result: Array<[[K, [V, V2]], number]> = []
 
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.

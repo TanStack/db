@@ -1,12 +1,12 @@
-import { IStreamBuilder, KeyValue } from '../types.js'
-import { map } from './map.js'
-import { reduce } from './reduce.js'
+import { map } from "./map.js"
+import { reduce } from "./reduce.js"
+import type { IStreamBuilder, KeyValue } from "../types.js"
 
 type GroupKey = Record<string, unknown>
 
 type BasicAggregateFunction<T, R, V = unknown> = {
   preMap: (data: T) => V
-  reduce: (values: [V, number][]) => V
+  reduce: (values: Array<[V, number]>) => V
   postMap?: (result: V) => R
 }
 
@@ -26,9 +26,9 @@ type AggregatesReturnType<T, A> = {
 }
 
 function isPipedAggregateFunction<T, R>(
-  aggregate: AggregateFunction<T, R>,
+  aggregate: AggregateFunction<T, R>
 ): aggregate is PipedAggregateFunction<T, R> {
-  return 'pipe' in aggregate
+  return `pipe` in aggregate
 }
 
 /**
@@ -45,23 +45,23 @@ export function groupBy<
 
   const basicAggregates = Object.fromEntries(
     Object.entries(aggregates).filter(
-      ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
-    ),
+      ([_, aggregate]) => !isPipedAggregateFunction(aggregate)
+    )
   ) as Record<string, BasicAggregateFunction<T, any, any>>
 
   // @ts-expect-error - TODO: we don't use this yet, but we will
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const pipedAggregates = Object.fromEntries(
     Object.entries(aggregates).filter(([_, aggregate]) =>
-      isPipedAggregateFunction(aggregate),
-    ),
+      isPipedAggregateFunction(aggregate)
+    )
   ) as Record<string, PipedAggregateFunction<T, any>>
 
   return (
-    stream: IStreamBuilder<T>,
+    stream: IStreamBuilder<T>
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
-    const KEY_SENTINEL = '__original_key__'
+    const KEY_SENTINEL = `__original_key__`
 
     // First map to extract keys and pre-aggregate values
     const withKeysAndValues = stream.pipe(
@@ -81,7 +81,7 @@ export function groupBy<
         }
 
         return [keyString, values] as KeyValue<string, Record<string, unknown>>
-      }),
+      })
     )
 
     // Then reduce to compute aggregates
@@ -101,19 +101,19 @@ export function groupBy<
         const result: Record<string, unknown> = {}
 
         // Get the original key from first value in group
-        const originalKey = values[0][0][KEY_SENTINEL]
+        const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
         result[KEY_SENTINEL] = originalKey
 
         // Apply each aggregate function
         for (const [name, aggregate] of Object.entries(basicAggregates)) {
           const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number],
+            ([v, m]) => [v[name], m] as [any, number]
           )
           result[name] = aggregate.reduce(preValues)
         }
 
         return [[result, 1]]
-      }),
+      })
     )
 
     // Finally map to extract the key and include all values
@@ -139,7 +139,7 @@ export function groupBy<
 
         // Return with the string key instead of the object
         return [keyString, result] as KeyValue<string, ResultType>
-      }),
+      })
     )
   }
 }
@@ -148,11 +148,11 @@ export function groupBy<
  * Creates a sum aggregate function
  */
 export function sum<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
 ): AggregateFunction<T, number, number> {
   return {
     preMap: (data: T) => valueExtractor(data),
-    reduce: (values: [number, number][]) => {
+    reduce: (values: Array<[number, number]>) => {
       let total = 0
       for (const [value, multiplicity] of values) {
         total += value * multiplicity
@@ -168,12 +168,12 @@ export function sum<T>(
 export function count<T>(): AggregateFunction<T, number, number> {
   return {
     preMap: () => 1,
-    reduce: (values: [number, number][]) => {
-      let count = 0
+    reduce: (values: Array<[number, number]>) => {
+      let totalCount = 0
       for (const [_, multiplicity] of values) {
-        count += multiplicity
+        totalCount += multiplicity
       }
-      return count
+      return totalCount
     },
   }
 }
@@ -182,14 +182,14 @@ export function count<T>(): AggregateFunction<T, number, number> {
  * Creates an average aggregate function
  */
 export function avg<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
 ): AggregateFunction<T, number, { sum: number; count: number }> {
   return {
     preMap: (data: T) => ({
       sum: valueExtractor(data),
       count: 0,
     }),
-    reduce: (values: [{ sum: number; count: number }, number][]) => {
+    reduce: (values: Array<[{ sum: number; count: number }, number]>) => {
       let totalSum = 0
       let totalCount = 0
       for (const [value, multiplicity] of values) {
@@ -212,11 +212,11 @@ export function avg<T>(
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
 export function min<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
 ): AggregateFunction<T, number, number> {
   return {
     preMap: (data: T) => valueExtractor(data),
-    reduce: (values: [number, number][]) => {
+    reduce: (values: Array<[number, number]>) => {
       let minValue = Number.POSITIVE_INFINITY
       for (const [value, _multiplicity] of values) {
         if (value < minValue) {
@@ -233,11 +233,11 @@ export function min<T>(
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
 export function max<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
 ): AggregateFunction<T, number, number> {
   return {
     preMap: (data: T) => valueExtractor(data),
-    reduce: (values: [number, number][]) => {
+    reduce: (values: Array<[number, number]>) => {
       let maxValue = Number.NEGATIVE_INFINITY
       for (const [value, _multiplicity] of values) {
         if (value > maxValue) {
@@ -255,13 +255,13 @@ export function max<T>(
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
 export function median<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
-): AggregateFunction<T, number, number[]> {
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
+): AggregateFunction<T, number, Array<number>> {
   return {
     preMap: (data: T) => [valueExtractor(data)],
-    reduce: (values: [number[], number][]) => {
+    reduce: (values: Array<[Array<number>, number]>) => {
       // Flatten all values, taking multiplicity into account
-      const allValues: number[] = []
+      const allValues: Array<number> = []
       for (const [valueArray, multiplicity] of values) {
         for (const value of valueArray) {
           // Add each value multiple times based on multiplicity
@@ -281,18 +281,18 @@ export function median<T>(
 
       return allValues
     },
-    postMap: (result: number[]) => {
+    postMap: (result: Array<number>) => {
       if (result.length === 0) return 0
 
       const mid = Math.floor(result.length / 2)
 
       // If even number of values, average the two middle values
       if (result.length % 2 === 0) {
-        return (result[mid - 1] + result[mid]) / 2
+        return (result[mid - 1]! + result[mid]!) / 2
       }
 
       // If odd number of values, return the middle value
-      return result[mid]
+      return result[mid]!
     },
   }
 }
@@ -303,23 +303,23 @@ export function median<T>(
  * @param valueExtractor Function to extract a value from each data entry
  */
 export function mode<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number,
+  valueExtractor: (value: T) => number = (v) => v as unknown as number
 ): AggregateFunction<T, number, Map<number, number>> {
   return {
     preMap: (data: T) => {
       const value = valueExtractor(data)
-      const map = new Map<number, number>()
-      map.set(value, 1)
-      return map
+      const frequencyMap = new Map<number, number>()
+      frequencyMap.set(value, 1)
+      return frequencyMap
     },
-    reduce: (values: [Map<number, number>, number][]) => {
+    reduce: (values: Array<[Map<number, number>, number]>) => {
       // Combine all frequency maps
       const combinedMap = new Map<number, number>()
 
-      for (const [map, multiplicity] of values) {
-        for (const [value, count] of map.entries()) {
+      for (const [frequencyMap, multiplicity] of values) {
+        for (const [value, frequencyCount] of frequencyMap.entries()) {
           const currentCount = combinedMap.get(value) || 0
-          combinedMap.set(value, currentCount + count * multiplicity)
+          combinedMap.set(value, currentCount + frequencyCount * multiplicity)
         }
       }
 
