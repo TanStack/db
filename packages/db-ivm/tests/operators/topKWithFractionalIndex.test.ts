@@ -50,7 +50,7 @@ function verifyOrder(results: Array<any>, expectedOrder: Array<string>) {
 
   // Now check that the indices result in the correct order
   const valueToIndex = new Map()
-  for (const [[_, [value, index]]] of results) {
+  for (const [[_key, [value, index]]] of results) {
     valueToIndex.set(value.value, index)
   }
 
@@ -71,7 +71,7 @@ describe(`Operators`, () => {
   describe.each([
     [`with array`, { topK: topKWithFractionalIndex }],
     [`with B+ tree`, { topK: topKWithFractionalIndexBTree }],
-  ])(`TopKWithFractionalIndex operator %s`, (_, { topK }) => {
+  ])(`TopKWithFractionalIndex operator %s`, (_name, { topK }) => {
     it(`should assign fractional indices to sorted elements`, () => {
       const graph = new D2()
       const input = graph.newInput<[null, { id: number; value: string }]>()

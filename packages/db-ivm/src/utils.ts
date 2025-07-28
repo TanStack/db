@@ -129,13 +129,13 @@ export class ObjectIdGenerator {
     // For primitives, use a simple hash of their string representation
     if (typeof value !== `object` || value === null) {
       const str = String(value)
-      let hash = 0
+      let hashValue = 0
       for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i)
-        hash = (hash << 5) - hash + char
-        hash = hash & hash // Convert to 32-bit integer
+        hashValue = (hashValue << 5) - hashValue + char
+        hashValue = hashValue & hashValue // Convert to 32-bit integer
       }
-      return hash
+      return hashValue
     }
 
     // For objects, use WeakMap to assign unique IDs

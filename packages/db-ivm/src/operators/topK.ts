@@ -20,11 +20,11 @@ interface TopKOptions {
  * @returns A piped operator that limits the number of results
  */
 export function topK<
-  K extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1 extends T extends KeyValue<K, infer V> ? V : never,
+  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
+  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   T,
 >(
-  comparator: (a: V1, b: V1) => number,
+  comparator: (a: V1Type, b: V1Type) => number,
   options?: TopKOptions
 ): PipedOperator<T, T> {
   const limit = options?.limit ?? Infinity
@@ -37,7 +37,7 @@ export function topK<
         const consolidated = new MultiSet(values).consolidate()
         const sortedValues = consolidated
           .getInner()
-          .sort((a, b) => comparator(a[0] as V1, b[0] as V1))
+          .sort((a, b) => comparator(a[0] as V1Type, b[0] as V1Type))
         return sortedValues.slice(offset, offset + limit)
       })
     )
@@ -58,21 +58,21 @@ export function topK<
  * @returns A piped operator that orders the elements and limits the number of results
  */
 export function topKWithIndex<
-  K extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1 extends T extends KeyValue<K, infer V> ? V : never,
+  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
+  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   T,
 >(
-  comparator: (a: V1, b: V1) => number,
+  comparator: (a: V1Type, b: V1Type) => number,
   options?: TopKOptions
-): PipedOperator<T, KeyValue<K, [V1, number]>> {
+): PipedOperator<T, KeyValue<KType, [V1Type, number]>> {
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
 
   return (
     stream: IStreamBuilder<T>
-  ): IStreamBuilder<KeyValue<K, [V1, number]>> => {
+  ): IStreamBuilder<KeyValue<KType, [V1Type, number]>> => {
     const reduced = stream.pipe(
-      reduce<K, V1, [V1, number], T>((values) => {
+      reduce<KType, V1Type, [V1Type, number], T>((values) => {
         // `values` is a list of tuples, first element is the value, second is the multiplicity
         const consolidated = new MultiSet(values).consolidate()
         let i = offset
@@ -80,7 +80,7 @@ export function topKWithIndex<
           .getInner()
           .sort((a, b) => comparator(a[0], b[0]))
           .slice(offset, offset + limit)
-          .map(([value, multiplicity]): [[V1, number], number] => [
+          .map(([value, multiplicity]): [[V1Type, number], number] => [
             [value, i++],
             multiplicity,
           ])

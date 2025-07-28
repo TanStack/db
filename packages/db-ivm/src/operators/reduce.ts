@@ -101,19 +101,19 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
  * Reduces the elements in the stream by key (version-free)
  */
 export function reduce<
-  K extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1 extends T extends KeyValue<K, infer V> ? V : never,
+  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
+  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   R,
   T,
->(f: (values: Array<[V1, number]>) => Array<[R, number]>) {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<K, R>> => {
-    const output = new StreamBuilder<KeyValue<K, R>>(
+>(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {
+  return (stream: IStreamBuilder<T>): IStreamBuilder<KeyValue<KType, R>> => {
+    const output = new StreamBuilder<KeyValue<KType, R>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, R>>()
+      new DifferenceStreamWriter<KeyValue<KType, R>>()
     )
-    const operator = new ReduceOperator<K, V1, R>(
+    const operator = new ReduceOperator<KType, V1Type, R>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
+      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
       output.writer,
       f
     )

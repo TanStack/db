@@ -39,8 +39,8 @@ let BTree: BTreeClass | undefined
 
 export async function loadBTree() {
   if (BTree === undefined) {
-    const { default: BTreeClass } = await import(`sorted-btree`)
-    BTree = BTreeClass
+    const { default: _BTreeClass } = await import(`sorted-btree`)
+    BTree = _BTreeClass
   }
 }
 
@@ -270,13 +270,13 @@ export class TopKWithFractionalIndexBTreeOperator<
  * @returns A piped operator that orders the elements and limits the number of results
  */
 export function topKWithFractionalIndexBTree<
-  K extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1 extends T extends KeyValue<K, infer V> ? V : never,
+  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
+  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
   T,
 >(
-  comparator: (a: V1, b: V1) => number,
+  comparator: (a: V1Type, b: V1Type) => number,
   options?: TopKWithFractionalIndexOptions
-): PipedOperator<T, KeyValue<K, [V1, string]>> {
+): PipedOperator<T, KeyValue<KType, [V1Type, string]>> {
   const opts = options || {}
 
   if (BTree === undefined) {
@@ -287,14 +287,14 @@ export function topKWithFractionalIndexBTree<
 
   return (
     stream: IStreamBuilder<T>
-  ): IStreamBuilder<KeyValue<K, [V1, string]>> => {
-    const output = new StreamBuilder<KeyValue<K, [V1, string]>>(
+  ): IStreamBuilder<KeyValue<KType, [V1Type, string]>> => {
+    const output = new StreamBuilder<KeyValue<KType, [V1Type, string]>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, [V1, string]>>()
+      new DifferenceStreamWriter<KeyValue<KType, [V1Type, string]>>()
     )
-    const operator = new TopKWithFractionalIndexOperator<K, V1>(
+    const operator = new TopKWithFractionalIndexOperator<KType, V1Type>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
+      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
       output.writer,
       comparator,
       opts

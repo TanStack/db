@@ -13,10 +13,10 @@ export class OutputOperator<T> extends UnaryOperator<T> {
   constructor(
     id: number,
     inputA: DifferenceStreamReader<T>,
-    output: DifferenceStreamWriter<T>,
+    outputWriter: DifferenceStreamWriter<T>,
     fn: (data: MultiSet<T>) => void
   ) {
-    super(id, inputA, output)
+    super(id, inputA, outputWriter)
     this.#fn = fn
   }
 
