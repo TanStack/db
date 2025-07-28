@@ -1,0 +1,22 @@
+version: "3.3"
+name: "tanstack-start-db-projects"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: projects
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - 54321:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+    command:
+      - -c
+      - listen_addresses=*
+
+volumes:
+  postgres_data:
