@@ -925,6 +925,85 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(graceIndex).toBeLessThan(3) // Should be among the nulls
       })
     })
+
+    describe(`String Comparison Tests`, () => {
+      it(`handles case differently in lexical vs locale string comparison`, async () => {
+        const numericEmployees = [
+          {
+            id: 1,
+            name: `Charlie`,
+            department_id: 1,
+            salary: 50000,
+            hire_date: `2020-01-15`,
+          },
+          {
+            id: 2,
+            name: `alice`,
+            department_id: 1,
+            salary: 50000,
+            hire_date: `2020-01-15`,
+          },
+          {
+            id: 3,
+            name: `bob`,
+            department_id: 1,
+            salary: 50000,
+            hire_date: `2020-01-15`,
+          },
+        ]
+
+        const numericCollection = createCollection(
+          mockSyncCollectionOptions<Employee>({
+            id: `test-numeric-employees`,
+            getKey: (employee) => employee.id,
+            initialData: numericEmployees,
+            autoIndex,
+          })
+        )
+
+        // Test lexical sorting (should sort by character code)
+        const lexicalCollection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: numericCollection })
+            .orderBy(({ employees }) => employees.name, {
+              direction: `asc`,
+              stringSort: `lexical`,
+            })
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+            }))
+        )
+        await lexicalCollection.preload()
+
+        // In lexical comparison, uppercase letters come before lowercase letters
+        const lexicalResults = Array.from(lexicalCollection.values())
+        expect(lexicalResults.map((r) => r.name)).toEqual([
+          `Charlie`,
+          `alice`,
+          `bob`,
+        ])
+
+        // Test locale sorting with numeric collation (default)
+        const localeCollection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: numericCollection })
+            .orderBy(({ employees }) => employees.name, `asc`)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+            }))
+        )
+        await localeCollection.preload()
+
+        const localeResults = Array.from(localeCollection.values())
+        expect(localeResults.map((r) => r.name)).toEqual([
+          `alice`,
+          `bob`,
+          `Charlie`,
+        ])
+      })
+    })
   })
 }
 

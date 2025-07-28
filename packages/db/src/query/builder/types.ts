@@ -78,6 +78,24 @@ export type OrderByCallback<TContext extends Context> = (
 export type OrderByOptions = {
   direction?: OrderByDirection
   nulls?: `first` | `last`
+} & StringSortOpts
+
+export type StringSortOpts =
+  | {
+      stringSort?: `lexical`
+    }
+  | {
+      stringSort?: `locale`
+      locale?: string
+      localeOptions?: object
+    }
+
+export type CompareOptions = {
+  direction: OrderByDirection
+  nulls: `first` | `last`
+  stringSort: `lexical` | `locale`
+  locale?: string
+  localeOptions?: object
 }
 
 // Callback type for groupBy clauses

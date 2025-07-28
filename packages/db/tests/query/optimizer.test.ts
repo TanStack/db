@@ -366,8 +366,11 @@ describe(`Query Optimizer`, () => {
         orderBy: [
           {
             expression: createPropRef(`u`, `name`),
-            direction: `asc`,
-            nulls: `first`,
+            compareOptions: {
+              direction: `asc`,
+              nulls: `first`,
+              stringSort: `locale`,
+            },
           },
         ],
         limit: 10,
@@ -1158,8 +1161,11 @@ describe(`Query Optimizer`, () => {
         orderBy: [
           {
             expression: createPropRef(`u`, `salary`),
-            direction: `desc`,
-            nulls: `first`,
+            compareOptions: {
+              direction: `desc`,
+              nulls: `first`,
+              stringSort: `locale`,
+            },
           },
         ],
         limit: 10, // Top 10 highest paid users
@@ -1318,8 +1324,11 @@ describe(`Query Optimizer`, () => {
         orderBy: [
           {
             expression: createPropRef(`u`, `name`),
-            direction: `asc`,
-            nulls: `first`,
+            compareOptions: {
+              direction: `asc`,
+              nulls: `first`,
+              stringSort: `locale`,
+            },
           },
         ],
         // No LIMIT or OFFSET - safe to optimize

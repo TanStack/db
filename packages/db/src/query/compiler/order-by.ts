@@ -1,5 +1,5 @@
 import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
-import { ascComparator, descComparator } from "../../utils/comparison.js"
+import { defaultComparator, makeComparator } from "../../utils/comparison.js"
 import { compileExpression } from "./evaluators.js"
 import type { OrderByClause } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
@@ -19,8 +19,7 @@ export function processOrderBy(
   // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => ({
     compiledExpression: compileExpression(clause.expression),
-    direction: clause.direction,
-    nulls: clause.nulls,
+    compareOptions: clause.compareOptions,
   }))
 
   // Create a value extractor function for the orderBy operator
@@ -54,41 +53,31 @@ export function processOrderBy(
   }
 
   // Create a multi-property comparator that respects the order and direction of each property
-  const makeComparator = () => {
-    return (a: unknown, b: unknown) => {
-      // If we're comparing arrays (multiple properties), compare each property in order
-      if (orderByClause.length > 1) {
-        const arrayA = a as Array<unknown>
-        const arrayB = b as Array<unknown>
-        for (let i = 0; i < orderByClause.length; i++) {
-          const clause = orderByClause[i]!
-          const direction = clause.direction
-          const nulls = clause.nulls
-          const compareFn =
-            direction === `desc` ? descComparator : ascComparator
-          const result = compareFn(arrayA[i], arrayB[i], nulls)
-          if (result !== 0) {
-            return result
-          }
+  const comparator = (a: unknown, b: unknown) => {
+    // If we're comparing arrays (multiple properties), compare each property in order
+    if (orderByClause.length > 1) {
+      const arrayA = a as Array<unknown>
+      const arrayB = b as Array<unknown>
+      for (let i = 0; i < orderByClause.length; i++) {
+        const clause = orderByClause[i]!
+        const compareFn = makeComparator(clause.compareOptions)
+        const result = compareFn(arrayA[i], arrayB[i])
+        if (result !== 0) {
+          return result
         }
-        return arrayA.length - arrayB.length
       }
-
-      // Single property comparison
-      if (orderByClause.length === 1) {
-        const clause = orderByClause[0]!
-        const direction = clause.direction
-        const nulls = clause.nulls
-        return direction === `desc`
-          ? descComparator(a, b, nulls)
-          : ascComparator(a, b, nulls)
-      }
-
-      return ascComparator(a, b, `first`)
+      return arrayA.length - arrayB.length
     }
-  }
 
-  const comparator = makeComparator()
+    // Single property comparison
+    if (orderByClause.length === 1) {
+      const clause = orderByClause[0]!
+      const compareFn = makeComparator(clause.compareOptions)
+      return compareFn(a, b)
+    }
+
+    return defaultComparator(a, b)
+  }
 
   // Use fractional indexing and return the tuple [value, index]
   return pipeline.pipe(
