@@ -2,8 +2,11 @@ import { createCollection } from "@tanstack/react-db"
 import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
+import { firebaseCollectionOptions } from "@tanstack/firebase-db-collection"
 import { QueryClient } from "@tanstack/query-core"
 import { initClient } from "trailbase"
+import { initializeApp } from "firebase/app"
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore"
 import { selectConfigSchema, selectTodoSchema } from "../db/validation"
 import { api } from "./api"
 import type { SelectConfig, SelectTodo } from "../db/validation"
@@ -13,6 +16,17 @@ const queryClient = new QueryClient()
 
 // Create a TrailBase client.
 const trailBaseClient = initClient(`http://localhost:4000`)
+
+// Initialize Firebase
+const firebaseApp = initializeApp({
+  projectId: `tanstack-db-demo`,
+})
+const firestore = getFirestore(firebaseApp)
+
+// Connect to emulator in development
+if (import.meta.env.DEV) {
+  connectFirestoreEmulator(firestore, `localhost`, 8080)
+}
 
 // Electric Todo Collection
 export const electricTodoCollection = createCollection(
@@ -225,6 +239,42 @@ export const trailBaseConfigCollection = createCollection(
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
       updated_at: (date) => Math.floor(date.valueOf() / 1000),
+    },
+  })
+)
+
+// Firebase Todo Collection
+export const firebaseTodoCollection = createCollection(
+  firebaseCollectionOptions({
+    id: `todos`,
+    firestore,
+    collectionName: `todos`,
+    getKey: (item) => item.id,
+    schema: selectTodoSchema,
+    rowUpdateMode: `partial`,
+    parse: {
+      created_at: (timestamp: any) =>
+        timestamp?.toDate?.() || new Date(timestamp),
+      updated_at: (timestamp: any) =>
+        timestamp?.toDate?.() || new Date(timestamp),
+    },
+  })
+)
+
+// Firebase Config Collection
+export const firebaseConfigCollection = createCollection(
+  firebaseCollectionOptions({
+    id: `config`,
+    firestore,
+    collectionName: `config`,
+    getKey: (item) => item.id,
+    schema: selectConfigSchema,
+    rowUpdateMode: `partial`,
+    parse: {
+      created_at: (timestamp: any) =>
+        timestamp?.toDate?.() || new Date(timestamp),
+      updated_at: (timestamp: any) =>
+        timestamp?.toDate?.() || new Date(timestamp),
     },
   })
 )

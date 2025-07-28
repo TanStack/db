@@ -4,6 +4,7 @@
   "version": "0.0.38",
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.0.14",
+    "@tanstack/firebase-db-collection": "file:../../../packages/firebase-db-collection",
     "@tanstack/query-core": "^5.75.7",
     "@tanstack/query-db-collection": "^0.0.14",
     "@tanstack/react-db": "^0.0.32",
@@ -14,6 +15,7 @@
     "drizzle-orm": "^0.40.1",
     "drizzle-zod": "^0.7.0",
     "express": "^4.19.2",
+    "firebase": "^11.2.0",
     "postgres": "^3.4.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -39,6 +41,7 @@
     "eslint": "^9.22.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "firebase-tools": "^13.31.0",
     "pg": "^8.14.1",
     "tsx": "^4.6.2",
     "typescript": "^5.8.2",
@@ -50,7 +53,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "dev": "docker compose up -d && vite dev",
+    "dev": "docker compose up -d && firebase emulators:start --only firestore & vite dev",
+    "dev:no-emulator": "docker compose up -d && vite dev",
     "lint": "eslint . --fix",
     "preview": "vite preview"
   },
