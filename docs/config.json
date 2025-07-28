@@ -20,8 +20,8 @@
         {
           "label": "Installation",
           "to": "installation"
-        },
-      ],
+        }
+      ]
     },
     {
       "label": "Guides",
@@ -39,6 +39,6 @@
           "to": "collection-options-creator"
         }
       ]
-    },
+    }
   ]
 }
