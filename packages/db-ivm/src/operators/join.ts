@@ -93,15 +93,30 @@ export function join<
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   switch (type) {
     case `inner`:
-      return innerJoin(other)
+      return innerJoin(other) as unknown as PipedOperator<
+        T,
+        KeyValue<K, [V1, V2]>
+      >
     case `anti`:
-      return antiJoin(other)
+      return antiJoin(other) as unknown as PipedOperator<
+        T,
+        KeyValue<K, [V1, null]>
+      >
     case `left`:
-      return leftJoin(other)
+      return leftJoin(other) as unknown as PipedOperator<
+        T,
+        KeyValue<K, [V1, V2 | null]>
+      >
     case `right`:
-      return rightJoin(other)
+      return rightJoin(other) as unknown as PipedOperator<
+        T,
+        KeyValue<K, [V1 | null, V2]>
+      >
     case `full`:
-      return fullJoin(other)
+      return fullJoin(other) as unknown as PipedOperator<
+        T,
+        KeyValue<K, [V1 | null, V2 | null]>
+      >
     default:
       throw new Error(`Join type ${type} is invalid`)
   }

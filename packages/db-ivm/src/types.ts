@@ -1,5 +1,10 @@
 import type { MultiSet, MultiSetArray } from "./multiset.js"
-import type { DifferenceStreamReader, DifferenceStreamWriter, UnaryOperator, BinaryOperator } from "./graph.js"
+import type {
+  BinaryOperator,
+  DifferenceStreamReader,
+  DifferenceStreamWriter,
+  UnaryOperator,
+} from "./graph.js"
 
 export type KeyValue<K, V> = [K, V]
 
