@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/solid-router"
+import { For, Show, createSignal } from "solid-js"
+import type { JSX } from "solid-js"
 import type { Collection } from "@tanstack/solid-db"
 import type { SelectConfig, SelectTodo } from "../db/validation"
-import { createSignal, For, JSX, Show } from "solid-js"
 
 interface TodoAppProps {
   todos: Array<SelectTodo>
@@ -93,13 +94,13 @@ export function TodoApp(props: TodoAppProps) {
 
   const titleColor = getComplementaryColor(backgroundColor)
 
-  const handleColorChange: JSX.CustomEventHandlersCamelCase<HTMLInputElement>["onInput"] =
+  const handleColorChange: JSX.CustomEventHandlersCamelCase<HTMLInputElement>[`onInput`] =
     (e) => {
       const newColor = e.target.value
       setConfigValue(`backgroundColor`, newColor)
     }
 
-  const handleSubmit: JSX.CustomEventHandlersCamelCase<HTMLFormElement>["onSubmit"] =
+  const handleSubmit: JSX.CustomEventHandlersCamelCase<HTMLFormElement>[`onSubmit`] =
     (e) => {
       e.preventDefault()
       if (!newTodo().trim()) return
@@ -122,7 +123,7 @@ export function TodoApp(props: TodoAppProps) {
       class="min-h-screen flex items-start justify-center overflow-auto py-8"
       style={{ "background-color": backgroundColor }}
     >
-      <div style={{ width: "550px" }} class="mx-auto relative">
+      <div style={{ width: `550px` }} class="mx-auto relative">
         <div class="text-center mb-8">
           <h1 class="text-[70px] font-bold mb-4" style={{ color: titleColor }}>
             {props.title}
