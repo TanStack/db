@@ -1,14 +1,39 @@
-Welcome to your new TanStack [Start](https://tanstack.com/start/latest)/[DB](https://tanstack.com/db/latest) projects app!
+This is a TanStack Start project with tRPC API running on Start's server functions so it's easily deployable to many hosting platforms.
+
+All reads from the Postgres database are done via tRPC queries which populate TanStack DB query collections.
+
+We sync normalized data from tables into TanStack DB collections in the client & then write client-side queries for displaying data in components.
 
 # Getting Started
 
+## Create a new project
+
+To create a new project based on this starter, run the following commands:
+
+```
+npx gitpick tanstack/db/tree/main/examples/react/projects my-tanstack-db-project
+cd my-tanstack-db-project
+```
+
+Copy the .env.example file to .env and fill in the values.
+
+_The database url will be set by default to development postgres docker container, and during development the better-auth secret is not required._
+
+```
+cp .env.example .env
+```
+
 ## Running the Application
+
+__Note: Docker is required to run this starter__
 
 To run this application:
 
 ```bash
 npm install
 npm run dev
+
+# From a separate terminal
 npm run migrate
 ```
 
