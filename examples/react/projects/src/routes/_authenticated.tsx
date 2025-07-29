@@ -1,79 +1,46 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { Outlet } from "@tanstack/react-router"
-import { authClient } from "@/lib/auth-client"
 import {
-  useLiveQuery,
-  createCollection,
-  liveQueryCollectionOptions,
-  createLiveQueryCollection,
-  not,
-  like,
-  count,
-} from "@tanstack/react-db"
+  Link,
+  Outlet,
+  createFileRoute,
+  useNavigate,
+} from "@tanstack/react-router"
+import { useEffect, useState } from "react"
+import { useLiveQuery } from "@tanstack/react-db"
+import { authClient } from "@/lib/auth-client"
 import { projectCollection } from "@/lib/collections"
 
-export const Route = createFileRoute("/_authenticated")({
+export const Route = createFileRoute(`/_authenticated`)({
   component: AuthenticatedLayout,
   ssr: false,
 })
 
 function AuthenticatedLayout() {
   const { data: session, isPending } = authClient.useSession()
-  console.log({ session, isPending })
   const navigate = useNavigate()
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
-  const [newProjectName, setNewProjectName] = useState("")
+  const [newProjectName, setNewProjectName] = useState(``)
 
-  const countQuery = createLiveQueryCollection({
-    query: (q) =>
-      q.from({ projects: projectCollection }).select(({ projects }) => ({
-        count: count(projects.id),
-      })),
-  })
-  const newQuery = createCollection(
-    liveQueryCollectionOptions({
-      query: (q) =>
-        q
-          .from({ projects: projectCollection })
-          .where(({ projects }) => not(like(projects.name, `Default`))),
-    })
-  )
-
-  const { data: notDefault } = useLiveQuery(newQuery)
-  const { data: countData } = useLiveQuery(countQuery)
-  console.log({ notDefault, countData })
   const { data: projects, isLoading } = useLiveQuery((q) =>
     q.from({ projectCollection })
   )
 
   useEffect(() => {
-    if (!isPending && !session) {
-      navigate({
-        href: "/login",
+    if (session && projects.length === 0 && !isLoading) {
+      projectCollection.insert({
+        id: Math.floor(Math.random() * 100000),
+        name: `Default`,
+        description: `Default project`,
+        owner_id: session.user.id,
+        shared_user_ids: [],
+        created_at: new Date(),
+        updated_at: new Date(),
       })
-    }
-  }, [session, isPending, navigate])
-
-  useEffect(() => {
-    if (session && projects && !isLoading) {
-      const hasProject = projects.length > 0
-      if (!hasProject) {
-        projectCollection.insert({
-          id: Math.floor(Math.random() * 100000),
-          name: "Default",
-          description: "Default project",
-          owner_id: session.user.id,
-          shared_user_ids: [],
-          created_at: new Date(),
-        })
-      }
     }
   }, [session, projects, isLoading])
 
   const handleLogout = async () => {
     await authClient.signOut()
-    navigate({ to: "/login" })
+    navigate({ to: `/login` })
   }
 
   const handleCreateProject = () => {
@@ -81,12 +48,13 @@ function AuthenticatedLayout() {
       projectCollection.insert({
         id: Math.floor(Math.random() * 100000),
         name: newProjectName.trim(),
-        description: "",
+        description: ``,
         owner_id: session.user.id,
         shared_user_ids: [],
         created_at: new Date(),
+        updated_at: new Date(),
       })
-      setNewProjectName("")
+      setNewProjectName(``)
       setShowNewProjectForm(false)
     }
   }
@@ -154,7 +122,7 @@ function AuthenticatedLayout() {
                   type="text"
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
+                  onKeyDown={(e) => e.key === `Enter` && handleCreateProject()}
                   placeholder="Project name"
                   className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                 />

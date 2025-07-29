@@ -7,10 +7,13 @@ export const Route = createFileRoute(`/_authenticated/`)({
   component: IndexRedirect,
   ssr: false,
   loader: async () => {
-    console.log(1)
+    const timeout = setTimeout(() => {
+      window.location.href = `/login`
+    }, 500)
     await projectCollection.preload()
     await todoCollection.preload()
-    console.log(2)
+    clearTimeout(timeout)
+
     return null
   },
 })
@@ -20,10 +23,10 @@ function IndexRedirect() {
   const { data: projects } = useLiveQuery((q) => q.from({ projectCollection }))
 
   useEffect(() => {
-    if (projects && projects.length > 0) {
+    if (projects.length > 0) {
       const firstProject = projects[0]
       navigate({
-        to: "/project/$projectId",
+        to: `/project/$projectId`,
         params: { projectId: firstProject.id.toString() },
         replace: true,
       })
