@@ -1,10 +1,10 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.0.33",
+  "version": "0.1.0",
   "dependencies": {
-    "@electric-sql/d2mini": "^0.1.8",
-    "@standard-schema/spec": "^1.0.0"
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.0.9",

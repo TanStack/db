@@ -1,4 +1,4 @@
-import { distinct, filter, map } from "@electric-sql/d2mini"
+import { distinct, filter, map } from "@tanstack/db-ivm"
 import { optimizeQuery } from "../optimizer.js"
 import {
   CollectionInputNotFoundError,
