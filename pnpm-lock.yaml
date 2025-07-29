@@ -105,16 +105,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.0.15
+        specifier: ^0.1.0
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.75.7
         version: 5.75.7
       '@tanstack/query-db-collection':
-        specifier: ^0.0.15
+        specifier: ^0.1.0
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.0.33
+        specifier: ^0.1.0
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.125.6
@@ -123,7 +123,7 @@ importers:
         specifier: ^1.126.1
         version: 1.129.2(@netlify/blobs@9.1.2)(@tanstack/react-router@1.129.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(@vitejs/plugin-react@4.7.0(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.8.0)))(drizzle-orm@0.40.1(@types/pg@8.11.11)(gel@2.0.1)(kysely@0.27.6)(pg@8.14.1)(postgres@3.4.7))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(vite-plugin-solid@2.11.7(@testing-library/jest-dom@6.6.3)(solid-js@1.9.7)(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.8.0)))(vite@6.3.5(@types/node@22.13.10)(jiti@2.4.2)(lightningcss@1.29.2)(terser@5.43.1)(tsx@4.19.3)(yaml@2.8.0))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.0.9
+        specifier: ^0.1.0
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5

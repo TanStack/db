@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/vue-db",
   "description": "Vue integration for @tanstack/db",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
