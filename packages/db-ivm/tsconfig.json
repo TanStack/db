@@ -10,7 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "jsx": "react",
+    "jsx": "react"
   },
   "include": ["src", "tests", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]

@@ -1,4 +1,4 @@
-import { map } from "@electric-sql/d2mini"
+import { map } from "@tanstack/db-ivm"
 import { compileExpression } from "./evaluators.js"
 import type { Aggregate, BasicExpression, Select } from "../ir.js"
 import type {

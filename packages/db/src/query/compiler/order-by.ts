@@ -1,9 +1,9 @@
-import { orderByWithFractionalIndex } from "@electric-sql/d2mini"
+import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
 import { ascComparator, descComparator } from "../../utils/comparison.js"
 import { compileExpression } from "./evaluators.js"
 import type { OrderByClause } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
-import type { IStreamBuilder, KeyValue } from "@electric-sql/d2mini"
+import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 
 /**
  * Processes the ORDER BY clause

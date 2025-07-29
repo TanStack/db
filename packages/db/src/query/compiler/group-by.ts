@@ -1,4 +1,4 @@
-import { filter, groupBy, groupByOperators, map } from "@electric-sql/d2mini"
+import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
 import { Func, PropRef } from "../ir.js"
 import {
   AggregateFunctionNotInSelectError,

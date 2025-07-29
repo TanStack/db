@@ -1,8 +1,8 @@
 # IVM implementation for TanStack DB based on Differential Dataflow
 
-This is an implementation of differential dataflow for TanStack DB, forked from @electric-sql/d2ts, but simplified and without the complexities of multi-dimensional versioning.
+This is an implementation of differential dataflow used by TanStack DB, forked from [@electric-sql/d2ts](https://github.com/electric-sql/d2ts), but simplified and without the complexities of multi-dimensional versioning.
 
-It is used internally by the TanStack DB with the live quries compiled to a D2 graph. This library doesn't depend on the TanStack DB and so could be used in other projects.
+It is used internally by the TanStack DB with the live queries compiled to a D2 graph. This library doesn't depend on the TanStack DB and so could be used in other projects.
 
 The API is almost identical to D2TS, but without the need to specify a version when sending data, or to send a frontier to mark the end of a version.
 
@@ -11,7 +11,7 @@ The API is almost identical to D2TS, but without the need to specify a version w
 Here's a simple example that demonstrates the core concepts:
 
 ```typescript
-import { D2, map, filter, debug, MultiSet, v } from '@electric-sql/d2ts'
+import { D2, map, filter, debug, MultiSet } from "@tanstack/db-ivm"
 
 // Create a new D2 graph
 const graph = new D2()
@@ -28,7 +28,7 @@ const input = graph.newInput<number>()
 const output = input.pipe(
   map((x) => x + 5),
   filter((x) => x % 2 === 0),
-  debug('output'),
+  debug("output")
 )
 
 // Finalize the pipeline, after this point we can no longer add operators or
@@ -46,7 +46,7 @@ input.sendData(
     [1, 1],
     [2, 1],
     [3, 1],
-  ]),
+  ])
 )
 
 // Process the data

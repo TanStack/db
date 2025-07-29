@@ -322,12 +322,12 @@ importers:
 
   packages/db:
     dependencies:
-      '@electric-sql/d2mini':
-        specifier: ^0.1.8
-        version: 0.1.8
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
+      '@tanstack/db-ivm':
+        specifier: workspace:*
+        version: link:../db-ivm
       typescript:
         specifier: '>=4.7'
         version: 5.8.2
