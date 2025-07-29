@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
@@ -9,9 +10,9 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "NodeNext",
-    "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
     "noEmit": true,
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
@@ -21,7 +22,7 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "ES2020",
-    "jsx": "react-jsx"
+    "noErrorTruncation": true
   },
   "include": [
     "src/**/*.ts",
