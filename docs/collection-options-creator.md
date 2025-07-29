@@ -32,7 +32,7 @@ Every collection options creator must implement these key responsibilities:
 Define a configuration interface that extends or includes standard collection properties:
 
 ```typescript
-// Pattern A: User provides handlers (Query / Electric SQL style)
+// Pattern A: User provides handlers (Query / ElectricSQL style)
 interface MyCollectionConfig<TItem extends object> {
   // Your sync engine specific options
   connectionUrl: string
@@ -223,7 +223,7 @@ parse: {
 
 There are two distinct patterns for handling mutations in collection options creators:
 
-#### Pattern A: User-Provided Handlers (Electric SQL, Query)
+#### Pattern A: User-Provided Handlers (ElectricSQL, Query)
 
 The user provides mutation handlers in the config. Your collection creator passes them through:
 
