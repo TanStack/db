@@ -719,8 +719,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should use index of biggest collection when inner-joining collections`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -728,7 +728,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -738,7 +738,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -771,7 +771,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `inner`
               )
               .where(({ item, other }: any) =>
@@ -818,8 +818,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should not optimize inner join if biggest collection has no index on the join key`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -827,7 +827,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -837,7 +837,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -862,7 +862,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `inner`
               )
               .where(({ item, other }: any) =>
@@ -906,8 +906,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should use index of right collection when left-joining collections`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -915,7 +915,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -925,7 +925,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -939,7 +939,7 @@ describe(`Query Index Optimization`, () => {
 
       // Since we're using a left join, it will iterate over the left collection
       // and join in matching keys from the right collection
-      secondCollection.createIndex((row) => row.id)
+      secondCollection.createIndex((row) => row.id2)
 
       await secondCollection.stateWhenReady()
 
@@ -954,7 +954,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `left`
               )
               .where(({ item, other }: any) =>
@@ -1009,19 +1009,19 @@ describe(`Query Index Optimization`, () => {
           {
             type: `index`,
             operation: `eq`,
-            field: `id`,
+            field: `id2`,
             value: `1`,
           },
           {
             type: `index`,
             operation: `eq`,
-            field: `id`,
+            field: `id2`,
             value: `3`,
           },
           {
             type: `index`,
             operation: `eq`,
-            field: `id`,
+            field: `id2`,
             value: `5`,
           },
         ])
@@ -1040,8 +1040,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should not optimize left join if right collection has no index on the join key`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1049,7 +1049,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -1059,7 +1059,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -1084,7 +1084,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `left`
               )
               .where(({ item, other }: any) =>
@@ -1173,9 +1173,6 @@ describe(`Query Index Optimization`, () => {
       const tracker1 = createIndexUsageTracker(collection)
       const tracker2 = createIndexUsageTracker(secondCollection)
 
-      // TODO: make sure all join tests here use different names for the columns that are joined
-      //       such that we detect bugs due to the wrong join expr being used
-
       try {
         const liveQuery = createLiveQueryCollection({
           query: (q: any) =>
@@ -1228,8 +1225,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should not optimize right join if left collection has no index on the join key`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1237,7 +1234,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -1247,7 +1244,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -1272,7 +1269,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `right`
               )
               .where(({ item, other }: any) =>
