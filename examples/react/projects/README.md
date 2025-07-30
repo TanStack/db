@@ -25,7 +25,7 @@ cp .env.example .env
 
 ## Running the Application
 
-__Note: Docker is required to run this starter__
+**Note: Docker is required to run this starter**
 
 To run this application:
 
