@@ -206,7 +206,13 @@ function processJoin(
 
         // The joinedExpr is of the form `{ tableAlias }.{ joinKey }`
         // so we need to strip the table alias from this path
-        const [_, ...indexPath] = (joinedExpr as PropRef).path
+
+        const lazyCollectionJoinExpr =
+          activeCollection === `main`
+            ? (joinedExpr as PropRef)
+            : (mainExpr as PropRef)
+        const [_, ...indexPath] = lazyCollectionJoinExpr.path
+
         index ??= findIndexForField(lazyCollection.indexes, indexPath)
 
         // The `callbacks` object is passed by the liveQueryCollection to the compiler.
