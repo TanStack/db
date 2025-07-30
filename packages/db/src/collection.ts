@@ -37,6 +37,7 @@ import {
   UpdateKeyNotFoundError,
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
+import type { BasicExpression } from "./query/ir"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
@@ -1397,8 +1398,8 @@ export class CollectionImpl<
 
   /**
    * Creates an index on a collection for faster queries.
-   * Indexes significantly improve query performance by allowing binary search
-   * and range queries instead of full scans.
+   * Indexes significantly improve query performance by allowing constant time lookups
+   * and logarithmic time range queries instead of full scans.
    *
    * @template TResolver - The type of the index resolver (constructor or async loader)
    * @param indexCallback - Function that extracts the indexed value from each item
@@ -2281,6 +2282,65 @@ export class CollectionImpl<
       this.changeListeners.delete(filteredCallback)
       this.removeSubscriber()
     }
+  }
+
+  /**
+   * Subscribes to changes for a dynamic set of keys
+   * @param callback - Function that is called when items in the key set change
+   * @param whereExpression - Optional where expression to filter the changes (needed in case we need to switch back to a regular subscription)
+   * @returns An object with an add method to add keys to the subscription and an unsubscribe method to stop listening for changes
+   * @example
+   * const { add, unsubscribe } = collection.subscribeChangesDynamic((changes) => {
+   *   changes.forEach(change => {
+   *     console.log(`${change.type}: ${change.key}`, change.value)
+   *   })
+   * })
+   * add("user1")
+   */
+  subscribeChangesDynamic(
+    callback: (changes: Array<ChangeMessage<T>>) => void,
+    whereExpression?: BasicExpression<boolean>
+  ) {
+    const keys = new Set<string | number>()
+    const subscriptions = new Set<() => void>()
+    let switchedToRegularSubscription = false
+
+    const add = (keySet: Set<TKey>) => {
+      if (switchedToRegularSubscription) return
+      for (const key of keySet) {
+        if (keys.has(key)) break
+        keys.add(key)
+        subscriptions.add(
+          this.subscribeChangesKey(key, callback, {
+            includeInitialState: true,
+          })
+        )
+      }
+    }
+
+    const unsubscribe = () => {
+      subscriptions.forEach((unsub) => unsub())
+      subscriptions.clear()
+      keys.clear()
+    }
+
+    const switchToRegularSubscription = () => {
+      if (switchedToRegularSubscription) return
+      unsubscribe()
+      switchedToRegularSubscription = true
+      this.subscribeChanges(callback, {
+        includeInitialState: true,
+        whereExpression,
+      })
+    }
+
+    const res = {
+      add,
+      unsubscribe,
+      switchToRegularSubscription,
+    }
+
+    return res
   }
 
   /**

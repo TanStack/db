@@ -12,6 +12,8 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
+import type { LazyCollectionCallbacks } from "./joins.js"
+import type { Collection } from "../../collection.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -29,6 +31,8 @@ import type { QueryCache, QueryMapping } from "./types.js"
  * Result of query compilation including both the pipeline and collection-specific WHERE clauses
  */
 export interface CompilationResult {
+  /** The ID of the main collection */
+  collectionId: string
   /** The compiled query pipeline */
   pipeline: ResultStream
   /** Map of collection aliases to their WHERE clauses for index optimization */
@@ -46,6 +50,9 @@ export interface CompilationResult {
 export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection<any, any, any, any, any>>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazyCollections: Set<string>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
@@ -70,9 +77,16 @@ export function compileQuery(
   const tables: Record<string, KeyedStream> = {}
 
   // Process the FROM clause to get the main table
-  const { alias: mainTableAlias, input: mainInput } = processFrom(
+  const {
+    alias: mainTableAlias,
+    input: mainInput,
+    collectionId: mainCollectionId,
+  } = processFrom(
     query.from,
     allInputs,
+    collections,
+    callbacks,
+    lazyCollections,
     cache,
     queryMapping
   )
@@ -96,10 +110,14 @@ export function compileQuery(
       pipeline,
       query.join,
       tables,
+      mainCollectionId,
       mainTableAlias,
       allInputs,
       cache,
-      queryMapping
+      queryMapping,
+      collections,
+      callbacks,
+      lazyCollections
     )
   }
 
@@ -249,6 +267,7 @@ export function compileQuery(
     const result = resultPipeline
     // Cache the result before returning (use original query as key)
     const compilationResult = {
+      collectionId: mainCollectionId,
       pipeline: result,
       collectionWhereClauses,
     }
@@ -275,6 +294,7 @@ export function compileQuery(
   const result = resultPipeline
   // Cache the result before returning (use original query as key)
   const compilationResult = {
+    collectionId: mainCollectionId,
     pipeline: result,
     collectionWhereClauses,
   }
@@ -289,16 +309,19 @@ export function compileQuery(
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazyCollections: Set<string>,
   cache: QueryCache,
   queryMapping: QueryMapping
-): { alias: string; input: KeyedStream } {
+): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
         throw new CollectionInputNotFoundError(from.collection.id)
       }
-      return { alias: from.alias, input }
+      return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
       // Find the original query for caching purposes
@@ -308,6 +331,9 @@ function processFrom(
       const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
+        collections,
+        callbacks,
+        lazyCollections,
         cache,
         queryMapping
       )
@@ -324,7 +350,11 @@ function processFrom(
         })
       )
 
-      return { alias: from.alias, input: extractedInput }
+      return {
+        alias: from.alias,
+        input: extractedInput,
+        collectionId: subQueryResult.collectionId,
+      }
     }
     default:
       throw new UnsupportedFromTypeError((from as any).type)

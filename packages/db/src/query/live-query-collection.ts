@@ -16,6 +16,7 @@ import type {
 import type { Context, GetResult } from "./builder/types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { BasicExpression } from "./ir.js"
+import type { LazyCollectionCallbacks } from "./compiler/joins.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -176,6 +177,11 @@ export function liveQueryCollectionOptions<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
+  // Map of collection IDs to functions that load keys for that lazy collection
+  const lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  // Set of collection IDs that are lazy collections
+  const lazyCollections = new Set<string>()
+
   const compileBasePipeline = () => {
     graphCache = new D2()
     inputsCache = Object.fromEntries(
@@ -189,7 +195,13 @@ export function liveQueryCollectionOptions<
     ;({
       pipeline: pipelineCache,
       collectionWhereClauses: collectionWhereClausesCache,
-    } = compileQuery(query, inputsCache as Record<string, KeyedStream>))
+    } = compileQuery(
+      query,
+      inputsCache as Record<string, KeyedStream>,
+      collections,
+      lazyCollectionsCallbacks,
+      lazyCollections
+    ))
   }
 
   const maybeCompileBasePipeline = () => {
@@ -292,9 +304,11 @@ export function liveQueryCollectionOptions<
 
       graph.finalize()
 
+      let subscribedToAllCollections = false
+
       const maybeRunGraph = () => {
         // We only run the graph if all the collections are ready
-        if (allCollectionsReady()) {
+        if (allCollectionsReady() && subscribedToAllCollections) {
           graph.run()
           // On the initial run, we may need to do an empty commit to ensure that
           // the collection is initialized
@@ -319,6 +333,54 @@ export function liveQueryCollectionOptions<
             ? collectionWhereClausesCache.get(collectionAlias)
             : undefined
 
+        const subscribeToAllChanges = (
+          whereExpression: BasicExpression<boolean> | undefined
+        ) => {
+          const unsubscribe = collection.subscribeChanges(
+            (changes) => {
+              sendChangesToInput(input, changes, collection.config.getKey)
+              maybeRunGraph()
+            },
+            {
+              includeInitialState: true,
+              ...(whereExpression ? { whereExpression } : undefined),
+            }
+          )
+          return unsubscribe
+        }
+
+        const subscribeToMatchingChanges = (
+          whereExpression: BasicExpression<boolean> | undefined
+        ) => {
+          // This is used by lazy collections
+          // i.e. collections that are part of a join
+          //      and can be loaded lazily based on the rows
+          //      from the other collection in the join
+          const { add, switchToRegularSubscription, unsubscribe } =
+            collection.subscribeChangesDynamic((changes) => {
+              sendChangesToInput(input, changes, collection.config.getKey)
+              maybeRunGraph()
+            }, whereExpression)
+          // Store the `add` function in the `lazyLoaders` map
+          lazyCollectionsCallbacks[collectionId] = {
+            loadKeys: add,
+            switchToRegularSubscription,
+          }
+          return unsubscribe
+        }
+
+        const subscribeToChanges = (
+          whereExpression?: BasicExpression<boolean>
+        ) => {
+          let unsubscribe: () => void
+          if (lazyCollections.has(collectionId)) {
+            unsubscribe = subscribeToMatchingChanges(whereExpression)
+          } else {
+            unsubscribe = subscribeToAllChanges(whereExpression)
+          }
+          unsubscribeCallbacks.add(unsubscribe)
+        }
+
         if (whereClause) {
           // Convert WHERE clause to BasicExpression format for collection subscription
           const whereExpression = convertToBasicExpression(
@@ -328,17 +390,7 @@ export function liveQueryCollectionOptions<
 
           if (whereExpression) {
             // Use index optimization for this collection
-            const subscription = collection.subscribeChanges(
-              (changes) => {
-                sendChangesToInput(input, changes, collection.config.getKey)
-                maybeRunGraph()
-              },
-              {
-                includeInitialState: true,
-                whereExpression: whereExpression,
-              }
-            )
-            unsubscribeCallbacks.add(subscription)
+            subscribeToChanges(whereExpression)
           } else {
             // This should not happen - if we have a whereClause but can't create whereExpression,
             // it indicates a bug in our optimization logic
@@ -349,16 +401,11 @@ export function liveQueryCollectionOptions<
           }
         } else {
           // No WHERE clause for this collection, use regular subscription
-          const subscription = collection.subscribeChanges(
-            (changes) => {
-              sendChangesToInput(input, changes, collection.config.getKey)
-              maybeRunGraph()
-            },
-            { includeInitialState: true }
-          )
-          unsubscribeCallbacks.add(subscription)
+          subscribeToChanges()
         }
       })
+
+      subscribedToAllCollections = true
 
       // Initial run
       maybeRunGraph()

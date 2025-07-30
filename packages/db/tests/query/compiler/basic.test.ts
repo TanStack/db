@@ -43,7 +43,13 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -90,7 +96,13 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -159,7 +171,13 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -216,7 +234,13 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
