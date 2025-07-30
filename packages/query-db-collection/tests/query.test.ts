@@ -1045,22 +1045,22 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Test syncInsert
+      // Test writeInsert
       const newItem: TestItem = { id: `3`, name: `Item 3`, value: 30 }
-      collection.utils.syncInsert(newItem)
+      collection.utils.writeInsert(newItem)
 
       expect(collection.size).toBe(3)
       expect(collection.get(`3`)).toEqual(newItem)
 
-      // Test syncUpdate
-      collection.utils.syncUpdate({ id: `1`, name: `Updated Item 1` })
+      // Test writeUpdate
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       const updatedItem = collection.get(`1`)
       expect(updatedItem?.name).toBe(`Updated Item 1`)
       expect(updatedItem?.value).toBe(10) // Should preserve other fields
 
-      // Test syncUpsert (update existing)
-      collection.utils.syncUpsert({
+      // Test writeUpsert (update existing)
+      collection.utils.writeUpsert({
         id: `2`,
         name: `Upserted Item 2`,
         value: 25,
@@ -1070,8 +1070,8 @@ describe(`QueryCollection`, () => {
       expect(upsertedItem?.name).toBe(`Upserted Item 2`)
       expect(upsertedItem?.value).toBe(25)
 
-      // Test syncUpsert (insert new)
-      collection.utils.syncUpsert({ id: `4`, name: `New Item 4`, value: 40 })
+      // Test writeUpsert (insert new)
+      collection.utils.writeUpsert({ id: `4`, name: `New Item 4`, value: 40 })
 
       expect(collection.size).toBe(4)
       expect(collection.get(`4`)).toEqual({
@@ -1080,14 +1080,14 @@ describe(`QueryCollection`, () => {
         value: 40,
       })
 
-      // Test syncDelete
-      collection.utils.syncDelete(`3`)
+      // Test writeDelete
+      collection.utils.writeDelete(`3`)
 
       expect(collection.size).toBe(3)
       expect(collection.has(`3`)).toBe(false)
 
       // Test batch operations
-      collection.utils.syncInsert([
+      collection.utils.writeInsert([
         { id: `5`, name: `Item 5`, value: 50 },
         { id: `6`, name: `Item 6`, value: 60 },
       ])
@@ -1097,14 +1097,14 @@ describe(`QueryCollection`, () => {
       expect(collection.get(`6`)?.name).toBe(`Item 6`)
 
       // Test batch delete
-      collection.utils.syncDelete([`5`, `6`])
+      collection.utils.writeDelete([`5`, `6`])
 
       expect(collection.size).toBe(3)
       expect(collection.has(`5`)).toBe(false)
       expect(collection.has(`6`)).toBe(false)
 
-      // Test syncBatch with mixed operations
-      collection.utils.syncBatch([
+      // Test writeBatch with mixed operations
+      collection.utils.writeBatch([
         { type: `insert`, data: { id: `7`, name: `Batch Insert`, value: 70 } },
         { type: `update`, data: { id: `4`, name: `Batch Updated Item 4` } },
         { type: `upsert`, data: { id: `8`, name: `Batch Upsert`, value: 80 } },
@@ -1140,18 +1140,18 @@ describe(`QueryCollection`, () => {
         expect(collection.status).toBe(`ready`)
       })
 
-      // Test missing key error in syncUpdate
+      // Test missing key error in writeUpdate
       expect(() => {
-        collection.utils.syncUpdate({ id: `999`, name: `Missing` })
+        collection.utils.writeUpdate({ id: `999`, name: `Missing` })
       }).toThrow(/does not exist/)
 
-      // Test missing key error in syncDelete
+      // Test missing key error in writeDelete
       expect(() => {
-        collection.utils.syncDelete(`999`)
+        collection.utils.writeDelete(`999`)
       }).toThrow(/does not exist/)
     })
 
-    it(`should handle syncBatch validation errors`, async () => {
+    it(`should handle writeBatch validation errors`, async () => {
       const queryKey = [`sync-batch-error-test`]
       const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(initialItems)
@@ -1175,7 +1175,7 @@ describe(`QueryCollection`, () => {
 
       // Test duplicate keys within batch
       expect(() => {
-        collection.utils.syncBatch([
+        collection.utils.writeBatch([
           { type: `insert`, data: { id: `2`, name: `Item 2` } },
           { type: `update`, data: { id: `2`, name: `Updated Item 2` } },
         ])
@@ -1183,14 +1183,14 @@ describe(`QueryCollection`, () => {
 
       // Test updating non-existent item in batch
       expect(() => {
-        collection.utils.syncBatch([
+        collection.utils.writeBatch([
           { type: `update`, data: { id: `999`, name: `Missing` } },
         ])
       }).toThrow(/does not exist/)
 
       // Test deleting non-existent item in batch
       expect(() => {
-        collection.utils.syncBatch([{ type: `delete`, key: `999` }])
+        collection.utils.writeBatch([{ type: `delete`, key: `999` }])
       }).toThrow(/does not exist/)
     })
 
@@ -1226,9 +1226,9 @@ describe(`QueryCollection`, () => {
       expect(initialCache).toHaveLength(2)
       expect(initialCache).toEqual(initialItems)
 
-      // Test syncInsert updates cache
+      // Test writeInsert updates cache
       const newItem = { id: `3`, name: `Item 3`, value: 30 }
-      collection.utils.syncInsert(newItem)
+      collection.utils.writeInsert(newItem)
 
       const cacheAfterInsert = queryClient.getQueryData(
         queryKey
@@ -1236,8 +1236,8 @@ describe(`QueryCollection`, () => {
       expect(cacheAfterInsert).toHaveLength(3)
       expect(cacheAfterInsert).toContainEqual(newItem)
 
-      // Test syncUpdate updates cache
-      collection.utils.syncUpdate({ id: `1`, name: `Updated Item 1` })
+      // Test writeUpdate updates cache
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       const cacheAfterUpdate = queryClient.getQueryData(
         queryKey
@@ -1247,8 +1247,8 @@ describe(`QueryCollection`, () => {
       expect(updatedItem?.name).toBe(`Updated Item 1`)
       expect(updatedItem?.value).toBe(10) // Original value preserved
 
-      // Test syncDelete updates cache
-      collection.utils.syncDelete(`2`)
+      // Test writeDelete updates cache
+      collection.utils.writeDelete(`2`)
 
       const cacheAfterDelete = queryClient.getQueryData(
         queryKey
@@ -1260,8 +1260,8 @@ describe(`QueryCollection`, () => {
         value: 20,
       })
 
-      // Test syncUpsert updates cache
-      collection.utils.syncUpsert({ id: `4`, name: `Item 4`, value: 40 })
+      // Test writeUpsert updates cache
+      collection.utils.writeUpsert({ id: `4`, name: `Item 4`, value: 40 })
 
       const cacheAfterUpsert = queryClient.getQueryData(
         queryKey
@@ -1273,8 +1273,8 @@ describe(`QueryCollection`, () => {
         value: 40,
       })
 
-      // Test syncBatch updates cache with multiple operations
-      collection.utils.syncBatch([
+      // Test writeBatch updates cache with multiple operations
+      collection.utils.writeBatch([
         { type: `insert`, data: { id: `5`, name: `Batch Item 5`, value: 50 } },
         { type: `update`, data: { id: `3`, name: `Batch Updated Item 3` } },
         { type: `delete`, key: `1` },
@@ -1342,7 +1342,7 @@ describe(`QueryCollection`, () => {
 
       // Try to update non-existent item (should throw and not update cache)
       expect(() => {
-        collection.utils.syncUpdate({ id: `999`, name: `Should Fail` })
+        collection.utils.writeUpdate({ id: `999`, name: `Should Fail` })
       }).toThrow()
 
       // Verify cache wasn't modified
@@ -1354,7 +1354,7 @@ describe(`QueryCollection`, () => {
 
       // Try batch with duplicate keys (should throw and not update cache)
       expect(() => {
-        collection.utils.syncBatch([
+        collection.utils.writeBatch([
           { type: `insert`, data: { id: `3`, name: `Item 3` } },
           { type: `update`, data: { id: `3`, name: `Duplicate` } },
         ])

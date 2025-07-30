@@ -114,7 +114,7 @@ function validateOperations<
 }
 
 // Execute a batch of operations
-export function performSyncOperations<
+export function performWriteOperations<
   TRow extends object,
   TKey extends string | number = string | number,
   TInsertInput extends object = TRow,
@@ -184,17 +184,17 @@ export function performSyncOperations<
         break
       }
     }
-
-    ctx.commit()
-
-    // Update query cache after successful commit
-    const updatedData = ctx.collection.toArray
-    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
   }
+
+  ctx.commit()
+
+  // Update query cache after successful commit
+  const updatedData = ctx.collection.toArray
+  ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
 }
 
-// Factory function to create sync utils
-export function createSyncUtils<
+// Factory function to create write utils
+export function createWriteUtils<
   TRow extends object,
   TKey extends string | number = string | number,
   TInsertInput extends object = TRow,
@@ -208,29 +208,29 @@ export function createSyncUtils<
   }
 
   return {
-    syncInsert(data: TInsertInput | Array<TInsertInput>) {
+    writeInsert(data: TInsertInput | Array<TInsertInput>) {
       const ctx = ensureContext()
-      performSyncOperations({ type: `insert`, data }, ctx)
+      performWriteOperations({ type: `insert`, data }, ctx)
     },
 
-    syncUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
+    writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
       const ctx = ensureContext()
-      performSyncOperations({ type: `update`, data }, ctx)
+      performWriteOperations({ type: `update`, data }, ctx)
     },
 
-    syncDelete(key: TKey | Array<TKey>) {
+    writeDelete(key: TKey | Array<TKey>) {
       const ctx = ensureContext()
-      performSyncOperations({ type: `delete`, key }, ctx)
+      performWriteOperations({ type: `delete`, key }, ctx)
     },
 
-    syncUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
+    writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
       const ctx = ensureContext()
-      performSyncOperations({ type: `upsert`, data }, ctx)
+      performWriteOperations({ type: `upsert`, data }, ctx)
     },
 
-    syncBatch(operations: Array<SyncOperation<TRow, TKey, TInsertInput>>) {
+    writeBatch(operations: Array<SyncOperation<TRow, TKey, TInsertInput>>) {
       const ctx = ensureContext()
-      performSyncOperations(operations, ctx)
+      performWriteOperations(operations, ctx)
     },
   }
 }

@@ -5,7 +5,7 @@ import {
   QueryFnRequiredError,
   QueryKeyRequiredError,
 } from "./errors"
-import { createSyncUtils } from "./manual-sync"
+import { createWriteUtils } from "./manual-sync"
 import type { SyncOperation } from "./manual-sync"
 import type {
   QueryClient,
@@ -229,7 +229,7 @@ export type RefetchFn = () => Promise<void>
  * Query collection utilities type
  */
 /**
- * Sync operation types for batch operations
+ * Write operation types for batch operations
  */
 export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
@@ -237,11 +237,11 @@ export interface QueryCollectionUtils<
   TInsertInput extends object = TItem,
 > extends UtilsRecord {
   refetch: RefetchFn
-  syncInsert: (data: TInsertInput | Array<TInsertInput>) => void
-  syncUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
-  syncDelete: (keys: TKey | Array<TKey>) => void
-  syncUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
-  syncBatch: (
+  writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
+  writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
+  writeDelete: (keys: TKey | Array<TKey>) => void
+  writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
+  writeBatch: (
     operations: Array<SyncOperation<TItem, TKey, TInsertInput>>
   ) => void
 }
@@ -432,8 +432,8 @@ export function queryCollectionOptions<
     })
   }
 
-  // Create sync context for manual sync operations
-  let syncContext: {
+  // Create write context for manual write operations
+  let writeContext: {
     collection: any
     queryClient: QueryClient
     queryKey: Array<unknown>
@@ -443,12 +443,12 @@ export function queryCollectionOptions<
     commit: () => void
   } | null = null
 
-  // Enhanced internalSync that captures sync functions for manual use
+  // Enhanced internalSync that captures write functions for manual use
   const enhancedInternalSync: SyncConfig<TItem>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
-    // Store references for manual sync operations
-    syncContext = {
+    // Store references for manual write operations
+    writeContext = {
       collection,
       queryClient,
       queryKey: queryKey as unknown as Array<unknown>,
@@ -462,9 +462,9 @@ export function queryCollectionOptions<
     return internalSync(params)
   }
 
-  // Create sync utils using the manual-sync module
-  const syncUtils = createSyncUtils<TItem, TKey, TInsertInput>(
-    () => syncContext
+  // Create write utils using the manual-sync module
+  const writeUtils = createWriteUtils<TItem, TKey, TInsertInput>(
+    () => writeContext
   )
 
   // Create wrapper handlers for direct persistence operations that handle refetching
@@ -519,7 +519,7 @@ export function queryCollectionOptions<
     onDelete: wrappedOnDelete,
     utils: {
       refetch,
-      ...syncUtils,
+      ...writeUtils,
     },
   }
 }
