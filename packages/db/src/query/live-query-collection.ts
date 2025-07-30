@@ -1,4 +1,4 @@
-import { D2, MultiSet, output } from "@electric-sql/d2mini"
+import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { createCollection } from "../collection.js"
 import { compileQuery } from "./compiler/index.js"
 import { buildQuery, getQueryIR } from "./builder/index.js"
@@ -14,7 +14,7 @@ import type {
   UtilsRecord,
 } from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
-import type { MultiSetArray, RootStreamBuilder } from "@electric-sql/d2mini"
+import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { BasicExpression } from "./ir.js"
 
 // Global counter for auto-generated collection IDs

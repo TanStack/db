@@ -1,5 +1,59 @@
 # examples/react/todo
 
+## 0.1.0
+
+### Minor Changes
+
+- 0.1 release - first beta 🎉 ([#332](https://github.com/TanStack/db/pull/332))
+
+### Patch Changes
+
+- Updated dependencies [[`7d2f4be`](https://github.com/TanStack/db/commit/7d2f4be95c43aad29fb61e80e5a04c58c859322b), [`f0eda36`](https://github.com/TanStack/db/commit/f0eda36cb36350399bc8835686a6c4b6ad297e45)]:
+  - @tanstack/electric-db-collection@0.1.0
+  - @tanstack/query-db-collection@0.1.0
+  - @tanstack/react-db@0.1.0
+  - @tanstack/trailbase-db-collection@0.1.0
+
+## 0.0.39
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.15
+  - @tanstack/query-db-collection@0.0.15
+  - @tanstack/react-db@0.0.33
+  - @tanstack/trailbase-db-collection@0.0.9
+
+## 0.0.38
+
+### Patch Changes
+
+- Updated dependencies [[`e04bd12`](https://github.com/TanStack/db/commit/e04bd1252f612d4638104368d17cb644cc85295b)]:
+  - @tanstack/query-db-collection@0.0.14
+  - @tanstack/electric-db-collection@0.0.14
+  - @tanstack/react-db@0.0.32
+  - @tanstack/trailbase-db-collection@0.0.8
+
+## 0.0.37
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.13
+  - @tanstack/query-db-collection@0.0.13
+  - @tanstack/react-db@0.0.31
+  - @tanstack/trailbase-db-collection@0.0.7
+
+## 0.0.36
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.12
+  - @tanstack/query-db-collection@0.0.12
+  - @tanstack/react-db@0.0.30
+  - @tanstack/trailbase-db-collection@0.0.6
+
 ## 0.0.35
 
 ### Patch Changes
@@ -84,7 +138,7 @@
 
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
   - Move local-only and local-storage collections to main `@tanstack/db` package
-  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
   - Delete `@tanstack/db-collections` package (removed from repo)
   - Update example app and documentation to use new package structure

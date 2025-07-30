@@ -17,7 +17,7 @@ Collection options creators follow a consistent pattern:
 ## When to Create a Custom Collection
 
 You should create a custom collection when:
-- You have a dedicated sync engine (like ElectricSQL, Trailbase, or a custom WebSocket solution)
+- You have a dedicated sync engine (like ElectricSQL, Trailbase, Firebase, or a custom WebSocket solution)
 - You need specific sync behaviors that aren't covered by the query collection
 - You want to integrate with a backend that has its own sync protocol
 
@@ -32,7 +32,7 @@ Every collection options creator must implement these key responsibilities:
 Define a configuration interface that extends or includes standard collection properties:
 
 ```typescript
-// Pattern A: User provides handlers (Query / Electric SQL style)
+// Pattern A: User provides handlers (Query / ElectricSQL style)
 interface MyCollectionConfig<TItem extends object> {
   // Your sync engine specific options
   connectionUrl: string
@@ -43,6 +43,8 @@ interface MyCollectionConfig<TItem extends object> {
   schema?: StandardSchemaV1
   getKey: (item: TItem) => string | number
   sync?: SyncConfig<TItem>
+  
+  rowUpdateMode?: 'partial' | 'full'
   
   // User provides mutation handlers
   onInsert?: InsertMutationFn<TItem>
@@ -57,6 +59,8 @@ interface MyCollectionConfig<TItem extends object>
   recordApi: MyRecordApi<TItem>
   connectionUrl: string
   
+  rowUpdateMode?: 'partial' | 'full'
+  
   // Note: onInsert/onUpdate/onDelete are implemented by your collection creator
 }
 ```
@@ -65,6 +69,8 @@ interface MyCollectionConfig<TItem extends object>
 
 The sync function is the heart of your collection. It must:
 
+The sync function must return a cleanup function for proper garbage collection:
+
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
   const { begin, write, commit, markReady, collection } = params
@@ -72,25 +78,18 @@ const sync: SyncConfig<T>['sync'] = (params) => {
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
   
-  // 2. Perform initial data fetch
-  async function initialSync() {
-    const data = await fetchInitialData()
-    
-    begin() // Start a transaction
-    
-    for (const item of data) {
-      write({
-        type: 'insert',
-        value: item
-      })
+  // 2. Set up real-time subscription FIRST (prevents race conditions)
+  const eventBuffer: Array<any> = []
+  let isInitialSyncComplete = false
+  
+  connection.subscribe((event) => {
+    if (!isInitialSyncComplete) {
+      // Buffer events during initial sync to prevent race conditions
+      eventBuffer.push(event)
+      return
     }
     
-    commit() // Commit the transaction
-    markReady() // Mark collection as ready
-  }
-
-  // 3. Subscribe to real-time updates
-  connection.subscribe((event) => {
+    // Process real-time events
     begin()
     
     switch (event.type) {
@@ -108,25 +107,69 @@ const sync: SyncConfig<T>['sync'] = (params) => {
     commit()
   })
   
+  // 3. Perform initial data fetch
+  async function initialSync() {
+    try {
+      const data = await fetchInitialData()
+      
+      begin() // Start a transaction
+      
+      for (const item of data) {
+        write({
+          type: 'insert',
+          value: item
+        })
+      }
+      
+      commit() // Commit the transaction
+      
+      // 4. Process buffered events
+      isInitialSyncComplete = true
+      if (eventBuffer.length > 0) {
+        begin()
+        for (const event of eventBuffer) {
+          // Deduplicate if necessary based on your sync engine
+          write({ type: event.type, value: event.data })
+        }
+        commit()
+        eventBuffer.splice(0)
+      }
+      
+    } catch (error) {
+      console.error('Initial sync failed:', error)
+      throw error
+    } finally {
+      // ALWAYS call markReady, even on error
+      markReady()
+    }
+  }
+
   initialSync()
   
   // 4. Return cleanup function
   return () => {
     connection.close()
+    // Clean up any timers, intervals, or other resources
   }
 }
 ```
 
 ### 3. Transaction Lifecycle
 
+Understanding the transaction lifecycle is important for correct implementation.
+
 The sync process follows this lifecycle:
 
 1. **begin()** - Start collecting changes
-2. **write()** - Add changes to the pending transaction
-3. **commit()** - Apply all changes atomically
+2. **write()** - Add changes to the pending transaction (buffered until commit)
+3. **commit()** - Apply all changes atomically to the collection state
 4. **markReady()** - Signal that initial sync is complete
 
-**Important**: Many sync engines start real-time subscriptions before the initial sync completes. Your implementation may need to deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider tracking timestamps, sequence numbers, or using other mechanisms to avoid processing the same change twice.
+**Race Condition Prevention:**
+Many sync engines start real-time subscriptions before the initial sync completes. Your implementation MUST deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider:
+- Starting the listener BEFORE initial fetch and buffering events
+- Tracking timestamps, sequence numbers, or document versions
+- Using read timestamps or other ordering mechanisms
 
 ### 4. Data Parsing and Type Conversion
 
@@ -151,11 +194,36 @@ interface MyCollectionConfig<TItem, TRecord> {
 }
 ```
 
+**Type Conversion Examples:**
+```typescript
+// Firebase Timestamp to Date
+parse: {
+  createdAt: (timestamp) => timestamp?.toDate?.() || new Date(timestamp),
+  updatedAt: (timestamp) => timestamp?.toDate?.() || new Date(timestamp),
+}
+
+// PostGIS geometry to GeoJSON
+parse: {
+  location: (wkb: string) => parseWKBToGeoJSON(wkb)
+}
+
+// JSON string to object with error handling
+parse: {
+  metadata: (str: string) => {
+    try {
+      return JSON.parse(str)
+    } catch {
+      return {}
+    }
+  }
+}
+```
+
 ### 5. Mutation Handler Patterns
 
 There are two distinct patterns for handling mutations in collection options creators:
 
-#### Pattern A: User-Provided Handlers (Electric SQL, Query)
+#### Pattern A: User-Provided Handlers (ElectricSQL, Query)
 
 The user provides mutation handlers in the config. Your collection creator passes them through:
 
@@ -174,6 +242,7 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
+    rowUpdateMode: config.rowUpdateMode || 'partial',
     
     // Pass through user-provided handlers (possibly with additional logic)
     onInsert: config.onInsert ? async (params) => {
@@ -185,7 +254,7 @@ export function myCollectionOptions<TItem extends object>(
 }
 ```
 
-#### Pattern B: Built-in Handlers (Trailbase, WebSocket)
+#### Pattern B: Built-in Handlers (Trailbase, WebSocket, Firebase)
 
 Your collection creator implements the handlers directly using the sync engine's APIs:
 
@@ -201,29 +270,84 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
+    rowUpdateMode: config.rowUpdateMode || 'partial',
     
     // Implement handlers using sync engine APIs
     onInsert: async ({ transaction }) => {
-      const ids = await config.recordApi.createBulk(
-        transaction.mutations.map(m => serialize(m.modified))
-      )
-      await awaitIds(ids)
-      return ids
+      // Handle provider-specific batch limits (e.g., Firestore's 500 limit)
+      const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
+      
+      for (const chunk of chunks) {
+        const ids = await config.recordApi.createBulk(
+          chunk.map(m => serialize(m.modified))
+        )
+        await awaitIds(ids)
+      }
+      
+      return transaction.mutations.map(m => m.key)
     },
     
     onUpdate: async ({ transaction }) => {
-      await Promise.all(
-        transaction.mutations.map(m => 
-          config.recordApi.update(m.key, serialize(m.changes))
+      const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
+      
+      for (const chunk of chunks) {
+        await Promise.all(
+          chunk.map(m => 
+            config.recordApi.update(m.key, serialize(m.changes))
+          )
         )
-      )
+      }
+      
       await awaitIds(transaction.mutations.map(m => String(m.key)))
     }
   }
 }
 ```
 
+Many providers have batch size limits (Firestore: 500, DynamoDB: 25, etc.) so chunk large transactions accordingly.
+
 Choose Pattern A when users need to provide their own APIs, and Pattern B when your sync engine handles writes directly.
+
+## Row Update Modes
+
+Collections support two update modes:
+
+- **`partial`** (default) - Updates are merged with existing data
+- **`full`** - Updates replace the entire row
+
+Configure this in your sync config:
+
+```typescript
+sync: {
+  sync: syncFn,
+  rowUpdateMode: 'full' // or 'partial'
+}
+```
+
+## Production Examples
+
+For complete, production-ready examples, see the collection packages in the TanStack DB repository:
+
+- **[@tanstack/query-collection](https://github.com/TanStack/db/tree/main/packages/query-collection)** - Pattern A: User-provided handlers with full refetch strategy
+- **[@tanstack/trailbase-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-collection)** - Pattern B: Built-in handlers with ID-based tracking  
+- **[@tanstack/electric-collection](https://github.com/TanStack/db/tree/main/packages/electric-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
+
+### Key Lessons from Production Collections
+
+**From Query Collection:**
+- Simplest approach: Full refetch after mutations
+- Best for: APIs without real-time sync
+- Pattern: User provides `onInsert/onUpdate/onDelete` handlers
+
+**From Trailbase Collection:**  
+- Shows ID-based optimistic state management
+- Handles provider batch limits (chunking large operations)
+- Pattern: Collection provides mutation handlers using record API
+
+**From Electric Collection:**
+- Complex transaction ID tracking for distributed sync
+- Demonstrates advanced deduplication techniques
+- Shows how to wrap user handlers with sync coordination
 
 ## Complete Example: WebSocket Collection
 
@@ -482,31 +606,6 @@ todos.utils.getConnectionState() // 'connected'
 todos.utils.reconnect() // Force reconnect
 ```
 
-## Best Practices
-
-1. **Always call markReady()** - This signals that the collection has initial data and is ready for use
-2. **Handle errors gracefully** - Call markReady() even on error to avoid blocking the app
-3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
-4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
-5. **Type safety** - Use TypeScript generics to maintain type safety throughout
-6. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
-
-## Row Update Modes
-
-Collections support two update modes:
-
-- **`partial`** (default) - Updates are merged with existing data
-- **`full`** - Updates replace the entire row
-
-Configure this in your sync config:
-
-```typescript
-sync: {
-  sync: syncFn,
-  rowUpdateMode: 'full' // or 'partial'
-}
-```
-
 ## Advanced: Managing Optimistic State
 
 A critical challenge in sync-first apps is knowing when to drop optimistic state. When a user makes a change:
@@ -519,7 +618,19 @@ A critical challenge in sync-first apps is knowing when to drop optimistic state
 
 The key question is: **How do you know when step 4 is complete?**
 
-### Strategy 1: Transaction ID Tracking (ElectricSQL)
+### Strategy 1: Built-in Provider Methods (Recommended)
+
+Many providers offer built-in methods to wait for sync completion:
+
+```typescript
+// Firebase
+await waitForPendingWrites(firestore)
+
+// Custom WebSocket
+await websocket.waitForAck(transactionId)
+```
+
+### Strategy 2: Transaction ID Tracking (ElectricSQL)
 
 ElectricSQL returns transaction IDs that you can track:
 
@@ -561,7 +672,7 @@ const awaitTxId = (txId: number): Promise<boolean> => {
 }
 ```
 
-### Strategy 2: ID-Based Tracking (Trailbase)
+### Strategy 3: ID-Based Tracking (Trailbase)
 
 Trailbase tracks when specific record IDs have been synced:
 
@@ -596,23 +707,6 @@ const awaitIds = (ids: string[]): Promise<void> => {
 }
 ```
 
-### Strategy 3: Full Refetch (Query Collection)
-
-The query collection simply refetches all data after mutations:
-
-```typescript
-const wrappedOnInsert = async (params) => {
-  // Perform the mutation
-  await config.onInsert(params)
-  
-  // Refetch the entire collection
-  await refetch()
-  
-  // The refetch will trigger sync with fresh data,
-  // automatically dropping optimistic state
-}
-```
-
 ### Strategy 4: Version/Timestamp Tracking
 
 Track version numbers or timestamps to detect when data is fresh:
@@ -644,8 +738,26 @@ const waitForSync = (afterTime: number): Promise<void> => {
 }
 ```
 
+### Strategy 5: Full Refetch (Query Collection)
+
+The query collection simply refetches all data after mutations:
+
+```typescript
+const wrappedOnInsert = async (params) => {
+  // Perform the mutation
+  await config.onInsert(params)
+  
+  // Refetch the entire collection
+  await refetch()
+  
+  // The refetch will trigger sync with fresh data,
+  // automatically dropping optimistic state
+}
+```
+
 ### Choosing a Strategy
 
+- **Built-in Methods**: Best when your provider offers sync completion APIs
 - **Transaction IDs**: Best when your backend provides reliable transaction tracking
 - **ID-Based**: Good for systems where each mutation returns the affected IDs
 - **Full Refetch**: Simplest but least efficient; good for small datasets
@@ -657,6 +769,16 @@ const waitForSync = (afterTime: number): Promise<void> => {
 2. **Handle timeouts** - Don't wait forever for sync confirmation
 3. **Clean up tracking data** - Remove old txids/IDs to prevent memory leaks
 4. **Provide utilities** - Export functions like `awaitTxId` or `awaitSync` for advanced use cases
+
+## Best Practices
+
+1. **Always call markReady()** - This signals that the collection has initial data and is ready for use
+2. **Handle errors gracefully** - Call markReady() even on error to avoid blocking the app
+3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
+4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
+5. **Race Conditions** - Start listeners before initial fetch and buffer events
+6. **Type safety** - Use TypeScript generics to maintain type safety throughout
+7. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
 
 ## Testing Your Collection
 

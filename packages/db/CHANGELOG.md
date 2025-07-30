@@ -1,5 +1,63 @@
 # @tanstack/db
 
+## 0.1.0
+
+### Minor Changes
+
+- 0.1 release - first beta 🎉 ([#332](https://github.com/TanStack/db/pull/332))
+
+### Patch Changes
+
+- We have moved development of the differential dataflow implementation from @electric-sql/d2mini to a new @tanstack/db-ivm package inside the tanstack db monorepo to make development simpler. ([#330](https://github.com/TanStack/db/pull/330))
+
+- Updated dependencies [[`7d2f4be`](https://github.com/TanStack/db/commit/7d2f4be95c43aad29fb61e80e5a04c58c859322b), [`f0eda36`](https://github.com/TanStack/db/commit/f0eda36cb36350399bc8835686a6c4b6ad297e45)]:
+  - @tanstack/db-ivm@0.1.0
+
+## 0.0.33
+
+### Patch Changes
+
+- bump d2mini to latest which has a significant speedup ([#321](https://github.com/TanStack/db/pull/321))
+
+## 0.0.32
+
+### Patch Changes
+
+- Fix LiveQueryCollection hanging when source collections have no data ([#309](https://github.com/TanStack/db/pull/309))
+
+  Fixed an issue where `LiveQueryCollection.preload()` would hang indefinitely when source collections call `markReady()` without data changes (e.g., when queryFn returns empty array).
+
+  The fix implements a proper event-based solution:
+  - Collections now emit empty change events when becoming ready with no data
+  - WHERE clause filtered subscriptions now correctly pass through empty ready signals
+  - Both regular and WHERE clause optimized LiveQueryCollections now work correctly with empty source collections
+
+## 0.0.31
+
+### Patch Changes
+
+- Fix UI responsiveness issue with rapid user interactions in collections ([#308](https://github.com/TanStack/db/pull/308))
+
+  Fixed a critical issue where rapid user interactions (like clicking multiple checkboxes quickly) would cause the UI to become unresponsive when using collections with slow backend responses. The problem occurred when optimistic updates would back up and the UI would stop reflecting user actions.
+
+  **Root Causes:**
+  - Event filtering logic was blocking ALL events for keys with recent sync operations, including user-initiated actions
+  - Event batching was queuing user actions instead of immediately updating the UI during high-frequency operations
+
+  **Solution:**
+  - Added `triggeredByUserAction` parameter to `recomputeOptimisticState()` to distinguish user actions from sync operations
+  - Modified event filtering to allow user-initiated actions to bypass sync status checks
+  - Enhanced `emitEvents()` with `forceEmit` parameter to skip batching for immediate user action feedback
+  - Updated all user action code paths to properly identify themselves as user-triggered
+
+  This ensures the UI remains responsive during rapid user interactions while maintaining the performance benefits of event batching and duplicate event filtering for sync operations.
+
+## 0.0.30
+
+### Patch Changes
+
+- Remove OrderedIndex in favor of more efficient BTree index. ([#302](https://github.com/TanStack/db/pull/302))
+
 ## 0.0.29
 
 ### Patch Changes
@@ -137,7 +195,7 @@
   - Sync implementation patterns with transaction lifecycle (begin, write, commit, markReady)
   - Data parsing and type conversion using field-specific conversions
   - Two distinct mutation handler patterns:
-    - Pattern A: User-provided handlers (Electric SQL, Query style)
+    - Pattern A: User-provided handlers (ElectricSQL, Query style)
     - Pattern B: Built-in handlers (Trailbase, WebSocket style)
   - Complete WebSocket collection example with full round-trip flow
   - Managing optimistic state with various strategies (transaction IDs, ID-based tracking, refetch, timestamps)
@@ -217,7 +275,7 @@
 
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
   - Move local-only and local-storage collections to main `@tanstack/db` package
-  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
   - Delete `@tanstack/db-collections` package (removed from repo)
   - Update example app and documentation to use new package structure

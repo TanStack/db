@@ -1,12 +1,13 @@
 import { ascComparator } from "../utils/comparison.js"
-import { findInsertPosition } from "../utils/array-utils.js"
+import { BTree } from "../utils/btree.js"
 import { BaseIndex } from "./base-index.js"
+import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
 
 /**
  * Options for Ordered index
  */
-export interface OrderedIndexOptions {
+export interface BTreeIndexOptions {
   compareFn?: (a: any, b: any) => number
 }
 
@@ -21,10 +22,10 @@ export interface RangeQueryOptions {
 }
 
 /**
- * Ordered index for sorted data with range queries
+ * B+Tree index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
  */
-export class OrderedIndex<
+export class BTreeIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set<IndexOperation>([
@@ -37,14 +38,25 @@ export class OrderedIndex<
   ])
 
   // Internal data structures - private to hide implementation details
-  private orderedEntries: Array<[any, Set<TKey>]> = []
-  private valueMap = new Map<any, Set<TKey>>()
+  // The `orderedEntries` B+ tree is used for efficient range queries
+  // The `valueMap` is used for O(1) lookups of PKs by indexed value
+  private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
+  private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
   private indexedKeys = new Set<TKey>()
   private compareFn: (a: any, b: any) => number = ascComparator
 
-  protected initialize(options?: OrderedIndexOptions): void {
+  constructor(
+    id: number,
+    expression: BasicExpression,
+    name?: string,
+    options?: any
+  ) {
+    super(id, expression, name, options)
     this.compareFn = options?.compareFn ?? ascComparator
+    this.orderedEntries = new BTree(this.compareFn)
   }
+
+  protected initialize(_options?: BTreeIndexOptions): void {}
 
   /**
    * Adds a value to the index
@@ -67,14 +79,7 @@ export class OrderedIndex<
       // Create new set for this value
       const keySet = new Set<TKey>([key])
       this.valueMap.set(indexedValue, keySet)
-
-      // Find correct position in ordered entries using binary search
-      const insertIndex = findInsertPosition(
-        this.orderedEntries,
-        indexedValue,
-        this.compareFn
-      )
-      this.orderedEntries.splice(insertIndex, 0, [indexedValue, keySet])
+      this.orderedEntries.set(indexedValue, undefined)
     }
 
     this.indexedKeys.add(key)
@@ -104,13 +109,8 @@ export class OrderedIndex<
       if (keySet.size === 0) {
         this.valueMap.delete(indexedValue)
 
-        // Find and remove from ordered entries
-        const index = this.orderedEntries.findIndex(
-          ([value]) => this.compareFn(value, indexedValue) === 0
-        )
-        if (index !== -1) {
-          this.orderedEntries.splice(index, 1)
-        }
+        // Remove from ordered entries
+        this.orderedEntries.delete(indexedValue)
       }
     }
 
@@ -141,7 +141,7 @@ export class OrderedIndex<
    * Clears all data from the index
    */
   clear(): void {
-    this.orderedEntries = []
+    this.orderedEntries.clear()
     this.valueMap.clear()
     this.indexedKeys.clear()
     this.updateTimestamp()
@@ -175,7 +175,7 @@ export class OrderedIndex<
         result = this.inArrayLookup(value)
         break
       default:
-        throw new Error(`Operation ${operation} not supported by OrderedIndex`)
+        throw new Error(`Operation ${operation} not supported by BTreeIndex`)
     }
 
     this.trackLookup(startTime)
@@ -206,70 +206,26 @@ export class OrderedIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    if (this.orderedEntries.length === 0) {
-      return result
-    }
+    const fromKey = from ?? this.orderedEntries.minKey()
+    const toKey = to ?? this.orderedEntries.maxKey()
 
-    // Find start position
-    let startIndex = 0
-    if (from !== undefined) {
-      const fromInsertIndex = findInsertPosition(
-        this.orderedEntries,
-        from,
-        this.compareFn
-      )
+    this.orderedEntries.forRange(
+      fromKey,
+      toKey,
+      toInclusive,
+      (indexedValue, _) => {
+        if (!fromInclusive && this.compareFn(indexedValue, from) === 0) {
+          // the B+ tree `forRange` method does not support exclusive lower bounds
+          // so we need to exclude it manually
+          return
+        }
 
-      if (fromInclusive) {
-        // Include values equal to 'from'
-        startIndex = fromInsertIndex
-      } else {
-        // Exclude values equal to 'from'
-        startIndex = fromInsertIndex
-        // Skip the value if it exists at this position
-        if (
-          startIndex < this.orderedEntries.length &&
-          this.compareFn(this.orderedEntries[startIndex]![0], from) === 0
-        ) {
-          startIndex++
+        const keys = this.valueMap.get(indexedValue)
+        if (keys) {
+          keys.forEach((key) => result.add(key))
         }
       }
-    }
-
-    // Find end position
-    let endIndex = this.orderedEntries.length
-    if (to !== undefined) {
-      const toInsertIndex = findInsertPosition(
-        this.orderedEntries,
-        to,
-        this.compareFn
-      )
-
-      if (toInclusive) {
-        // Include values equal to 'to'
-        endIndex = toInsertIndex
-        // Include the value if it exists at this position
-        if (
-          toInsertIndex < this.orderedEntries.length &&
-          this.compareFn(this.orderedEntries[toInsertIndex]![0], to) === 0
-        ) {
-          endIndex = toInsertIndex + 1
-        }
-      } else {
-        // Exclude values equal to 'to'
-        endIndex = toInsertIndex
-      }
-    }
-
-    // Ensure startIndex doesn't exceed endIndex
-    if (startIndex >= endIndex) {
-      return result
-    }
-
-    // Collect keys from the range
-    for (let i = startIndex; i < endIndex; i++) {
-      const keys = this.orderedEntries[i]![1]
-      keys.forEach((key) => result.add(key))
-    }
+    )
 
     return result
   }
@@ -297,6 +253,8 @@ export class OrderedIndex<
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
     return this.orderedEntries
+      .keysArray()
+      .map((key) => [key, this.valueMap.get(key) ?? new Set()])
   }
 
   get valueMapData(): Map<any, Set<TKey>> {

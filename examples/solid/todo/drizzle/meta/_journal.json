@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1740502196428,
+      "tag": "0000_whole_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1740601351239,
+      "tag": "0001_sturdy_titania",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1740606615508,
+      "tag": "0002_update_timestamps_trigger",
+      "breakpoints": true
+    }
+  ]
+}

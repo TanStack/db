@@ -1,5 +1,44 @@
 # @tanstack/electric-db-collection
 
+## 0.1.0
+
+### Minor Changes
+
+- 0.1 release - first beta 🎉 ([#332](https://github.com/TanStack/db/pull/332))
+
+### Patch Changes
+
+- Updated dependencies [[`7d2f4be`](https://github.com/TanStack/db/commit/7d2f4be95c43aad29fb61e80e5a04c58c859322b), [`f0eda36`](https://github.com/TanStack/db/commit/f0eda36cb36350399bc8835686a6c4b6ad297e45)]:
+  - @tanstack/db@0.1.0
+
+## 0.0.15
+
+### Patch Changes
+
+- Updated dependencies [[`6e8d7f6`](https://github.com/TanStack/db/commit/6e8d7f660050118e050d575913733e469e3daa8c)]:
+  - @tanstack/db@0.0.33
+
+## 0.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`e04bd12`](https://github.com/TanStack/db/commit/e04bd1252f612d4638104368d17cb644cc85295b)]:
+  - @tanstack/db@0.0.32
+
+## 0.0.13
+
+### Patch Changes
+
+- Updated dependencies [[`3e9a36d`](https://github.com/TanStack/db/commit/3e9a36d2600c4f700ca7bc4f720c189a5a29387a)]:
+  - @tanstack/db@0.0.31
+
+## 0.0.12
+
+### Patch Changes
+
+- Updated dependencies [[`6bdde55`](https://github.com/TanStack/db/commit/6bdde554f36f54c0c4f4dacb74bef5da45811855)]:
+  - @tanstack/db@0.0.30
+
 ## 0.0.11
 
 ### Patch Changes
@@ -181,7 +220,7 @@
 
 - Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
   - Move local-only and local-storage collections to main `@tanstack/db` package
-  - Create new `@tanstack/electric-db-collection` package for Electric SQL integration
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
   - Create new `@tanstack/query-db-collection` package for TanStack Query integration
   - Delete `@tanstack/db-collections` package (removed from repo)
   - Update example app and documentation to use new package structure

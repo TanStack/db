@@ -3,7 +3,7 @@ import {
   filter,
   join as joinOperator,
   map,
-} from "@electric-sql/d2mini"
+} from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
   InvalidJoinConditionSameTableError,
@@ -14,7 +14,7 @@ import {
 } from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery } from "./index.js"
-import type { IStreamBuilder, JoinType } from "@electric-sql/d2mini"
+import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
 import type {
   BasicExpression,
   CollectionRef,
