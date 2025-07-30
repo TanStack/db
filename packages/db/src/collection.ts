@@ -1489,7 +1489,7 @@ export class CollectionImpl<
     return false
   }
 
-  private validateData(
+  public validateData(
     data: unknown,
     type: `insert` | `update`,
     key?: TKey

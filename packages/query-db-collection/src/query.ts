@@ -1,19 +1,12 @@
 import { QueryObserver } from "@tanstack/query-core"
 import {
-  DeleteOperationItemNotFoundError,
-  DuplicateKeyInBatchError,
   GetKeyRequiredError,
-  InvalidItemStructureError,
-  InvalidSyncOperationError,
-  ItemNotFoundError,
-  MissingKeyFieldError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
-  SyncNotInitializedError,
-  UnknownOperationTypeError,
-  UpdateOperationItemNotFoundError,
 } from "./errors"
+import { createSyncUtils } from "./manual-sync"
+import type { SyncOperation } from "./manual-sync"
 import type {
   QueryClient,
   QueryFunctionContext,
@@ -32,6 +25,9 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+
+// Re-export for external use
+export type { SyncOperation } from "./manual-sync"
 
 export interface QueryCollectionConfig<
   TItem extends object,
@@ -235,16 +231,6 @@ export type RefetchFn = () => Promise<void>
 /**
  * Sync operation types for batch operations
  */
-export type SyncOperation<
-  TItem extends object,
-  TKey extends string | number,
-  TInsertInput extends object,
-> =
-  | { type: `insert`; data: TInsertInput }
-  | { type: `update`; data: Partial<TItem> }
-  | { type: `delete`; key: TKey }
-  | { type: `upsert`; data: Partial<TItem> }
-
 export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -446,12 +432,15 @@ export function queryCollectionOptions<
     })
   }
 
-  // Store references to sync functions for manual sync operations
-  let syncFunctions: {
+  // Create sync context for manual sync operations
+  let syncContext: {
+    collection: any
+    queryClient: QueryClient
+    queryKey: Array<unknown>
+    getKey: (item: TItem) => TKey
     begin: () => void
     write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
     commit: () => void
-    collection: any
   } | null = null
 
   // Enhanced internalSync that captures sync functions for manual use
@@ -459,357 +448,24 @@ export function queryCollectionOptions<
     const { begin, write, commit, collection } = params
 
     // Store references for manual sync operations
-    syncFunctions = { begin, write, commit, collection }
+    syncContext = {
+      collection,
+      queryClient,
+      queryKey: queryKey as unknown as Array<unknown>,
+      getKey: getKey as (item: TItem) => TKey,
+      begin,
+      write,
+      commit,
+    }
 
     // Call the original internalSync logic
     return internalSync(params)
   }
 
-  /**
-   * Manually insert items into collection state for synchronization purposes
-   * Uses the proper sync transaction pattern (begin/write/commit) for consistency
-   * @param data - Item or array of items to insert
-   * @param options - Optional configuration for validation
-   * @throws {Error} If collection is not ready or items have duplicate keys
-   */
-  const syncInsert = (data: TInsertInput | Array<TInsertInput>): void => {
-    if (!syncFunctions) {
-      throw new SyncNotInitializedError()
-    }
-
-    const { begin, write, commit } = syncFunctions
-    const items = Array.isArray(data) ? data : [data]
-
-    // Validate all items first before starting transaction
-    const validatedItems: Array<TItem> = []
-    for (const item of items) {
-      // For query collections, we use the getKey function to validate structure
-      let validatedData: TItem
-      try {
-        validatedData = item as unknown as TItem
-        getKey(validatedData) // This will throw if the item doesn't have the required key
-      } catch (error) {
-        throw new InvalidItemStructureError(String(error))
-      }
-
-      validatedItems.push(validatedData)
-    }
-
-    // Use proper sync transaction pattern
-    begin()
-
-    // Write all validated items
-    for (const validatedItem of validatedItems) {
-      write({ type: `insert`, value: validatedItem })
-    }
-
-    // Commit the transaction
-    commit()
-
-    // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray as Array<TItem>
-    queryClient.setQueryData(queryKey, currentData as any)
-  }
-
-  /**
-   * Manually update existing items in collection state for synchronization purposes
-   * Uses the proper sync transaction pattern (begin/write/commit) for consistency
-   * @param updates - Partial item or array of partial items to update
-   * @param options - Optional configuration for validation and existence checks
-   * @throws {Error} If collection is not ready or items don't exist
-   */
-  const syncUpdate = (
-    updates: Partial<TItem> | Array<Partial<TItem>>
-  ): void => {
-    if (!syncFunctions) {
-      throw new SyncNotInitializedError()
-    }
-
-    const { begin, write, commit, collection } = syncFunctions
-    const items = Array.isArray(updates) ? updates : [updates]
-
-    // Validate all items and prepare full objects for update
-    const itemsToUpdate: Array<TItem> = []
-    for (const partialItem of items) {
-      // Extract key from partial item (it must contain the key field)
-      let key: TKey
-      try {
-        key = getKey(partialItem as TItem) as TKey
-      } catch (error) {
-        throw new MissingKeyFieldError(`Update`, String(error))
-      }
-
-      // Get existing item and merge with update
-      const existingItem = collection.get(key)
-      if (!existingItem) {
-        throw new ItemNotFoundError(key)
-      }
-
-      const mergedItem = { ...existingItem, ...partialItem } as TItem
-      itemsToUpdate.push(mergedItem)
-    }
-
-    if (itemsToUpdate.length === 0) {
-      return // Nothing to update
-    }
-
-    // Use proper sync transaction pattern
-    begin()
-
-    // Write all updated items
-    for (const updatedItem of itemsToUpdate) {
-      write({ type: `update`, value: updatedItem })
-    }
-
-    // Commit the transaction
-    commit()
-
-    // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray as Array<TItem>
-    queryClient.setQueryData(queryKey, currentData as any)
-  }
-
-  /**
-   * Manually delete items from collection state for synchronization purposes
-   * Uses the proper sync transaction pattern (begin/write/commit) for consistency
-   * @param keys - Single key or array of keys to delete
-   * @param options - Optional configuration for existence checks
-   * @throws {Error} If collection is not ready or items don't exist
-   */
-  const syncDelete = (keys: TKey | Array<TKey>): void => {
-    if (!syncFunctions) {
-      throw new SyncNotInitializedError()
-    }
-
-    const { begin, write, commit, collection } = syncFunctions
-    const keyArray = Array.isArray(keys) ? keys : [keys]
-    const itemsToDelete: Array<TItem> = []
-
-    // Collect items to delete and validate existence
-    for (const key of keyArray) {
-      const item = collection.get(key)
-      if (!item) {
-        throw new ItemNotFoundError(key)
-      }
-      itemsToDelete.push(item)
-    }
-
-    if (itemsToDelete.length === 0) {
-      return // Nothing to delete
-    }
-
-    // Use proper sync transaction pattern
-    begin()
-
-    // Write all delete operations
-    for (const item of itemsToDelete) {
-      write({ type: `delete`, value: item })
-    }
-
-    // Commit the transaction
-    commit()
-
-    // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray as Array<TItem>
-    queryClient.setQueryData(queryKey, currentData as any)
-  }
-
-  /**
-   * Manually upsert (insert or update) items in collection state for synchronization purposes
-   * Uses the proper sync transaction pattern (begin/write/commit) for consistency
-   * @param data - Partial item or array of partial items to upsert
-   * @param options - Optional configuration for validation
-   */
-  const syncUpsert = (data: Partial<TItem> | Array<Partial<TItem>>): void => {
-    if (!syncFunctions) {
-      throw new SyncNotInitializedError()
-    }
-
-    const { begin, write, commit, collection } = syncFunctions
-    const items = Array.isArray(data) ? data : [data]
-    const upsertOperations: Array<{ type: `insert` | `update`; item: TItem }> =
-      []
-
-    // Process each item for upsert
-    for (const partialItem of items) {
-      // Extract key from partial item (it must contain the key field)
-      let key: TKey
-      try {
-        key = getKey(partialItem as TItem) as TKey
-      } catch (error) {
-        throw new MissingKeyFieldError(`Upsert`, String(error))
-      }
-
-      const exists = collection.has(key)
-      let fullItem: TItem
-
-      if (exists) {
-        // Update: merge with existing item
-        const existingItem = collection.get(key)
-        fullItem = { ...existingItem, ...partialItem } as TItem
-        upsertOperations.push({ type: `update`, item: fullItem })
-      } else {
-        // Insert: use as-is (assuming it has all required fields)
-        fullItem = partialItem as TItem
-        upsertOperations.push({ type: `insert`, item: fullItem })
-      }
-    }
-
-    if (upsertOperations.length === 0) {
-      return // Nothing to upsert
-    }
-
-    // Use proper sync transaction pattern
-    begin()
-
-    // Write all upsert operations
-    for (const { type, item } of upsertOperations) {
-      write({ type, value: item })
-    }
-
-    // Commit the transaction
-    commit()
-
-    // Update query cache to reflect the new state
-    const currentData = syncFunctions.collection.toArray as Array<TItem>
-    queryClient.setQueryData(queryKey, currentData as any)
-  }
-
-  /**
-   * Perform multiple sync operations atomically in a single transaction
-   * Validates for duplicate keys and conflicting operations within the batch
-   * @param operations - Array of sync operations to perform
-   * @param options - Optional configuration for validation and existence checks
-   */
-  const syncBatch = (
-    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>
-  ): void => {
-    if (!syncFunctions) {
-      throw new SyncNotInitializedError()
-    }
-
-    const { begin, write, commit, collection } = syncFunctions
-
-    // Validate operations and check for conflicts
-    const seenKeys = new Set<TKey>()
-    const processedOperations: Array<{
-      type: `insert` | `update` | `delete`
-      value: TItem
-    }> = []
-
-    for (const operation of operations) {
-      let key: TKey
-      let value: TItem
-
-      switch (operation.type) {
-        case `insert`: {
-          try {
-            value = operation.data as unknown as TItem
-            key = getKey(value) as TKey
-          } catch (error) {
-            throw new InvalidSyncOperationError(String(error))
-          }
-
-          // Check for duplicate keys within batch
-          if (seenKeys.has(key)) {
-            throw new DuplicateKeyInBatchError(key)
-          }
-          seenKeys.add(key)
-
-          processedOperations.push({ type: `insert`, value })
-          break
-        }
-
-        case `update`: {
-          try {
-            key = getKey(operation.data as TItem) as TKey
-          } catch (error) {
-            throw new InvalidSyncOperationError(String(error))
-          }
-
-          // Check for duplicate keys within batch
-          if (seenKeys.has(key)) {
-            throw new DuplicateKeyInBatchError(key)
-          }
-          seenKeys.add(key)
-
-          // Get existing item and merge with update
-          const existingItem = collection.get(key)
-          if (!existingItem) {
-            throw new UpdateOperationItemNotFoundError(key)
-          }
-
-          value = { ...existingItem, ...operation.data } as TItem
-          processedOperations.push({ type: `update`, value })
-          break
-        }
-
-        case `delete`: {
-          key = operation.key
-
-          // Check for duplicate keys within batch
-          if (seenKeys.has(key)) {
-            throw new DuplicateKeyInBatchError(key)
-          }
-          seenKeys.add(key)
-
-          const item = collection.get(key)
-          if (!item) {
-            throw new DeleteOperationItemNotFoundError(key)
-          }
-          processedOperations.push({ type: `delete`, value: item })
-          break
-        }
-
-        case `upsert`: {
-          try {
-            key = getKey(operation.data as TItem) as TKey
-          } catch (error) {
-            throw new InvalidSyncOperationError(String(error))
-          }
-
-          // Check for duplicate keys within batch
-          if (seenKeys.has(key)) {
-            throw new DuplicateKeyInBatchError(key)
-          }
-          seenKeys.add(key)
-
-          const exists = collection.has(key)
-          if (exists) {
-            // Update: merge with existing item
-            const existingItem = collection.get(key)
-            value = { ...existingItem, ...operation.data } as TItem
-            processedOperations.push({ type: `update`, value })
-          } else {
-            // Insert: use as-is
-            value = operation.data as TItem
-            processedOperations.push({ type: `insert`, value })
-          }
-          break
-        }
-
-        default:
-          throw new UnknownOperationTypeError((operation as any).type)
-      }
-    }
-
-    if (processedOperations.length === 0) {
-      return // Nothing to process
-    }
-
-    // Execute all operations in a single transaction
-    begin()
-
-    for (const op of processedOperations) {
-      write({ type: op.type, value: op.value })
-    }
-
-    commit()
-
-    // Update query cache to reflect the new state
-    const currentData = collection.toArray as Array<TItem>
-    queryClient.setQueryData(queryKey, currentData as any)
-  }
+  // Create sync utils using the manual-sync module
+  const syncUtils = createSyncUtils<TItem, TKey, TInsertInput>(
+    () => syncContext
+  )
 
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
@@ -863,11 +519,7 @@ export function queryCollectionOptions<
     onDelete: wrappedOnDelete,
     utils: {
       refetch,
-      syncInsert,
-      syncUpdate,
-      syncDelete,
-      syncUpsert,
-      syncBatch,
+      ...syncUtils,
     },
   }
 }
