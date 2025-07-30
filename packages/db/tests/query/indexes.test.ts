@@ -25,6 +25,10 @@ interface TestItem {
   createdAt: Date
 }
 
+type TestItem2 = Omit<TestItem, `id`> & {
+  id2: string
+}
+
 // Index usage tracking utilities (copied from collection-indexes.test.ts)
 interface IndexUsageStats {
   rangeQueryCalls: number
@@ -1128,8 +1132,8 @@ describe(`Query Index Optimization`, () => {
 
     it(`should use index of left collection when right-joining collections`, async () => {
       // Create a second collection for the join with its own index
-      const secondCollection = createCollection<TestItem, string>({
-        getKey: (item) => item.id,
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1137,7 +1141,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `1`,
+                id2: `1`,
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -1147,7 +1151,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id2: `other2`,
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -1169,6 +1173,9 @@ describe(`Query Index Optimization`, () => {
       const tracker1 = createIndexUsageTracker(collection)
       const tracker2 = createIndexUsageTracker(secondCollection)
 
+      // TODO: make sure all join tests here use different names for the columns that are joined
+      //       such that we detect bugs due to the wrong join expr being used
+
       try {
         const liveQuery = createLiveQueryCollection({
           query: (q: any) =>
@@ -1176,7 +1183,7 @@ describe(`Query Index Optimization`, () => {
               .from({ item: collection })
               .join(
                 { other: secondCollection },
-                ({ item, other }: any) => eq(item.id, other.id),
+                ({ item, other }: any) => eq(item.id, other.id2),
                 `right`
               )
               .where(({ item, other }: any) =>
