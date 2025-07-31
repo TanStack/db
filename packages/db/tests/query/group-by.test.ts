@@ -1063,9 +1063,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) => orders.customer !== undefined)
-              .groupBy(({ orders }) => orders.customer?.tier || `unknown`)
+              .groupBy(({ orders }) => orders.customer.tier)
               .select(({ orders }) => ({
-                tier: orders.customer?.tier || `unknown`,
+                tier: orders.customer.tier,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
                 avg_amount: avg(orders.amount),
@@ -1092,15 +1092,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer?.address !== undefined)
-              .groupBy(
-                ({ orders }) => orders.customer?.address.state || `unknown`
-              )
+              .where(({ orders }) => orders.customer.address !== undefined)
+              .groupBy(({ orders }) => orders.customer.address.state)
               .select(({ orders }) => ({
-                state: orders.customer?.address.state || `unknown`,
+                state: orders.customer.address.state,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                cities: orders.customer?.address.city,
+                cities: orders.customer.address.city,
               })),
         })
 
@@ -1125,13 +1123,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) => orders.shipping !== undefined)
-              .groupBy(({ orders }) => orders.shipping?.method || `unknown`)
+              .groupBy(({ orders }) => orders.shipping.method)
               .select(({ orders }) => ({
-                method: orders.shipping?.method || `unknown`,
+                method: orders.shipping.method,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                avg_shipping_cost: avg(orders.shipping?.cost || 0),
-                total_shipping_cost: sum(orders.shipping?.cost || 0),
+                avg_shipping_cost: avg(orders.shipping.cost),
+                total_shipping_cost: sum(orders.shipping.cost),
               })),
         })
 
@@ -1163,11 +1161,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                   orders.shipping !== undefined
                 )
               )
-              .groupBy(({ orders }) => orders.customer?.tier || `unknown`)
-              .groupBy(({ orders }) => orders.shipping?.method || `unknown`)
+              .groupBy(({ orders }) => orders.customer.tier)
+              .groupBy(({ orders }) => orders.shipping.method)
               .select(({ orders }) => ({
-                tier: orders.customer?.tier || `unknown`,
-                method: orders.shipping?.method || `unknown`,
+                tier: orders.customer.tier,
+                method: orders.shipping.method,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),
@@ -1198,13 +1196,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer?.preferences !== undefined)
-              .groupBy(
-                ({ orders }) => orders.customer?.preferences.newsletter || false
-              )
+              .where(({ orders }) => orders.customer.preferences !== undefined)
+              .groupBy(({ orders }) => orders.customer.preferences.newsletter)
               .select(({ orders }) => ({
-                newsletter_subscribed:
-                  orders.customer?.preferences.newsletter || false,
+                newsletter_subscribed: orders.customer.preferences.newsletter,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
                 avg_amount: avg(orders.amount),
@@ -1236,18 +1231,16 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .groupBy(({ orders }) =>
-                orders.shipping?.tracking !== undefined
-                  ? `tracked`
-                  : `untracked`
+                orders.shipping.tracking !== undefined ? `tracked` : `untracked`
               )
               .select(({ orders }) => ({
                 tracking_status:
-                  orders.shipping?.tracking !== undefined
+                  orders.shipping.tracking !== undefined
                     ? `tracked`
                     : `untracked`,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                has_tracking: orders.shipping?.tracking !== undefined,
+                has_tracking: orders.shipping.tracking !== undefined,
               })),
         })
 
@@ -1271,9 +1264,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) => orders.customer !== undefined)
-              .groupBy(({ orders }) => orders.customer?.tier || `unknown`)
+              .groupBy(({ orders }) => orders.customer.tier)
               .select(({ orders }) => ({
-                tier: orders.customer?.tier || `unknown`,
+                tier: orders.customer.tier,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),

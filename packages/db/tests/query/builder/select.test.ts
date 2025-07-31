@@ -193,9 +193,9 @@ describe(`QueryBuilder.select`, () => {
       .select(({ employees }) => ({
         id: employees.id,
         name: employees.name,
-        bio: employees.profile?.bio,
-        skills: employees.profile?.skills,
-        city: employees.address?.city,
+        bio: employees.profile.bio,
+        skills: employees.profile.skills,
+        city: employees.address.city,
       }))
 
     const builtQuery = getQueryIR(query)
@@ -211,8 +211,8 @@ describe(`QueryBuilder.select`, () => {
       .from({ employees: employeesCollection })
       .select(({ employees }) => ({
         id: employees.id,
-        email: employees.profile?.contact.email,
-        phone: employees.profile?.contact.phone,
+        email: employees.profile.contact.email,
+        phone: employees.profile.contact.phone,
       }))
 
     const builtQuery = getQueryIR(query)
@@ -244,8 +244,8 @@ describe(`QueryBuilder.select`, () => {
       .from({ employees: employeesCollection })
       .select(({ employees }) => ({
         id: employees.id,
-        upperCity: upper(employees.address?.city || `Unknown`),
-        skillCount: count(employees.profile?.skills),
+        upperCity: upper(employees.address.city),
+        skillCount: count(employees.profile.skills),
         fullAddress: employees.address,
       }))
 
@@ -267,11 +267,11 @@ describe(`QueryBuilder.select`, () => {
       .select(({ employees }) => ({
         employeeId: employees.id,
         employeeName: employees.name,
-        employeeSkills: employees.profile?.skills,
-        contactInfo: employees.profile?.contact,
+        employeeSkills: employees.profile.skills,
+        contactInfo: employees.profile.contact,
         location: {
-          city: employees.address?.city,
-          country: employees.address?.country,
+          city: employees.address.city,
+          country: employees.address.country,
         },
       }))
 
@@ -291,9 +291,9 @@ describe(`QueryBuilder.select`, () => {
       .select(({ employees }) => ({
         id: employees.id,
         hasProfile: employees.profile !== undefined,
-        profileBio: employees.profile?.bio || `No bio`,
-        addressStreet: employees.address?.street || `No street`,
-        contactEmail: employees.profile?.contact?.email || `No email`,
+        profileBio: employees.profile.bio,
+        addressStreet: employees.address.street,
+        contactEmail: employees.profile.contact?.email,
       }))
 
     const builtQuery = getQueryIR(query)
@@ -311,11 +311,11 @@ describe(`QueryBuilder.select`, () => {
       .select(({ employees }) => ({
         id: employees.id,
         partialProfile: {
-          bio: employees.profile?.bio,
-          skillCount: employees.profile?.skills.length,
+          bio: employees.profile.bio,
+          skillCount: employees.profile.skills.length,
         },
         partialAddress: {
-          city: employees.address?.city,
+          city: employees.address.city,
         },
       }))
 

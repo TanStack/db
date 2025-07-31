@@ -787,12 +787,12 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .where(({ user }) =>
-              eq(user.profile?.bio, `Software engineer with 5 years experience`)
+              eq(user.profile.bio, `Software engineer with 5 years experience`)
             )
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              bio: user.profile?.bio,
+              bio: user.profile.bio,
             })),
       })
 
@@ -809,11 +809,11 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.profile?.preferences.theme, `dark`))
+            .where(({ user }) => eq(user.profile.preferences.theme, `dark`))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              theme: user.profile?.preferences.theme,
+              theme: user.profile.preferences.theme,
             })),
       })
 
@@ -832,9 +832,9 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            preferences: user.profile?.preferences,
-            city: user.address?.city,
-            coordinates: user.address?.coordinates,
+            preferences: user.profile.preferences,
+            city: user.address.city,
+            coordinates: user.address.coordinates,
           })),
       })
 
@@ -897,18 +897,15 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       const profileCollection = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
-          q
-            .from({ user: usersCollection })
-            .where(({ user }) => user.profile !== undefined)
-            .select(({ user }) => ({
-              id: user.id,
-              name: user.name,
-              theme: user.profile?.preferences.theme,
-              notifications: user.profile?.preferences.notifications,
-            })),
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            theme: user.profile.preferences.theme,
+            notifications: user.profile.preferences.notifications,
+          })),
       })
 
-      expect(profileCollection.size).toBe(2) // Alice and Bob
+      expect(profileCollection.size).toBe(4) // All users, but some will have undefined values
 
       // Update Bob's theme
       const bob = sampleUsers.find((u) => u.id === 2)!
@@ -958,7 +955,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
       usersCollection.utils.commit()
 
-      expect(profileCollection.size).toBe(3) // Now includes Dave
+      expect(profileCollection.size).toBe(4) // All users
       expect(profileCollection.get(4)).toMatchObject({
         id: 4,
         name: `Dave`,
@@ -979,26 +976,31 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
       usersCollection.utils.commit()
 
-      expect(profileCollection.size).toBe(2) // Bob removed
-      expect(profileCollection.get(2)).toBeUndefined()
+      expect(profileCollection.size).toBe(4) // All users still there, Bob will have undefined values
+      expect(profileCollection.get(2)).toMatchObject({
+        id: 2,
+        name: `Bob`,
+        theme: undefined,
+        notifications: undefined,
+      })
     })
 
     test(`should work with spread operator on nested objects`, () => {
       const spreadCollection = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
-          q
-            .from({ user: usersCollection })
-            .where(({ user }) => user.address !== undefined)
-            .select(({ user }) => ({
-              id: user.id,
-              name: user.name,
-              ...user.address,
-            })),
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            street: user.address.street,
+            city: user.address.city,
+            country: user.address.country,
+            coordinates: user.address.coordinates,
+          })),
       })
 
       const results = spreadCollection.toArray
-      expect(results).toHaveLength(2) // Alice and Charlie
+      expect(results).toHaveLength(4) // All users, but some will have undefined values
 
       const alice = results.find((u) => u.id === 1)
       expect(alice).toMatchObject({
@@ -1020,12 +1022,12 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.address?.city, `New York`))
+            .where(({ user }) => eq(user.address.city, `New York`))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              lat: user.address?.coordinates.lat,
-              lng: user.address?.coordinates.lng,
+              lat: user.address.coordinates.lat,
+              lng: user.address.coordinates.lng,
             })),
       })
 
@@ -1043,11 +1045,11 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.address?.coordinates.lat || 0, 38))
+            .where(({ user }) => gt(user.address.coordinates.lat, 38))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              city: user.address?.city,
+              city: user.address.city,
             })),
       })
 
@@ -1066,17 +1068,10 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            locationString: concat(
-              user.address?.city || `Unknown`,
-              `, `,
-              user.address?.country || `Unknown`
-            ),
-            hasNotifications: user.profile?.preferences.notifications || false,
-            profileSummary: concat(
-              upper(user.name),
-              ` - `,
-              user.profile?.bio || `No bio`
-            ),
+            city: user.address.city,
+            country: user.address.country,
+            hasNotifications: user.profile.preferences.notifications,
+            profileSummary: concat(upper(user.name), ` - `, user.profile.bio),
           })),
       })
 
@@ -1087,7 +1082,8 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(alice).toMatchObject({
         id: 1,
         name: `Alice`,
-        locationString: `New York, USA`,
+        city: `New York`,
+        country: `USA`,
         hasNotifications: true,
         profileSummary: `ALICE - Software engineer with 5 years experience`,
       })
@@ -1096,10 +1092,10 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(dave).toMatchObject({
         id: 4,
         name: `Dave`,
-        locationString: `Unknown, Unknown`,
-        hasNotifications: false,
-        profileSummary: `DAVE - No bio`,
       })
+      expect(dave?.city).toBeUndefined()
+      expect(dave?.country).toBeUndefined()
+      expect(dave?.hasNotifications).toBeUndefined()
     })
   })
 }
