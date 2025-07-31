@@ -33,6 +33,36 @@ type Employee = {
   first_name: string
   last_name: string
   age: number
+  profile?: {
+    skills: Array<string>
+    certifications: Array<{
+      name: string
+      date: string
+      valid: boolean
+    }>
+    experience: {
+      years: number
+      companies: Array<{
+        name: string
+        role: string
+        duration: number
+      }>
+    }
+  }
+  contact?: {
+    phone: string | null
+    address: {
+      street: string
+      city: string
+      state: string
+      zip: string
+    } | null
+    emergency: {
+      name: string
+      relation: string
+      phone: string
+    }
+  }
 }
 
 // Sample employee data
@@ -48,6 +78,34 @@ const sampleEmployees: Array<Employee> = [
     first_name: `Alice`,
     last_name: `Johnson`,
     age: 28,
+    profile: {
+      skills: [`JavaScript`, `TypeScript`, `React`],
+      certifications: [
+        { name: `AWS Certified Developer`, date: `2022-05-15`, valid: true },
+        { name: `Scrum Master`, date: `2021-03-10`, valid: true },
+      ],
+      experience: {
+        years: 5,
+        companies: [
+          { name: `TechCorp`, role: `Senior Developer`, duration: 3 },
+          { name: `StartupXYZ`, role: `Developer`, duration: 2 },
+        ],
+      },
+    },
+    contact: {
+      phone: `555-0101`,
+      address: {
+        street: `123 Main St`,
+        city: `San Francisco`,
+        state: `CA`,
+        zip: `94105`,
+      },
+      emergency: {
+        name: `John Johnson`,
+        relation: `Spouse`,
+        phone: `555-0102`,
+      },
+    },
   },
   {
     id: 2,
@@ -60,6 +118,28 @@ const sampleEmployees: Array<Employee> = [
     first_name: `Bob`,
     last_name: `Smith`,
     age: 32,
+    profile: {
+      skills: [`Python`, `Django`, `PostgreSQL`],
+      certifications: [
+        { name: `Python Developer`, date: `2020-08-20`, valid: true },
+      ],
+      experience: {
+        years: 8,
+        companies: [
+          { name: `DataCorp`, role: `Backend Developer`, duration: 5 },
+          { name: `WebAgency`, role: `Junior Developer`, duration: 3 },
+        ],
+      },
+    },
+    contact: {
+      phone: `555-0201`,
+      address: null,
+      emergency: {
+        name: `Mary Smith`,
+        relation: `Sister`,
+        phone: `555-0202`,
+      },
+    },
   },
   {
     id: 3,
@@ -72,6 +152,20 @@ const sampleEmployees: Array<Employee> = [
     first_name: `Charlie`,
     last_name: `Brown`,
     age: 35,
+    profile: {
+      skills: [`Java`, `Spring`, `Kubernetes`],
+      certifications: [
+        { name: `Java Certified`, date: `2019-02-15`, valid: false },
+        { name: `Kubernetes Admin`, date: `2023-01-20`, valid: true },
+      ],
+      experience: {
+        years: 10,
+        companies: [
+          { name: `EnterpriseCo`, role: `Lead Developer`, duration: 7 },
+          { name: `CloudTech`, role: `Senior Developer`, duration: 3 },
+        ],
+      },
+    },
   },
   {
     id: 4,
@@ -84,6 +178,20 @@ const sampleEmployees: Array<Employee> = [
     first_name: `Diana`,
     last_name: `Miller`,
     age: 29,
+    contact: {
+      phone: null,
+      address: {
+        street: `789 Elm St`,
+        city: `San Francisco`,
+        state: `CA`,
+        zip: `94110`,
+      },
+      emergency: {
+        name: `Robert Miller`,
+        relation: `Father`,
+        phone: `555-0401`,
+      },
+    },
   },
   {
     id: 5,
@@ -1269,6 +1377,307 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         employeesCollection.utils.begin()
         employeesCollection.utils.write({ type: `delete`, value: inactiveJohn })
         employeesCollection.utils.commit()
+      })
+    })
+
+    describe(`Nested Object Queries`, () => {
+      let employeesCollection: ReturnType<typeof createEmployeesCollection>
+
+      beforeEach(() => {
+        employeesCollection = createEmployeesCollection(autoIndex)
+      })
+
+      test(`should filter by nested object properties`, () => {
+        // Filter by nested profile.skills array
+        const jsDevs = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                inArray(`JavaScript`, emp.profile?.skills || [])
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                skills: emp.profile?.skills,
+              })),
+        })
+
+        expect(jsDevs.size).toBe(1) // Only Alice
+        expect(jsDevs.get(1)?.skills).toContain(`JavaScript`)
+
+        // Filter by deeply nested property
+        const sfEmployees = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                eq(emp.contact?.address?.city, `San Francisco`)
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                city: emp.contact?.address?.city,
+              })),
+        })
+
+        expect(sfEmployees.size).toBe(2) // Alice and Diana
+        expect(
+          sfEmployees.toArray.every((e) => e.city === `San Francisco`)
+        ).toBe(true)
+      })
+
+      test(`should handle null checks in nested properties`, () => {
+        // Employees with no address
+        const noAddress = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) => eq(emp.contact?.address, null))
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                hasAddress: emp.contact?.address !== null,
+              })),
+        })
+
+        expect(noAddress.size).toBe(1) // Only Bob
+        expect(noAddress.get(2)?.name).toBe(`Bob Smith`)
+
+        // Employees with valid certifications
+        const validCerts = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(
+                ({ emp }) =>
+                  emp.profile?.certifications?.some(
+                    (cert) => cert.valid === true
+                  ) || false
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                validCerts:
+                  emp.profile?.certifications?.filter((c) => c.valid) || [],
+              })),
+        })
+
+        expect(validCerts.size).toBe(3) // Alice, Bob, Charlie (all have at least one valid cert)
+      })
+
+      test(`should combine nested and non-nested conditions`, () => {
+        // Active employees in CA with 5+ years experience
+        const seniorCAEmployees = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                and(
+                  eq(emp.active, true),
+                  eq(emp.contact?.address?.state, `CA`),
+                  gte(emp.profile?.experience.years || 0, 5)
+                )
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                years: emp.profile?.experience.years,
+                state: emp.contact?.address?.state,
+              })),
+        })
+
+        expect(seniorCAEmployees.size).toBe(1) // Only Alice (active, CA, 5 years)
+        expect(seniorCAEmployees.get(1)).toMatchObject({
+          id: 1,
+          name: `Alice Johnson`,
+          years: 5,
+          state: `CA`,
+        })
+
+        // High earners with Python skills
+        const pythonHighEarners = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                and(
+                  gt(emp.salary, 60000),
+                  inArray(`Python`, emp.profile?.skills || [])
+                )
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                salary: emp.salary,
+                skills: emp.profile?.skills,
+              })),
+        })
+
+        expect(pythonHighEarners.size).toBe(1) // Only Bob
+        expect(pythonHighEarners.get(2)?.skills).toContain(`Python`)
+      })
+
+      test(`should handle updates to nested properties`, () => {
+        // Track employees with emergency contacts
+        const emergencyContacts = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) => emp.contact?.emergency !== undefined)
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                emergencyName: emp.contact?.emergency.name,
+                relation: emp.contact?.emergency.relation,
+              })),
+        })
+
+        expect(emergencyContacts.size).toBe(3) // Alice, Bob, Diana
+
+        // Add emergency contact to Eve
+        const eve = sampleEmployees.find((e) => e.id === 5)!
+        const eveWithContact: Employee = {
+          ...eve,
+          contact: {
+            phone: `555-0501`,
+            address: null,
+            emergency: {
+              name: `Tom Wilson`,
+              relation: `Brother`,
+              phone: `555-0502`,
+            },
+          },
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `update`,
+          value: eveWithContact,
+        })
+        employeesCollection.utils.commit()
+
+        expect(emergencyContacts.size).toBe(4) // Now includes Eve
+        expect(emergencyContacts.get(5)).toMatchObject({
+          id: 5,
+          name: `Eve Wilson`,
+          emergencyName: `Tom Wilson`,
+          relation: `Brother`,
+        })
+
+        // Update Alice's emergency contact
+        const alice = sampleEmployees.find((e) => e.id === 1)!
+        const aliceUpdated: Employee = {
+          ...alice,
+          contact: {
+            ...alice.contact!,
+            emergency: {
+              name: `Jane Doe`,
+              relation: `Friend`,
+              phone: `555-0103`,
+            },
+          },
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({ type: `update`, value: aliceUpdated })
+        employeesCollection.utils.commit()
+
+        expect(emergencyContacts.get(1)?.emergencyName).toBe(`Jane Doe`)
+        expect(emergencyContacts.get(1)?.relation).toBe(`Friend`)
+      })
+
+      test(`should work with computed expressions on nested properties`, () => {
+        // Filter by total experience duration
+        const experiencedDevs = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) => {
+                const totalDuration =
+                  emp.profile?.experience.companies.reduce(
+                    (sum, company) => sum + company.duration,
+                    0
+                  ) || 0
+                return gte(totalDuration, 5)
+              })
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                totalExperience:
+                  emp.profile?.experience.companies.reduce(
+                    (sum, company) => sum + company.duration,
+                    0
+                  ) || 0,
+              })),
+        })
+
+        expect(experiencedDevs.size).toBe(3) // Alice (5), Bob (8), Charlie (10)
+        expect(experiencedDevs.get(1)?.totalExperience).toBe(5)
+        expect(experiencedDevs.get(2)?.totalExperience).toBe(8)
+        expect(experiencedDevs.get(3)?.totalExperience).toBe(10)
+
+        // Filter by certification count
+        const multiCertified = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                gte(length(emp.profile?.certifications || []), 2)
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                certCount: length(emp.profile?.certifications || []),
+              })),
+        })
+
+        expect(multiCertified.size).toBe(2) // Alice and Charlie have 2 certs each
+      })
+
+      test(`should handle OR conditions with nested properties`, () => {
+        // Employees in SF OR with Python skills
+        const sfOrPython = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                or(
+                  eq(emp.contact?.address?.city, `San Francisco`),
+                  inArray(`Python`, emp.profile?.skills || [])
+                )
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                city: emp.contact?.address?.city,
+                hasPython: inArray(`Python`, emp.profile?.skills || []),
+              })),
+        })
+
+        expect(sfOrPython.size).toBe(3) // Alice (SF), Bob (Python), Diana (SF)
+
+        const results = sfOrPython.toArray
+        const alice = results.find((e) => e.id === 1)
+        const bob = results.find((e) => e.id === 2)
+        const diana = results.find((e) => e.id === 4)
+
+        expect(alice?.city).toBe(`San Francisco`)
+        expect(alice?.hasPython).toBe(false)
+        expect(bob?.city).toBeUndefined()
+        expect(bob?.hasPython).toBe(true)
+        expect(diana?.city).toBe(`San Francisco`)
+        expect(diana?.hasPython).toBe(false)
       })
     })
   })
