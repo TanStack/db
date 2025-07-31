@@ -11,6 +11,22 @@ type Person = {
   email: string
   isActive: boolean
   team: string
+  profile?: {
+    bio: string
+    score: number
+    stats: {
+      tasksCompleted: number
+      rating: number
+    }
+  }
+  address?: {
+    city: string
+    country: string
+    coordinates: {
+      lat: number
+      lng: number
+    }
+  }
 }
 
 const initialPersons: Array<Person> = [
@@ -21,6 +37,22 @@ const initialPersons: Array<Person> = [
     email: `john.doe@example.com`,
     isActive: true,
     team: `team1`,
+    profile: {
+      bio: `Senior developer with 5 years experience`,
+      score: 85,
+      stats: {
+        tasksCompleted: 120,
+        rating: 4.5,
+      },
+    },
+    address: {
+      city: `New York`,
+      country: `USA`,
+      coordinates: {
+        lat: 40.7128,
+        lng: -74.006,
+      },
+    },
   },
   {
     id: `2`,
@@ -29,6 +61,22 @@ const initialPersons: Array<Person> = [
     email: `jane.doe@example.com`,
     isActive: true,
     team: `team2`,
+    profile: {
+      bio: `Junior developer`,
+      score: 92,
+      stats: {
+        tasksCompleted: 85,
+        rating: 4.8,
+      },
+    },
+    address: {
+      city: `Los Angeles`,
+      country: `USA`,
+      coordinates: {
+        lat: 34.0522,
+        lng: -118.2437,
+      },
+    },
   },
   {
     id: `3`,
@@ -37,6 +85,14 @@ const initialPersons: Array<Person> = [
     email: `john.smith@example.com`,
     isActive: true,
     team: `team1`,
+    profile: {
+      bio: `Lead engineer`,
+      score: 78,
+      stats: {
+        tasksCompleted: 200,
+        rating: 4.2,
+      },
+    },
   },
 ]
 
@@ -1001,6 +1057,258 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           `alice`,
           `bob`,
           `Charlie`,
+        ])
+      })
+    })
+
+    describe(`Nested Object OrderBy`, () => {
+      let personsCollection: ReturnType<typeof createCollection<Person>>
+
+      beforeEach(() => {
+        personsCollection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `test-persons-nested`,
+            getKey: (person) => person.id,
+            initialData: initialPersons,
+            autoIndex,
+          })
+        )
+      })
+
+      it(`orders by nested object properties ascending`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile.score, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.score)).toEqual([78, 85, 92]) // John Smith, John Doe, Jane Doe
+        expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
+          `John Doe`,
+          `Jane Doe`,
+        ])
+      })
+
+      it(`orders by nested object properties descending`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.score)).toEqual([92, 85, 78]) // Jane Doe, John Doe, John Smith
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+      })
+
+      it(`orders by deeply nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile.stats.rating, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              rating: persons.profile.stats.rating,
+              tasksCompleted: persons.profile.stats.tasksCompleted,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.rating)).toEqual([4.8, 4.5, 4.2]) // Jane, John Doe, John Smith
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+      })
+
+      it(`orders by multiple nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.team, `asc`)
+            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              team: persons.team,
+              score: persons.profile.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+
+        // Should be ordered by team ASC, then score DESC within each team
+        // team1: John Doe (85), John Smith (78)
+        // team2: Jane Doe (92)
+        expect(results.map((r) => r.team)).toEqual([`team1`, `team1`, `team2`])
+        expect(results.map((r) => r.name)).toEqual([
+          `John Doe`,
+          `John Smith`,
+          `Jane Doe`,
+        ])
+        expect(results.map((r) => r.score)).toEqual([85, 78, 92])
+      })
+
+      it(`orders by coordinates (nested numeric properties)`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => persons.address !== undefined)
+            .orderBy(({ persons }) => persons.address.coordinates.lat, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              city: persons.address.city,
+              lat: persons.address.coordinates.lat,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(2) // Only John Doe and Jane Doe have addresses
+        expect(results.map((r) => r.lat)).toEqual([34.0522, 40.7128]) // LA, then NY
+        expect(results.map((r) => r.city)).toEqual([`Los Angeles`, `New York`])
+      })
+
+      it(`handles null/undefined nested properties in ordering`, async () => {
+        // Add a person without profile for testing
+        const personWithoutProfile: Person = {
+          id: `4`,
+          name: `Test Person`,
+          age: 40,
+          email: `test@example.com`,
+          isActive: true,
+          team: `team3`,
+        }
+
+        personsCollection.utils.begin()
+        personsCollection.utils.write({
+          type: `insert`,
+          value: personWithoutProfile,
+        })
+        personsCollection.utils.commit()
+
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(4)
+
+        // Person without profile should have score 0 and be last
+        expect(results.map((r) => r.score)).toEqual([92, 85, 78, 0])
+        expect(results[3].name).toBe(`Test Person`)
+      })
+
+      it(`maintains ordering during live updates of nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile.score,
+            }))
+        )
+        await collection.preload()
+
+        // Initial order should be Jane (92), John Doe (85), John Smith (78)
+        let results = Array.from(collection.values())
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+
+        // Update John Smith's score to be highest
+        const johnSmith = initialPersons.find((p) => p.id === `3`)!
+        const updatedJohnSmith: Person = {
+          ...johnSmith,
+          profile: {
+            ...johnSmith.profile!,
+            score: 95, // Higher than Jane's 92
+          },
+        }
+
+        personsCollection.utils.begin()
+        personsCollection.utils.write({
+          type: `update`,
+          value: updatedJohnSmith,
+        })
+        personsCollection.utils.commit()
+
+        // Order should now be John Smith (95), Jane (92), John Doe (85)
+        results = Array.from(collection.values())
+        expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
+          `Jane Doe`,
+          `John Doe`,
+        ])
+        expect(results.map((r) => r.score)).toEqual([95, 92, 85])
+      })
+
+      it(`handles string ordering on nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.address.city, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              city: persons.address.city,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+
+        // Should be ordered: Los Angeles, New York, undefined (John Smith has no address)
+        // Note: undefined values in ORDER BY may be handled differently by the query engine
+        expect(results.map((r) => r.city)).toEqual([
+          `Los Angeles`,
+          `New York`,
+          undefined,
+        ])
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
         ])
       })
     })
