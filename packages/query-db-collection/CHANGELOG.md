@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 0.1.1
+
+### Patch Changes
+
+- Add manual write methods to QueryCollectionUtils interface to enable direct state updates from external sources. Introduces writeInsert, writeUpdate, writeDelete, writeUpsert, and writeBatch methods that bypass the normal optimistic update flow for WebSocket/real-time scenarios. All methods include proper transaction handling, data validation, and automatic query cache synchronization. ([#303](https://github.com/TanStack/db/pull/303))
+
 ## 0.1.0
 
 ### Minor Changes
