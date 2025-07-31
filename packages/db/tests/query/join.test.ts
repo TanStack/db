@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createIndexUsageTracker, mockSyncCollectionOptions } from "../utls.js"
 
 // Sample data types for join testing
 type User = {
@@ -277,7 +277,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
       }
     })
 
-    test(`should handle live updates for ${joinType} joins - insert matching record`, () => {
+    test.only(`should handle live updates for ${joinType} joins - insert matching record`, () => {
       const joinQuery = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
@@ -294,6 +294,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             })),
       })
 
+      usersCollection.createIndex((row) => row.id)
+      departmentsCollection.createIndex((row) => row.id)
+
       const initialSize = joinQuery.size
 
       // Insert a new user with existing department
@@ -304,11 +307,22 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
         department_id: 1, // Engineering
       }
 
+      console.log(`gonna insert new user`)
+
+      const tracker1 = createIndexUsageTracker(usersCollection)
+      const tracker2 = createIndexUsageTracker(departmentsCollection)
+
       usersCollection.utils.begin()
       usersCollection.utils.write({ type: `insert`, value: newUser })
       usersCollection.utils.commit()
 
+      console.log(`inserted new user`)
+
+      console.log(`tracker1 stats:`, JSON.stringify(tracker1.stats, null, 2))
+      console.log(`tracker2 stats:`, JSON.stringify(tracker2.stats, null, 2))
+
       // For all join types, adding a matching user should increase the count
+      console.log(`joinQuery res:`, JSON.stringify(joinQuery.toArray, null, 2))
       expect(joinQuery.size).toBe(initialSize + 1)
 
       const eve = joinQuery.get(5)

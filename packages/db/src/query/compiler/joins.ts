@@ -13,10 +13,11 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
+import { Func } from "../ir.js"
+import { ensureIndexForExpression } from "../../indexes/auto-index.js"
 import { compileExpression } from "./evaluators.js"
+import { convertToBasicExpression } from "./expressions.js"
 import { compileQuery } from "./index.js"
-import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
-import type { Collection } from "../../collection.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -24,6 +25,8 @@ import type {
   PropRef,
   QueryRef,
 } from "../ir.js"
+import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
+import type { Collection } from "../../collection.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -195,6 +198,23 @@ function processJoin(
 
     let index: BaseIndex<string | number> | undefined
 
+    const [lazyCollectionJoinExpr, activeCollectionJoinExpr] =
+      activeCollection === `main`
+        ? [joinedExpr as PropRef, mainExpr as PropRef]
+        : [mainExpr as PropRef, joinedExpr as PropRef]
+
+    // The lazyCollectionJoinExpr is of the form `{ tableAlias }.{ joinKey }`
+    // so we need to strip the table alias from this path
+    const [_, ...indexPath] = lazyCollectionJoinExpr.path
+
+    const lazyCollectionAlias =
+      activeCollection === `main` ? joinedTableAlias : mainTableAlias
+
+    const exprToIndex = convertToBasicExpression(
+      new Func(`eq`, [lazyCollectionJoinExpr, activeCollectionJoinExpr]),
+      lazyCollectionAlias
+    )!
+
     const activePipelineWithLoading: IStreamBuilder<
       [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
     > = activePipeline.pipe(
@@ -204,15 +224,7 @@ function processJoin(
         // because the indexes are only available after the initial sync
         // so we can't fetch it during compilation
 
-        // The joinedExpr is of the form `{ tableAlias }.{ joinKey }`
-        // so we need to strip the table alias from this path
-
-        const lazyCollectionJoinExpr =
-          activeCollection === `main`
-            ? (joinedExpr as PropRef)
-            : (mainExpr as PropRef)
-        const [_, ...indexPath] = lazyCollectionJoinExpr.path
-
+        ensureIndexForExpression(exprToIndex, lazyCollection)
         index ??= findIndexForField(lazyCollection.indexes, indexPath)
 
         // The `callbacks` object is passed by the liveQueryCollection to the compiler.
@@ -233,6 +245,10 @@ function processJoin(
           // that match this row from the active collection based on the value of the joinKey
           const matchingKeys = index.lookup(`eq`, joinKey)
           // Inform the lazy collection that those keys need to be loaded
+          console.log(
+            `loading keys in ${lazyCollectionAlias} - ${lazyCollection.id} - ${JSON.stringify(lazyCollectionJoinExpr, null, 2)}: `,
+            JSON.stringify([...matchingKeys.values()], null, 2)
+          )
           loadKeys(matchingKeys)
         } else {
           // We can't optimize the join because there is no index for the join key
