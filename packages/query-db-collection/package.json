@@ -3,10 +3,10 @@
   "description": "TanStack Query collection for TanStack DB",
   "version": "0.1.1",
   "dependencies": {
-    "@tanstack/db": "workspace:*",
-    "@tanstack/query-core": "^5.75.7"
+    "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
+    "@tanstack/query-core": "^5.0.5",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
@@ -30,6 +30,7 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
+    "@tanstack/query-core": "^5.0.0",
     "typescript": ">=4.7"
   },
   "author": "Kyle Mathews",
