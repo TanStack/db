@@ -10,7 +10,7 @@ TanStack DB is a reactive client store for building super fast apps. This exampl
 - **Mutate data** with instant optimistic updates
 
 ```tsx
-import { createCollection, useLiveQuery } from '@tanstack/react-db'
+import { createCollection, eq, useLiveQuery } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 // Define a collection that loads data using TanStack Query
@@ -36,7 +36,7 @@ function Todos() {
   // Live query that updates automatically when data changes
   const { data: todos } = useLiveQuery((q) =>
     q.from({ todo: todoCollection })
-     .where(({ todo }) => !todo.completed)
+     .where(({ todo }) => eq(todo.completed, false))
      .orderBy(({ todo }) => todo.createdAt, 'desc')
   )
 
@@ -112,7 +112,7 @@ function TodoList() {
   // Basic filtering and sorting
   const { data: incompleteTodos } = useLiveQuery((q) =>
     q.from({ todo: todoCollection })
-     .where(({ todo }) => !todo.completed)
+     .where(({ todo }) => eq(todo.completed, false))
      .orderBy(({ todo }) => todo.createdAt, 'desc')
   )
 
