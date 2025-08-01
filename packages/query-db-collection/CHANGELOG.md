@@ -1,5 +1,11 @@
 # @tanstack/query-db-collection
 
+## 0.1.2
+
+### Patch Changes
+
+- Move @tanstack/query-core from dependencies to peerDependencies to avoid version conflicts when users already have react-query or query-core installed. This is a non-breaking change as the package will continue to work with any 5.x version of query-core. ([#351](https://github.com/TanStack/db/pull/351))
+
 ## 0.1.1
 
 ### Patch Changes
