@@ -34,7 +34,7 @@ The result types are automatically inferred from your query structure, providing
 - [Creating Live Query Collections](#creating-live-query-collections)
 - [From Clause](#from-clause)
 - [Where Clauses](#where-clauses)
-- [Select Projections](#select-projections)
+- [Select Projections](#select)
 - [Joins](#joins)
 - [Subqueries](#subqueries)
 - [groupBy and Aggregations](#groupby-and-aggregations)
