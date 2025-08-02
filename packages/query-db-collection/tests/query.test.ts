@@ -400,6 +400,33 @@ describe(`QueryCollection`, () => {
     expect(collection.get(`item3`)).toEqual(updatedItems[1])
   })
 
+  it(`should pass meta property to queryFn context`, async () => {
+    const queryKey = [`metaTest`]
+    const meta = { errorMessage: `Failed to load items` }
+    const queryFn = vi.fn().mockResolvedValueOnce([])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `test`,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey,
+      meta,
+      startSync: true,
+    }
+
+    const options = queryCollectionOptions(config)
+    createCollection(options)
+
+    // Wait for query to execute
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    // Verify queryFn was called with the correct context, including the meta object
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
+  })
+
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       const queryKey = [`directPersistenceTest`]
