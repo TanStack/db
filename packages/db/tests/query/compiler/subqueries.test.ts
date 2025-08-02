@@ -169,7 +169,13 @@ describe(`Query2 Subqueries`, () => {
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
-      const { pipeline } = compileQuery(builtQuery, { issues: issuesInput })
+      const { pipeline } = compileQuery(
+        builtQuery,
+        { issues: issuesInput },
+        { issues: issuesCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -202,6 +208,11 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Subqueries in JOIN clause`, () => {
+    const dummyCallbacks = {
+      loadKeys: (_: any) => {},
+      switchToRegularSubscription: () => {},
+    }
+
     it(`supports subquery in join clause`, () => {
       // Create a subquery for active users
       const activeUsersQuery = new Query()
@@ -261,10 +272,20 @@ describe(`Query2 Subqueries`, () => {
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
       const usersInput = createUserInput(graph)
-      const { pipeline } = compileQuery(builtQuery, {
-        issues: issuesInput,
-        users: usersInput,
-      })
+      const lazyCollections = new Set<string>()
+      const { pipeline } = compileQuery(
+        builtQuery,
+        {
+          issues: issuesInput,
+          users: usersInput,
+        },
+        { issues: issuesCollection, users: usersCollection },
+        { issues: dummyCallbacks, users: dummyCallbacks },
+        lazyCollections
+      )
+
+      // Since we're doing a left join, the collection on the right should be handled lazily
+      expect(lazyCollections).contains(usersCollection.id)
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -321,7 +342,13 @@ describe(`Query2 Subqueries`, () => {
       // Execute the aggregate query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
-      const { pipeline } = compileQuery(builtQuery, { issues: issuesInput })
+      const { pipeline } = compileQuery(
+        builtQuery,
+        { issues: issuesInput },
+        { issues: issuesCollection },
+        {},
+        new Set()
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
