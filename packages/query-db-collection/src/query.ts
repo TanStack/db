@@ -218,6 +218,28 @@ export interface QueryCollectionConfig<
    */
   onDelete?: DeleteMutationFn<TItem>
   // TODO type returning { refetch: boolean }
+
+  /**
+   * Metadata to pass to the query.
+   * Available in queryFn via context.meta
+   *
+   * @example
+   * // Using meta for error context
+   * queryFn: async (context) => {
+   *   try {
+   *     return await api.getTodos(userId)
+   *   } catch (error) {
+   *     // Use meta for better error messages
+   *     throw new Error(
+   *       context.meta?.errorMessage || 'Failed to load todos'
+   *     )
+   *   }
+   * },
+   * meta: {
+   *   errorMessage: `Failed to load todos for user ${userId}`
+   * }
+   */
+  meta?: Record<string, unknown>
 }
 
 /**
@@ -276,6 +298,7 @@ export function queryCollectionOptions<
     onInsert,
     onUpdate,
     onDelete,
+    meta,
     ...baseCollectionConfig
   } = config
 
@@ -312,6 +335,7 @@ export function queryCollectionOptions<
     > = {
       queryKey: queryKey,
       queryFn: queryFn,
+      meta: meta,
       enabled: enabled,
       refetchInterval: refetchInterval,
       retry: retry,

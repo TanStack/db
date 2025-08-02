@@ -8,10 +8,10 @@ title: queryCollectionOptions
 # Function: queryCollectionOptions()
 
 ```ts
-function queryCollectionOptions<TItem, TError, TQueryKey>(config): CollectionConfig<TItem, string | number, StandardSchemaV1<unknown, unknown>, TItem> & object
+function queryCollectionOptions<TItem, TError, TQueryKey, TKey, TInsertInput>(config): CollectionConfig<TItem, string | number, StandardSchemaV1<unknown, unknown>, TItem> & object
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:235](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L235)
+Defined in: [packages/query-db-collection/src/query.ts:277](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L277)
 
 Creates query collection options for use with a standard Collection
 
@@ -22,6 +22,10 @@ Creates query collection options for use with a standard Collection
 • **TError** = `unknown`
 
 • **TQueryKey** *extends* readonly `unknown`[] = readonly `unknown`[]
+
+• **TKey** *extends* `string` \| `number` = `string` \| `number`
+
+• **TInsertInput** *extends* `object` = `TItem`
 
 ## Parameters
 
