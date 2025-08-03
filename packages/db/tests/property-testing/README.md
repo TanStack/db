@@ -11,19 +11,23 @@ Property-based testing (PBT) uses randomly generated inputs to verify that syste
 ### Core Components
 
 #### 1. **Generators** (`generators/`)
+
 - **`schema-generator.ts`**: Generates random database schemas with tables, columns, and relationships
 - **`row-generator.ts`**: Creates test data that conforms to the generated schemas
 - **`query-generator.ts`**: Generates random SQL queries using TanStack DB's query builder
 - **`mutation-generator.ts`**: Creates random insert, update, and delete operations
 
 #### 2. **SQL Translation** (`sql/`)
+
 - **`ast-to-sql.ts`**: Converts TanStack DB's Intermediate Representation (IR) to SQLite SQL
 - **`sqlite-oracle.ts`**: Provides a real SQLite database instance for comparison
 
 #### 3. **Test Harness** (`harness/`)
+
 - **`property-test-harness.ts`**: Main orchestrator that runs test sequences and validates properties
 
 #### 4. **Utilities** (`utils/`)
+
 - **`incremental-checker.ts`**: Validates invariants and compares TanStack DB vs SQLite results
 - **`normalizer.ts`**: Normalizes data for comparison (handles type differences, ordering, etc.)
 - **`functional-to-structural.ts`**: Converts functional expressions to structural IR
@@ -31,6 +35,7 @@ Property-based testing (PBT) uses randomly generated inputs to verify that syste
 ### Test Types
 
 #### 1. **Property-Based Tests** (`property-based-tests.test.ts`)
+
 Tests the core properties that must hold true for the query engine:
 
 - **Property 1: Snapshot Equality**: TanStack DB results match SQLite oracle
@@ -42,6 +47,7 @@ Tests the core properties that must hold true for the query engine:
 - **Property 7: Error Handling**: Edge cases are handled gracefully
 
 #### 2. **Quick Test Suite** (`quick-test-suite.test.ts`)
+
 Rapid validation tests for the PBT framework itself:
 
 - Schema generation validation
@@ -51,6 +57,7 @@ Rapid validation tests for the PBT framework itself:
 - Basic property validation
 
 #### 3. **Comprehensive SQL Coverage** (`comprehensive-sql-coverage.test.ts`)
+
 Systematic testing of SQL translation capabilities:
 
 - All comparison operators (`eq`, `gt`, `gte`, `lt`, `lte`, `in`, `like`, `ilike`)
@@ -62,6 +69,7 @@ Systematic testing of SQL translation capabilities:
 - `ORDER BY`, `GROUP BY`, `LIMIT`, `OFFSET`
 
 #### 4. **Framework Unit Tests** (`framework-unit-tests.test.ts`)
+
 Unit tests for individual PBT components:
 
 - Generator validation
@@ -70,6 +78,7 @@ Unit tests for individual PBT components:
 - Oracle validation
 
 #### 5. **Integration Tests**
+
 - **`tanstack-sqlite-comparison.test.ts`**: Direct comparison of TanStack DB vs SQLite
 - **`query-builder-ir-extraction.test.ts`**: Tests IR extraction from query builder
 - **`ir-to-sql-translation.test.ts`**: Tests IR to SQL translation
@@ -77,6 +86,7 @@ Unit tests for individual PBT components:
 ## How It Works
 
 ### 1. **Test Sequence Generation**
+
 ```typescript
 // Generate a random schema
 const schema = generateSchema(config)
@@ -89,6 +99,7 @@ const commands = generateCompleteTestSequence(schema, config)
 ```
 
 ### 2. **Test Execution**
+
 ```typescript
 // Initialize test state
 const state = {
@@ -106,6 +117,7 @@ for (const command of commands) {
 ```
 
 ### 3. **Property Validation**
+
 ```typescript
 // Check snapshot equality
 const snapshotCheck = await checker.checkSnapshotEquality()
@@ -121,6 +133,7 @@ const rowCountCheck = await checker.checkRowCountSanity()
 ```
 
 ### 4. **Result Comparison**
+
 ```typescript
 // Compare TanStack DB vs SQLite results
 const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
@@ -132,7 +145,8 @@ if (hasOrderBy) {
 } else {
   // Results can be in different order
   const sortedComparison = normalizer.compareRowSets(
-    sortedTanstack, sortedSqlite
+    sortedTanstack,
+    sortedSqlite
   )
   expect(sortedComparison.equal).toBe(true)
 }
@@ -141,10 +155,13 @@ if (hasOrderBy) {
 ## Key Features
 
 ### **Real SQLite Oracle**
+
 Uses `better-sqlite3` for deterministic comparison against TanStack DB's results.
 
 ### **Comprehensive SQL Translation**
+
 Converts TanStack DB's IR to SQLite-compatible SQL, supporting:
+
 - All comparison operators
 - Logical operators
 - Functions and aggregates
@@ -152,19 +169,24 @@ Converts TanStack DB's IR to SQLite-compatible SQL, supporting:
 - Ordering and grouping
 
 ### **Robust Data Normalization**
+
 Handles type differences, ordering, and edge cases:
+
 - Number precision differences
 - Boolean vs integer representations
 - Object/array serialization
 - Null handling
 
 ### **Error Handling**
+
 Gracefully handles expected failures:
+
 - Non-existent rows/columns
 - Invalid SQL syntax
 - Schema generation edge cases
 
 ### **Reproducibility**
+
 - Deterministic seeds for reproducible failures
 - Detailed error reporting with failing command sequences
 - Regression test fixtures
@@ -172,21 +194,25 @@ Gracefully handles expected failures:
 ## Running Tests
 
 ### Quick Tests
+
 ```bash
 pnpm test:property:quick
 ```
 
 ### Full Property Tests
+
 ```bash
 pnpm test:property
 ```
 
 ### Coverage Report
+
 ```bash
 pnpm test:property:coverage
 ```
 
 ### Example Usage
+
 ```bash
 pnpm test:property:example
 ```
@@ -197,39 +223,46 @@ The framework is configurable via `GeneratorConfig`:
 
 ```typescript
 interface GeneratorConfig {
-  maxTables: number        // Maximum tables per schema
-  maxColumns: number       // Maximum columns per table
-  minRows?: number         // Minimum rows per table
-  maxRows?: number         // Maximum rows per table
-  maxRowsPerTable: number  // Maximum rows per table
-  minCommands?: number     // Minimum commands per test
-  maxCommands: number      // Maximum commands per test
-  maxQueries: number       // Maximum queries per test
-  floatTolerance: number   // Float comparison tolerance
+  maxTables: number // Maximum tables per schema
+  maxColumns: number // Maximum columns per table
+  minRows?: number // Minimum rows per table
+  maxRows?: number // Maximum rows per table
+  maxRowsPerTable: number // Maximum rows per table
+  minCommands?: number // Minimum commands per test
+  maxCommands: number // Maximum commands per test
+  maxQueries: number // Maximum queries per test
+  floatTolerance: number // Float comparison tolerance
 }
 ```
 
 ## Validation Properties
 
 ### **Snapshot Equality**
+
 Ensures that TanStack DB query results exactly match SQLite oracle results.
 
 ### **Incremental Convergence**
+
 Verifies that query results remain consistent as the database state changes through mutations.
 
 ### **Optimistic Transaction Visibility**
+
 Validates that transaction state is properly managed and visible to queries.
 
 ### **Row Count Sanity**
+
 Confirms that row counts are consistent between TanStack DB and SQLite across all tables.
 
 ### **Query Feature Coverage**
+
 Tests that all query features (WHERE, JOIN, ORDER BY, etc.) work correctly.
 
 ### **Data Type Handling**
+
 Ensures all data types (strings, numbers, booleans, objects, arrays) are handled properly.
 
 ### **Error Handling**
+
 Validates that edge cases and error conditions are handled gracefully.
 
 ## Benefits
