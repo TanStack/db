@@ -36,11 +36,11 @@ describe(`Property-Based Testing Framework`, () => {
       const schema = await fc.sample(schemaArb, 1)[0]
 
       expect(schema).toBeDefined()
-      expect(schema.tables).toBeInstanceOf(Array)
-      expect(schema.tables.length).toBeGreaterThan(0)
-      expect(schema.tables.length).toBeLessThanOrEqual(2)
+      expect(schema!.tables).toBeInstanceOf(Array)
+      expect(schema!.tables.length).toBeGreaterThan(0)
+      expect(schema!.tables.length).toBeLessThanOrEqual(2)
 
-      for (const table of schema.tables) {
+      for (const table of schema!.tables) {
         expect(table.name).toBeDefined()
         expect(table.columns).toBeInstanceOf(Array)
         expect(table.columns.length).toBeGreaterThan(0)
@@ -60,7 +60,7 @@ describe(`Property-Based Testing Framework`, () => {
       const schemaArb = generateSchema({ maxTables: 2, maxColumns: 4 })
       const schema = await fc.sample(schemaArb, 1)[0]
 
-      if (schema.tables.length >= 2) {
+      if (schema!.tables.length >= 2) {
         // Should have some join hints if there are multiple tables
         expect(schema.joinHints).toBeInstanceOf(Array)
       }

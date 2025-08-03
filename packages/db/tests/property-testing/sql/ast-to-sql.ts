@@ -38,7 +38,7 @@ function buildSQL(
   parts.push(buildFrom(ast.from))
 
   // JOIN clause
-  if (ast.join && ast.join.length > 0) {
+  if (ast.join && ast.join!.length > 0) {
     parts.push(buildJoins(ast.join, params, paramIndex))
   }
 
@@ -128,10 +128,10 @@ function buildJoins(
 
   return joins
     .map((join: any) => {
-      const joinType = join.type.toUpperCase()
-      const joinTable = quoteIdentifier(join.from.alias)
-      const leftExpr = expressionToSQL(join.left, params, paramIndex)
-      const rightExpr = expressionToSQL(join.right, params, paramIndex)
+      const joinType = join!.type.toUpperCase()
+      const joinTable = quoteIdentifier(join!.from.alias)
+      const leftExpr = expressionToSQL(join!.left, params, paramIndex)
+      const rightExpr = expressionToSQL(join!.right, params, paramIndex)
 
       return `${joinType} JOIN ${joinTable} ON ${leftExpr} = ${rightExpr}`
     })

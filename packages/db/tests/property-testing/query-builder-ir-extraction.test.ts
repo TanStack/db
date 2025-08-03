@@ -14,8 +14,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -37,6 +39,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
       generateRowsForTable(table, { minRows: 5, maxRows: 10 }),
       1
     )[0]
+    if (!testRows) throw new Error(`Failed to generate test rows`)
 
     // Insert into SQLite
     for (const row of testRows) {
@@ -70,8 +73,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -95,7 +100,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
@@ -109,7 +114,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Get a sample value for the WHERE clause
     const sampleValue =
-      testRows.find((row) => row[stringColumn.name] !== undefined)?.[
+      testRows!.find((row) => row[stringColumn.name] !== undefined)?.[
         stringColumn.name
       ] || `test`
 
@@ -117,10 +122,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table.primaryKey]: row[tableName][table.primaryKey],
-        [stringColumn.name]: row[tableName][stringColumn.name],
+        [table.primaryKey]: row[tableName][table.primaryKey]!,
+        [stringColumn.name]: row[tableName][stringColumn.name]!,
       }))
-      .where((row) => eq(row[tableName][stringColumn.name], sampleValue))
+      .where((row) => eq(row[tableName][stringColumn.name]!, sampleValue))
 
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
@@ -140,7 +145,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Verify we get filtered results
     expect(sqliteResult.length).toBeGreaterThanOrEqual(0)
-    expect(sqliteResult.length).toBeLessThanOrEqual(testRows.length)
+    expect(sqliteResult.length).toBeLessThanOrEqual(testRows!.length)
   })
 
   it(`should extract IR from ORDER BY query and translate correctly`, async () => {
@@ -148,18 +153,18 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -167,17 +172,17 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
     // Find a sortable column
-    const sortColumn = table.columns.find(
+    const sortColumn = table!.columns.find(
       (col) => col.type === `string` || col.type === `number`
     )
     if (!sortColumn) {
@@ -188,10 +193,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table.primaryKey]: row[tableName][table.primaryKey],
-        [sortColumn.name]: row[tableName][sortColumn.name],
+        [table!.primaryKey]: row[tableName][table!.primaryKey]!,
+        [sortColumn.name]: row[tableName][sortColumn.name]!,
       }))
-      .orderBy((row) => row[tableName][sortColumn.name], `asc`)
+      .orderBy((row) => row[tableName][sortColumn.name]!, `asc`)
 
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
@@ -209,7 +214,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Verify we get all rows
-    expect(sqliteResult.length).toBe(testRows.length)
+    expect(sqliteResult.length).toBe(testRows!.length)
   })
 
   it(`should extract IR from aggregate query and translate correctly`, async () => {
@@ -217,18 +222,18 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -236,19 +241,19 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
     // Build query using the query builder with COUNT aggregate
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
-      .select(() => ({ count: count(`*`) }))
+      .select(() => ({ count: count(`*` as any) }))
 
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
@@ -267,7 +272,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Verify we get a count result
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
-    expect(Number(sqliteResult[0].count)).toBe(testRows.length)
+    expect(Number(sqliteResult[0].count)).toBe(testRows!.length)
   })
 
   it(`should extract IR from complex query and translate correctly`, async () => {

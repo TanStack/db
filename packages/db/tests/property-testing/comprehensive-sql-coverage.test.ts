@@ -32,7 +32,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
   // Helper function to test SQL translation
   function testSQLTranslation(
     description: string,
-    queryBuilder: InstanceType<typeof Query>,
+    queryBuilder: any,
     expectedSQLPatterns: Array<string>,
     expectedParams: Array<any> = []
   ) {
@@ -59,7 +59,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -85,7 +85,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -141,7 +141,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -151,7 +151,9 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate AND operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => and(eq(row.users.age, 25), eq(row.users.active, true))),
+        .where((row) =>
+          and(eq(row.users.age!, 25), eq(row.users.active!, true))
+        ),
       [`SELECT`, `FROM`, `WHERE`, `AND`]
     )
 
@@ -159,7 +161,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate OR operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => or(eq(row.users.age, 25), eq(row.users.age, 30))),
+        .where((row) => or(eq(row.users.age!, 25), eq(row.users.age!, 30))),
       [`SELECT`, `FROM`, `WHERE`, `OR`]
     )
 
@@ -167,7 +169,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate NOT operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => not(eq(row.users.active, false))),
+        .where((row) => not(eq(row.users.active!, false))),
       [`SELECT`, `FROM`, `WHERE`, `NOT`]
     )
   })
@@ -176,7 +178,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -186,7 +188,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate LIKE operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => like(row.users.name, `%john%`)),
+        .where((row) => like(row.users.name! as any, `%john%`)),
       [`SELECT`, `FROM`, `WHERE`, `LIKE`, `?`],
       [`%john%`]
     )
@@ -195,7 +197,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate ILIKE operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => ilike(row.users.name, `%john%`)),
+        .where((row) => ilike(row.users.name! as any, `%john%`)),
       [`SELECT`, `FROM`, `WHERE`, `ILIKE`, `?`],
       [`%john%`]
     )
@@ -203,7 +205,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate UPPER function`,
       new Query().from({ users: collection }).select((row) => ({
-        name: upper(row.users.name),
+        name: upper(row.users.name! as any),
       })),
       [`SELECT`, `UPPER`, `FROM`]
     )
@@ -211,7 +213,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate LOWER function`,
       new Query().from({ users: collection }).select((row) => ({
-        name: lower(row.users.name),
+        name: lower(row.users.name! as any),
       })),
       [`SELECT`, `LOWER`, `FROM`]
     )
@@ -219,7 +221,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate LENGTH function`,
       new Query().from({ users: collection }).select((row) => ({
-        nameLength: length(row.users.name),
+        nameLength: length(row.users.name! as any),
       })),
       [`SELECT`, `LENGTH`, `FROM`]
     )
@@ -227,7 +229,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate CONCAT function`,
       new Query().from({ users: collection }).select((row) => ({
-        fullName: concat(row.users.firstName, ` `, row.users.lastName),
+        fullName: concat(
+          row.users.firstName! as any,
+          ` `,
+          row.users.lastName! as any
+        ),
       })),
       [`SELECT`, `CONCAT`, `FROM`]
     )
@@ -237,7 +243,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -246,7 +252,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate COUNT aggregate`,
       new Query().from({ users: collection }).select(() => ({
-        total: count(`*`),
+        total: count(`*` as any),
       })),
       [`SELECT`, `COUNT`, `FROM`]
     )
@@ -254,7 +260,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate SUM aggregate`,
       new Query().from({ users: collection }).select(() => ({
-        totalSalary: sum(`salary`),
+        totalSalary: sum(`salary` as any),
       })),
       [`SELECT`, `SUM`, `FROM`]
     )
@@ -278,7 +284,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate MAX aggregate`,
       new Query().from({ users: collection }).select(() => ({
-        maxSalary: max(`salary`),
+        maxSalary: max(`salary` as any),
       })),
       [`SELECT`, `MAX`, `FROM`]
     )
@@ -288,7 +294,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -298,7 +304,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate ORDER BY ASC`,
       new Query()
         .from({ users: collection })
-        .orderBy((row) => row.users.name, `asc`),
+        .orderBy((row) => row.users.name!, `asc`),
       [`SELECT`, `FROM`, `ORDER BY`, `ASC`]
     )
 
@@ -306,7 +312,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate ORDER BY DESC`,
       new Query()
         .from({ users: collection })
-        .orderBy((row) => row.users.age, `desc`),
+        .orderBy((row) => row.users.age!, `desc`),
       [`SELECT`, `FROM`, `ORDER BY`, `DESC`]
     )
 
@@ -326,7 +332,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate ORDER BY with LIMIT and OFFSET`,
       new Query()
         .from({ users: collection })
-        .orderBy((row) => row.users.age, `desc`)
+        .orderBy((row) => row.users.age!, `desc`)
         .limit(10)
         .offset(20),
       [`SELECT`, `FROM`, `ORDER BY`, `DESC`, `LIMIT`, `OFFSET`]
@@ -337,7 +343,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -349,8 +355,8 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
         .from({ users: collection })
         .where((row) =>
           and(
-            gte(row.users.age, 18),
-            or(eq(row.users.active, true), eq(row.users.verified, true))
+            gte(row.users.age!, 18),
+            or(eq(row.users.active!, true), eq(row.users.verified!, true))
           )
         ),
       [`SELECT`, `FROM`, `WHERE`, `AND`, `OR`, `>=`, `=`]
@@ -362,9 +368,9 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
         .from({ users: collection })
         .where((row) =>
           and(
-            gt(row.users.age, 18),
-            lt(row.users.age, 65),
-            not(eq(row.users.banned, true))
+            gt(row.users.age!, 18),
+            lt(row.users.age!, 65),
+            not(eq(row.users.banned!, true))
           )
         ),
       [`SELECT`, `FROM`, `WHERE`, `AND`, `NOT`, `>`, `<`, `=`]
@@ -375,7 +381,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -384,7 +390,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate ADD function`,
       new Query().from({ users: collection }).select((row) => ({
-        total: add(row.users.salary, row.users.bonus),
+        total: add(row.users.salary!, row.users.bonus!),
       })),
       [`SELECT`, `+`, `FROM`]
     )
@@ -392,7 +398,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate COALESCE function`,
       new Query().from({ users: collection }).select((row) => ({
-        displayName: coalesce(row.users.nickname, row.users.name, `Unknown`),
+        displayName: coalesce(row.users.nickname!, row.users.name!, `Unknown`),
       })),
       [`SELECT`, `COALESCE`, `FROM`]
     )
@@ -402,7 +408,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -412,7 +418,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate IN ARRAY operator`,
       new Query()
         .from({ users: collection })
-        .where((row) => inArray(row.users.id, [1, 2, 3, 4, 5])),
+        .where((row) => inArray(row.users.id!, [1, 2, 3, 4, 5])),
       [`SELECT`, `FROM`, `WHERE`, `IN`]
     )
   })
@@ -421,7 +427,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -431,7 +437,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate DISTINCT`,
       new Query()
         .from({ users: collection })
-        .select((row) => row.users.department)
+        .select((row) => row.users.department!)
         .distinct(),
       [`SELECT`, `DISTINCT`, `FROM`]
     )
@@ -441,7 +447,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -453,9 +459,9 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
         .from({ users: collection })
         .select(() => ({
           department: `department`,
-          count: count(`*`),
+          count: count(`*` as any),
         }))
-        .groupBy((row) => row.users.department),
+        .groupBy((row) => row.users.department!),
       [`SELECT`, `FROM`, `GROUP BY`, `COUNT`]
     )
 
@@ -467,7 +473,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           department: `department`,
           avgSalary: avg(`salary`),
         }))
-        .groupBy((row) => row.users.department)
+        .groupBy((row) => row.users.department!)
         .having((row) => gt(row.avgSalary, 50000)),
       [`SELECT`, `FROM`, `GROUP BY`, `HAVING`, `>`, `AVG`]
     )
@@ -477,7 +483,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const usersCollection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -486,7 +492,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const postsCollection = createCollection(
       mockSyncCollectionOptions({
         id: `posts`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -497,11 +503,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       new Query()
         .from({ users: usersCollection })
         .innerJoin({ posts: postsCollection }, (row) =>
-          eq(row.users.id, row.posts.userId)
+          eq(row.users.id!, row.posts.userId!)
         )
         .select((row) => ({
-          userName: row.users.name,
-          postTitle: row.posts.title,
+          userName: row.users.name!,
+          postTitle: row.posts.title!,
         })),
       [`SELECT`, `FROM`, `INNER JOIN`, `ON`, `=`]
     )
@@ -511,11 +517,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       new Query()
         .from({ users: usersCollection })
         .leftJoin({ posts: postsCollection }, (row) =>
-          eq(row.users.id, row.posts.userId)
+          eq(row.users.id!, row.posts.userId!)
         )
         .select((row) => ({
-          userName: row.users.name,
-          postTitle: row.posts.title,
+          userName: row.users.name!,
+          postTitle: row.posts.title!,
         })),
       [`SELECT`, `FROM`, `LEFT JOIN`, `ON`, `=`]
     )
@@ -525,11 +531,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       new Query()
         .from({ users: usersCollection })
         .rightJoin({ posts: postsCollection }, (row) =>
-          eq(row.users.id, row.posts.userId)
+          eq(row.users.id!, row.posts.userId!)
         )
         .select((row) => ({
-          userName: row.users.name,
-          postTitle: row.posts.title,
+          userName: row.users.name!,
+          postTitle: row.posts.title!,
         })),
       [`SELECT`, `FROM`, `RIGHT JOIN`, `ON`, `=`]
     )
@@ -539,11 +545,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       new Query()
         .from({ users: usersCollection })
         .fullJoin({ posts: postsCollection }, (row) =>
-          eq(row.users.id, row.posts.userId)
+          eq(row.users.id!, row.posts.userId!)
         )
         .select((row) => ({
-          userName: row.users.name,
-          postTitle: row.posts.title,
+          userName: row.users.name!,
+          postTitle: row.posts.title!,
         })),
       [`SELECT`, `FROM`, `FULL JOIN`, `ON`, `=`]
     )
@@ -553,7 +559,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const usersCollection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -562,7 +568,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const postsCollection = createCollection(
       mockSyncCollectionOptions({
         id: `posts`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -574,7 +580,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
         .from({
           activeUsers: new Query()
             .from({ users: usersCollection })
-            .where((row) => eq(row.users.active, true)),
+            .where((row) => eq(row.users.active!, true)),
         })
         .select((row) => row.activeUsers),
       [`SELECT`, `FROM`, `WHERE`, `=`]
@@ -584,7 +590,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate subquery in WHERE clause`,
       new Query().from({ users: usersCollection }).where((row) =>
         inArray(
-          row.users.id,
+          row.users.id!,
           new Query()
             .from({ posts: postsCollection })
             .select((postRow) => postRow.posts.userId)
@@ -598,7 +604,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const usersCollection = createCollection(
       mockSyncCollectionOptions({
         id: `users`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -607,7 +613,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     const postsCollection = createCollection(
       mockSyncCollectionOptions({
         id: `posts`,
-        getKey: (item: any) => item.id,
+        getKey: (item: any) => item!.id,
         initialData: [],
         autoIndex: `eager`,
       })
@@ -618,15 +624,17 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       new Query()
         .from({ users: usersCollection })
         .leftJoin({ posts: postsCollection }, (row) =>
-          eq(row.users.id, row.posts.userId)
+          eq(row.users.id!, row.posts.userId!)
         )
-        .where((row) => and(gte(row.users.age, 18), eq(row.users.active, true)))
+        .where((row) =>
+          and(gte(row.users.age!, 18), eq(row.users.active!, true))
+        )
         .select(() => ({
           department: `department`,
-          userCount: count(`*`),
-          avgAge: avg(`age`),
+          userCount: count(`*` as any),
+          avgAge: avg(`age` as any),
         }))
-        .groupBy((row) => row.users.department)
+        .groupBy((row) => row.users.department!)
         .having((row) => gt(row.userCount, 5))
         .orderBy((row) => row.avgAge, `desc`)
         .limit(10),

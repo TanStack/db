@@ -31,8 +31,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -54,6 +56,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
       generateRowsForTable(table, { minRows: 5, maxRows: 10 }),
       1
     )[0]
+    if (!testRows) throw new Error(`Failed to generate test rows`)
 
     // Insert into SQLite
     for (const row of testRows) {
@@ -101,8 +104,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -126,7 +131,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
     )[0]
 
     // Insert into both databases
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
       collection.insert(row)
     }
@@ -140,7 +145,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
     }
 
     // Get a sample value for the WHERE clause
-    const sampleValue = testRows[0][stringColumn.name]
+    const sampleValue = testRows![0]![stringColumn.name]
 
     // Test WHERE clause
     const whereAST = {
@@ -164,8 +169,8 @@ describe(`SQL Translation and Execution Comparison`, () => {
         q
           .from({ [tableName]: collection })
           .select((row) => ({
-            [table.primaryKey]: row[table.primaryKey],
-            [stringColumn.name]: row[stringColumn.name],
+            [table.primaryKey]: row[table.primaryKey]!,
+            [stringColumn.name]: row[stringColumn.name]!,
           }))
           .where((row) => row[stringColumn.name] === sampleValue),
     })
@@ -186,8 +191,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -211,7 +218,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
     )[0]
 
     // Insert into both databases
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
       collection.insert(row)
     }
@@ -269,18 +276,18 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -288,18 +295,18 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into both databases
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
       collection.insert(row)
     }
 
     // Find a numeric column for aggregation
-    const numericColumn = table.columns.find(
+    const numericColumn = table!.columns.find(
       (col) => col.type === `number` && !col.isPrimaryKey
     )
     if (!numericColumn) {
@@ -340,18 +347,18 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 4 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -359,21 +366,21 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 20, maxRows: 50 }),
+      generateRowsForTable(table!, { minRows: 20, maxRows: 50 }),
       1
     )[0]
 
     // Insert into both databases
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
       collection.insert(row)
     }
 
     // Find columns for complex query
-    const stringColumn = table.columns.find(
+    const stringColumn = table!.columns.find(
       (col) => col.type === `string` && !col.isPrimaryKey
     )
-    const numericColumn = table.columns.find(
+    const numericColumn = table!.columns.find(
       (col) => col.type === `number` && !col.isPrimaryKey
     )
 
@@ -385,7 +392,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const complexAST = {
       from: new CollectionRef(collection as any, tableName),
       select: {
-        [table.primaryKey]: new PropRef([tableName, table.primaryKey]),
+        [table!.primaryKey]: new PropRef([tableName, table!.primaryKey]),
         [stringColumn.name]: new PropRef([tableName, stringColumn.name]),
         [numericColumn.name]: new PropRef([tableName, numericColumn.name]),
       },
@@ -411,7 +418,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
         q
           .from({ [tableName]: collection })
           .select((row) => ({
-            [table.primaryKey]: row[table.primaryKey],
+            [table!.primaryKey]: row[table!.primaryKey],
             [stringColumn.name]: row[stringColumn.name],
             [numericColumn.name]: row[numericColumn.name],
           }))

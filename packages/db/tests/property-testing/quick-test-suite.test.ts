@@ -47,12 +47,12 @@ describe(`Enhanced Quick Test Suite`, () => {
       const schemaArb = generateSchema(config)
       const schema = await fc.sample(schemaArb, 1)[0]
 
-      for (const table of schema.tables) {
+      for (const table of schema!.tables) {
         const rowsArb = generateRowsForTable(table, config)
         const rows = await fc.sample(rowsArb, 1)[0]
 
-        expect(rows.length).toBeGreaterThan(0)
-        expect(rows.every((row) => row[table.primaryKey] !== undefined)).toBe(
+        expect(rows!.length).toBeGreaterThan(0)
+        expect(rows!.every((row) => row[table.primaryKey] !== undefined)).toBe(
           true
         )
       }
@@ -77,7 +77,7 @@ describe(`Enhanced Quick Test Suite`, () => {
       const queryArb = generateCompleteTestSequence(schema, config)
       const commands = await fc.sample(queryArb, 1)[0]
 
-      expect(commands.length).toBeGreaterThan(0)
+      expect(commands!.length).toBeGreaterThan(0)
 
       // Test SQL translation for query commands
       for (const command of commands) {

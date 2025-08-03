@@ -36,10 +36,10 @@ export class PropertyTestHarness {
       const schema = await fc.sample(schemaArb, 1)[0]
 
       // Initialize test state
-      const state = await this.initializeTestState(schema, seed)
+      const state = await this.initializeTestState(schema!, seed)
 
       // Generate test commands
-      const commands = await this.generateTestCommands(schema)
+      const commands = await this.generateTestCommands(schema!)
 
       // Execute commands and collect results
       const result = await this.executeTestSequence(state, commands, seed)
@@ -92,7 +92,7 @@ export class PropertyTestHarness {
 
     // Execute commands
     for (let i = 0; i < commands.length; i++) {
-      const command = commands[i]
+      const command = commands[i]!
       state.commandCount++
       results.commandCount = state.commandCount
 
@@ -310,21 +310,21 @@ export class PropertyTestHarness {
   ) {
     // Coverage is always initialized, so this check is unnecessary
 
-    if (ast.select) coverage.select++
-    if (ast.where && ast.where.length > 0) coverage.where++
-    if (ast.join && ast.join.length > 0) coverage.join++
-    if (ast.orderBy && ast.orderBy.length > 0) coverage.orderBy++
-    if (ast.groupBy && ast.groupBy.length > 0) coverage.groupBy++
+    if (ast.select) coverage!.select++
+    if (ast.where && ast.where.length > 0) coverage!.where++
+    if (ast.join && ast.join.length > 0) coverage!.join++
+    if (ast.orderBy && ast.orderBy.length > 0) coverage!.orderBy++
+    if (ast.groupBy && ast.groupBy.length > 0) coverage!.groupBy++
 
     // Check for aggregates in select
     if (ast.select) {
       for (const expr of Object.values(ast.select)) {
-        if (expr.type === `agg`) coverage.aggregate++
+        if (expr.type === `agg`) coverage!.aggregate++
       }
     }
 
     // Check for subqueries in from
-    if (ast.from.type === `queryRef`) coverage.subquery++
+    if (ast.from.type === `queryRef`) coverage!.subquery++
   }
 
   /**
@@ -375,7 +375,7 @@ export class PropertyTestHarness {
     const checker = new IncrementalChecker(state, this.config)
 
     for (let i = 0; i < commands.length; i++) {
-      const command = commands[i]
+      const command = commands[i]!
       state.commandCount++
 
       const result = await checker.executeCommand(command)
@@ -482,7 +482,7 @@ export class PropertyTestHarness {
       const checker = new IncrementalChecker(state, this.config)
 
       for (let i = 0; i < commands.length; i++) {
-        const command = commands[i]
+        const command = commands[i]!
         state.commandCount++
 
         const result = await checker.executeCommand(command)

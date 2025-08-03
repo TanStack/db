@@ -135,16 +135,16 @@ function generateJoinHints(tables: Array<TableDef>): TestSchema[`joinHints`] {
       const table2 = tables[j]
 
       // Find joinable columns with matching types
-      const joinableColumns1 = table1.columns.filter((col) => col.isJoinable)
-      const joinableColumns2 = table2.columns.filter((col) => col.isJoinable)
+      const joinableColumns1 = table1!.columns.filter((col) => col.isJoinable)
+      const joinableColumns2 = table2!.columns.filter((col) => col.isJoinable)
 
       for (const col1 of joinableColumns1) {
         for (const col2 of joinableColumns2) {
           if (col1.type === col2.type) {
             hints.push({
-              table1: table1.name,
+              table1: table1!.name,
               column1: col1.name,
-              table2: table2.name,
+              table2: table2!.name,
               column2: col2.name,
             })
           }

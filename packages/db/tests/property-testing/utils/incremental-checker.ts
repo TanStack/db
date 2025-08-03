@@ -525,7 +525,7 @@ export class IncrementalChecker {
         if (collection) {
           try {
             const rows = await collection.find().toArray()
-            tanstackCount = rows.length
+            tanstackCount = rows!.length
           } catch {
             // If collection query fails, try getting size directly
             tanstackCount = collection.state.size

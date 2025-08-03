@@ -19,8 +19,10 @@ describe(`IR to SQL Translation`, () => {
     // Generate a simple schema
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -44,7 +46,7 @@ describe(`IR to SQL Translation`, () => {
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
@@ -74,7 +76,7 @@ describe(`IR to SQL Translation`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Verify we get the expected number of rows
-    expect(sqliteResult.length).toBe(testRows.length)
+    expect(sqliteResult.length).toBe(testRows!.length)
   })
 
   it(`should translate WHERE clause queries correctly`, async () => {
@@ -82,18 +84,18 @@ describe(`IR to SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -101,17 +103,17 @@ describe(`IR to SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
     // Find a string column for WHERE clause
-    const stringColumn = table.columns.find(
+    const stringColumn = table!.columns.find(
       (col) => col.type === `string` && !col.isPrimaryKey
     )
     if (!stringColumn) {
@@ -120,7 +122,7 @@ describe(`IR to SQL Translation`, () => {
 
     // Get a sample value for the WHERE clause
     const sampleValue =
-      testRows.find((row) => row[stringColumn.name] !== undefined)?.[
+      testRows!.find((row) => row[stringColumn.name] !== undefined)?.[
         stringColumn.name
       ] || `test`
 
@@ -128,7 +130,7 @@ describe(`IR to SQL Translation`, () => {
     const whereIR = {
       from: new CollectionRef(collection as any, tableName),
       select: {
-        [table.primaryKey]: new PropRef([tableName, table.primaryKey]),
+        [table!.primaryKey]: new PropRef([tableName, table!.primaryKey]),
         [stringColumn.name]: new PropRef([tableName, stringColumn.name]),
       },
       where: [
@@ -154,7 +156,7 @@ describe(`IR to SQL Translation`, () => {
 
     // Verify we get filtered results
     expect(sqliteResult.length).toBeGreaterThanOrEqual(0)
-    expect(sqliteResult.length).toBeLessThanOrEqual(testRows.length)
+    expect(sqliteResult.length).toBeLessThanOrEqual(testRows!.length)
   })
 
   it(`should translate ORDER BY queries correctly`, async () => {
@@ -162,18 +164,18 @@ describe(`IR to SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -181,17 +183,17 @@ describe(`IR to SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
     // Find a sortable column
-    const sortColumn = table.columns.find(
+    const sortColumn = table!.columns.find(
       (col) => col.type === `string` || col.type === `number`
     )
     if (!sortColumn) {
@@ -202,7 +204,7 @@ describe(`IR to SQL Translation`, () => {
     const orderByIR = {
       from: new CollectionRef(collection as any, tableName),
       select: {
-        [table.primaryKey]: new PropRef([tableName, table.primaryKey]),
+        [table!.primaryKey]: new PropRef([tableName, table!.primaryKey]),
         [sortColumn.name]: new PropRef([tableName, sortColumn.name]),
       },
       orderBy: [
@@ -226,7 +228,7 @@ describe(`IR to SQL Translation`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Verify we get all rows
-    expect(sqliteResult.length).toBe(testRows.length)
+    expect(sqliteResult.length).toBe(testRows!.length)
   })
 
   it(`should translate aggregate functions correctly`, async () => {
@@ -234,18 +236,18 @@ describe(`IR to SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 3 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -253,12 +255,12 @@ describe(`IR to SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 10, maxRows: 20 }),
+      generateRowsForTable(table!, { minRows: 10, maxRows: 20 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
@@ -284,7 +286,7 @@ describe(`IR to SQL Translation`, () => {
     // Verify we get a count result
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
-    expect(Number(sqliteResult[0].count)).toBe(testRows.length)
+    expect(Number(sqliteResult[0].count)).toBe(testRows!.length)
   })
 
   it(`should translate complex queries with multiple clauses`, async () => {
@@ -292,18 +294,18 @@ describe(`IR to SQL Translation`, () => {
     const schemaArb = generateSchema({ maxTables: 1, maxColumns: 4 })
     const schema = await fc.sample(schemaArb, 1)[0]
 
-    const table = schema.tables[0]
-    const tableName = table.name
+    const table = schema!.tables[0]
+    const tableName = table!.name
 
     // Create SQLite database
     const sqliteDb = createTempDatabase()
-    sqliteDb.initialize(schema)
+    sqliteDb.initialize(schema!)
 
     // Create TanStack collection
     const collection = createCollection(
       mockSyncCollectionOptions({
         id: tableName,
-        getKey: (item: any) => item[table.primaryKey],
+        getKey: (item: any) => item[table!.primaryKey],
         initialData: [],
         autoIndex: `eager`,
       })
@@ -311,20 +313,20 @@ describe(`IR to SQL Translation`, () => {
 
     // Generate and insert test data
     const testRows = await fc.sample(
-      generateRowsForTable(table, { minRows: 20, maxRows: 50 }),
+      generateRowsForTable(table!, { minRows: 20, maxRows: 50 }),
       1
     )[0]
 
     // Insert into SQLite
-    for (const row of testRows) {
+    for (const row of testRows!) {
       sqliteDb.insert(tableName, row)
     }
 
     // Find columns for complex query
-    const stringColumn = table.columns.find(
+    const stringColumn = table!.columns.find(
       (col) => col.type === `string` && !col.isPrimaryKey
     )
-    const numericColumn = table.columns.find(
+    const numericColumn = table!.columns.find(
       (col) => col.type === `number` && !col.isPrimaryKey
     )
 
@@ -336,7 +338,7 @@ describe(`IR to SQL Translation`, () => {
     const complexIR = {
       from: new CollectionRef(collection as any, tableName),
       select: {
-        [table.primaryKey]: new PropRef([tableName, table.primaryKey]),
+        [table!.primaryKey]: new PropRef([tableName, table!.primaryKey]),
         [stringColumn.name]: new PropRef([tableName, stringColumn.name]),
         [numericColumn.name]: new PropRef([tableName, numericColumn.name]),
       },
