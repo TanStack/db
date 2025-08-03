@@ -8,7 +8,10 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.0.9",
-    "arktype": "^2.1.20"
+    "arktype": "^2.1.20",
+    "fast-check": "^3.5.0",
+    "better-sqlite3": "^10.1.0",
+    "@types/better-sqlite3": "^7.6.9"
   },
   "exports": {
     ".": {
@@ -49,7 +52,11 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "npx vitest --run",
+    "test:property": "npx vitest --run property-tests.test.ts",
+    "test:property:quick": "npx vitest --run property-tests.test.ts --reporter=verbose",
+    "test:property:coverage": "npx vitest --run property-tests.test.ts --coverage",
+    "test:property:example": "npx tsx tests/property-testing/simple-example.ts"
   },
   "sideEffects": false,
   "type": "module",
