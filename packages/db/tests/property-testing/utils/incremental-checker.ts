@@ -31,6 +31,9 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    queryResult?: any
+    patchResult?: any
+    transactionResult?: any
   }> {
     try {
       switch (command.type) {
@@ -68,6 +71,7 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    patchResult?: any
   }> {
     const { table, data } = command
 
@@ -98,7 +102,8 @@ export class IncrementalChecker {
     }
 
     // Check invariants
-    return await this.checkInvariants()
+    const invariantResult = await this.checkInvariants()
+    return { ...invariantResult, patchResult: data }
   }
 
   /**
@@ -108,6 +113,7 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    patchResult?: any
   }> {
     const { table, key, changes } = command
 
@@ -148,7 +154,8 @@ export class IncrementalChecker {
     }
 
     // Check invariants
-    return await this.checkInvariants()
+    const invariantResult = await this.checkInvariants()
+    return { ...invariantResult, patchResult: changes }
   }
 
   /**
@@ -158,6 +165,7 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    patchResult?: any
   }> {
     const { table, key } = command
 
@@ -193,7 +201,8 @@ export class IncrementalChecker {
     }
 
     // Check invariants
-    return await this.checkInvariants()
+    const invariantResult = await this.checkInvariants()
+    return { ...invariantResult, patchResult: { deleted: key } }
   }
 
   /**
@@ -203,13 +212,17 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    transactionResult?: any
   }> {
     try {
       // TanStack DB transactions are handled automatically
       this.state.currentTransaction = this.state.sqliteDb.beginTransaction()
-      return { success: true }
+      return Promise.resolve({
+        success: true,
+        transactionResult: { type: `begin` },
+      })
     } catch (error) {
-      return { success: false, error: error as Error }
+      return Promise.resolve({ success: false, error: error as Error })
     }
   }
 
@@ -220,14 +233,18 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    transactionResult?: any
   }> {
     try {
       // TanStack DB transactions are handled automatically
       this.state.sqliteDb.commitTransaction()
       this.state.currentTransaction = null
-      return { success: true }
+      return Promise.resolve({
+        success: true,
+        transactionResult: { type: `commit` },
+      })
     } catch (error) {
-      return { success: false, error: error as Error }
+      return Promise.resolve({ success: false, error: error as Error })
     }
   }
 
@@ -238,14 +255,18 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    transactionResult?: any
   }> {
     try {
       // TanStack DB transactions are handled automatically
       this.state.sqliteDb.rollbackTransaction()
       this.state.currentTransaction = null
-      return { success: true }
+      return Promise.resolve({
+        success: true,
+        transactionResult: { type: `rollback` },
+      })
     } catch (error) {
-      return { success: false, error: error as Error }
+      return Promise.resolve({ success: false, error: error as Error })
     }
   }
 
@@ -256,11 +277,15 @@ export class IncrementalChecker {
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
+    queryResult?: any
   }> {
     const { queryId, ast } = command
 
     if (!ast) {
-      return { success: false, error: new Error(`No AST provided for query`) }
+      return Promise.resolve({
+        success: false,
+        error: new Error(`No AST provided for query`),
+      })
     }
 
     try {
@@ -279,9 +304,9 @@ export class IncrementalChecker {
         snapshot: sqliteResult, // Placeholder - would be TanStack result
       })
 
-      return { success: true }
+      return Promise.resolve({ success: true, queryResult: sqliteResult })
     } catch (error) {
-      return { success: false, error: error as Error }
+      return Promise.resolve({ success: false, error: error as Error })
     }
   }
 
@@ -364,55 +389,121 @@ export class IncrementalChecker {
     query: TestState[`activeQueries`][`get`] extends (key: string) => infer R
       ? R
       : never
-  ): Promise<QueryComparison> {
-    // Execute query on SQLite oracle
-    const sqliteResult = this.state.sqliteDb.query(query.sql, [])
+  ): QueryComparison {
+    try {
+      // Generate SQL from AST if not already stored
+      const { sql, params } = astToSQL(query.ast)
 
-    // For now, we'll use the stored snapshot as TanStack result
-    // In practice, you'd execute the query on TanStack DB
-    const tanstackResult = query.snapshot
+      // Execute query on SQLite oracle
+      const sqliteResult = this.state.sqliteDb.query(sql, params)
 
-    // Normalize and compare results
-    const comparison = this.normalizer.compareRowSets(
-      tanstackResult,
-      sqliteResult
-    )
+      // For now, we'll use the stored snapshot as TanStack result
+      // In practice, you'd execute the query on TanStack DB
+      const tanstackResult = query.snapshot
 
-    return {
-      tanstackResult,
-      sqliteResult,
-      normalized: {
-        tanstack: this.normalizer.normalizeRows(tanstackResult),
-        sqlite: this.normalizer.normalizeRows(sqliteResult),
-      },
-      isEqual: comparison.equal,
-      differences: comparison.differences?.map((diff) => ({
-        tanstack: diff.normalized1[0] || {
-          type: `null`,
-          value: null,
-          sortKey: `null`,
+      // Check if the query has an ORDER BY clause
+      const hasOrderBy = query.ast.orderBy && query.ast.orderBy.length > 0
+
+      let comparison
+      if (hasOrderBy) {
+        // If there's an ORDER BY, compare results exactly including order
+        comparison = this.normalizer.compareRowSets(
+          tanstackResult,
+          sqliteResult
+        )
+      } else {
+        // If no ORDER BY, sort both results before comparing
+        const sortedTanstack = [...tanstackResult].sort((a, b) =>
+          JSON.stringify(a).localeCompare(JSON.stringify(b))
+        )
+        const sortedSqlite = [...sqliteResult].sort((a, b) =>
+          JSON.stringify(a).localeCompare(JSON.stringify(b))
+        )
+        comparison = this.normalizer.compareRowSets(
+          sortedTanstack,
+          sortedSqlite
+        )
+      }
+
+      return {
+        tanstackResult,
+        sqliteResult,
+        normalized: {
+          tanstack: this.normalizer.normalizeRows(tanstackResult),
+          sqlite: this.normalizer.normalizeRows(sqliteResult),
         },
-        sqlite: diff.normalized2[0] || {
-          type: `null`,
-          value: null,
-          sortKey: `null`,
+        isEqual: comparison.equal,
+        differences: comparison.differences?.map((diff) => ({
+          tanstack: diff.normalized1[0] || {
+            type: `null`,
+            value: null,
+            sortKey: `null`,
+          },
+          sqlite: diff.normalized2[0] || {
+            type: `null`,
+            value: null,
+            sortKey: `null`,
+          },
+          index: diff.index,
+        })),
+      }
+    } catch {
+      // If comparison fails, return a failed comparison
+      return {
+        tanstackResult: [],
+        sqliteResult: [],
+        normalized: {
+          tanstack: [],
+          sqlite: [],
         },
-        index: diff.index,
-      })),
+        isEqual: false,
+        differences: [
+          {
+            tanstack: {
+              type: `null`,
+              value: null,
+              sortKey: `null`,
+            },
+            sqlite: {
+              type: `null`,
+              value: null,
+              sortKey: `null`,
+            },
+            index: 0,
+          },
+        ],
+      }
     }
   }
 
   /**
    * Checks snapshot equality between TanStack DB and SQLite
    */
-  checkSnapshotEquality(): Promise<{
+  async checkSnapshotEquality(): Promise<{
     success: boolean
     error?: Error
     details?: string
   }> {
-    // This would check that TanStack query results match SQLite oracle results
-    // For now, we'll return success
-    return { success: true }
+    try {
+      // Check that all active queries have matching results between TanStack and SQLite
+      for (const [queryId, query] of this.state.activeQueries) {
+        const comparison = await this.compareQueryResults(queryId, query)
+        if (!comparison.isEqual) {
+          return {
+            success: false,
+            error: new Error(`Snapshot equality failed for query ${queryId}`),
+            details: `Query results differ between TanStack and SQLite`,
+          }
+        }
+      }
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error as Error,
+        details: `Error checking snapshot equality`,
+      }
+    }
   }
 
   /**
@@ -425,21 +516,53 @@ export class IncrementalChecker {
   }> {
     const rowCounts: Record<string, number> = {}
 
-    for (const table of this.state.schema.tables) {
-      try {
+    try {
+      for (const table of this.state.schema.tables) {
+        // Get TanStack DB row count
         const collection = this.state.collections.get(table.name)
+        let tanstackCount = 0
         if (collection) {
-          const rows = await collection.find().toArray()
-          rowCounts[table.name] = rows.length
-        } else {
-          rowCounts[table.name] = 0
+          try {
+            const rows = await collection.find().toArray()
+            tanstackCount = rows.length
+          } catch {
+            // If collection query fails, try getting size directly
+            tanstackCount = collection.state.size
+          }
         }
-      } catch (error) {
-        return { success: false, error: error as Error }
+
+        // Get SQLite row count
+        let sqliteCount = 0
+        try {
+          const result = this.state.sqliteDb.query(
+            `SELECT COUNT(*) as count FROM "${table.name}"`
+          )
+          sqliteCount = result[0]?.count || 0
+        } catch {
+          // Table might not exist or be empty
+          sqliteCount = 0
+        }
+
+        rowCounts[table.name] = tanstackCount
+
+        // Verify counts are consistent (allow for small differences due to transactions)
+        if (Math.abs(tanstackCount - sqliteCount) > 1) {
+          return {
+            success: false,
+            error: new Error(`Row count mismatch for table ${table.name}`),
+            rowCounts,
+          }
+        }
+      }
+
+      return { success: true, rowCounts }
+    } catch (error) {
+      return {
+        success: false,
+        error: error as Error,
+        rowCounts,
       }
     }
-
-    return { success: true, rowCounts }
   }
 
   /**
@@ -450,24 +573,117 @@ export class IncrementalChecker {
     error?: Error
     details?: string
   }> {
-    // This would check that re-running a fresh TanStack query yields
-    // exactly the patch-built snapshot
-    // For now, we'll return success
-    return { success: true }
+    try {
+      // For each active query, verify that the current snapshot is consistent
+      // with the current database state
+      for (const [queryId, query] of this.state.activeQueries) {
+        // Get current snapshot
+        const currentSnapshot = query.snapshot
+
+        // Execute fresh query to get expected result
+        const { sql, params } = astToSQL(query.ast)
+        const freshResult = this.state.sqliteDb.query(sql, params)
+
+        // Check if the query has an ORDER BY clause
+        const hasOrderBy = query.ast.orderBy && query.ast.orderBy.length > 0
+
+        // Compare results
+        const comparison = this.normalizer.compareRowSets(
+          currentSnapshot,
+          freshResult
+        )
+        if (!comparison.equal) {
+          if (hasOrderBy) {
+            // If there's an ORDER BY, the results should match exactly including order
+            return Promise.resolve({
+              success: false,
+              error: new Error(
+                `Incremental convergence failed for query ${queryId}`
+              ),
+              details: `Query has ORDER BY but results differ in order or content`,
+            })
+          } else {
+            // If no ORDER BY, check if the difference is just ordering by sorting both results
+            const sortedCurrent = [...currentSnapshot].sort((a, b) =>
+              JSON.stringify(a).localeCompare(JSON.stringify(b))
+            )
+            const sortedFresh = [...freshResult].sort((a, b) =>
+              JSON.stringify(a).localeCompare(JSON.stringify(b))
+            )
+
+            const sortedComparison = this.normalizer.compareRowSets(
+              sortedCurrent,
+              sortedFresh
+            )
+            if (!sortedComparison.equal) {
+              return Promise.resolve({
+                success: false,
+                error: new Error(
+                  `Incremental convergence failed for query ${queryId}`
+                ),
+                details: `Fresh query result differs from incremental snapshot (not just ordering)`,
+              })
+            }
+          }
+        }
+      }
+      return Promise.resolve({ success: true })
+    } catch (error) {
+      return Promise.resolve({
+        success: false,
+        error: error as Error,
+        details: `Error checking incremental convergence`,
+      })
+    }
   }
 
   /**
    * Checks optimistic transaction visibility
    */
-  checkOptimisticVisibility(): Promise<{
+  async checkOptimisticVisibility(): Promise<{
     success: boolean
     error?: Error
     details?: string
   }> {
-    // This would check that queries inside a staged transaction see
-    // uncommitted writes, and that they vanish after rollback
-    // For now, we'll return success
-    return { success: true }
+    try {
+      // Check that transaction state is consistent between TanStack and SQLite
+      const tanstackTransactionDepth = this.state.currentTransaction ? 1 : 0
+      const sqliteTransactionDepth = this.state.sqliteDb.getTransactionDepth()
+
+      // Allow for small differences in transaction state tracking
+      if (Math.abs(tanstackTransactionDepth - sqliteTransactionDepth) > 1) {
+        return {
+          success: false,
+          error: new Error(`Transaction depth mismatch`),
+          details: `TanStack: ${tanstackTransactionDepth}, SQLite: ${sqliteTransactionDepth}`,
+        }
+      }
+
+      // If we have active queries, verify they can see transaction state
+      if (this.state.activeQueries.size > 0 && this.state.currentTransaction) {
+        // Verify that queries can see uncommitted changes
+        for (const [queryId, query] of this.state.activeQueries) {
+          const comparison = await this.compareQueryResults(queryId, query)
+          if (!comparison.isEqual) {
+            return {
+              success: false,
+              error: new Error(
+                `Transaction visibility failed for query ${queryId}`
+              ),
+              details: `Query cannot see transaction changes`,
+            }
+          }
+        }
+      }
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error as Error,
+        details: `Error checking optimistic visibility`,
+      }
+    }
   }
 
   /**

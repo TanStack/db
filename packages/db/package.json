@@ -53,9 +53,9 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "npx vitest --run",
-    "test:property": "npx vitest --run property-tests.test.ts",
-    "test:property:quick": "npx vitest --run property-tests.test.ts --reporter=verbose",
-    "test:property:coverage": "npx vitest --run property-tests.test.ts --coverage",
+    "test:property": "npx vitest --run tests/property-testing/property-based-tests.test.ts",
+    "test:property:quick": "npx vitest --run tests/property-testing/quick-test-suite.test.ts --reporter=verbose",
+    "test:property:coverage": "npx vitest --run tests/property-testing/property-based-tests.test.ts --coverage",
     "test:property:example": "npx tsx tests/property-testing/simple-example.ts"
   },
   "sideEffects": false,

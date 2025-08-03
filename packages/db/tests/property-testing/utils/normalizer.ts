@@ -19,7 +19,7 @@ export class ValueNormalizer {
    * Normalizes a single value for comparison
    */
   normalizeValue(value: TestValue): NormalizedValue {
-    if (value === null || value === undefined) {
+    if (value === null) {
       return {
         type: `null`,
         value: null,

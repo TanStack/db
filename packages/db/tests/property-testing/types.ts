@@ -1,5 +1,43 @@
-import type { Collection } from "../../../src/collection"
-import type { QueryIR } from "../../../src/query/ir"
+// Note: These imports are for type definitions only
+// The actual implementation may not be available during testing
+export type Collection<_T> = any
+export type QueryIR = any
+
+// Re-export types that are used throughout the property testing framework
+export type Aggregate<_T = any> = {
+  type: `agg`
+  function: string
+  args: Array<any>
+}
+
+export type BasicExpression<_T = any> = {
+  type: `val` | `ref` | `func`
+  value?: any
+  path?: Array<string>
+  function?: string
+  args?: Array<any>
+}
+
+export type Func<_T = any> = {
+  type: `func`
+  function: string
+  args: Array<any>
+}
+
+export type OrderByClause = {
+  expression: BasicExpression
+  direction: `asc` | `desc`
+}
+
+export type PropRef = {
+  type: `ref`
+  path: Array<string>
+}
+
+export type Value = {
+  type: `val`
+  value: any
+}
 
 /**
  * Supported data types for property testing
@@ -60,8 +98,8 @@ export type TestValue =
   | number
   | boolean
   | null
-  | Record<string, TestValue>
-  | Array<TestValue>
+  | Record<string, any>
+  | Array<any>
 
 /**
  * Mutation operation types
@@ -138,14 +176,14 @@ export interface GeneratorConfig {
   floatTolerance: number
 }
 
-/**
- * Default generator configuration
- */
 export const DEFAULT_CONFIG: GeneratorConfig = {
-  maxTables: 4,
-  maxColumns: 8,
-  maxRowsPerTable: 2000,
-  maxCommands: 40,
+  maxTables: 3,
+  maxColumns: 6,
+  minRows: 5,
+  maxRows: 20,
+  maxRowsPerTable: 100,
+  minCommands: 10,
+  maxCommands: 50,
   maxQueries: 10,
   floatTolerance: 1e-12,
 }

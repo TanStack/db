@@ -248,8 +248,11 @@ function buildValue(
     return `NULL`
   }
 
+  // Convert value to SQLite-compatible format
+  const sqliteValue = convertToSQLiteValue(expr.value)
+
   // Add parameter and return placeholder
-  params.push(expr.value)
+  params.push(sqliteValue)
   return `?`
 }
 

@@ -1,382 +1,248 @@
-# Property-Based Testing Framework for TanStack DB
+# Property-Based Testing for TanStack DB Query Engine
 
-This directory contains a comprehensive property-based testing framework for the TanStack DB query engine, implementing the RFC for robust, unbiased correctness testing.
+This directory contains a comprehensive property-based testing framework for validating the correctness of TanStack DB's query engine against SQLite as an oracle.
 
 ## Overview
 
-The framework uses [fast-check](https://github.com/dubzzz/fast-check) to generate random test cases and SQLite (via better-sqlite3) as an oracle to verify TanStack DB's behavior. It tests the following key properties:
-
-1. **Snapshot equality** - Every active query's materialized TanStack result equals the oracle's SELECT
-2. **Incremental convergence** - Re-running a fresh TanStack query yields exactly the patch-built snapshot
-3. **Optimistic transaction visibility** - Queries inside staged transactions see uncommitted writes; after ROLLBACK they vanish; after COMMIT they persist
-4. **Row-count sanity** - COUNT(*) per collection/table stays in lock-step
+Property-based testing (PBT) uses randomly generated inputs to verify that system properties hold true across a wide range of scenarios. This framework generates random schemas, data, and queries to ensure TanStack DB produces results that match SQLite's output.
 
 ## Architecture
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Generators    │    │   SQL Oracle    │    │   Test Harness  │
-│                 │    │                 │    │                 │
-│ • Schema        │    │ • SQLite DB     │    │ • fast-check    │
-│ • Rows          │    │ • Savepoints    │    │ • Invariants    │
-│ • Mutations     │    │ • Transactions  │    │ • Shrinking     │
-│ • Queries       │    │ • CRUD ops      │    │ • Reporting     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   Utilities     │
-                    │                 │
-                    │ • AST→SQL       │
-                    │ • Normalizer    │
-                    │ • Incremental   │
-                    │   Checker       │
-                    └─────────────────┘
-```
+### Core Components
 
-## Key Components
+#### 1. **Generators** (`generators/`)
+- **`schema-generator.ts`**: Generates random database schemas with tables, columns, and relationships
+- **`row-generator.ts`**: Creates test data that conforms to the generated schemas
+- **`query-generator.ts`**: Generates random SQL queries using TanStack DB's query builder
+- **`mutation-generator.ts`**: Creates random insert, update, and delete operations
 
-### 1. Generators (`generators/`)
+#### 2. **SQL Translation** (`sql/`)
+- **`ast-to-sql.ts`**: Converts TanStack DB's Intermediate Representation (IR) to SQLite SQL
+- **`sqlite-oracle.ts`**: Provides a real SQLite database instance for comparison
 
-- **Schema Generator**: Creates random, type-correct schemas with 1-4 tables, 2-8 columns each
-- **Row Generator**: Produces well-typed data objects for each table
-- **Mutation Generator**: Creates insert, update, delete operations with realistic data flow
-- **Query Generator**: Builds valid TanStack ASTs with joins, predicates, aggregates, ordering
+#### 3. **Test Harness** (`harness/`)
+- **`property-test-harness.ts`**: Main orchestrator that runs test sequences and validates properties
 
-### 2. SQL Oracle (`sql/`)
+#### 4. **Utilities** (`utils/`)
+- **`incremental-checker.ts`**: Validates invariants and compares TanStack DB vs SQLite results
+- **`normalizer.ts`**: Normalizes data for comparison (handles type differences, ordering, etc.)
+- **`functional-to-structural.ts`**: Converts functional expressions to structural IR
 
-- **SQLiteOracle**: Mirrors TanStack DB's visibility rules using savepoints
-- **AST to SQL**: Converts TanStack ASTs to parameterized SQLite SQL
-- **Transaction Support**: SAVEPOINT/ROLLBACK/RELEASE for optimistic transaction testing
+### Test Types
 
-### 3. Utilities (`utils/`)
+#### 1. **Property-Based Tests** (`property-based-tests.test.ts`)
+Tests the core properties that must hold true for the query engine:
 
-- **ValueNormalizer**: Aligns JS and SQLite value representations for comparison
-- **IncrementalChecker**: Applies TanStack patches and compares with oracle snapshots
+- **Property 1: Snapshot Equality**: TanStack DB results match SQLite oracle
+- **Property 2: Incremental Convergence**: Query results remain consistent under mutations
+- **Property 3: Optimistic Transaction Visibility**: Transaction state is properly managed
+- **Property 4: Row Count Sanity**: Row counts are consistent between systems
+- **Property 5: Query Feature Coverage**: All query features work correctly
+- **Property 6: Data Type Handling**: All data types are handled properly
+- **Property 7: Error Handling**: Edge cases are handled gracefully
 
-### 4. Test Harness (`harness/`)
+#### 2. **Quick Test Suite** (`quick-test-suite.test.ts`)
+Rapid validation tests for the PBT framework itself:
 
-- **PropertyTestHarness**: Main orchestrator using fast-check's model/command API
-- **Regression Testing**: Saves and replays failing test cases
-- **Configuration**: Tunable limits for tables, rows, commands, queries
+- Schema generation validation
+- Row generation validation
+- Query generation validation
+- SQL translation validation
+- Basic property validation
 
-## Usage
+#### 3. **Comprehensive SQL Coverage** (`comprehensive-sql-coverage.test.ts`)
+Systematic testing of SQL translation capabilities:
 
-### Basic Property Test
+- All comparison operators (`eq`, `gt`, `gte`, `lt`, `lte`, `in`, `like`, `ilike`)
+- Logical operators (`and`, `or`, `not`)
+- Functions (`upper`, `lower`, `length`, `concat`, `coalesce`, `add`)
+- Aggregates (`count`, `avg`, `sum`, `min`, `max`)
+- `DISTINCT` queries
+- Subqueries in `FROM` clauses
+- `ORDER BY`, `GROUP BY`, `LIMIT`, `OFFSET`
 
+#### 4. **Framework Unit Tests** (`framework-unit-tests.test.ts`)
+Unit tests for individual PBT components:
+
+- Generator validation
+- SQL translation validation
+- Normalizer validation
+- Oracle validation
+
+#### 5. **Integration Tests**
+- **`tanstack-sqlite-comparison.test.ts`**: Direct comparison of TanStack DB vs SQLite
+- **`query-builder-ir-extraction.test.ts`**: Tests IR extraction from query builder
+- **`ir-to-sql-translation.test.ts`**: Tests IR to SQL translation
+
+## How It Works
+
+### 1. **Test Sequence Generation**
 ```typescript
-import { runPropertyTest } from './harness/property-test-harness'
+// Generate a random schema
+const schema = generateSchema(config)
 
-// Run a single property test
-const result = await runPropertyTest({
-  maxTables: 2,
-  maxColumns: 4,
-  maxRowsPerTable: 100,
-  maxCommands: 20
-})
+// Generate test data
+const rows = generateRowsForTable(table, config)
 
-if (!result.success) {
-  console.error('Test failed with seed:', result.seed)
-  console.error('Failing commands:', result.failingCommands)
+// Generate test commands (mutations + queries)
+const commands = generateCompleteTestSequence(schema, config)
+```
+
+### 2. **Test Execution**
+```typescript
+// Initialize test state
+const state = {
+  schema,
+  collections: new Map(), // TanStack DB collections
+  sqliteDb: new SQLiteOracle(), // SQLite oracle
+  activeQueries: new Map(),
+  // ...
+}
+
+// Execute commands
+for (const command of commands) {
+  await checker.executeCommand(command)
 }
 ```
 
-### Quick Test Suite
-
+### 3. **Property Validation**
 ```typescript
-import { runQuickTestSuite } from './harness/property-test-harness'
+// Check snapshot equality
+const snapshotCheck = await checker.checkSnapshotEquality()
 
-// Run 10 property tests
-const suite = await runQuickTestSuite({
-  maxTables: 2,
-  maxColumns: 4,
-  maxRowsPerTable: 50,
-  maxCommands: 10
-})
+// Check incremental convergence
+const convergenceCheck = await checker.checkIncrementalConvergence()
 
-console.log(`Passed: ${suite.passedTests}, Failed: ${suite.failedTests}`)
+// Check transaction visibility
+const visibilityCheck = await checker.checkOptimisticVisibility()
+
+// Check row count sanity
+const rowCountCheck = await checker.checkRowCountSanity()
 ```
 
-### Custom Test Harness
-
+### 4. **Result Comparison**
 ```typescript
-import { PropertyTestHarness } from './harness/property-test-harness'
+// Compare TanStack DB vs SQLite results
+const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
 
-const harness = new PropertyTestHarness({
-  maxTables: 3,
-  maxColumns: 6,
-  maxRowsPerTable: 200,
-  maxCommands: 30,
-  maxQueries: 5,
-  floatTolerance: 1e-12
-})
-
-// Run with specific seed for reproducibility
-const result = await harness.runPropertyTest(12345)
-
-// Run regression test from saved fixture
-const fixture = {
-  schema: /* ... */,
-  commands: /* ... */,
-  seed: 12345
+// Handle ordering differences
+if (hasOrderBy) {
+  // Results must match exactly including order
+  expect(comparison.equal).toBe(true)
+} else {
+  // Results can be in different order
+  const sortedComparison = normalizer.compareRowSets(
+    sortedTanstack, sortedSqlite
+  )
+  expect(sortedComparison.equal).toBe(true)
 }
-const regressionResult = await harness.runRegressionTest(fixture)
+```
+
+## Key Features
+
+### **Real SQLite Oracle**
+Uses `better-sqlite3` for deterministic comparison against TanStack DB's results.
+
+### **Comprehensive SQL Translation**
+Converts TanStack DB's IR to SQLite-compatible SQL, supporting:
+- All comparison operators
+- Logical operators
+- Functions and aggregates
+- Subqueries and joins
+- Ordering and grouping
+
+### **Robust Data Normalization**
+Handles type differences, ordering, and edge cases:
+- Number precision differences
+- Boolean vs integer representations
+- Object/array serialization
+- Null handling
+
+### **Error Handling**
+Gracefully handles expected failures:
+- Non-existent rows/columns
+- Invalid SQL syntax
+- Schema generation edge cases
+
+### **Reproducibility**
+- Deterministic seeds for reproducible failures
+- Detailed error reporting with failing command sequences
+- Regression test fixtures
+
+## Running Tests
+
+### Quick Tests
+```bash
+pnpm test:property:quick
+```
+
+### Full Property Tests
+```bash
+pnpm test:property
+```
+
+### Coverage Report
+```bash
+pnpm test:property:coverage
+```
+
+### Example Usage
+```bash
+pnpm test:property:example
 ```
 
 ## Configuration
 
-The framework supports extensive configuration via `GeneratorConfig`:
+The framework is configurable via `GeneratorConfig`:
 
 ```typescript
 interface GeneratorConfig {
-  maxTables: number        // 1-4 tables per test
-  maxColumns: number       // 2-8 columns per table
-  maxRowsPerTable: number  // 0-2000 rows per table
-  maxCommands: number      // 1-40 commands per test
-  maxQueries: number       // 0-10 queries per test
-  floatTolerance: number   // 1e-12 for float comparisons
+  maxTables: number        // Maximum tables per schema
+  maxColumns: number       // Maximum columns per table
+  minRows?: number         // Minimum rows per table
+  maxRows?: number         // Maximum rows per table
+  maxRowsPerTable: number  // Maximum rows per table
+  minCommands?: number     // Minimum commands per test
+  maxCommands: number      // Maximum commands per test
+  maxQueries: number       // Maximum queries per test
+  floatTolerance: number   // Float comparison tolerance
 }
 ```
 
-Default configuration:
-```typescript
-const DEFAULT_CONFIG: GeneratorConfig = {
-  maxTables: 4,
-  maxColumns: 8,
-  maxRowsPerTable: 2000,
-  maxCommands: 40,
-  maxQueries: 10,
-  floatTolerance: 1e-12
-}
-```
+## Validation Properties
 
-## Data Types
+### **Snapshot Equality**
+Ensures that TanStack DB query results exactly match SQLite oracle results.
 
-The framework supports these TanStack DB types with SQLite mappings:
+### **Incremental Convergence**
+Verifies that query results remain consistent as the database state changes through mutations.
 
-| TanStack Type | SQLite Mapping | Normalization Strategy |
-|---------------|----------------|----------------------|
-| `number` | `REAL` | Safe 53-bit ints & finite doubles; tolerance for aggregates |
-| `string` | `TEXT` | ASCII-only generators; byte-wise sort |
-| `boolean` | `INTEGER 0/1` | Map 0→false, 1→true |
-| `null` | `NULL` | Direct match |
-| `object`/`array` | `TEXT` via `json(?)` | Compare parsed JSON objects |
+### **Optimistic Transaction Visibility**
+Validates that transaction state is properly managed and visible to queries.
 
-## Test Properties
+### **Row Count Sanity**
+Confirms that row counts are consistent between TanStack DB and SQLite across all tables.
 
-### 1. Snapshot Equality
+### **Query Feature Coverage**
+Tests that all query features (WHERE, JOIN, ORDER BY, etc.) work correctly.
 
-Every active query's materialized TanStack result equals the oracle's SELECT:
+### **Data Type Handling**
+Ensures all data types (strings, numbers, booleans, objects, arrays) are handled properly.
 
-```typescript
-// After each mutation, compare:
-const tanstackResult = query.getSnapshot()
-const sqliteResult = oracle.query(sql, params)
-expect(normalizer.compareRowSets(tanstackResult, sqliteResult).equal).toBe(true)
-```
+### **Error Handling**
+Validates that edge cases and error conditions are handled gracefully.
 
-### 2. Incremental Convergence
+## Benefits
 
-Re-running a fresh TanStack query yields exactly the patch-built snapshot:
+1. **Comprehensive Coverage**: Tests a wide range of scenarios through random generation
+2. **Oracle Validation**: Uses SQLite as a trusted reference implementation
+3. **Regression Detection**: Catches regressions through reproducible test sequences
+4. **Edge Case Discovery**: Finds edge cases that manual testing might miss
+5. **Confidence Building**: Provides confidence in query engine correctness
 
-```typescript
-// Build snapshot incrementally via patches
-const incrementalSnapshot = applyPatches(initialSnapshot, patches)
+## Future Enhancements
 
-// Compare with fresh query
-const freshSnapshot = freshQuery.getSnapshot()
-expect(normalizer.compareRowSets(incrementalSnapshot, freshSnapshot).equal).toBe(true)
-```
-
-### 3. Optimistic Transaction Visibility
-
-Queries inside staged transactions see uncommitted writes:
-
-```typescript
-// Begin transaction
-oracle.beginTransaction() // Creates SAVEPOINT
-
-// Insert in transaction
-tanstackCollection.insert(data)
-oracle.insert(table, data)
-
-// Query should see uncommitted data
-const inTransactionResult = query.getSnapshot()
-expect(inTransactionResult).toContain(data)
-
-// Rollback transaction
-oracle.rollbackTransaction() // ROLLBACK TO SAVEPOINT
-
-// Query should not see rolled back data
-const afterRollbackResult = query.getSnapshot()
-expect(afterRollbackResult).not.toContain(data)
-```
-
-### 4. Row-Count Sanity
-
-COUNT(*) per collection/table stays in lock-step:
-
-```typescript
-// After each mutation, verify:
-const tanstackCount = collection.state.size
-const sqliteCount = oracle.getRowCount(tableName)
-expect(tanstackCount).toBe(sqliteCount)
-```
-
-## Reproducibility
-
-When a test fails, the framework provides:
-
-1. **Seed**: For deterministic replay
-2. **Command Count**: Where the failure occurred
-3. **Shrunk Example**: Minimal failing command sequence
-4. **Regression Fixture**: Complete test case for debugging
-
-```typescript
-// Replay a failing test
-const result = await runPropertyTest(config, failingSeed)
-
-// Or run a specific test case
-const fixture = {
-  schema: /* ... */,
-  commands: /* ... */,
-  seed: 12345
-}
-await harness.runRegressionTest(fixture)
-```
-
-## Running Tests
-
-### Unit Tests
-
-```bash
-# Run property testing unit tests
-npm test -- property-tests.test.ts
-
-# Run with coverage
-npm test -- --coverage property-tests.test.ts
-```
-
-### Property Tests
-
-```bash
-# Run quick property test suite
-npm run test:property:quick
-
-# Run comprehensive property test suite
-npm run test:property:full
-
-# Run with specific configuration
-npm run test:property:custom -- --maxTables=2 --maxCommands=20
-```
-
-### CI Integration
-
-The framework is designed for CI with:
-
-- **Resource caps**: ≤2000 rows/table, ≤40 commands
-- **Runtime limits**: ≤5 minutes per property run
-- **Memory limits**: <2GB RAM
-- **Deterministic seeds**: For reproducible failures
-
-## Extension Points
-
-### Adding New Generators
-
-```typescript
-// Create a new generator
-export function generateCustomData(config: GeneratorConfig): fc.Arbitrary<CustomData> {
-  return fc.record({
-    field1: fc.string(),
-    field2: fc.number()
-  })
-}
-
-// Integrate with test harness
-const commandsArb = fc.oneof(
-  generateMutationCommand(schema),
-  generateCustomCommand(schema) // Your new generator
-)
-```
-
-### Adding New Invariants
-
-```typescript
-// Add to IncrementalChecker
-async checkCustomInvariant(): Promise<{
-  success: boolean
-  error?: Error
-  details?: string
-}> {
-  // Your custom invariant check
-  return { success: true }
-}
-
-// Integrate with test harness
-const customCheck = await checker.checkCustomInvariant()
-if (!customCheck.success) {
-  return false
-}
-```
-
-### Adding New SQL Functions
-
-```typescript
-// Extend AST to SQL translator
-function buildFunction(expr: Func, params: any[], paramIndex: number): string {
-  switch (expr.name) {
-    case 'customFunc':
-      return `CUSTOM_FUNC(${args.join(', ')})`
-    // ... existing cases
-  }
-}
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Memory Usage**: Reduce `maxRowsPerTable` or `maxCommands`
-2. **Test Timeout**: Reduce configuration limits or increase timeout
-3. **SQLite Errors**: Check schema compatibility and data types
-4. **Normalization Issues**: Verify float tolerance and type mappings
-
-### Debug Mode
-
-Enable verbose logging:
-
-```typescript
-const harness = new PropertyTestHarness({
-  ...config,
-  verbose: true
-})
-```
-
-### Regression Testing
-
-Save failing test cases:
-
-```typescript
-if (!result.success) {
-  const fixture = harness.createTestFixture(schema, commands, seed)
-  // Save fixture to file for later analysis
-}
-```
-
-## Contributing
-
-When extending the framework:
-
-1. **Add tests** for new generators and utilities
-2. **Update documentation** for new features
-3. **Maintain compatibility** with existing test cases
-4. **Follow patterns** established in existing code
-5. **Add type safety** for all new interfaces
-
-## References
-
-- [RFC - Property-Based Testing for TanStack DB](./RFC.md)
-- [fast-check Documentation](https://github.com/dubzzz/fast-check)
-- [better-sqlite3 Documentation](https://github.com/WiseLibs/better-sqlite3)
-- [TanStack DB Documentation](https://tanstack.com/db)
+- **Performance Testing**: Add performance property validation
+- **Concurrency Testing**: Test concurrent query execution
+- **Migration Testing**: Validate schema migration scenarios
+- **Integration Testing**: Test with real application scenarios

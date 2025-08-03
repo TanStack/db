@@ -28,7 +28,7 @@ export function generateQueryCommands(
 
   return fc
     .array(generateQueryCommand(schema), {
-      minLength: 0,
+      minLength: 1, // Ensure at least one query is generated
       maxLength: maxQueries,
     })
     .map((commands) => {

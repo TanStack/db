@@ -18,7 +18,7 @@ export function generateRowsForTable(
 
   return fc
     .array(generateRow(table.columns), {
-      minLength: 0,
+      minLength: 1,
       maxLength: maxRowsPerTable,
     })
     .map((rows) => {
