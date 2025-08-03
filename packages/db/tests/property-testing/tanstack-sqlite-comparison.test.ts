@@ -90,20 +90,11 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const { sql, params } = astToSQL(selectAllAST)
     const sqliteResult = sqliteDb.query(sql, params)
 
-    // Debug results
-    console.log(`TanStack result: ${JSON.stringify(tanstackResult)}`)
-    console.log(`SQLite result: ${JSON.stringify(sqliteResult)}`)
-
     // Compare results
     const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
-
-    console.log(`✅ SELECT * query comparison passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   TanStack rows: ${tanstackResult.length}`)
-    console.log(`   SQLite rows: ${sqliteResult.length}`)
   })
 
   it(`should translate and execute WHERE clause queries correctly`, async () => {
@@ -145,7 +136,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
       (col) => col.type === `string` && !col.isPrimaryKey
     )
     if (!stringColumn) {
-      console.log(`Skipping WHERE test - no string column found`)
       return
     }
 
@@ -190,12 +180,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
-
-    console.log(`✅ WHERE clause query comparison passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   TanStack rows: ${tanstackResult.length}`)
-    console.log(`   SQLite rows: ${sqliteResult.length}`)
   })
 
   it(`should translate and execute ORDER BY queries correctly`, async () => {
@@ -237,7 +221,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
       (col) => col.type === `string` || col.type === `number`
     )
     if (!sortColumn) {
-      console.log(`Skipping ORDER BY test - no sortable column found`)
       return
     }
 
@@ -279,11 +262,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
-
-    console.log(`✅ ORDER BY query comparison passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   TanStack rows: ${tanstackResult.length}`)
-    console.log(`   SQLite rows: ${sqliteResult.length}`)
   })
 
   it(`should handle aggregate functions correctly`, async () => {
@@ -325,7 +303,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
       (col) => col.type === `number` && !col.isPrimaryKey
     )
     if (!numericColumn) {
-      console.log(`Skipping aggregate test - no numeric column found`)
       return
     }
 
@@ -356,11 +333,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
-
-    console.log(`✅ COUNT aggregate query comparison passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   TanStack result: ${JSON.stringify(tanstackResult)}`)
-    console.log(`   SQLite result: ${JSON.stringify(sqliteResult)}`)
   })
 
   it(`should handle complex queries with multiple clauses`, async () => {
@@ -406,7 +378,6 @@ describe(`SQL Translation and Execution Comparison`, () => {
     )
 
     if (!stringColumn || !numericColumn) {
-      console.log(`Skipping complex query test - missing required columns`)
       return
     }
 
@@ -459,11 +430,5 @@ describe(`SQL Translation and Execution Comparison`, () => {
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
-
-    console.log(`✅ Complex query comparison passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   TanStack rows: ${tanstackResult.length}`)
-    console.log(`   SQLite rows: ${sqliteResult.length}`)
   })
 })

@@ -75,11 +75,6 @@ describe(`IR to SQL Translation`, () => {
 
     // Verify we get the expected number of rows
     expect(sqliteResult.length).toBe(testRows.length)
-
-    console.log(`✅ SELECT * IR to SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Rows returned: ${sqliteResult.length}`)
   })
 
   it(`should translate WHERE clause queries correctly`, async () => {
@@ -120,7 +115,6 @@ describe(`IR to SQL Translation`, () => {
       (col) => col.type === `string` && !col.isPrimaryKey
     )
     if (!stringColumn) {
-      console.log(`Skipping WHERE test - no string column found`)
       return
     }
 
@@ -161,11 +155,6 @@ describe(`IR to SQL Translation`, () => {
     // Verify we get filtered results
     expect(sqliteResult.length).toBeGreaterThanOrEqual(0)
     expect(sqliteResult.length).toBeLessThanOrEqual(testRows.length)
-
-    console.log(`✅ WHERE clause IR to SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Filtered rows: ${sqliteResult.length}`)
   })
 
   it(`should translate ORDER BY queries correctly`, async () => {
@@ -206,7 +195,6 @@ describe(`IR to SQL Translation`, () => {
       (col) => col.type === `string` || col.type === `number`
     )
     if (!sortColumn) {
-      console.log(`Skipping ORDER BY test - no sortable column found`)
       return
     }
 
@@ -239,11 +227,6 @@ describe(`IR to SQL Translation`, () => {
 
     // Verify we get all rows
     expect(sqliteResult.length).toBe(testRows.length)
-
-    console.log(`✅ ORDER BY IR to SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Ordered rows: ${sqliteResult.length}`)
   })
 
   it(`should translate aggregate functions correctly`, async () => {
@@ -302,11 +285,6 @@ describe(`IR to SQL Translation`, () => {
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
     expect(Number(sqliteResult[0].count)).toBe(testRows.length)
-
-    console.log(`✅ COUNT aggregate IR to SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Count result: ${sqliteResult[0].count}`)
   })
 
   it(`should translate complex queries with multiple clauses`, async () => {
@@ -351,7 +329,6 @@ describe(`IR to SQL Translation`, () => {
     )
 
     if (!stringColumn || !numericColumn) {
-      console.log(`Skipping complex query test - missing required columns`)
       return
     }
 
@@ -395,10 +372,5 @@ describe(`IR to SQL Translation`, () => {
 
     // Verify we get limited results
     expect(sqliteResult.length).toBeLessThanOrEqual(5)
-
-    console.log(`✅ Complex query IR to SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Limited rows: ${sqliteResult.length}`)
   })
 })

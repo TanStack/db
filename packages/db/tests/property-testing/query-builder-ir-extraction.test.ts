@@ -51,8 +51,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
 
-    console.log(`Extracted IR:`, JSON.stringify(queryIR, null, 2))
-
     // Convert IR to SQL
     const { sql, params } = astToSQL(queryIR)
 
@@ -66,11 +64,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Verify we get the expected number of rows
     expect(sqliteResult.length).toBe(testRows.length)
-
-    console.log(`✅ Query Builder IR extraction and SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Rows returned: ${sqliteResult.length}`)
   })
 
   it(`should extract IR from WHERE clause query and translate correctly`, async () => {
@@ -111,7 +104,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
       (col) => col.type === `string` && !col.isPrimaryKey
     )
     if (!stringColumn) {
-      console.log(`Skipping WHERE test - no string column found`)
       return
     }
 
@@ -133,8 +125,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
 
-    console.log(`WHERE IR:`, JSON.stringify(queryIR, null, 2))
-
     // Convert IR to SQL
     const { sql, params } = astToSQL(queryIR)
 
@@ -151,11 +141,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Verify we get filtered results
     expect(sqliteResult.length).toBeGreaterThanOrEqual(0)
     expect(sqliteResult.length).toBeLessThanOrEqual(testRows.length)
-
-    console.log(`✅ WHERE clause IR extraction and SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Filtered rows: ${sqliteResult.length}`)
   })
 
   it(`should extract IR from ORDER BY query and translate correctly`, async () => {
@@ -196,7 +181,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
       (col) => col.type === `string` || col.type === `number`
     )
     if (!sortColumn) {
-      console.log(`Skipping ORDER BY test - no sortable column found`)
       return
     }
 
@@ -212,8 +196,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
 
-    console.log(`ORDER BY IR:`, JSON.stringify(queryIR, null, 2))
-
     // Convert IR to SQL
     const { sql, params } = astToSQL(queryIR)
 
@@ -228,11 +210,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Verify we get all rows
     expect(sqliteResult.length).toBe(testRows.length)
-
-    console.log(`✅ ORDER BY IR extraction and SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Ordered rows: ${sqliteResult.length}`)
   })
 
   it(`should extract IR from aggregate query and translate correctly`, async () => {
@@ -276,8 +253,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
 
-    console.log(`COUNT IR:`, JSON.stringify(queryIR, null, 2))
-
     // Convert IR to SQL
     const { sql, params } = astToSQL(queryIR)
 
@@ -293,11 +268,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
     expect(Number(sqliteResult[0].count)).toBe(testRows.length)
-
-    console.log(`✅ COUNT aggregate IR extraction and SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Count result: ${sqliteResult[0].count}`)
   })
 
   it(`should extract IR from complex query and translate correctly`, async () => {
@@ -342,7 +312,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     )
 
     if (!stringColumn || !numericColumn) {
-      console.log(`Skipping complex query test - missing required columns`)
       return
     }
 
@@ -361,8 +330,6 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
 
-    console.log(`Complex IR:`, JSON.stringify(queryIR, null, 2))
-
     // Convert IR to SQL
     const { sql, params } = astToSQL(queryIR)
 
@@ -380,10 +347,5 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
     // Verify we get limited results
     expect(sqliteResult.length).toBeLessThanOrEqual(5)
-
-    console.log(`✅ Complex query IR extraction and SQL translation passed`)
-    console.log(`   SQL: ${sql}`)
-    console.log(`   Parameters: ${JSON.stringify(params)}`)
-    console.log(`   Limited rows: ${sqliteResult.length}`)
   })
 })

@@ -52,10 +52,6 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       if (expectedParams.length > 0) {
         expect(params).toEqual(expect.arrayContaining(expectedParams))
       }
-
-      console.log(`✅ ${description}`)
-      console.log(`   SQL: ${sql}`)
-      console.log(`   Params: ${JSON.stringify(params)}`)
     })
   }
 

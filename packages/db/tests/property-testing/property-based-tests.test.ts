@@ -41,9 +41,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.snapshotEquality).toBe(true)
           expect(result.errors).toBeUndefined()
 
-          console.log(
-            `✅ Snapshot equality test passed for seed ${seed}, ${commandCount} commands`
-          )
           return true
         }
       )
@@ -77,9 +74,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.queryResults).toBeDefined()
           expect(result.queryResults!.length).toBeGreaterThan(0)
 
-          console.log(
-            `✅ Complex query snapshot equality test passed for seed ${seed}`
-          )
           return true
         }
       )
@@ -115,9 +109,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.incrementalConvergence).toBe(true)
           expect(result.patchResults).toBeDefined()
 
-          console.log(
-            `✅ Incremental convergence test passed for seed ${seed}, ${mutationCount} mutations`
-          )
           return true
         }
       )
@@ -149,9 +140,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.incrementalConvergence).toBe(true)
 
-          console.log(
-            `✅ Rapid mutation convergence test passed for seed ${seed}`
-          )
           return true
         }
       )
@@ -186,7 +174,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.transactionVisibility).toBe(true)
           expect(result.transactionResults).toBeDefined()
 
-          console.log(`✅ Transaction visibility test passed for seed ${seed}`)
           return true
         }
       )
@@ -218,7 +205,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.transactionVisibility).toBe(true)
 
-          console.log(`✅ Transaction rollback test passed for seed ${seed}`)
           return true
         }
       )
@@ -253,7 +239,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.rowCountSanity).toBe(true)
           expect(result.rowCounts).toBeDefined()
 
-          console.log(`✅ Row count sanity test passed for seed ${seed}`)
           return true
         }
       )
@@ -285,7 +270,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.rowCountSanity).toBe(true)
 
-          console.log(`✅ COUNT(*) consistency test passed for seed ${seed}`)
           return true
         }
       )
@@ -322,8 +306,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.featureCoverage!.where).toBeGreaterThan(0)
           expect(result.featureCoverage!.join).toBeGreaterThan(0)
 
-          console.log(`✅ Query feature coverage test passed for seed ${seed}`)
-          console.log(`   Features tested:`, result.featureCoverage)
           return true
         }
       )
@@ -355,7 +337,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.complexQueryResults).toBeDefined()
 
-          console.log(`✅ Complex query test passed for seed ${seed}`)
           return true
         }
       )
@@ -389,7 +370,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.dataTypeResults).toBeDefined()
 
-          console.log(`✅ Data type handling test passed for seed ${seed}`)
           return true
         }
       )
@@ -423,7 +403,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           expect(result.success).toBe(true)
           expect(result.edgeCaseResults).toBeDefined()
 
-          console.log(`✅ Edge case handling test passed for seed ${seed}`)
           return true
         }
       )
@@ -445,16 +424,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
       })
 
       expect(results.length).toBe(3)
-
-      console.log(`Quick test suite results: ${results.length} tests`)
-      results.forEach((result, i) => {
-        console.log(
-          `   Test ${i + 1}: seed ${result.seed}, success: ${result.success}, commands: ${result.commandCount}`
-        )
-        if (!result.success && result.errors) {
-          console.log(`     Errors: ${result.errors.join(`, `)}`)
-        }
-      })
 
       // For now, just check that we have results
       expect(results.length).toBeGreaterThan(0)
@@ -501,8 +470,6 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           true,
           `Row count sanity failed for seed ${seed}`
         )
-
-        console.log(`✅ Regression test passed for seed ${seed}`)
       }
     }, 60000)
   })
