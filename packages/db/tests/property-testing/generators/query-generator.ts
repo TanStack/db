@@ -110,15 +110,38 @@ function generateQueryAST(schema: TestSchema): fc.Arbitrary<QueryIR> {
       generateOrderBy(schema),
       generateLimitOffset()
     )
-    .map(([from, select, where, groupBy, orderBy, { limit, offset }]) => ({
-      from,
-      select,
-      where,
-      groupBy,
-      orderBy,
-      limit,
-      offset,
-    }))
+    .map(([from, select, where, groupBy, orderBy, { limit, offset }]) => {
+      try {
+        return {
+          from,
+          select,
+          where,
+          groupBy,
+          orderBy,
+          limit,
+          offset,
+        }
+      } catch {
+        // Fallback to a simple query if complex generation fails
+        const table = schema.tables[0]
+        if (!table) {
+          throw new Error(`No tables available for query generation`)
+        }
+        return {
+          from: {
+            type: `collectionRef` as const,
+            collection: null as any,
+            alias: table.name,
+          },
+          select: { "*": { type: `val` as const, value: `*` } },
+          where: [],
+          groupBy: [],
+          orderBy: [],
+          limit: undefined,
+          offset: undefined,
+        }
+      }
+    })
 }
 
 /**
@@ -372,7 +395,7 @@ function generateOrderBy(
           fc.constantFrom(...columns.map((col) => col.name)),
           fc.constantFrom(`asc`, `desc`)
         ),
-        { minLength: 1, maxLength: 2 }
+        { minLength: 0, maxLength: 2 }
       )
       .map((orderings) =>
         orderings.map(([colName, direction]) => ({
