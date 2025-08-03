@@ -220,7 +220,7 @@ function expressionToSQL(
 /**
  * Builds a property reference
  */
-function buildPropRef(expr: PropRef): string {
+function buildPropRef(expr: PropRef | BasicExpression): string {
   if ((expr as any).path.length === 1) {
     // Handle case where path is just the table alias (e.g., ["table_name"])
     return `${quoteIdentifier((expr as any).path[0])}.*`
@@ -240,7 +240,7 @@ function buildPropRef(expr: PropRef): string {
  * Builds a value expression
  */
 function buildValue(
-  expr: Value,
+  expr: Value | BasicExpression,
   params: Array<any>,
   _paramIndex: number
 ): string {
@@ -260,11 +260,14 @@ function buildValue(
  * Builds a function expression
  */
 function buildFunction(
-  expr: Func,
+  expr: Func | BasicExpression,
   params: Array<any>,
   paramIndex: number
 ): string {
-  const args = expr.args.map((arg) => expressionToSQL(arg, params, paramIndex))
+  const args =
+    (expr as any).args?.map((arg: any) =>
+      expressionToSQL(arg, params, paramIndex)
+    ) || []
 
   switch ((expr as any).name) {
     // Comparison operators
@@ -336,7 +339,10 @@ function buildAggregate(
   params: Array<any>,
   paramIndex: number
 ): string {
-  const args = expr.args.map((arg) => expressionToSQL(arg, params, paramIndex))
+  const args =
+    (expr as any).args?.map((arg: any) =>
+      expressionToSQL(arg, params, paramIndex)
+    ) || []
 
   switch ((expr as any).name) {
     case `count`:

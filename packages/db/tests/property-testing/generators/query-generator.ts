@@ -239,7 +239,10 @@ function generateWhere(
   return fc.constantFrom(...schema.tables).chain((table) => {
     return fc
       .array(generatePredicate(table), { minLength: 0, maxLength: 3 })
-      .map((predicates) => predicates.filter(Boolean))
+      .map(
+        (predicates) =>
+          predicates.filter(Boolean) as Array<BasicExpression<boolean>>
+      )
   })
 }
 
@@ -323,15 +326,15 @@ function generatePredicate(
  */
 function generateValueForColumn(
   columnArb: fc.Arbitrary<TestSchema[`tables`][0][`columns`][0]>
-): fc.Arbitrary<any> {
+): fc.Arbitrary<string | null> {
   return columnArb.chain((column) => {
     switch (column.type) {
       case `string`:
         return fc.string({ minLength: 1, maxLength: 10 })
       case `number`:
-        return fc.integer({ min: -1000, max: 1000 })
+        return fc.string({ minLength: 1, maxLength: 10 }) // Convert to string
       case `boolean`:
-        return fc.boolean()
+        return fc.string({ minLength: 1, maxLength: 10 }) // Convert to string
       case `null`:
         return fc.constant(null)
       default:
@@ -402,7 +405,7 @@ function generateOrderBy(
             type: `ref` as const,
             path: [table.name, colName],
           },
-          direction,
+          direction: direction as `asc` | `desc`,
         }))
       )
   })

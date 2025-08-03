@@ -367,7 +367,7 @@ export class PropertyTestHarness {
     _seed: number
   ): Promise<boolean> {
     // Initialize test state
-    const state = await this.initializeTestState(schema, seed)
+    const state = await this.initializeTestState(schema, _seed)
 
     // Generate test commands
     const commands = await this.generateTestCommands(schema)
@@ -666,6 +666,7 @@ export async function runQuickTestSuite(options?: {
 }): Promise<Array<PropertyTestResult>> {
   const numTests = options?.numTests || 5
   const maxCommands = options?.maxCommands || 10
+
   const _timeout = options?.timeout || 10000
 
   const config: GeneratorConfig = {

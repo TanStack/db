@@ -437,7 +437,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate DISTINCT`,
       new Query()
         .from({ users: collection })
-        .select((row) => row.users.department!)
+        .select((row) => row.users.department! as any)
         .distinct(),
       [`SELECT`, `DISTINCT`, `FROM`]
     )
@@ -582,7 +582,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
             .from({ users: usersCollection })
             .where((row) => eq(row.users.active!, true)),
         })
-        .select((row) => row.activeUsers),
+        .select((row) => row.activeUsers as any),
       [`SELECT`, `FROM`, `WHERE`, `=`]
     )
 
@@ -593,7 +593,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           row.users.id!,
           new Query()
             .from({ posts: postsCollection })
-            .select((postRow) => postRow.posts.userId)
+            .select((postRow) => postRow.posts.userId as any)
         )
       ),
       [`SELECT`, `FROM`, `WHERE`, `IN`]
@@ -635,8 +635,8 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           avgAge: avg(`age` as any),
         }))
         .groupBy((row) => row.users.department!)
-        .having((row) => gt(row.userCount, 5))
-        .orderBy((row) => row.avgAge, `desc`)
+        .having((row) => gt(row.userCount as any, 5))
+        .orderBy((row) => row.avgAge as any, `desc`)
         .limit(10),
       [
         `SELECT`,

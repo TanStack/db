@@ -1,5 +1,11 @@
 import * as fc from "fast-check"
-import type { ColumnDef, GeneratorConfig, TableDef, TestSchema } from "../types"
+import type {
+  ColumnDef,
+  GeneratorConfig,
+  SupportedType,
+  TableDef,
+  TestSchema,
+} from "../types"
 
 /**
  * Generates a random schema for property testing
@@ -99,7 +105,7 @@ function generateColumn(): fc.Arbitrary<ColumnDef> {
     )
     .map(([name, type, isPrimaryKey, isNullable, isJoinable]) => ({
       name,
-      type,
+      type: type as SupportedType,
       isPrimaryKey,
       isNullable,
       isJoinable: isJoinable && (type === `string` || type === `number`),

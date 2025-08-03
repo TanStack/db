@@ -200,7 +200,7 @@ export function generateRealisticMutation(
       const table = state.schema.tables.find((t) => t.name === tableName)!
       const collection = state.collections.get(tableName)
       const existingRows = collection
-        ? Array.from(collection.state.values())
+        ? (Array.from(collection.state.values()) as unknown as Array<TestRow>)
         : []
 
       return fc.oneof(

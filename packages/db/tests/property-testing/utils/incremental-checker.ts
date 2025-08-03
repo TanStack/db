@@ -314,7 +314,7 @@ export class IncrementalChecker {
   /**
    * Executes a stop query command
    */
-  private executeStopQuery(command: QueryCommand): Promise<{
+  private async executeStopQuery(command: QueryCommand): Promise<{
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>

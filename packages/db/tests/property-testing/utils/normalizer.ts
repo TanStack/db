@@ -56,7 +56,7 @@ export class ValueNormalizer {
       return {
         type: `array`,
         value,
-        sortKey: this.normalizeArrayForSort(value),
+        sortKey: this.normalizeArrayForSort(value as Array<TestValue>),
       }
     }
 
@@ -64,7 +64,9 @@ export class ValueNormalizer {
       return {
         type: `object`,
         value,
-        sortKey: this.normalizeObjectForSort(value),
+        sortKey: this.normalizeObjectForSort(
+          value as Record<string, TestValue>
+        ),
       }
     }
 

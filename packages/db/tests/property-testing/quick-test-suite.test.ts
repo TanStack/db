@@ -73,6 +73,7 @@ describe(`Enhanced Quick Test Suite`, () => {
 
       const schemaArb = generateSchema(config)
       const schema = await fc.sample(schemaArb, 1)[0]
+      if (!schema) throw new Error(`Failed to generate schema`)
 
       const queryArb = generateCompleteTestSequence(schema, config)
       const commands = await fc.sample(queryArb, 1)[0]

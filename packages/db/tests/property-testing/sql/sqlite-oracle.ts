@@ -246,20 +246,20 @@ function convertSQLiteValue(value: any): any {
 /**
  * Converts JavaScript values to SQLite-compatible values
  */
-export function convertToSQLiteValue(value: any): any {
+export function convertToSQLiteValue(value: any): string {
   if (value === null || value === undefined) {
-    return null
+    return `NULL`
   }
 
   if (typeof value === `boolean`) {
-    return value ? 1 : 0
+    return value ? `1` : `0`
   }
 
   if (typeof value === `object` || Array.isArray(value)) {
     return JSON.stringify(value)
   }
 
-  return value
+  return String(value)
 }
 
 /**

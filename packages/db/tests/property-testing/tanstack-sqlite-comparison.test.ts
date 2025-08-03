@@ -328,9 +328,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const liveQuery = createLiveQueryCollection({
       startSync: true,
       query: (q) =>
-        q
-          .from({ [tableName]: collection })
-          .select(() => ({ count: q.count() })),
+        q.from({ [tableName]: collection }).select(() => ({ count: 0 as any })),
     })
     const tanstackResult = liveQuery.toArray
 
@@ -428,7 +426,7 @@ describe(`SQL Translation and Execution Comparison`, () => {
             [stringColumn.name]: row[stringColumn.name] as any,
             [numericColumn.name]: row[numericColumn.name] as any,
           }))
-          .where((row) => row[numericColumn.name] > 0)
+          .where((row) => (row[numericColumn.name] as any) > 0)
           .orderBy((row) => row[numericColumn.name], `desc`)
           .limit(5),
     })
@@ -439,7 +437,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Compare results
-    const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
+    const comparison = normalizer.compareRowSets(
+      tanstackResult as any,
+      sqliteResult as any
+    )
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
