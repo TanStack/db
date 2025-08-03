@@ -28,11 +28,11 @@ function generateTable(maxColumns: number): fc.Arbitrary<TableDef> {
       const primaryKeyColumns = columns.filter((col) => col.isPrimaryKey)
       if (primaryKeyColumns.length === 0) {
         // No primary key found, set the first column as primary key
-        columns[0].isPrimaryKey = true
+        columns[0]!.isPrimaryKey = true
       } else if (primaryKeyColumns.length > 1) {
         // Multiple primary keys found, keep only the first one
         for (let i = 0; i < columns.length; i++) {
-          columns[i].isPrimaryKey = i === 0
+          columns[i]!.isPrimaryKey = i === 0
         }
       }
 

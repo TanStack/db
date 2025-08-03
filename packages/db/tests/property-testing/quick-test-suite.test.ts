@@ -80,7 +80,7 @@ describe(`Enhanced Quick Test Suite`, () => {
       expect(commands!.length).toBeGreaterThan(0)
 
       // Test SQL translation for query commands
-      for (const command of commands) {
+      for (const command of commands!) {
         if (command.type === `startQuery` && command.ast) {
           const { sql, params } = astToSQL(command.ast)
           expect(sql).toBeDefined()

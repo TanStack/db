@@ -45,6 +45,7 @@ export class PropertyTestHarness {
       const result = await this.executeTestSequence(state, commands, seed)
 
       return {
+        success: true,
         seed,
         commandCount: commands.length,
         ...result,

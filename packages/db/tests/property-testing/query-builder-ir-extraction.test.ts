@@ -122,10 +122,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table.primaryKey]: row[tableName][table.primaryKey]!,
-        [stringColumn.name]: row[tableName][stringColumn.name]!,
+        [table.primaryKey]: row[tableName]![table.primaryKey]!,
+        [stringColumn.name]: row[tableName]![stringColumn.name]!,
       }))
-      .where((row) => eq(row[tableName][stringColumn.name]!, sampleValue))
+      .where((row) => eq(row[tableName]![stringColumn.name]!, sampleValue))
 
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
@@ -193,10 +193,10 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table!.primaryKey]: row[tableName][table!.primaryKey]!,
-        [sortColumn.name]: row[tableName][sortColumn.name]!,
+        [table!.primaryKey]: row[tableName]![table!.primaryKey]!,
+        [sortColumn.name]: row[tableName]![sortColumn.name]!,
       }))
-      .orderBy((row) => row[tableName][sortColumn.name]!, `asc`)
+      .orderBy((row) => row[tableName]![sortColumn.name]!, `asc`)
 
     // Extract IR before optimization
     const queryIR = getQueryIR(queryBuilder)
@@ -272,7 +272,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     // Verify we get a count result
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
-    expect(Number(sqliteResult[0].count)).toBe(testRows!.length)
+    expect(Number(sqliteResult[0]!.count)).toBe(testRows!.length)
   })
 
   it(`should extract IR from complex query and translate correctly`, async () => {
@@ -334,12 +334,12 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table.primaryKey]: row[tableName][table.primaryKey]!,
-        [stringColumn.name]: row[tableName][stringColumn.name]!,
-        [numericColumn.name]: row[tableName][numericColumn.name]!,
+        [table.primaryKey]: row[tableName]![table.primaryKey]!,
+        [stringColumn.name]: row[tableName]![stringColumn.name]!,
+        [numericColumn.name]: row[tableName]![numericColumn.name]!,
       }))
-      .where((row) => gt(row[tableName][numericColumn.name]!, 0))
-      .orderBy((row) => row[tableName][numericColumn.name]!, `desc`)
+      .where((row) => gt(row[tableName]![numericColumn.name]!, 0))
+      .orderBy((row) => row[tableName]![numericColumn.name]!, `desc`)
       .limit(5)
 
     // Extract IR before optimization

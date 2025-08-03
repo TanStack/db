@@ -3,7 +3,6 @@ import { generateMutationCommands } from "./mutation-generator"
 import type {
   Aggregate,
   BasicExpression,
-  CollectionRef,
   GeneratorConfig,
   OrderByClause,
   QueryCommand,
@@ -147,7 +146,7 @@ function generateQueryAST(schema: TestSchema): fc.Arbitrary<QueryIR> {
 /**
  * Generates the FROM clause
  */
-function generateFrom(schema: TestSchema): fc.Arbitrary<CollectionRef> {
+function generateFrom(schema: TestSchema): fc.Arbitrary<any> {
   return fc.constantFrom(...schema.tables).map((table) => ({
     type: `collectionRef` as const,
     collection: null as any, // Will be set during test execution
@@ -437,6 +436,7 @@ export function generateJoinQuery(schema: TestSchema): fc.Arbitrary<QueryIR> {
 
   return fc.constantFrom(...schema.joinHints).chain((hint) => {
     const _table1 = schema.tables.find((t) => t.name === hint.table1)!
+
     const _table2 = schema.tables.find((t) => t.name === hint.table2)!
 
     return fc

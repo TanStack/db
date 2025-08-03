@@ -209,11 +209,11 @@ export function generateRealisticMutation(
         // Update - only if rows exist
         existingRows.length > 0
           ? generateUpdateForTable(table, existingRows)
-          : fc.never(),
+          : generateInsertForTable(table, existingRows), // Fallback to insert
         // Delete - only if rows exist
         existingRows.length > 0
           ? generateDeleteForTable(table, existingRows)
-          : fc.never()
+          : generateInsertForTable(table, existingRows) // Fallback to insert
       )
     })
 }
@@ -246,7 +246,7 @@ function generateUpdateForTable(
   return fc.constantFrom(...existingRows).map((row) => ({
     type: `update` as const,
     table: table.name,
-    key: row[table.primaryKey],
+    key: row[table.primaryKey] as string | number,
     changes: {}, // Will be populated during execution
   }))
 }
@@ -261,7 +261,7 @@ function generateDeleteForTable(
   return fc.constantFrom(...existingRows).map((row) => ({
     type: `delete` as const,
     table: table.name,
-    key: row[table.primaryKey],
+    key: row[table.primaryKey] as string | number,
   }))
 }
 
@@ -293,8 +293,8 @@ function generateRealisticCommand(
 ): fc.Arbitrary<TestCommand> {
   return fc.oneof(
     // 70% mutations, 30% transactions
-    fc.weighted(generateMutationCommand(schema), 7),
-    fc.weighted(generateTransactionCommand(), 3)
+    generateMutationCommand(schema),
+    generateTransactionCommand()
   )
 }
 

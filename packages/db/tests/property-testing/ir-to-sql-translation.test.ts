@@ -286,7 +286,7 @@ describe(`IR to SQL Translation`, () => {
     // Verify we get a count result
     expect(sqliteResult.length).toBe(1)
     expect(sqliteResult[0]).toHaveProperty(`count`)
-    expect(Number(sqliteResult[0].count)).toBe(testRows!.length)
+    expect(Number(sqliteResult[0]!.count)).toBe(testRows!.length)
   })
 
   it(`should translate complex queries with multiple clauses`, async () => {

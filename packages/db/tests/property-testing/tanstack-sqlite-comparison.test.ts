@@ -253,8 +253,8 @@ describe(`SQL Translation and Execution Comparison`, () => {
         q
           .from({ [tableName]: collection })
           .select((row) => ({
-            [table.primaryKey]: row[table.primaryKey],
-            [sortColumn.name]: row[sortColumn.name],
+            [table.primaryKey]: row[table.primaryKey] as any,
+            [sortColumn.name]: row[sortColumn.name] as any,
           }))
           .orderBy((row) => row[sortColumn.name], `asc`),
     })
@@ -265,7 +265,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Compare results
-    const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
+    const comparison = normalizer.compareRowSets(
+      tanstackResult as any,
+      sqliteResult as any
+    )
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
@@ -336,7 +339,10 @@ describe(`SQL Translation and Execution Comparison`, () => {
     const sqliteResult = sqliteDb.query(sql, params)
 
     // Compare results
-    const comparison = normalizer.compareRowSets(tanstackResult, sqliteResult)
+    const comparison = normalizer.compareRowSets(
+      tanstackResult as any,
+      sqliteResult as any
+    )
 
     expect(comparison.equal).toBe(true)
     expect(comparison.differences).toBeUndefined()
@@ -418,9 +424,9 @@ describe(`SQL Translation and Execution Comparison`, () => {
         q
           .from({ [tableName]: collection })
           .select((row) => ({
-            [table!.primaryKey]: row[table!.primaryKey],
-            [stringColumn.name]: row[stringColumn.name],
-            [numericColumn.name]: row[numericColumn.name],
+            [table!.primaryKey]: row[table!.primaryKey] as any,
+            [stringColumn.name]: row[stringColumn.name] as any,
+            [numericColumn.name]: row[numericColumn.name] as any,
           }))
           .where((row) => row[numericColumn.name] > 0)
           .orderBy((row) => row[numericColumn.name], `desc`)

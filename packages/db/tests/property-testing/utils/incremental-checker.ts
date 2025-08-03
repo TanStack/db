@@ -430,8 +430,8 @@ export class IncrementalChecker {
         tanstackResult,
         sqliteResult,
         normalized: {
-          tanstack: this.normalizer.normalizeRows(tanstackResult).flat(),
-          sqlite: this.normalizer.normalizeRows(sqliteResult).flat(),
+          tanstack: [this.normalizer.normalizeRows(tanstackResult).flat()],
+          sqlite: [this.normalizer.normalizeRows(sqliteResult).flat()],
         },
         isEqual: comparison.equal,
         differences: comparison.differences?.map((diff) => ({

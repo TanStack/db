@@ -28,7 +28,7 @@ export function generateRowsForTable(
 
       for (const row of rows) {
         const key = row[table.primaryKey]
-        if (!seenKeys.has(key)) {
+        if (key !== undefined && !seenKeys.has(key)) {
           seenKeys.add(key)
           uniqueRows.push(row)
         }
@@ -190,6 +190,7 @@ export function generateUpdateRow(
 
       for (const [columnName, _] of pairs) {
         const column = table.columns.find((col) => col.name === columnName)!
+
         const _generator = generateValueForType(column.type, column.isNullable)
 
         // For now, we'll generate a simple value - in practice this would need

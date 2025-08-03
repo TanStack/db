@@ -268,7 +268,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate AVG aggregate`,
       new Query().from({ users: collection }).select(() => ({
-        avgSalary: avg(`salary`),
+        avgSalary: avg(`salary` as any),
       })),
       [`SELECT`, `AVG`, `FROM`]
     )
@@ -276,7 +276,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate MIN aggregate`,
       new Query().from({ users: collection }).select(() => ({
-        minSalary: min(`salary`),
+        minSalary: min(`salary` as any),
       })),
       [`SELECT`, `MIN`, `FROM`]
     )
@@ -390,7 +390,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate ADD function`,
       new Query().from({ users: collection }).select((row) => ({
-        total: add(row.users.salary!, row.users.bonus!),
+        total: add(row.users.salary! as any, row.users.bonus! as any),
       })),
       [`SELECT`, `+`, `FROM`]
     )
@@ -474,7 +474,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           avgSalary: avg(`salary`),
         }))
         .groupBy((row) => row.users.department!)
-        .having((row) => gt(row.avgSalary, 50000)),
+        .having((row) => gt(row.avgSalary as any, 50000)),
       [`SELECT`, `FROM`, `GROUP BY`, `HAVING`, `>`, `AVG`]
     )
   })
