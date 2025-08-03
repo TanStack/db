@@ -314,7 +314,7 @@ export class IncrementalChecker {
   /**
    * Executes a stop query command
    */
-  private async executeStopQuery(command: QueryCommand): Promise<{
+  private executeStopQuery(command: QueryCommand): Promise<{
     success: boolean
     error?: Error
     comparisons?: Array<QueryComparison>
@@ -327,7 +327,7 @@ export class IncrementalChecker {
       this.state.activeQueries.delete(queryId)
     }
 
-    return { success: true }
+    return Promise.resolve({ success: true })
   }
 
   /**

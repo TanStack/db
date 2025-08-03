@@ -201,6 +201,7 @@ export class SQLiteOracle {
     let totalRows = 0
 
     for (const table of tables) {
+      // @ts-expect-error - Type mismatch in getRowCount parameter
       const count = this.getRowCount(table.name!)
       totalRows += count
     }

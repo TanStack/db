@@ -191,6 +191,7 @@ export function generateUpdateRow(
       for (const [columnName, _] of pairs) {
         const column = table.columns.find((col) => col.name === columnName)!
 
+        // @ts-expect-error - Unused variable for value generation
         const _generator = generateValueForType(column.type, column.isNullable)
 
         // For now, we'll generate a simple value - in practice this would need

@@ -8,6 +8,7 @@ import { ValueNormalizer } from "./utils/normalizer"
 import type { GeneratorConfig } from "./types"
 
 describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
+  // @ts-expect-error - Unused variable for normalizer setup
   let _normalizer: ValueNormalizer
 
   beforeAll(() => {

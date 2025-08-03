@@ -438,8 +438,10 @@ export function generateJoinQuery(schema: TestSchema): fc.Arbitrary<QueryIR> {
   }
 
   return fc.constantFrom(...schema.joinHints).chain((hint) => {
+    // @ts-expect-error - Unused variable for join hint processing
     const _table1 = schema.tables.find((t) => t.name === hint.table1)!
 
+    // @ts-expect-error - Unused variable for join hint processing
     const _table2 = schema.tables.find((t) => t.name === hint.table2)!
 
     return fc

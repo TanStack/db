@@ -472,10 +472,11 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
         .from({ users: collection })
         .select(() => ({
           department: `department`,
+          // @ts-expect-error - avg function expects number but we're passing string
           avgSalary: avg(`salary`),
         }))
         .groupBy((row) => row.users.department!)
-
+        // @ts-expect-error - Property access on RefProxyForContext
         .having((row) => gt(row.avgSalary as any, 50000)),
       [`SELECT`, `FROM`, `GROUP BY`, `HAVING`, `>`, `AVG`]
     )
@@ -637,9 +638,9 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           avgAge: avg(`age` as any),
         }))
         .groupBy((row) => row.users.department!)
-
+        // @ts-expect-error - Property access on RefProxyForContext
         .having((row) => gt(row.userCount as any, 5))
-
+        // @ts-expect-error - Property access on RefProxyForContext
         .orderBy((row) => row.avgAge as any, `desc`)
         .limit(10),
       [

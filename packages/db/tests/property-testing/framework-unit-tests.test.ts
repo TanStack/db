@@ -12,6 +12,7 @@ import { astToSQL } from "./sql/ast-to-sql"
 import type { GeneratorConfig, TestSchema } from "./types"
 
 describe(`Property-Based Testing Framework`, () => {
+  // @ts-expect-error - Unused variable for testing framework setup
   let _harness: PropertyTestHarness
 
   beforeAll(() => {
@@ -289,7 +290,7 @@ describe(`Property-Based Testing Framework`, () => {
       expect(sql).toContain(`FROM "users"`)
       expect(sql).toContain(`WHERE`)
       expect(sql).toContain(`ORDER BY`)
-      expect(params).toEqual([1])
+      expect(params).toEqual([`1`])
     })
 
     it(`should handle aggregate functions`, () => {

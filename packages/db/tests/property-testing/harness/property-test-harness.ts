@@ -335,6 +335,7 @@ export class PropertyTestHarness {
     const actualSeed = seed || Math.floor(Math.random() * 0x7fffffff)
 
     try {
+      // @ts-expect-error - Unused variable for property test assertion
       const _result = await fc.assert(
         fc.asyncProperty(generateSchema(this.config), async (schema) => {
           return await this.testSchema(schema, actualSeed)
@@ -667,6 +668,7 @@ export async function runQuickTestSuite(options?: {
   const numTests = options?.numTests || 5
   const maxCommands = options?.maxCommands || 10
 
+  // @ts-expect-error - Unused variable for timeout configuration
   const _timeout = options?.timeout || 10000
 
   const config: GeneratorConfig = {
