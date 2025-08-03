@@ -4,8 +4,6 @@ import {
   FeedFetchError,
   FeedParsingError,
   FeedTimeoutError,
-  FeedURLRequiredError,
-  GetKeyRequiredError,
   InvalidPollingIntervalError,
   UnsupportedFeedFormatError,
 } from "./errors"
@@ -82,7 +80,7 @@ export interface HTTPOptions {
  * Base configuration interface for feed collection options
  */
 interface BaseFeedCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -169,7 +167,7 @@ interface BaseFeedCollectionConfig<
  * Configuration interface for RSS collection options
  */
 export interface RSSCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends object = RSSItem,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = RSSItem,
   TKey extends string | number = string | number,
@@ -184,7 +182,7 @@ export interface RSSCollectionConfig<
  * Configuration interface for Atom collection options
  */
 export interface AtomCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends object = AtomItem,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = AtomItem,
   TKey extends string | number = string | number,
@@ -197,18 +195,21 @@ export interface AtomCollectionConfig<
 
 // Type resolution helper (copied from TanStack DB patterns)
 type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T>
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
   : Record<string, unknown>
 
 type ResolveType<
-  TExplicit = unknown,
+  TExplicit extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? TFallback
-    : InferSchemaOutput<TSchema>
-  : TExplicit
+> =
+  Record<string, unknown> extends TExplicit
+    ? [TSchema] extends [never]
+      ? TFallback
+      : InferSchemaOutput<TSchema>
+    : TExplicit
 
 /**
  * Feed collection utilities
@@ -469,7 +470,7 @@ function getItemId(item: FeedItem, feedType: `rss` | `atom`): string {
  * Internal implementation shared between RSS and Atom collections
  */
 function createFeedCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -499,14 +500,6 @@ function createFeedCollectionOptions<
   } = config
 
   // Validation
-  if (!feedUrl) {
-    throw new FeedURLRequiredError()
-  }
-
-  if (!getKey) {
-    throw new GetKeyRequiredError()
-  }
-
   if (pollingInterval <= 0) {
     throw new InvalidPollingIntervalError(pollingInterval)
   }
@@ -571,6 +564,7 @@ function createFeedCollectionOptions<
 
       const xmlContent = await fetchFeed(feedUrl, httpOptions)
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!XMLValidator.validate(xmlContent)) {
         throw new FeedParsingError(feedUrl, new Error(`Invalid XML content`))
       }
@@ -580,7 +574,10 @@ function createFeedCollectionOptions<
         `Parsed ${parsedFeed.items.length} items from ${parsedFeed.type} feed`
       )
 
-      if (expectedFeedType && expectedFeedType !== parsedFeed.type) {
+      if (
+        expectedFeedType !== undefined &&
+        expectedFeedType !== parsedFeed.type
+      ) {
         throw new UnsupportedFeedFormatError(feedUrl)
       }
 
@@ -763,7 +760,7 @@ function createFeedCollectionOptions<
  * Creates RSS collection options for use with a standard Collection
  */
 export function rssCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends object = RSSItem,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = RSSItem,
   TKey extends string | number = string | number,
@@ -781,7 +778,7 @@ export function rssCollectionOptions<
  * Creates Atom collection options for use with a standard Collection
  */
 export function atomCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends object = AtomItem,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = AtomItem,
   TKey extends string | number = string | number,
