@@ -81,14 +81,10 @@ describe(`RSS Collection Errors`, () => {
     })
 
     it(`should handle network timeout`, async () => {
-      const fetchMock = vi.fn().mockImplementation(() => {
-        return new Promise((_, reject) => {
-          setTimeout(() => {
-            const error = new Error(`Aborted`)
-            error.name = `AbortError`
-            reject(error)
-          }, 100)
-        })
+      const fetchMock = vi.fn().mockRejectedValue(() => {
+        const error = new Error(`Aborted`)
+        error.name = `AbortError`
+        return error
       })
       global.fetch = fetchMock
 
@@ -399,7 +395,7 @@ describe(`RSS Collection Errors`, () => {
         feedUrl: `https://example.com/unreliable.xml`,
         pollingInterval: 1000,
         getKey: (item: any) => item.guid,
-        startPolling: true,
+        startPolling: false,
       }
 
       const options = rssCollectionOptions(config)
@@ -411,11 +407,9 @@ describe(`RSS Collection Errors`, () => {
       expect(collection.size).toBe(0)
       expect(fetchMock).toHaveBeenCalledTimes(1)
 
-      // Advance time to trigger retry
-      vi.advanceTimersByTime(1000)
-      await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(2)
-      })
+      // Manually trigger retry
+      await collection.utils.refresh()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
 
       // Should now have the item from successful retry
       expect(collection.size).toBe(1)

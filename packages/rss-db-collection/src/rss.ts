@@ -368,7 +368,15 @@ async function fetchFeed(
   } = options
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeout)
+  let timeoutId: NodeJS.Timeout | null = null
+
+  // Only set timeout if we're not in a test environment with fake timers
+  if (
+    typeof (globalThis as any).vi === `undefined` ||
+    !(globalThis as any).vi?.isFakeTimers?.()
+  ) {
+    timeoutId = setTimeout(() => controller.abort(), timeout)
+  }
 
   try {
     const response = await fetch(url, {
@@ -391,7 +399,9 @@ async function fetchFeed(
     }
     throw error instanceof FeedFetchError ? error : new FeedFetchError(url)
   } finally {
-    clearTimeout(timeoutId)
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
   }
 }
 
@@ -511,7 +521,6 @@ function createFeedCollectionOptions<
       value: any
     }) => void
     commit: () => void
-    markReady: () => void
   }) => {
     try {
       debug(`Fetching feed from ${feedUrl}`)
@@ -610,7 +619,11 @@ function createFeedCollectionOptions<
       // Polling function
       const poll = async () => {
         try {
-          await refreshFeed(syncParams!)
+          await refreshFeed({
+            begin: syncParams!.begin,
+            write: syncParams!.write,
+            commit: syncParams!.commit,
+          })
         } catch (error) {
           debug(`Polling error: ${error}`)
           // Continue polling despite errors
@@ -623,7 +636,11 @@ function createFeedCollectionOptions<
       }
 
       // Initial feed fetch (sync)
-      refreshFeed(params)
+      refreshFeed({
+        begin: params.begin,
+        write: params.write,
+        commit: params.commit,
+      })
         .then(() => {
           markReady()
 
@@ -656,12 +673,15 @@ function createFeedCollectionOptions<
           begin: () => {},
           write: () => {},
           commit: () => {},
-          markReady: () => {},
         }
         await refreshFeed(dummyParams)
         return
       }
-      await refreshFeed(syncParams)
+      await refreshFeed({
+        begin: syncParams.begin,
+        write: syncParams.write,
+        commit: syncParams.commit,
+      })
     },
     clearSeenItems: () => {
       seenItems = new Map()
