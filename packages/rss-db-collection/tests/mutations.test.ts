@@ -369,7 +369,7 @@ describe(`RSS Collection Mutations`, () => {
 
       const onInsertMock = vi.fn().mockImplementation(({ collection }) => {
         // Test that utils are available
-        expect(collection.utils.isPolling).toBeDefined()
+        expect(collection.utils.refresh).toBeDefined()
         expect(collection.utils.getSeenItemsCount).toBeDefined()
         expect(collection.utils.clearSeenItems).toBeDefined()
         return Promise.resolve()

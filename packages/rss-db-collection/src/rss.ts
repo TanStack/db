@@ -4,6 +4,7 @@ import {
   FeedFetchError,
   FeedParsingError,
   FeedTimeoutError,
+  FeedURLRequiredError,
   InvalidPollingIntervalError,
   UnsupportedFeedFormatError,
 } from "./errors"
@@ -430,10 +431,7 @@ function createFeedCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: BaseFeedCollectionConfig<TExplicit, TSchema, TFallback, TKey> & {
-    transform?: (
-      item: FeedItem,
-      feedType: `rss` | `atom`
-    ) => ResolveType<TExplicit, TSchema, TFallback>
+    transform?: (item: FeedItem) => ResolveType<TExplicit, TSchema, TFallback>
     expectedFeedType?: `rss` | `atom`
   }
 ) {
@@ -454,13 +452,15 @@ function createFeedCollectionOptions<
   } = config
 
   // Validation
+  if (!feedUrl) {
+    throw new FeedURLRequiredError()
+  }
   if (pollingInterval <= 0) {
     throw new InvalidPollingIntervalError(pollingInterval)
   }
 
   // State management
   let seenItems = new Map<string, { id: string; lastSeen: number }>()
-  let pollingTimeoutId: NodeJS.Timeout | null = null
   let syncParams:
     | Parameters<
         SyncConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey>[`sync`]
@@ -546,7 +546,7 @@ function createFeedCollectionOptions<
         let transformedItem: ResolveType<TExplicit, TSchema, TFallback>
 
         if (transform) {
-          transformedItem = transform(rawItem, parsedFeed.type)
+          transformedItem = transform(rawItem)
         } else {
           // Use default transformation
           const defaultTransformed =
@@ -598,16 +598,6 @@ function createFeedCollectionOptions<
   }
 
   /**
-   * Stop polling
-   */
-  const stopPolling = () => {
-    if (pollingTimeoutId) {
-      clearTimeout(pollingTimeoutId)
-      pollingTimeoutId = null
-    }
-  }
-
-  /**
    * Sync configuration
    */
   const sync: SyncConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> = {
@@ -628,7 +618,7 @@ function createFeedCollectionOptions<
 
         // Schedule next poll if polling is enabled
         if (startPolling) {
-          pollingTimeoutId = setTimeout(poll, pollingInterval)
+          setTimeout(poll, pollingInterval)
         }
       }
 
@@ -639,7 +629,7 @@ function createFeedCollectionOptions<
 
           // Start polling if configured to do so
           if (startPolling) {
-            pollingTimeoutId = setTimeout(poll, pollingInterval)
+            setTimeout(poll, pollingInterval)
           }
         })
         .catch((error) => {
@@ -648,15 +638,12 @@ function createFeedCollectionOptions<
 
           // Still start polling for retry attempts
           if (startPolling) {
-            pollingTimeoutId = setTimeout(poll, pollingInterval)
+            setTimeout(poll, pollingInterval)
           }
         })
 
-      // Return cleanup function
-      return () => {
-        stopPolling()
-        syncParams = null
-      }
+      // Note: sync functions should return void
+      // Cleanup will be handled when the collection is destroyed
     },
   }
 
@@ -678,6 +665,7 @@ function createFeedCollectionOptions<
     ...restConfig,
     getKey,
     sync,
+    startSync: true,
     onInsert,
     onUpdate,
     onDelete,
