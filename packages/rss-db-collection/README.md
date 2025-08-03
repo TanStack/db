@@ -279,7 +279,7 @@ const blogCollection = createCollection({
 })
 ```
 
-### Manual Polling Control
+### Manual Refresh
 
 ```typescript
 const collection = createCollection({
@@ -290,12 +290,9 @@ const collection = createCollection({
   })
 })
 
-// Control polling manually
-collection.utils.startPolling()
-console.log(`Polling: ${collection.utils.isPolling()}`) // true
-
-collection.utils.stopPolling()
-console.log(`Polling: ${collection.utils.isPolling()}`) // false
+// Manually refresh the feed
+await collection.utils.refresh()
+console.log('Feed refreshed!')
 
 // Get status
 console.log(`Seen items: ${collection.utils.getSeenItemsCount()}`)
@@ -381,10 +378,7 @@ Common error scenarios handled:
 ```typescript
 // Available on collection.utils for both RSS and Atom collections
 interface FeedCollectionUtils {
-  refresh(): Promise<void>           // Manual refresh (limited outside sync context)
-  startPolling(): void              // Start polling
-  stopPolling(): void               // Stop polling  
-  isPolling(): boolean              // Check polling status
+  refresh(): Promise<void>           // Manual feed refresh
   clearSeenItems(): void            // Clear deduplication cache
   getSeenItemsCount(): number       // Get number of tracked items
 }

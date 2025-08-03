@@ -261,7 +261,7 @@ describe(`RSS Collection`, () => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
 
-    it(`should allow manual polling control`, async () => {
+    it(`should allow manual refresh`, async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(sampleRSSFeed),
@@ -284,25 +284,32 @@ describe(`RSS Collection`, () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(1) // Initial fetch only
 
-      // Start polling manually
-      collection.utils.startPolling()
-      expect(collection.utils.isPolling()).toBe(true)
-
-      // Advance time
-      vi.advanceTimersByTime(10000)
-      await flushPromises()
+      // Manually refresh the feed
+      await collection.utils.refresh()
 
       expect(fetchMock).toHaveBeenCalledTimes(2)
 
-      // Stop polling
-      collection.utils.stopPolling()
-      expect(collection.utils.isPolling()).toBe(false)
+      // Refresh again
+      await collection.utils.refresh()
 
-      // Advance time - should not fetch again
-      vi.advanceTimersByTime(10000)
-      await flushPromises()
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
 
-      expect(fetchMock).toHaveBeenCalledTimes(2) // No additional fetch
+    it(`should throw error when refresh is called before sync`, async () => {
+      const config: RSSCollectionConfig = {
+        feedUrl: `https://example.com/rss.xml`,
+        pollingInterval: 10000,
+        getKey: (item: any) => item.guid || item.link,
+        startPolling: false,
+      }
+
+      const options = rssCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Try to refresh before collection has synced
+      await expect(collection.utils.refresh()).rejects.toThrow(
+        `Collection not synced yet - cannot refresh`
+      )
     })
   })
 

@@ -221,21 +221,6 @@ export interface FeedCollectionUtils extends UtilsRecord {
   refresh: () => Promise<void>
 
   /**
-   * Start polling if it was stopped
-   */
-  startPolling: () => void
-
-  /**
-   * Stop polling
-   */
-  stopPolling: () => void
-
-  /**
-   * Get the current polling status
-   */
-  isPolling: () => boolean
-
-  /**
    * Clear the seen items cache
    */
   clearSeenItems: () => void
@@ -475,8 +460,12 @@ function createFeedCollectionOptions<
 
   // State management
   let seenItems = new Map<string, { id: string; lastSeen: number }>()
-  let isPolling = false
   let pollingTimeoutId: NodeJS.Timeout | null = null
+  let syncParams:
+    | Parameters<
+        SyncConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey>[`sync`]
+      >[0]
+    | null = null
 
   /**
    * Clean up old seen items to prevent memory leaks
@@ -515,7 +504,7 @@ function createFeedCollectionOptions<
   /**
    * Refresh feed data
    */
-  const refreshFeed = async (syncParams: {
+  const refreshFeed = async (params: {
     begin: () => void
     write: (message: {
       type: `insert` | `update` | `delete`
@@ -546,7 +535,7 @@ function createFeedCollectionOptions<
         throw new UnsupportedFeedFormatError(feedUrl)
       }
 
-      const { begin, write, commit } = syncParams
+      const { begin, write, commit } = params
       begin()
 
       let newItemsCount = 0
@@ -609,41 +598,9 @@ function createFeedCollectionOptions<
   }
 
   /**
-   * Start polling
-   */
-  const startPollingFn = (syncParams?: any) => {
-    if (isPolling) {
-      return // Already polling
-    }
-
-    isPolling = true
-
-    const poll = async () => {
-      if (!isPolling) {
-        return // Polling was stopped
-      }
-
-      try {
-        if (syncParams) {
-          await refreshFeed(syncParams)
-        }
-      } catch (error) {
-        debug(`Polling error: ${error}`)
-        // Continue polling despite errors
-      }
-
-      // Schedule next poll
-      pollingTimeoutId = setTimeout(poll, pollingInterval)
-    }
-
-    poll()
-  }
-
-  /**
    * Stop polling
    */
-  const stopPollingFn = () => {
-    isPolling = false
+  const stopPolling = () => {
     if (pollingTimeoutId) {
       clearTimeout(pollingTimeoutId)
       pollingTimeoutId = null
@@ -657,6 +614,24 @@ function createFeedCollectionOptions<
     sync: (params) => {
       const { markReady } = params
 
+      // Store sync params for manual refresh
+      syncParams = params
+
+      // Polling function
+      const poll = async () => {
+        try {
+          await refreshFeed(syncParams!)
+        } catch (error) {
+          debug(`Polling error: ${error}`)
+          // Continue polling despite errors
+        }
+
+        // Schedule next poll if polling is enabled
+        if (startPolling) {
+          pollingTimeoutId = setTimeout(poll, pollingInterval)
+        }
+      }
+
       // Initial feed fetch
       refreshFeed(params)
         .then(() => {
@@ -664,7 +639,7 @@ function createFeedCollectionOptions<
 
           // Start polling if configured to do so
           if (startPolling) {
-            startPollingFn(params)
+            pollingTimeoutId = setTimeout(poll, pollingInterval)
           }
         })
         .catch((error) => {
@@ -673,29 +648,26 @@ function createFeedCollectionOptions<
 
           // Still start polling for retry attempts
           if (startPolling) {
-            startPollingFn(params)
+            pollingTimeoutId = setTimeout(poll, pollingInterval)
           }
         })
 
       // Return cleanup function
       return () => {
-        stopPollingFn()
+        stopPolling()
+        syncParams = null
       }
     },
   }
 
   // Utils
   const utils: FeedCollectionUtils = {
-    refresh: () => {
-      // For manual refresh, we need access to sync params
-      // This is a limitation - manual refresh without sync params
-      return Promise.reject(
-        new Error(`Manual refresh not supported outside of sync context`)
-      )
+    refresh: async () => {
+      if (!syncParams) {
+        throw new Error(`Collection not synced yet - cannot refresh`)
+      }
+      await refreshFeed(syncParams)
     },
-    startPolling: () => startPollingFn(),
-    stopPolling: stopPollingFn,
-    isPolling: () => isPolling,
     clearSeenItems: () => {
       seenItems = new Map()
     },
