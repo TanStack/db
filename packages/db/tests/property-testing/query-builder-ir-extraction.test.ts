@@ -272,10 +272,19 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
 
   it(`should extract IR from complex query and translate correctly`, async () => {
     // Generate a simple schema
-    const schemaArb = generateSchema({ maxTables: 1, maxColumns: 4 })
+    const schemaArb = generateSchema({
+      maxTables: 1,
+      maxColumns: 4,
+      maxRowsPerTable: 10,
+      maxCommands: 30,
+      maxQueries: 5,
+      floatTolerance: 1e-12,
+    })
     const schema = await fc.sample(schemaArb, 1)[0]
+    if (!schema) throw new Error(`Failed to generate schema`)
 
     const table = schema.tables[0]
+    if (!table) throw new Error(`No tables in schema`)
     const tableName = table.name
 
     // Create SQLite database
@@ -297,6 +306,7 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
       generateRowsForTable(table, { minRows: 20, maxRows: 50 }),
       1
     )[0]
+    if (!testRows) throw new Error(`Failed to generate test rows`)
 
     // Insert into SQLite
     for (const row of testRows) {
@@ -312,19 +322,19 @@ describe(`Query Builder IR Extraction and SQL Translation`, () => {
     )
 
     if (!stringColumn || !numericColumn) {
-      return
+      throw new Error(`Required columns not found in schema`)
     }
 
     // Build query using the query builder with WHERE, ORDER BY, and LIMIT
     const queryBuilder = new Query()
       .from({ [tableName]: collection })
       .select((row) => ({
-        [table.primaryKey]: row[tableName][table.primaryKey],
-        [stringColumn.name]: row[tableName][stringColumn.name],
-        [numericColumn.name]: row[tableName][numericColumn.name],
+        [table.primaryKey]: row[tableName][table.primaryKey]!,
+        [stringColumn.name]: row[tableName][stringColumn.name]!,
+        [numericColumn.name]: row[tableName][numericColumn.name]!,
       }))
-      .where((row) => gt(row[tableName][numericColumn.name], 0))
-      .orderBy((row) => row[tableName][numericColumn.name], `desc`)
+      .where((row) => gt(row[tableName][numericColumn.name]!, 0))
+      .orderBy((row) => row[tableName][numericColumn.name]!, `desc`)
       .limit(5)
 
     // Extract IR before optimization

@@ -122,7 +122,9 @@ export class SQLiteOracle {
     // Convert SQLite results to TestRow format
     return results.map((row) => {
       const convertedRow: TestRow = {}
-      for (const [key, value] of Object.entries(row)) {
+      for (const [key, value] of Object.entries(
+        row as Record<string, unknown>
+      )) {
         convertedRow[key] = convertSQLiteValue(value)
       }
       return convertedRow
@@ -152,7 +154,7 @@ export class SQLiteOracle {
   getRow(tableName: string, keyColumn: string, keyValue: any): TestRow | null {
     const sql = `SELECT * FROM "${tableName}" WHERE "${keyColumn}" = ?`
     const results = this.query(sql, [keyValue])
-    return results.length > 0 ? results[0] : null
+    return results.length > 0 ? results[0]! : null
   }
 
   /**
@@ -199,7 +201,7 @@ export class SQLiteOracle {
     let totalRows = 0
 
     for (const table of tables) {
-      const count = this.getRowCount(table.name)
+      const count = this.getRowCount(table.name!)
       totalRows += count
     }
 

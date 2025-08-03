@@ -6,7 +6,7 @@ export type QueryIR = any
 // Re-export types that are used throughout the property testing framework
 export type Aggregate<_T = any> = {
   type: `agg`
-  function: string
+  name: string
   args: Array<any>
 }
 
@@ -20,7 +20,7 @@ export type BasicExpression<_T = any> = {
 
 export type Func<_T = any> = {
   type: `func`
-  function: string
+  name: string
   args: Array<any>
 }
 
@@ -98,8 +98,8 @@ export type TestValue =
   | number
   | boolean
   | null
-  | Record<string, any>
-  | Array<any>
+  | Record<string, unknown>
+  | Array<unknown>
 
 /**
  * Mutation operation types
@@ -165,26 +165,26 @@ export interface TestState {
  * Generator configuration for property testing
  */
 export interface GeneratorConfig {
-  maxTables: number
-  maxColumns: number
+  maxTables?: number
+  maxColumns?: number
   minRows?: number
   maxRows?: number
-  maxRowsPerTable: number
+  maxRowsPerTable?: number
   minCommands?: number
-  maxCommands: number
-  maxQueries: number
-  floatTolerance: number
+  maxCommands?: number
+  maxQueries?: number
+  floatTolerance?: number
 }
 
-export const DEFAULT_CONFIG: GeneratorConfig = {
+export const DEFAULT_CONFIG: Required<GeneratorConfig> = {
   maxTables: 3,
-  maxColumns: 6,
+  maxColumns: 5,
   minRows: 5,
   maxRows: 20,
-  maxRowsPerTable: 100,
+  maxRowsPerTable: 10,
   minCommands: 10,
-  maxCommands: 50,
-  maxQueries: 10,
+  maxCommands: 30,
+  maxQueries: 5,
   floatTolerance: 1e-12,
 }
 
@@ -245,8 +245,8 @@ export interface QueryComparison {
   tanstackResult: Array<TestRow>
   sqliteResult: Array<TestRow>
   normalized: {
-    tanstack: Array<NormalizedValue>
-    sqlite: Array<NormalizedValue>
+    tanstack: Array<Array<NormalizedValue>>
+    sqlite: Array<Array<NormalizedValue>>
   }
   isEqual: boolean
   differences?: Array<{

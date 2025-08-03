@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIG } from "../types"
 import type {
   GeneratorConfig,
   NormalizedValue,
@@ -9,10 +10,10 @@ import type {
  * Normalizes values for comparison between TanStack DB and SQLite
  */
 export class ValueNormalizer {
-  private config: GeneratorConfig
+  private config: Required<GeneratorConfig>
 
-  constructor(config: GeneratorConfig = { floatTolerance: 1e-12 }) {
-    this.config = config
+  constructor(config: GeneratorConfig = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config }
   }
 
   /**
@@ -85,7 +86,7 @@ export class ValueNormalizer {
     const sortedKeys = Object.keys(row).sort()
 
     for (const key of sortedKeys) {
-      normalized.push(this.normalizeValue(row[key]))
+      normalized.push(this.normalizeValue(row[key]!))
     }
 
     return normalized
@@ -151,8 +152,8 @@ export class ValueNormalizer {
     }
 
     for (let i = 0; i < a.length; i++) {
-      const normA = this.normalizeValue(a[i])
-      const normB = this.normalizeValue(b[i])
+      const normA = this.normalizeValue(a[i]!)
+      const normB = this.normalizeValue(b[i]!)
 
       if (!this.compareValues(normA, normB)) {
         return false
@@ -181,8 +182,8 @@ export class ValueNormalizer {
         return false
       }
 
-      const normA = this.normalizeValue(a[keysA[i]])
-      const normB = this.normalizeValue(b[keysB[i]])
+      const normA = this.normalizeValue(a[keysA[i]!]!)
+      const normB = this.normalizeValue(b[keysB[i]!]!)
 
       if (!this.compareValues(normA, normB)) {
         return false
@@ -215,7 +216,7 @@ export class ValueNormalizer {
   private normalizeObjectForSort(value: Record<string, TestValue>): string {
     const sortedKeys = Object.keys(value).sort()
     return sortedKeys
-      .map((key) => `${key}:${this.normalizeValue(value[key]).sortKey}`)
+      .map((key) => `${key}:${this.normalizeValue(value[key]!).sortKey}`)
       .join(`|`)
   }
 
@@ -229,7 +230,7 @@ export class ValueNormalizer {
       const minLength = Math.min(a.length, b.length)
 
       for (let i = 0; i < minLength; i++) {
-        const comparison = a[i].sortKey.localeCompare(b[i].sortKey)
+        const comparison = a[i]!.sortKey.localeCompare(b[i]!.sortKey)
         if (comparison !== 0) {
           return comparison
         }
@@ -286,13 +287,13 @@ export class ValueNormalizer {
       const norm1 = normalized1[i]
       const norm2 = normalized2[i]
 
-      if (!this.compareNormalizedRows(norm1, norm2)) {
+      if (!this.compareNormalizedRows(norm1!, norm2!)) {
         differences.push({
           index: i,
           row1: rows1[i] || ({} as TestRow),
           row2: rows2[i] || ({} as TestRow),
-          normalized1: norm1,
-          normalized2: norm2,
+          normalized1: norm1!,
+          normalized2: norm2!,
         })
       }
     }
@@ -315,7 +316,7 @@ export class ValueNormalizer {
     }
 
     for (let i = 0; i < a.length; i++) {
-      if (!this.compareValues(a[i], b[i])) {
+      if (!this.compareValues(a[i]!, b[i]!)) {
         return false
       }
     }

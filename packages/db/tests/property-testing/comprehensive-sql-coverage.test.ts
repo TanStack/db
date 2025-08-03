@@ -32,7 +32,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
   // Helper function to test SQL translation
   function testSQLTranslation(
     description: string,
-    queryBuilder: Query,
+    queryBuilder: InstanceType<typeof Query>,
     expectedSQLPatterns: Array<string>,
     expectedParams: Array<any> = []
   ) {
@@ -74,8 +74,8 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
     testSQLTranslation(
       `should translate SELECT with specific columns`,
       new Query().from({ users: collection }).select((row) => ({
-        id: row.users.id,
-        name: row.users.name,
+        id: row.users.id!,
+        name: row.users.name!,
       })),
       [`SELECT`, `FROM`, `"users"`, `AS`]
     )
@@ -95,7 +95,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate eq() comparison`,
       new Query()
         .from({ users: collection })
-        .where((row) => eq(row.users.id, 1)),
+        .where((row) => eq(row.users.id!, 1)),
       [`SELECT`, `FROM`, `WHERE`, `=`, `?`],
       [1]
     )
@@ -104,7 +104,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate gt() comparison`,
       new Query()
         .from({ users: collection })
-        .where((row) => gt(row.users.age, 18)),
+        .where((row) => gt(row.users.age!, 18)),
       [`SELECT`, `FROM`, `WHERE`, `>`, `?`],
       [18]
     )
@@ -113,7 +113,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate gte() comparison`,
       new Query()
         .from({ users: collection })
-        .where((row) => gte(row.users.age, 18)),
+        .where((row) => gte(row.users.age!, 18)),
       [`SELECT`, `FROM`, `WHERE`, `>=`, `?`],
       [18]
     )
@@ -122,7 +122,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate lt() comparison`,
       new Query()
         .from({ users: collection })
-        .where((row) => lt(row.users.age, 65)),
+        .where((row) => lt(row.users.age!, 65)),
       [`SELECT`, `FROM`, `WHERE`, `<`, `?`],
       [65]
     )
@@ -131,7 +131,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
       `should translate lte() comparison`,
       new Query()
         .from({ users: collection })
-        .where((row) => lte(row.users.age, 65)),
+        .where((row) => lte(row.users.age!, 65)),
       [`SELECT`, `FROM`, `WHERE`, `<=`, `?`],
       [65]
     )

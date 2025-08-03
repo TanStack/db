@@ -91,10 +91,10 @@ function buildSelect(
   const columns: Array<string> = []
 
   for (const [alias, expr] of Object.entries(select)) {
-    if (expr.type === `val` && expr.value === `*`) {
+    if ((expr as any).type === `val` && (expr as any).value === `*`) {
       columns.push(`*`)
     } else {
-      const sql = expressionToSQL(expr, params, paramIndex)
+      const sql = expressionToSQL(expr as any, params, paramIndex)
       columns.push(`${sql} AS ${quoteIdentifier(alias)}`)
     }
   }
@@ -127,7 +127,7 @@ function buildJoins(
   if (!joins) return ``
 
   return joins
-    .map((join) => {
+    .map((join: any) => {
       const joinType = join.type.toUpperCase()
       const joinTable = quoteIdentifier(join.from.alias)
       const leftExpr = expressionToSQL(join.left, params, paramIndex)
@@ -148,7 +148,7 @@ function buildWhere(
 ): string {
   if (!where || where.length === 0) return ``
 
-  const conditions = where.map((expr) =>
+  const conditions = where.map((expr: any) =>
     expressionToSQL(expr, params, paramIndex)
   )
   return `WHERE ${conditions.join(` AND `)}`
@@ -160,7 +160,7 @@ function buildWhere(
 function buildGroupBy(groupBy: QueryIR[`groupBy`]): string {
   if (!groupBy || groupBy.length === 0) return ``
 
-  const columns = groupBy.map((expr) => expressionToSQL(expr, [], 0))
+  const columns = groupBy.map((expr: any) => expressionToSQL(expr, [], 0))
   return `GROUP BY ${columns.join(`, `)}`
 }
 
@@ -174,7 +174,7 @@ function buildHaving(
 ): string {
   if (!having || having.length === 0) return ``
 
-  const conditions = having.map((expr) =>
+  const conditions = having.map((expr: any) =>
     expressionToSQL(expr, params, paramIndex)
   )
   return `HAVING ${conditions.join(` AND `)}`
@@ -221,17 +221,17 @@ function expressionToSQL(
  * Builds a property reference
  */
 function buildPropRef(expr: PropRef): string {
-  if (expr.path.length === 1) {
+  if ((expr as any).path.length === 1) {
     // Handle case where path is just the table alias (e.g., ["table_name"])
-    return `${quoteIdentifier(expr.path[0])}.*`
-  } else if (expr.path.length === 2) {
+    return `${quoteIdentifier((expr as any).path[0])}.*`
+  } else if ((expr as any).path.length === 2) {
     // Handle case where path is [tableAlias, columnName]
-    const [tableAlias, columnName] = expr.path
+    const [tableAlias, columnName] = (expr as any).path
     return `${quoteIdentifier(tableAlias)}.${quoteIdentifier(columnName)}`
   } else {
     // Handle nested paths (e.g., ["table", "column", "subcolumn"])
-    const tableAlias = expr.path[0]
-    const columnPath = expr.path.slice(1).join(`.`)
+    const tableAlias = (expr as any).path[0]
+    const columnPath = (expr as any).path.slice(1).join(`.`)
     return `${quoteIdentifier(tableAlias)}.${quoteIdentifier(columnPath)}`
   }
 }
@@ -266,7 +266,7 @@ function buildFunction(
 ): string {
   const args = expr.args.map((arg) => expressionToSQL(arg, params, paramIndex))
 
-  switch (expr.name) {
+  switch ((expr as any).name) {
     // Comparison operators
     case `eq`:
       return `${args[0]} = ${args[1]}`
@@ -324,7 +324,7 @@ function buildFunction(
       return `${args[0]} IN (${args[1]})`
 
     default:
-      throw new Error(`Unsupported function: ${expr.name}`)
+      throw new Error(`Unsupported function: ${(expr as any).name}`)
   }
 }
 
@@ -338,7 +338,7 @@ function buildAggregate(
 ): string {
   const args = expr.args.map((arg) => expressionToSQL(arg, params, paramIndex))
 
-  switch (expr.name) {
+  switch ((expr as any).name) {
     case `count`:
       return args.length > 0 ? `COUNT(${args[0]})` : `COUNT(*)`
     case `sum`:
@@ -350,7 +350,7 @@ function buildAggregate(
     case `max`:
       return `MAX(${args[0]})`
     default:
-      throw new Error(`Unsupported aggregate: ${expr.name}`)
+      throw new Error(`Unsupported aggregate: ${(expr as any).name}`)
   }
 }
 

@@ -1,4 +1,5 @@
 import { astToSQL } from "../sql/ast-to-sql"
+import { DEFAULT_CONFIG } from "../types"
 import { ValueNormalizer } from "./normalizer"
 import type {
   GeneratorConfig,
@@ -16,12 +17,12 @@ import type {
 export class IncrementalChecker {
   private state: TestState
   private normalizer: ValueNormalizer
-  private config: GeneratorConfig
+  private config: Required<GeneratorConfig>
 
   constructor(state: TestState, config: GeneratorConfig = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config }
     this.state = state
-    this.config = config
-    this.normalizer = new ValueNormalizer(config)
+    this.normalizer = new ValueNormalizer(this.config)
   }
 
   /**
@@ -139,7 +140,7 @@ export class IncrementalChecker {
     }
 
     try {
-      await collection.update(key, (draft) => {
+      await collection.update(key, (draft: any) => {
         Object.assign(draft, changes)
       })
     } catch (error) {
@@ -392,17 +393,17 @@ export class IncrementalChecker {
   ): QueryComparison {
     try {
       // Generate SQL from AST if not already stored
-      const { sql, params } = astToSQL(query.ast)
+      const { sql, params } = astToSQL(query!.ast)
 
       // Execute query on SQLite oracle
       const sqliteResult = this.state.sqliteDb.query(sql, params)
 
       // For now, we'll use the stored snapshot as TanStack result
       // In practice, you'd execute the query on TanStack DB
-      const tanstackResult = query.snapshot
+      const tanstackResult = query!.snapshot
 
       // Check if the query has an ORDER BY clause
-      const hasOrderBy = query.ast.orderBy && query.ast.orderBy.length > 0
+      const hasOrderBy = query!.ast.orderBy && query!.ast.orderBy.length > 0
 
       let comparison
       if (hasOrderBy) {
@@ -429,8 +430,8 @@ export class IncrementalChecker {
         tanstackResult,
         sqliteResult,
         normalized: {
-          tanstack: this.normalizer.normalizeRows(tanstackResult),
-          sqlite: this.normalizer.normalizeRows(sqliteResult),
+          tanstack: this.normalizer.normalizeRows(tanstackResult).flat(),
+          sqlite: this.normalizer.normalizeRows(sqliteResult).flat(),
         },
         isEqual: comparison.equal,
         differences: comparison.differences?.map((diff) => ({
@@ -496,7 +497,7 @@ export class IncrementalChecker {
           }
         }
       }
-      return { success: true }
+      return Promise.resolve({ success: true })
     } catch (error) {
       return {
         success: false,

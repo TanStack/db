@@ -62,7 +62,7 @@ function parseSelectFunction(
           [`count`, `sum`, `avg`, `min`, `max`].includes(value)
         ) {
           // Assume it's an aggregate
-          select[key] = new Aggregate(value, [])
+          select[key] = new Aggregate(value, []) as any
         } else {
           // Assume it's a literal value
           select[key] = new Value(value)
