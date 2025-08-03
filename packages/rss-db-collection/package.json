@@ -1,0 +1,62 @@
+{
+  "name": "@tanstack/rss-db-collection",
+  "description": "RSS/Atom feed collection for TanStack DB",
+  "version": "0.1.0",
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db": "workspace:*",
+    "debug": "^4.4.1",
+    "fast-xml-parser": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.12",
+    "@vitest/coverage-istanbul": "^3.0.9"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.6.3",
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "author": "Claude AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/rss-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "rss",
+    "atom",
+    "feed",
+    "polling",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}
