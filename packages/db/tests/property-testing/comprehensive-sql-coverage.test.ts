@@ -467,6 +467,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
 
     testSQLTranslation(
       `should translate HAVING`,
+
       new Query()
         .from({ users: collection })
         .select(() => ({
@@ -474,6 +475,7 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           avgSalary: avg(`salary`),
         }))
         .groupBy((row) => row.users.department!)
+
         .having((row) => gt(row.avgSalary as any, 50000)),
       [`SELECT`, `FROM`, `GROUP BY`, `HAVING`, `>`, `AVG`]
     )
@@ -635,7 +637,9 @@ describe(`Comprehensive SQL Translation Coverage`, () => {
           avgAge: avg(`age` as any),
         }))
         .groupBy((row) => row.users.department!)
+
         .having((row) => gt(row.userCount as any, 5))
+
         .orderBy((row) => row.avgAge as any, `desc`)
         .limit(10),
       [
