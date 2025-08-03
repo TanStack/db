@@ -74,9 +74,7 @@ describe(`RSS Collection Errors`, () => {
       const collection = createCollection(options)
 
       // Should mark ready even with error
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should have no items due to fetch error
       expect(collection.size).toBe(0)
@@ -107,9 +105,7 @@ describe(`RSS Collection Errors`, () => {
       const collection = createCollection(options)
 
       // Should mark ready even with error
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -127,9 +123,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -152,9 +146,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -180,9 +172,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -208,9 +198,7 @@ describe(`RSS Collection Errors`, () => {
       const options = atomCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should succeed but have no items
       expect(collection.size).toBe(0)
@@ -237,9 +225,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -273,9 +259,7 @@ describe(`RSS Collection Errors`, () => {
       const options = atomCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -305,9 +289,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
     })
@@ -344,9 +326,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should handle transform error gracefully
       expect(collection.size).toBe(0)
@@ -381,9 +361,7 @@ describe(`RSS Collection Errors`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should handle getKey error gracefully
       expect(collection.size).toBe(0)
@@ -428,9 +406,7 @@ describe(`RSS Collection Errors`, () => {
       const collection = createCollection(options)
 
       // Wait for initial attempt (will fail)
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(0)
       expect(fetchMock).toHaveBeenCalledTimes(1)

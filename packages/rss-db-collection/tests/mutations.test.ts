@@ -70,9 +70,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -111,9 +109,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should handle the error gracefully and still process items
       expect(onInsertMock).toHaveBeenCalled()
@@ -147,9 +143,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -194,9 +188,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -240,9 +232,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -283,9 +273,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -331,9 +319,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -392,9 +378,7 @@ describe(`RSS Collection Mutations`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 

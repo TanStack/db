@@ -622,7 +622,7 @@ function createFeedCollectionOptions<
         }
       }
 
-      // Initial feed fetch
+      // Initial feed fetch (sync)
       refreshFeed(params)
         .then(() => {
           markReady()
@@ -651,7 +651,15 @@ function createFeedCollectionOptions<
   const utils: FeedCollectionUtils = {
     refresh: async () => {
       if (!syncParams) {
-        throw new Error(`Collection not synced yet - cannot refresh`)
+        // If not synced yet, create minimal params for manual refresh
+        const dummyParams = {
+          begin: () => {},
+          write: () => {},
+          commit: () => {},
+          markReady: () => {},
+        }
+        await refreshFeed(dummyParams)
+        return
       }
       await refreshFeed(syncParams)
     },

@@ -119,11 +119,7 @@ describe(`RSS Collection`, () => {
       const collection = createCollection(options)
 
       // Wait for initial sync
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
-
-      await flushPromises()
+      await collection.stateWhenReady()
 
       expect(fetchMock).toHaveBeenCalledWith(
         `https://example.com/rss.xml`,
@@ -176,9 +172,7 @@ describe(`RSS Collection`, () => {
       const options = atomCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -209,9 +203,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       await flushPromises()
 
@@ -242,9 +234,7 @@ describe(`RSS Collection`, () => {
       const collection = createCollection(options)
 
       // Wait for initial fetch
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(fetchMock).toHaveBeenCalledTimes(1)
 
@@ -278,9 +268,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(fetchMock).toHaveBeenCalledTimes(1) // Initial fetch only
 
@@ -295,7 +283,13 @@ describe(`RSS Collection`, () => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
 
-    it(`should throw error when refresh is called before sync`, async () => {
+    it(`should allow refresh to be called before sync`, async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(sampleRSSFeed),
+      })
+      global.fetch = fetchMock
+
       const config: RSSCollectionConfig = {
         feedUrl: `https://example.com/rss.xml`,
         pollingInterval: 10000,
@@ -306,10 +300,9 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Try to refresh before collection has synced
-      await expect(collection.utils.refresh()).rejects.toThrow(
-        `Collection not synced yet - cannot refresh`
-      )
+      // Should not throw when refresh is called before sync
+      await expect(collection.utils.refresh()).resolves.toBeUndefined()
+      expect(fetchMock).toHaveBeenCalled()
     })
   })
 
@@ -344,9 +337,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(2)
       expect(collection.utils.getSeenItemsCount()).toBe(2)
@@ -401,9 +392,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.size).toBe(2)
 
@@ -433,9 +422,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.utils.getSeenItemsCount()).toBe(2)
 
@@ -463,9 +450,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(collection.utils.getSeenItemsCount()).toBe(2)
 
@@ -498,9 +483,7 @@ describe(`RSS Collection`, () => {
       const options = rssCollectionOptions(config)
       const collection = createCollection(options)
 
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       expect(fetchMock).toHaveBeenCalledWith(
         `https://example.com/rss.xml`,
@@ -531,9 +514,7 @@ describe(`RSS Collection`, () => {
       const collection = createCollection(options)
 
       // Should mark ready even on error
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should have no items due to format mismatch error
       expect(collection.size).toBe(0)
@@ -557,9 +538,7 @@ describe(`RSS Collection`, () => {
       const collection = createCollection(options)
 
       // Should mark ready even on error
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      await collection.stateWhenReady()
 
       // Should have no items due to format mismatch error
       expect(collection.size).toBe(0)
