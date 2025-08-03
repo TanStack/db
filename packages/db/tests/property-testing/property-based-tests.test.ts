@@ -108,8 +108,10 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           // Verify the test ran without crashing
           expect(result).toBeDefined()
           expect(result.seed).toBe(seed)
-          // For now, we just check that the test framework executed
           expect(typeof result.commandCount).toBe(`number`)
+
+          // Validate that TanStack DB matches SQLite for incremental convergence
+          expect(result.incrementalConvergence).toBe(true)
 
           return true
         }
@@ -244,8 +246,10 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           // Verify the test ran without crashing
           expect(result).toBeDefined()
           expect(result.seed).toBe(seed)
-          // For now, we just check that the test framework executed
           expect(typeof result.commandCount).toBe(`number`)
+
+          // Validate that TanStack DB matches SQLite for row count sanity
+          expect(result.rowCountSanity).toBe(true)
 
           return true
         }
@@ -277,8 +281,10 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           // Verify the test ran without crashing
           expect(result).toBeDefined()
           expect(result.seed).toBe(seed)
-          // For now, we just check that the test framework executed
           expect(typeof result.commandCount).toBe(`number`)
+
+          // Validate that TanStack DB matches SQLite for COUNT(*) queries
+          expect(result.snapshotEquality).toBe(true)
 
           return true
         }
@@ -312,10 +318,22 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           // Verify the test ran without crashing
           expect(result).toBeDefined()
           expect(result.seed).toBe(seed)
-          // For now, we just check that the test framework executed
           expect(typeof result.commandCount).toBe(`number`)
-          // Joins are only generated with multiple tables, so this might be 0
-          // expect(result.featureCoverage!.join).toBeGreaterThan(0)
+
+          // Validate that TanStack DB matches SQLite for snapshot equality
+          expect(result.snapshotEquality).toBe(true)
+
+          // Validate that joins and aggregates behave the same as SQLite
+          if (result.featureCoverage?.join && result.featureCoverage.join > 0) {
+            expect(result.snapshotEquality).toBe(true)
+          }
+
+          if (
+            result.featureCoverage?.aggregate &&
+            result.featureCoverage.aggregate > 0
+          ) {
+            expect(result.snapshotEquality).toBe(true)
+          }
 
           return true
         }
@@ -347,8 +365,10 @@ describe(`Property-Based Tests for TanStack DB Query Engine`, () => {
           // Verify the test ran without crashing
           expect(result).toBeDefined()
           expect(result.seed).toBe(seed)
-          // For now, we just check that the test framework executed
           expect(typeof result.commandCount).toBe(`number`)
+
+          // Validate that TanStack DB matches SQLite for complex joins and subqueries
+          expect(result.snapshotEquality).toBe(true)
 
           return true
         }
