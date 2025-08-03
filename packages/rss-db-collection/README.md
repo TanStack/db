@@ -5,7 +5,7 @@ RSS/Atom feed collection for TanStack DB - sync data from RSS and Atom feeds wit
 ## Features
 
 - **📡 RSS & Atom Support**: Dedicated option creators for RSS 2.0 and Atom 1.0 feeds
-- **🔄 Automatic Polling**: Configurable polling intervals with intelligent error recovery
+- **🔄 Automatic Polling**: Configurable polling intervals with intelligent error recovery and manual refresh capability
 - **✨ Deduplication**: Built-in deduplication based on feed item IDs/GUIDs
 - **🔧 Transform Functions**: Custom transform functions to normalize feed data to your schema
 - **📝 Full TypeScript Support**: Complete type safety with schema inference

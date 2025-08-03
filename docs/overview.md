@@ -362,6 +362,19 @@ Optional configuration includes:
 
 RSS and Atom collections automatically handle feed parsing, deduplication of items, and provide built-in error recovery. The collections will continue polling even after network failures or parsing errors.
 
+Collections can be manually refreshed when needed:
+
+```ts
+// Manually refresh the feed data
+await blogFeed.utils.refresh()
+
+// Clear deduplication cache if needed
+blogFeed.utils.clearSeenItems()
+
+// Check how many items have been tracked
+console.log(`Tracked items: ${blogFeed.utils.getSeenItemsCount()}`)
+```
+
 #### `LocalStorageCollection`
 
 localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
