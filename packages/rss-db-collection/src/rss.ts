@@ -255,37 +255,6 @@ interface ParsedFeed {
 }
 
 /**
- * Simple state management without external dependencies
- */
-class SimpleStore<T> {
-  private _state: T
-  private _subscribers: Array<(state: T) => void> = []
-
-  constructor(initialState: T) {
-    this._state = initialState
-  }
-
-  get state(): T {
-    return this._state
-  }
-
-  setState(updater: (current: T) => T): void {
-    this._state = updater(this._state)
-    this._subscribers.forEach((callback) => callback(this._state))
-  }
-
-  subscribe(callback: (state: T) => void): () => void {
-    this._subscribers.push(callback)
-    return () => {
-      const index = this._subscribers.indexOf(callback)
-      if (index > -1) {
-        this._subscribers.splice(index, 1)
-      }
-    }
-  }
-}
-
-/**
  * Parse RSS feed
  */
 function parseRSSFeed(data: any): Array<FeedItem> {
@@ -505,10 +474,8 @@ function createFeedCollectionOptions<
   }
 
   // State management
-  const seenItems = new SimpleStore<
-    Map<string, { id: string; lastSeen: number }>
-  >(new Map())
-  const isPollingRef = new SimpleStore<boolean>(false)
+  let seenItems = new Map<string, { id: string; lastSeen: number }>()
+  let isPolling = false
   let pollingTimeoutId: NodeJS.Timeout | null = null
 
   /**
@@ -518,33 +485,31 @@ function createFeedCollectionOptions<
     const now = Date.now()
     const maxAge = pollingInterval * 10 // Keep items for 10 polling cycles
 
-    seenItems.setState((current) => {
-      const cleaned = new Map()
-      let removedCount = 0
+    const cleaned = new Map()
+    let removedCount = 0
 
-      for (const [key, value] of current) {
-        if (now - value.lastSeen < maxAge) {
-          cleaned.set(key, value)
-        } else {
-          removedCount++
-        }
+    for (const [key, value] of seenItems) {
+      if (now - value.lastSeen < maxAge) {
+        cleaned.set(key, value)
+      } else {
+        removedCount++
       }
+    }
 
-      if (cleaned.size > maxSeenItems) {
-        // Remove oldest items if we're still over the limit
-        const sortedEntries = Array.from(cleaned.entries())
-          .sort(([, a], [, b]) => b.lastSeen - a.lastSeen)
-          .slice(0, maxSeenItems)
+    if (cleaned.size > maxSeenItems) {
+      // Remove oldest items if we're still over the limit
+      const sortedEntries = Array.from(cleaned.entries())
+        .sort(([, a], [, b]) => b.lastSeen - a.lastSeen)
+        .slice(0, maxSeenItems)
 
-        return new Map(sortedEntries)
-      }
+      seenItems = new Map(sortedEntries)
+    } else {
+      seenItems = cleaned
+    }
 
-      if (removedCount > 0) {
-        debug(`Cleaned up ${removedCount} old feed items`)
-      }
-
-      return cleaned
-    })
+    if (removedCount > 0) {
+      debug(`Cleaned up ${removedCount} old feed items`)
+    }
   }
 
   /**
@@ -611,15 +576,11 @@ function createFeedCollectionOptions<
         const itemId = getItemId(rawItem, parsedFeed.type)
 
         // Check if we've seen this item before
-        const seen = seenItems.state.get(itemId)
+        const seen = seenItems.get(itemId)
 
         if (!seen) {
           // New item
-          seenItems.setState((current) => {
-            const newMap = new Map(current)
-            newMap.set(itemId, { id: itemId, lastSeen: currentTime })
-            return newMap
-          })
+          seenItems.set(itemId, { id: itemId, lastSeen: currentTime })
 
           write({
             type: `insert`,
@@ -629,11 +590,7 @@ function createFeedCollectionOptions<
           newItemsCount++
         } else {
           // Update last seen time
-          seenItems.setState((current) => {
-            const newMap = new Map(current)
-            newMap.set(itemId, { ...seen, lastSeen: currentTime })
-            return newMap
-          })
+          seenItems.set(itemId, { ...seen, lastSeen: currentTime })
         }
       }
 
@@ -655,14 +612,14 @@ function createFeedCollectionOptions<
    * Start polling
    */
   const startPollingFn = (syncParams?: any) => {
-    if (isPollingRef.state) {
+    if (isPolling) {
       return // Already polling
     }
 
-    isPollingRef.setState(() => true)
+    isPolling = true
 
     const poll = async () => {
-      if (!isPollingRef.state) {
+      if (!isPolling) {
         return // Polling was stopped
       }
 
@@ -686,7 +643,7 @@ function createFeedCollectionOptions<
    * Stop polling
    */
   const stopPollingFn = () => {
-    isPollingRef.setState(() => false)
+    isPolling = false
     if (pollingTimeoutId) {
       clearTimeout(pollingTimeoutId)
       pollingTimeoutId = null
@@ -738,11 +695,11 @@ function createFeedCollectionOptions<
     },
     startPolling: () => startPollingFn(),
     stopPolling: stopPollingFn,
-    isPolling: () => isPollingRef.state,
+    isPolling: () => isPolling,
     clearSeenItems: () => {
-      seenItems.setState(() => new Map())
+      seenItems = new Map()
     },
-    getSeenItemsCount: () => seenItems.state.size,
+    getSeenItemsCount: () => seenItems.size,
   }
 
   return {
