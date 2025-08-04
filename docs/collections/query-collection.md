@@ -42,35 +42,6 @@ const todosCollection = createCollection(
 )
 ```
 
-### Using Meta for Additional Context
-
-The `meta` option allows you to pass additional context to your query function:
-
-```typescript
-const todosCollection = createCollection(
-  queryCollectionOptions({
-    queryKey: ['todos', userId],
-    queryFn: async (context) => {
-      // Access meta from the context
-      const { meta, queryKey } = context
-      const headers = meta?.authToken 
-        ? { Authorization: `Bearer ${meta.authToken}` }
-        : {}
-      
-      const response = await fetch(`/api/users/${queryKey[1]}/todos`, { headers })
-      return response.json()
-    },
-    queryClient,
-    getKey: (item) => item.id,
-    // Pass metadata that will be available in queryFn
-    meta: {
-      authToken: getAuthToken(),
-      apiVersion: 'v2',
-    }
-  })
-)
-```
-
 ## Configuration Options
 
 The `queryCollectionOptions` function accepts the following options:
