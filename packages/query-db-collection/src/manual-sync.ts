@@ -310,12 +310,13 @@ export function createWriteUtils<
         const result = callback()
 
         // Check if callback returns a promise (async function)
-        // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
         if (
+          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           result &&
           typeof result === `object` &&
           `then` in result &&
+          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
           typeof result.then === `function`
         ) {
           throw new Error(
