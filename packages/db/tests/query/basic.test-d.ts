@@ -213,4 +213,35 @@ describe(`Query Basic Types`, () => {
     // Should return the original User type, not namespaced
     expectTypeOf(results).toEqualTypeOf<Array<User>>()
   })
+
+  test(`selecting optional field should work`, () => {
+    // Define a type with an optional field
+    type UserWithOptional = {
+      id: number
+      name: string
+      inserted_at?: Date
+    }
+
+    const usersWithOptionalCollection = createCollection(
+      mockSyncCollectionOptions<UserWithOptional>({
+        id: `test-users-optional`,
+        getKey: (user) => user.id,
+        initialData: [],
+      })
+    )
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithOptionalCollection }).select(({ user }) => ({
+          inserted_at: user.inserted_at,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        inserted_at: Date | undefined
+      }>
+    >()
+  })
 })

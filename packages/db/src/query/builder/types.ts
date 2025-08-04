@@ -58,16 +58,18 @@ export type SelectObject<
 // Helper type to get the result type from a select object
 export type ResultTypeFromSelect<TSelectObject> = {
   [K in keyof TSelectObject]: TSelectObject[K] extends RefProxy<infer T>
-    ? // For RefProxy, preserve the type as-is (including optionality from joins)
-      T
+    ? T
     : TSelectObject[K] extends BasicExpression<infer T>
       ? T
       : TSelectObject[K] extends Aggregate<infer T>
         ? T
         : TSelectObject[K] extends RefProxyFor<infer T>
-          ? // For RefProxyFor, preserve the type as-is (including optionality from joins)
-            T
-          : never
+          ? T
+          : TSelectObject[K] extends undefined
+            ? undefined
+            : TSelectObject[K] extends { __type: infer U }
+              ? U
+              : never
 }
 
 // Callback type for orderBy clauses
@@ -119,12 +121,11 @@ export type RefProxyFor<T> = OmitRefProxy<
       ? // T is optional (T | undefined) but not exactly undefined
         NonUndefined<T> extends Record<string, any>
         ? {
-            // Properties are accessible and their types become optional
-            [K in keyof NonUndefined<T>]: NonUndefined<T>[K] extends Record<
+            [K in keyof NonUndefined<T>]-?: NonUndefined<T>[K] extends Record<
               string,
               any
             >
-              ? RefProxyFor<NonUndefined<T>[K] | undefined> &
+              ? RefProxyFor<NonUndefined<T>[K]> &
                   RefProxy<NonUndefined<T>[K] | undefined>
               : RefProxy<NonUndefined<T>[K] | undefined>
           } & RefProxy<T>
@@ -132,9 +133,14 @@ export type RefProxyFor<T> = OmitRefProxy<
       : // T is not optional
         T extends Record<string, any>
         ? {
-            [K in keyof T]: T[K] extends Record<string, any>
-              ? RefProxyFor<T[K]> & RefProxy<T[K]>
-              : RefProxy<T[K]>
+            // Make all properties required, but for optional ones, include undefined in the RefProxy type
+            [K in keyof T]-?: undefined extends T[K]
+              ? T[K] extends Record<string, any>
+                ? RefProxyFor<T[K]> & RefProxy<T[K]>
+                : RefProxy<T[K]>
+              : T[K] extends Record<string, any>
+                ? RefProxyFor<T[K]> & RefProxy<T[K]>
+                : RefProxy<T[K]>
           } & RefProxy<T>
         : RefProxy<T>
 >
