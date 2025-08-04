@@ -885,6 +885,24 @@ const AddTodo = () => {
 }
 ```
 
+## React Native
+
+When using TanStack DB with React Native, you need to install and configure a UUID generation library since React Native doesn't include crypto.randomUUID() by default.
+
+Install the `react-native-random-uuid` package:
+
+```bash
+npm install react-native-random-uuid
+```
+
+Then import it at the entry point of your React Native app (e.g., in your `App.js` or `index.js`):
+
+```javascript
+import 'react-native-random-uuid'
+```
+
+This polyfill provides the `crypto.randomUUID()` function that TanStack DB uses internally for generating unique identifiers.
+
 ## More info
 
 If you have questions / need help using TanStack DB, let us know on the Discord or start a GitHub discussion:
