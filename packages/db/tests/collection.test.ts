@@ -264,15 +264,9 @@ describe(`Collection`, () => {
       value: `bar`,
     })
 
-    // after mutationFn returns, check that the transaction is updated &
-    // optimistic update is gone & synced data & comibned state are all updated.
-    expect(
-      // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
-    ).toEqual({
-      id: 1,
-      value: `bar`,
-    })
+    // after mutationFn returns, check that the transaction is cleaned up,
+    // optimistic update is gone & synced data & combined state are all updated.
+    expect(collection.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )

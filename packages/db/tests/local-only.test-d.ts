@@ -1,8 +1,10 @@
 import { describe, expectTypeOf, it } from "vitest"
+import { z } from "zod"
 import { createCollection } from "../src/index"
 import { localOnlyCollectionOptions } from "../src/local-only"
 import type { LocalOnlyCollectionUtils } from "../src/local-only"
 import type { Collection } from "../src/index"
+import type { Query } from "../src/query/builder"
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -33,7 +35,7 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(options).toHaveProperty(`getKey`)
 
     // Test that getKey returns the correct type
-    expectTypeOf(options.getKey).toMatchTypeOf<(item: TestItem) => number>()
+    expectTypeOf(options.getKey).toExtend<(item: TestItem) => number>()
   })
 
   it(`should be compatible with createCollection`, () => {
@@ -56,7 +58,7 @@ describe(`LocalOnly Collection Types`, () => {
     >(options)
 
     // Test that the collection has the expected type
-    expectTypeOf(collection).toMatchTypeOf<
+    expectTypeOf(collection).toExtend<
       Collection<TestItem, number, LocalOnlyCollectionUtils>
     >()
   })
@@ -82,7 +84,7 @@ describe(`LocalOnly Collection Types`, () => {
       LocalOnlyCollectionUtils
     >(options)
 
-    expectTypeOf(collection).toMatchTypeOf<
+    expectTypeOf(collection).toExtend<
       Collection<TestItem, number, LocalOnlyCollectionUtils>
     >()
   })
@@ -106,7 +108,7 @@ describe(`LocalOnly Collection Types`, () => {
       LocalOnlyCollectionUtils
     >(options)
 
-    expectTypeOf(collection).toMatchTypeOf<
+    expectTypeOf(collection).toExtend<
       Collection<TestItem, number, LocalOnlyCollectionUtils>
     >()
   })
@@ -129,9 +131,130 @@ describe(`LocalOnly Collection Types`, () => {
       LocalOnlyCollectionUtils
     >(options)
 
-    expectTypeOf(collection).toMatchTypeOf<
+    expectTypeOf(collection).toExtend<
       Collection<TestItem, string, LocalOnlyCollectionUtils>
     >()
-    expectTypeOf(options.getKey).toMatchTypeOf<(item: TestItem) => string>()
+    expectTypeOf(options.getKey).toExtend<(item: TestItem) => string>()
+  })
+
+  it(`should work with schema and infer correct types`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      entityId: z.string(),
+      value: z.string(),
+    })
+
+    const config = {
+      id: `test-with-schema`,
+      getKey: (item: any) => item.id,
+      schema: testSchema,
+    }
+
+    const options = localOnlyCollectionOptions(config)
+    const collection = createCollection(options)
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection).toExtend<
+      Collection<
+        {
+          id: string
+          entityId: string
+          value: string
+        },
+        string,
+        LocalOnlyCollectionUtils
+      >
+    >()
+  })
+
+  it(`should work with schema and query builder type inference (bug report reproduction)`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      entityId: z.string(),
+      value: z.string(),
+      createdAt: z.date(),
+    })
+
+    const config = {
+      id: `test-with-schema-query`,
+      getKey: (item: any) => item.id,
+      schema: testSchema,
+    }
+
+    const options = localOnlyCollectionOptions(config)
+    const collection = createCollection(options)
+
+    // This should work without type errors - the query builder should infer the correct type
+    const query = (q: InstanceType<typeof Query>) =>
+      q
+        .from({ bookmark: collection })
+        .orderBy(({ bookmark }) => bookmark.createdAt, `desc`)
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection).toExtend<
+      Collection<
+        {
+          id: string
+          entityId: string
+          value: string
+          createdAt: Date
+        },
+        string,
+        LocalOnlyCollectionUtils
+      >
+    >()
+
+    // Test that the query builder can access the createdAt property
+    expectTypeOf(query).toBeFunction()
+  })
+
+  it(`should reproduce exact bug report scenario`, () => {
+    // This reproduces the exact scenario from the bug report
+    const selectUrlSchema = z.object({
+      id: z.string(),
+      url: z.string(),
+      title: z.string(),
+      createdAt: z.date(),
+    })
+
+    const initialData = [
+      {
+        id: `1`,
+        url: `https://example.com`,
+        title: `Example`,
+        createdAt: new Date(),
+      },
+    ]
+
+    const bookmarkCollection = createCollection(
+      localOnlyCollectionOptions({
+        initialData,
+        getKey: (url: any) => url.id,
+        schema: selectUrlSchema,
+      })
+    )
+
+    // This should work without type errors - the query builder should infer the correct type
+    const query = (q: InstanceType<typeof Query>) =>
+      q
+        .from({ bookmark: bookmarkCollection })
+        .orderBy(({ bookmark }) => bookmark.createdAt, `desc`)
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(bookmarkCollection).toExtend<
+      Collection<
+        {
+          id: string
+          url: string
+          title: string
+          createdAt: Date
+        },
+        string,
+        LocalOnlyCollectionUtils
+      >
+    >()
+
+    // Test that the query builder can access the createdAt property
+    expectTypeOf(query).toBeFunction()
   })
 })

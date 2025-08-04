@@ -7,7 +7,7 @@ title: QueryCollectionConfig
 
 # Interface: QueryCollectionConfig\<TItem, TError, TQueryKey\>
 
-Defined in: [packages/query-db-collection/src/query.ts:26](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L26)
+Defined in: [packages/query-db-collection/src/query.ts:32](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L32)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/query-db-collection/src/query.ts:26](https://github.com/Ta
 optional enabled: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:36](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L36)
+Defined in: [packages/query-db-collection/src/query.ts:42](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L42)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/query-db-collection/src/query.ts:36](https://github.com/Ta
 getKey: (item) => string | number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:68](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L68)
+Defined in: [packages/query-db-collection/src/query.ts:74](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L74)
 
 #### Parameters
 
@@ -55,7 +55,39 @@ Defined in: [packages/query-db-collection/src/query.ts:68](https://github.com/Ta
 optional id: string;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:67](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L67)
+Defined in: [packages/query-db-collection/src/query.ts:73](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L73)
+
+***
+
+### meta?
+
+```ts
+optional meta: Record<string, unknown>;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:242](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L242)
+
+Metadata to pass to the query.
+Available in queryFn via context.meta
+
+#### Example
+
+```ts
+// Using meta for error context
+queryFn: async (context) => {
+  try {
+    return await api.getTodos(userId)
+  } catch (error) {
+    // Use meta for better error messages
+    throw new Error(
+      context.meta?.errorMessage || 'Failed to load todos'
+    )
+  }
+},
+meta: {
+  errorMessage: `Failed to load todos for user ${userId}`
+}
+```
 
 ***
 
@@ -65,7 +97,7 @@ Defined in: [packages/query-db-collection/src/query.ts:67](https://github.com/Ta
 optional onDelete: DeleteMutationFn<TItem>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:213](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L213)
+Defined in: [packages/query-db-collection/src/query.ts:219](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L219)
 
 Optional asynchronous handler function called before a delete operation
 
@@ -131,7 +163,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: InsertMutationFn<TItem>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:114](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L114)
+Defined in: [packages/query-db-collection/src/query.ts:120](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L120)
 
 Optional asynchronous handler function called before an insert operation
 
@@ -193,7 +225,7 @@ onInsert: async ({ transaction }) => {
 optional onUpdate: UpdateMutationFn<TItem>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:167](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L167)
+Defined in: [packages/query-db-collection/src/query.ts:173](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L173)
 
 Optional asynchronous handler function called before an update operation
 
@@ -266,7 +298,7 @@ onUpdate: async ({ transaction, collection }) => {
 queryClient: QueryClient;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:33](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L33)
+Defined in: [packages/query-db-collection/src/query.ts:39](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L39)
 
 ***
 
@@ -276,7 +308,7 @@ Defined in: [packages/query-db-collection/src/query.ts:33](https://github.com/Ta
 queryFn: (context) => Promise<TItem[]>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:32](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L32)
+Defined in: [packages/query-db-collection/src/query.ts:38](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L38)
 
 #### Parameters
 
@@ -322,7 +354,7 @@ if you want access to the direction, you can add it to the pageParam
 queryKey: TQueryKey;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:31](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L31)
+Defined in: [packages/query-db-collection/src/query.ts:37](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L37)
 
 ***
 
@@ -332,7 +364,7 @@ Defined in: [packages/query-db-collection/src/query.ts:31](https://github.com/Ta
 optional refetchInterval: number | false | (query) => undefined | number | false;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:37](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L37)
+Defined in: [packages/query-db-collection/src/query.ts:43](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L43)
 
 ***
 
@@ -342,7 +374,7 @@ Defined in: [packages/query-db-collection/src/query.ts:37](https://github.com/Ta
 optional retry: RetryValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:44](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L44)
+Defined in: [packages/query-db-collection/src/query.ts:50](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L50)
 
 ***
 
@@ -352,7 +384,7 @@ Defined in: [packages/query-db-collection/src/query.ts:44](https://github.com/Ta
 optional retryDelay: RetryDelayValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:51](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L51)
+Defined in: [packages/query-db-collection/src/query.ts:57](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L57)
 
 ***
 
@@ -362,17 +394,17 @@ Defined in: [packages/query-db-collection/src/query.ts:51](https://github.com/Ta
 optional schema: StandardSchemaV1<unknown, unknown>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:69](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L69)
+Defined in: [packages/query-db-collection/src/query.ts:75](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L75)
 
 ***
 
 ### staleTime?
 
 ```ts
-optional staleTime: StaleTime<TItem[], TError, TItem[], TQueryKey>;
+optional staleTime: StaleTimeFunction<TItem[], TError, TItem[], TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:58](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L58)
+Defined in: [packages/query-db-collection/src/query.ts:64](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L64)
 
 ***
 
@@ -382,7 +414,7 @@ Defined in: [packages/query-db-collection/src/query.ts:58](https://github.com/Ta
 optional startSync: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:71](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L71)
+Defined in: [packages/query-db-collection/src/query.ts:77](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L77)
 
 ***
 
@@ -392,4 +424,4 @@ Defined in: [packages/query-db-collection/src/query.ts:71](https://github.com/Ta
 optional sync: SyncConfig<TItem, string | number>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:70](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L70)
+Defined in: [packages/query-db-collection/src/query.ts:76](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L76)
