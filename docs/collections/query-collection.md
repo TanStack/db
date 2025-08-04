@@ -290,6 +290,53 @@ When `queryFn` returns an empty array, **all items in the collection will be del
 queryFn: async () => []
 ```
 
+### Handling Partial/Incremental Fetches
+
+Since the query collection expects `queryFn` to return the complete state, you can handle partial fetches by merging new data with existing data:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['todos'],
+    queryFn: async ({ queryKey }) => {
+      // Get existing data from cache
+      const existingData = queryClient.getQueryData(queryKey) || []
+      
+      // Fetch only new/updated items (e.g., changes since last sync)
+      const lastSyncTime = localStorage.getItem('todos-last-sync')
+      const newData = await fetch(`/api/todos?since=${lastSyncTime}`).then(r => r.json())
+      
+      // Merge new data with existing data
+      const existingMap = new Map(existingData.map(item => [item.id, item]))
+      
+      // Apply updates and additions
+      newData.forEach(item => {
+        existingMap.set(item.id, item)
+      })
+      
+      // Handle deletions if your API provides them
+      if (newData.deletions) {
+        newData.deletions.forEach(id => existingMap.delete(id))
+      }
+      
+      // Update sync time
+      localStorage.setItem('todos-last-sync', new Date().toISOString())
+      
+      // Return the complete merged state
+      return Array.from(existingMap.values())
+    },
+    queryClient,
+    getKey: (item) => item.id,
+  })
+)
+```
+
+This pattern allows you to:
+- Fetch only incremental changes from your API
+- Merge those changes with existing data
+- Return the complete state that the collection expects
+- Avoid the performance overhead of fetching all data every time
+
 ### Direct Writes and Query Sync
 
 Direct writes update the collection immediately and also update the TanStack Query cache. However, they do not prevent the normal query sync behavior. If your `queryFn` returns data that conflicts with your direct writes, the query data will take precedence.
