@@ -1,5 +1,11 @@
 import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  gt,
+} from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
 import type { ElectricCollectionConfig } from "../src/electric"
 import type {
@@ -9,8 +15,6 @@ import type {
   UpdateMutationFnParams,
 } from "@tanstack/db"
 import type { Row } from "@electric-sql/client"
-import { createCollection } from "@tanstack/db"
-import { createLiveQueryCollection, eq, gt } from "@tanstack/db"
 
 describe(`Electric collection type resolution tests`, () => {
   // Define test types
@@ -136,23 +140,17 @@ describe(`Electric collection type resolution tests`, () => {
     })
 
     // Verify that the handlers are properly typed
-    if (options.onInsert) {
-      expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-        [InsertMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
+      [InsertMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onUpdate) {
-      expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-        [UpdateMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
+      [UpdateMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onDelete) {
-      expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-        [DeleteMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
+      [DeleteMutationFnParams<ExplicitType>]
+    >()
   })
 
   it(`should infer types from Zod schema through electric collection options to live query`, () => {
@@ -215,7 +213,7 @@ describe(`Electric collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
+          .where(({ user }) => eq(user.active, true) && gt(user.age, 18)) // eslint-disable-line @typescript-eslint/no-unnecessary-condition
           .select(({ user }) => ({
             id: user.id,
             name: user.name,
@@ -277,13 +275,11 @@ describe(`Electric collection type resolution tests`, () => {
     // Test that electric collection works correctly
     const electricQuery = createLiveQueryCollection({
       query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .select(({ user }) => ({
-            id: user.id,
-            name: user.name,
-            age: user.age,
-          })),
+        q.from({ user: electricCollection }).select(({ user }) => ({
+          id: user.id,
+          name: user.name,
+          age: user.age,
+        })),
     })
 
     const electricResults = electricQuery.toArray
@@ -302,6 +298,4 @@ describe(`Electric collection type resolution tests`, () => {
     // while direct createCollection with schema doesn't work in query builder
     expectTypeOf(electricOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
   })
-
-
 })

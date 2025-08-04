@@ -155,7 +155,7 @@ export interface Collection<
  *   sync: { sync: () => {} }
  * })
  *
- * // Note: You must provide either an explicit type or a schema, but not both.
+ * // Note: You can provide an explicit type, a schema, or both. When both are provided, the explicit type takes precedence.
  */
 
 // Overload for when schema is provided - infers schema type

@@ -478,7 +478,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
 
   test(`join with optional foreign key should work`, () => {
     // Define types with optional field for join (based on GitHub issue)
-    type User = {
+    type UserWithOptional = {
       id: string
       name: string
     }
@@ -490,7 +490,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     }
 
     const userCollection = createCollection(
-      mockSyncCollectionOptions<User>({
+      mockSyncCollectionOptions<UserWithOptional>({
         id: `test-users-join-optional`,
         getKey: (user) => user.id,
         initialData: [],

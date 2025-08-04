@@ -13,6 +13,7 @@ import {
   length,
   or,
 } from "../../src/query/builder/functions"
+import type { Collection } from "../../src/collection"
 import type { PendingMutation } from "../../src/types"
 
 interface TestItem {
@@ -182,7 +183,7 @@ function withIndexTracking(
 }
 
 describe(`Query Index Optimization`, () => {
-  let collection: ReturnType<typeof createCollection<TestItem, string>>
+  let collection: Collection<TestItem, string>
   let testData: Array<TestItem>
   let emitter: any
 

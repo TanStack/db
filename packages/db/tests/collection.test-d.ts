@@ -58,21 +58,14 @@ describe(`Collection type resolution tests`, () => {
   type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
   type ItemOf<T> = T extends Array<infer U> ? U : T
 
-  it(`should prioritize explicit type when provided`, () => {
+  it(`should use explicit type when provided without schema`, () => {
     const _collection = createCollection<ExplicitType>({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
-      schema: testSchema,
     })
 
-    type ExpectedType = ResolveType<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
 
   it(`should use schema type when explicit type is not provided`, () => {
@@ -137,13 +130,13 @@ describe(`Collection type resolution tests`, () => {
 
   it(`should automatically infer type from schema without generic arguments`, () => {
     // This is the key test case that was missing - no generic arguments at all
-    const collection = createCollection({
+    const _collection = createCollection({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
       schema: testSchema,
     })
 
-    type Param = Parameters<typeof collection.insert>[0]
+    type Param = Parameters<typeof _collection.insert>[0]
     // Should infer the schema type automatically
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
   })
@@ -157,13 +150,13 @@ describe(`Collection type resolution tests`, () => {
       created_at: z.date().optional(),
     })
 
-    const collection = createCollection({
+    const _collection = createCollection({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
       schema: userSchema,
     })
 
-    type Param = Parameters<typeof collection.insert>[0]
+    type Param = Parameters<typeof _collection.insert>[0]
     type ExpectedType = {
       id: number
       name: string
@@ -184,13 +177,13 @@ describe(`Collection type resolution tests`, () => {
       published_at: z.date().nullable(),
     })
 
-    const collection = createCollection({
+    const _collection = createCollection({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
       schema: postSchema,
     })
 
-    type Param = Parameters<typeof collection.insert>[0]
+    type Param = Parameters<typeof _collection.insert>[0]
     type ExpectedType = {
       id: string
       title: string

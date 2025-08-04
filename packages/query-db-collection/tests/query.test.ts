@@ -6,7 +6,6 @@ import type {
   CollectionImpl,
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  Transaction,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
@@ -435,22 +434,34 @@ describe(`QueryCollection`, () => {
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      // Create a mock transaction for testing
-      const mockTransaction = {
-        id: `test-transaction`,
-      } as Transaction<TestItem>
+      // Create mock transactions for testing with proper types
+      const insertTransaction = {
+        id: `test-transaction-insert`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `insert`>
+
+      const updateTransaction = {
+        id: `test-transaction-update`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `update`>
+
+      const deleteTransaction = {
+        id: `test-transaction-delete`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `delete`>
+
       const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: insertTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
       const updateMockParams: UpdateMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: updateTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
       const deleteMockParams: DeleteMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: deleteTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
@@ -485,12 +496,14 @@ describe(`QueryCollection`, () => {
     })
 
     it(`should call refetch based on handler return value`, async () => {
-      // Create a mock transaction for testing
-      const mockTransaction = {
-        id: `test-transaction`,
-      } as Transaction<TestItem>
+      // Create a mock transaction for testing with proper type
+      const insertTransaction = {
+        id: `test-transaction-insert`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `insert`>
+
       const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: insertTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }

@@ -1,13 +1,19 @@
 import { describe, expectTypeOf, it } from "vitest"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  gt,
+} from "@tanstack/db"
+import { QueryClient } from "@tanstack/query-core"
+import { z } from "zod"
 import { queryCollectionOptions } from "../src/query"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   UpdateMutationFnParams,
 } from "@tanstack/db"
-import { createCollection, createLiveQueryCollection, eq, gt } from "@tanstack/db"
-import { QueryClient } from "@tanstack/query-core"
-import { z } from "zod"
+
 describe(`Query collection type resolution tests`, () => {
   // Define test types
   type ExplicitType = { id: string; explicit: boolean }
@@ -20,7 +26,7 @@ describe(`Query collection type resolution tests`, () => {
       id: `test`,
       queryClient,
       queryKey: [`test`],
-      queryFn: async () => [],
+      queryFn: () => Promise.resolve([]),
       getKey: (item) => item.id,
     })
 
@@ -33,7 +39,7 @@ describe(`Query collection type resolution tests`, () => {
       id: `test`,
       queryClient,
       queryKey: [`test`],
-      queryFn: async () => [],
+      queryFn: () => Promise.resolve([]),
       getKey: (item) => item.id,
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
@@ -59,23 +65,17 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     // Verify that the handlers are properly typed
-    if (options.onInsert) {
-      expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-        [InsertMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
+      [InsertMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onUpdate) {
-      expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-        [UpdateMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
+      [UpdateMutationFnParams<ExplicitType>]
+    >()
 
-    if (options.onDelete) {
-      expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-        [DeleteMutationFnParams<ExplicitType>]
-      >()
-    }
+    expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
+      [DeleteMutationFnParams<ExplicitType>]
+    >()
   })
 
   it(`should create collection with explicit types`, () => {
@@ -93,7 +93,7 @@ describe(`Query collection type resolution tests`, () => {
       id: `test`,
       queryClient,
       queryKey: [`users`],
-      queryFn: async () => [],
+      queryFn: () => Promise.resolve([]),
       getKey: (item) => item.id,
     })
 
@@ -122,8 +122,8 @@ describe(`Query collection type resolution tests`, () => {
     // Create query collection options with the schema
     const queryOptions = queryCollectionOptions({
       queryClient,
-      queryKey: ['users'],
-      queryFn: async () => [] as UserType[],
+      queryKey: [`users`],
+      queryFn: () => Promise.resolve([] as Array<UserType>),
       schema: userSchema,
       getKey: (item) => item.id,
     })
@@ -166,7 +166,7 @@ describe(`Query collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
+          .where(({ user }) => eq(user.active, true) && gt(user.age, 18)) // eslint-disable-line @typescript-eslint/no-unnecessary-condition
           .select(({ user }) => ({
             id: user.id,
             name: user.name,
@@ -186,4 +186,4 @@ describe(`Query collection type resolution tests`, () => {
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
   })
-}) 
+})
