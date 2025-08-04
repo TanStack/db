@@ -25,6 +25,7 @@ describe(`Transactions`, () => {
 
     transaction.commit()
     expect(transaction.state).toBe(`completed`)
+    expect(transaction.isPersisted.promise).resolves.toBeDefined()
   })
   it(`thows an error if you don't pass in mutationFn`, () => {
     // @ts-expect-error missing argument on purpose
