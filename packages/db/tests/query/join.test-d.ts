@@ -474,4 +474,81 @@ describe(`Join Alias Methods - Type Safety`, () => {
       }>
     >()
   })
+
+  test(`join with optional foreign key should work`, () => {
+    // Define types with optional field for join (based on GitHub issue)
+    type User = {
+      id: string
+      name: string
+    }
+
+    type Event = {
+      id: string
+      user_id?: string // Optional foreign key
+      title: string
+    }
+
+    const userCollection = createCollection(
+      mockSyncCollectionOptions<User>({
+        id: `test-users-join-optional`,
+        getKey: (user) => user.id,
+        initialData: [],
+      })
+    )
+
+    const eventCollection = createCollection(
+      mockSyncCollectionOptions<Event>({
+        id: `test-events-join-optional`,
+        getKey: (event) => event.id,
+        initialData: [],
+      })
+    )
+
+    // This should not cause TypeScript errors - optional field as first argument
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ event: eventCollection })
+          .innerJoin(
+            { user: userCollection },
+            ({ event, user }) => eq(event.user_id, user.id) // Should work with optional field
+          )
+          .select(({ event, user }) => ({
+            eventTitle: event.title,
+            userName: user.name,
+          })),
+    })
+
+    // Also test with argument order swapped (as mentioned in GitHub issue)
+    const liveCollection2 = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ event: eventCollection })
+          .innerJoin(
+            { user: userCollection },
+            ({ event, user }) => eq(user.id, event.user_id) // Swapped argument order
+          )
+          .select(({ event, user }) => ({
+            eventTitle: event.title,
+            userName: user.name,
+          })),
+    })
+
+    const results = liveCollection.toArray
+    const results2 = liveCollection2.toArray
+
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        eventTitle: string
+        userName: string
+      }>
+    >()
+
+    expectTypeOf(results2).toEqualTypeOf<
+      Array<{
+        eventTitle: string
+        userName: string
+      }>
+    >()
+  })
 })
