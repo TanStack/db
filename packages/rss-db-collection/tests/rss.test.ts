@@ -403,6 +403,472 @@ describe(`RSS Collection`, () => {
       collection.utils.clearSeenItems()
       expect(collection.utils.getSeenItemsCount()).toBe(0)
     })
+
+    it(`should handle multiple sequential additions to RSS feed`, async () => {
+      // Create progressive feeds with new items added each time
+      const feedWithThirdItem = sampleRSSFeed.replace(
+        `</channel>`,
+        `
+        <item>
+          <title>Third Post</title>
+          <description>This is the third post</description>
+          <link>https://example.com/post3</link>
+          <guid>post-3</guid>
+          <pubDate>Fri, 03 Jan 2025 12:00:00 GMT</pubDate>
+          <author>Alice Johnson</author>
+        </item>
+        </channel>`
+      )
+
+      const feedWithFourthItem = feedWithThirdItem.replace(
+        `</channel>`,
+        `
+        <item>
+          <title>Fourth Post</title>
+          <description>This is the fourth post</description>
+          <link>https://example.com/post4</link>
+          <guid>post-4</guid>
+          <pubDate>Sat, 04 Jan 2025 12:00:00 GMT</pubDate>
+          <author>Bob Wilson</author>
+        </item>
+        </channel>`
+      )
+
+      const feedWithFifthItem = feedWithFourthItem.replace(
+        `</channel>`,
+        `
+        <item>
+          <title>Fifth Post</title>
+          <description>This is the fifth post</description>
+          <link>https://example.com/post5</link>
+          <guid>post-5</guid>
+          <pubDate>Sun, 05 Jan 2025 12:00:00 GMT</pubDate>
+          <author>Carol Davis</author>
+        </item>
+        </channel>`
+      )
+
+      let callCount = 0
+      const fetchMock = vi.fn().mockImplementation(() => {
+        callCount++
+        switch (callCount) {
+          case 1:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(sampleRSSFeed),
+            })
+          case 2:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithThirdItem),
+            })
+          case 3:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithFourthItem),
+            })
+          case 4:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithFifthItem),
+            })
+          default:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithFifthItem),
+            })
+        }
+      })
+      global.fetch = fetchMock
+
+      const config: RSSCollectionConfig<TestBlogPost> = {
+        feedUrl: `https://example.com/rss.xml`,
+        pollingInterval: 5000,
+        getKey,
+        startPolling: false,
+        transform: (item: RSSItem) => ({
+          id: item.guid || item.link || ``,
+          title: item.title || ``,
+          description: item.description || ``,
+          link: item.link || ``,
+          publishedAt: new Date(item.pubDate || Date.now()),
+          author: item.author,
+        }),
+      }
+
+      const options = rssCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Initial fetch - should have 2 items
+      await collection.stateWhenReady()
+      expect(collection.size).toBe(2)
+      expect(collection.get(`post-1`)).toBeDefined()
+      expect(collection.get(`post-2`)).toBeDefined()
+      expect(collection.get(`post-3`)).toBeUndefined()
+
+      // First refresh - should add third item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(3)
+      expect(collection.get(`post-3`)).toEqual({
+        id: `post-3`,
+        title: `Third Post`,
+        description: `This is the third post`,
+        link: `https://example.com/post3`,
+        publishedAt: new Date(`Fri, 03 Jan 2025 12:00:00 GMT`),
+        author: `Alice Johnson`,
+      })
+
+      // Second refresh - should add fourth item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(4)
+      expect(collection.get(`post-4`)).toEqual({
+        id: `post-4`,
+        title: `Fourth Post`,
+        description: `This is the fourth post`,
+        link: `https://example.com/post4`,
+        publishedAt: new Date(`Sat, 04 Jan 2025 12:00:00 GMT`),
+        author: `Bob Wilson`,
+      })
+
+      // Third refresh - should add fifth item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(5)
+      expect(collection.get(`post-5`)).toEqual({
+        id: `post-5`,
+        title: `Fifth Post`,
+        description: `This is the fifth post`,
+        link: `https://example.com/post5`,
+        publishedAt: new Date(`Sun, 05 Jan 2025 12:00:00 GMT`),
+        author: `Carol Davis`,
+      })
+
+      // Verify all items are present
+      expect(collection.get(`post-1`)).toBeDefined()
+      expect(collection.get(`post-2`)).toBeDefined()
+      expect(collection.get(`post-3`)).toBeDefined()
+      expect(collection.get(`post-4`)).toBeDefined()
+      expect(collection.get(`post-5`)).toBeDefined()
+
+      // Verify fetch was called the expected number of times
+      expect(fetchMock).toHaveBeenCalledTimes(4)
+    })
+
+    it(`should handle mixed additions and updates in RSS feed`, async () => {
+      // Create a feed where some items are updated and new ones are added
+      const updatedFeed = sampleRSSFeed
+        .replace(
+          `<description>This is the first post</description>`,
+          `<description>This is the updated first post</description>`
+        )
+        .replace(
+          `</channel>`,
+          `
+        <item>
+          <title>New Post</title>
+          <description>This is a completely new post</description>
+          <link>https://example.com/new-post</link>
+          <guid>new-post</guid>
+          <pubDate>Mon, 06 Jan 2025 12:00:00 GMT</pubDate>
+          <author>David Brown</author>
+        </item>
+        </channel>`
+        )
+
+      let callCount = 0
+      const fetchMock = vi.fn().mockImplementation(() => {
+        callCount++
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(sampleRSSFeed),
+          })
+        } else {
+          return Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(updatedFeed),
+          })
+        }
+      })
+      global.fetch = fetchMock
+
+      const config: RSSCollectionConfig<TestBlogPost> = {
+        feedUrl: `https://example.com/rss.xml`,
+        pollingInterval: 5000,
+        getKey,
+        startPolling: false,
+        transform: (item: RSSItem) => ({
+          id: item.guid || item.link || ``,
+          title: item.title || ``,
+          description: item.description || ``,
+          link: item.link || ``,
+          publishedAt: new Date(item.pubDate || Date.now()),
+          author: item.author,
+        }),
+      }
+
+      const options = rssCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Initial fetch
+      await collection.stateWhenReady()
+      expect(collection.size).toBe(2)
+      expect(collection.get(`post-1`)?.description).toBe(
+        `This is the first post`
+      )
+
+      // Refresh with updates and new item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(3)
+
+      // Note: The RSS collection doesn't update existing items, it only adds new ones
+      // So the existing item should remain unchanged
+      expect(collection.get(`post-1`)?.description).toBe(
+        `This is the first post`
+      )
+
+      // Check that new item was added
+      expect(collection.get(`new-post`)).toEqual({
+        id: `new-post`,
+        title: `New Post`,
+        description: `This is a completely new post`,
+        link: `https://example.com/new-post`,
+        publishedAt: new Date(`Mon, 06 Jan 2025 12:00:00 GMT`),
+        author: `David Brown`,
+      })
+
+      // Verify original second post is unchanged
+      expect(collection.get(`post-2`)?.description).toBe(
+        `This is the second post`
+      )
+    })
+
+    it(`should handle Atom feed with multiple sequential additions`, async () => {
+      // Create progressive Atom feeds
+      const atomWithThirdEntry = sampleAtomFeed.replace(
+        `</feed>`,
+        `
+  <entry>
+    <title>Third Atom Post</title>
+    <id>atom-post-3</id>
+    <link href="https://example.com/atom-post3"/>
+    <updated>2025-01-03T12:00:00Z</updated>
+    <published>2025-01-03T10:00:00Z</published>
+    <summary>This is the third atom post</summary>
+    <author>
+      <name>Eve Wilson</name>
+    </author>
+  </entry>
+</feed>`
+      )
+
+      const atomWithFourthEntry = atomWithThirdEntry.replace(
+        `</feed>`,
+        `
+  <entry>
+    <title>Fourth Atom Post</title>
+    <id>atom-post-4</id>
+    <link href="https://example.com/atom-post4"/>
+    <updated>2025-01-04T12:00:00Z</updated>
+    <published>2025-01-04T10:00:00Z</published>
+    <summary>This is the fourth atom post</summary>
+    <author>
+      <name>Frank Miller</name>
+    </author>
+  </entry>
+</feed>`
+      )
+
+      let callCount = 0
+      const fetchMock = vi.fn().mockImplementation(() => {
+        callCount++
+        switch (callCount) {
+          case 1:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(sampleAtomFeed),
+            })
+          case 2:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(atomWithThirdEntry),
+            })
+          case 3:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(atomWithFourthEntry),
+            })
+          default:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(atomWithFourthEntry),
+            })
+        }
+      })
+      global.fetch = fetchMock
+
+      const config: AtomCollectionConfig<TestBlogPost> = {
+        feedUrl: `https://example.com/atom.xml`,
+        pollingInterval: 5000,
+        getKey,
+        startPolling: false,
+        transform: (item: any) => ({
+          id: item.id || ``,
+          title:
+            typeof item.title === `string`
+              ? item.title
+              : item.title?.$text || ``,
+          description:
+            typeof item.summary === `string`
+              ? item.summary
+              : item.summary?.$text || ``,
+          link:
+            typeof item.link === `string`
+              ? item.link
+              : item.link?.[`@_href`] || item.link?.href || ``,
+          publishedAt: new Date(item.published || item.updated || Date.now()),
+          author: item.author?.name,
+        }),
+      }
+
+      const options = atomCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Initial fetch - should have 2 items
+      await collection.stateWhenReady()
+      expect(collection.size).toBe(2)
+      expect(collection.get(`atom-post-1`)).toBeDefined()
+      expect(collection.get(`atom-post-2`)).toBeDefined()
+      expect(collection.get(`atom-post-3`)).toBeUndefined()
+
+      // First refresh - should add third item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(3)
+      expect(collection.get(`atom-post-3`)).toEqual({
+        id: `atom-post-3`,
+        title: `Third Atom Post`,
+        description: `This is the third atom post`,
+        link: `https://example.com/atom-post3`,
+        publishedAt: new Date(`2025-01-03T10:00:00Z`),
+        author: `Eve Wilson`,
+      })
+
+      // Second refresh - should add fourth item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(4)
+      expect(collection.get(`atom-post-4`)).toEqual({
+        id: `atom-post-4`,
+        title: `Fourth Atom Post`,
+        description: `This is the fourth atom post`,
+        link: `https://example.com/atom-post4`,
+        publishedAt: new Date(`2025-01-04T10:00:00Z`),
+        author: `Frank Miller`,
+      })
+
+      // Verify all items are present
+      expect(collection.get(`atom-post-1`)).toBeDefined()
+      expect(collection.get(`atom-post-2`)).toBeDefined()
+      expect(collection.get(`atom-post-3`)).toBeDefined()
+      expect(collection.get(`atom-post-4`)).toBeDefined()
+
+      // Verify fetch was called the expected number of times
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    it(`should maintain collection state across multiple fetches with errors`, async () => {
+      // Create feeds with some successful fetches and some errors
+      const feedWithNewItem = sampleRSSFeed.replace(
+        `</channel>`,
+        `
+        <item>
+          <title>Error Recovery Post</title>
+          <description>This post should be added after an error</description>
+          <link>https://example.com/error-recovery</link>
+          <guid>error-recovery</guid>
+          <pubDate>Mon, 07 Jan 2025 12:00:00 GMT</pubDate>
+        </item>
+        </channel>`
+      )
+
+      let callCount = 0
+      const fetchMock = vi.fn().mockImplementation(() => {
+        callCount++
+        switch (callCount) {
+          case 1:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(sampleRSSFeed),
+            })
+          case 2:
+            // Simulate a network error
+            return Promise.reject(new Error(`Network error`))
+          case 3:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithNewItem),
+            })
+          case 4:
+            // Simulate another error
+            return Promise.resolve({
+              ok: false,
+              status: 500,
+              text: () => Promise.resolve(`Server error`),
+            })
+          case 5:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithNewItem),
+            })
+          default:
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(feedWithNewItem),
+            })
+        }
+      })
+      global.fetch = fetchMock
+
+      const config: RSSCollectionConfig<TestBlogPost> = {
+        feedUrl: `https://example.com/rss.xml`,
+        pollingInterval: 5000,
+        getKey,
+        startPolling: false,
+        transform: (item: RSSItem) => ({
+          id: item.guid || item.link || ``,
+          title: item.title || ``,
+          description: item.description || ``,
+          link: item.link || ``,
+          publishedAt: new Date(item.pubDate || Date.now()),
+          author: item.author,
+        }),
+      }
+
+      const options = rssCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Initial fetch - should succeed
+      await collection.stateWhenReady()
+      expect(collection.size).toBe(2)
+
+      // First refresh - should fail but not affect existing items
+      await expect(collection.utils.refresh()).rejects.toThrow()
+      expect(collection.size).toBe(2) // Should maintain existing items
+
+      // Second refresh - should succeed and add new item
+      await collection.utils.refresh()
+      expect(collection.size).toBe(3)
+      expect(collection.get(`error-recovery`)).toBeDefined()
+
+      // Third refresh - should fail but maintain items
+      await expect(collection.utils.refresh()).rejects.toThrow()
+      expect(collection.size).toBe(3) // Should maintain existing items
+
+      // Fourth refresh - should succeed (no new items, but should work)
+      await collection.utils.refresh()
+      expect(collection.size).toBe(3) // No new items added
+
+      // Verify fetch was called the expected number of times
+      expect(fetchMock).toHaveBeenCalledTimes(5)
+    })
   })
 
   describe(`Custom Configuration`, () => {
