@@ -3,6 +3,7 @@ import {
   filter,
   join as joinOperator,
   map,
+  tap,
 } from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
@@ -13,16 +14,15 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
-import { Func } from "../ir.js"
-import { ensureIndexForExpression } from "../../indexes/auto-index.js"
+import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { compileExpression } from "./evaluators.js"
-import { convertToBasicExpression } from "./expressions.js"
-import { compileQuery } from "./index.js"
+import { compileQuery, followRef } from "./index.js"
 import type {
   BasicExpression,
   CollectionRef,
   JoinClause,
   PropRef,
+  QueryIR,
   QueryRef,
 } from "../ir.js"
 import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
@@ -38,7 +38,7 @@ import type { BaseIndex } from "../../indexes/base-index.js"
 export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {
   loadKeys: LoadKeysFn
-  switchToRegularSubscription: () => void
+  loadInitialState: () => void
 }
 
 /**
@@ -55,7 +55,8 @@ export function processJoins(
   queryMapping: QueryMapping,
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>
+  lazyCollections: Set<string>,
+  rawQuery: QueryIR
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -71,7 +72,8 @@ export function processJoins(
       queryMapping,
       collections,
       callbacks,
-      lazyCollections
+      lazyCollections,
+      rawQuery
     )
   }
 
@@ -92,7 +94,8 @@ function processJoin(
   queryMapping: QueryMapping,
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>
+  lazyCollections: Set<string>,
+  rawQuery: QueryIR
 ): NamespacedAndKeyedStream {
   // Get the joined table alias and input stream
   const {
@@ -198,34 +201,38 @@ function processJoin(
 
     let index: BaseIndex<string | number> | undefined
 
-    const [lazyCollectionJoinExpr, activeCollectionJoinExpr] =
+    const lazyCollectionJoinExpr =
       activeCollection === `main`
-        ? [joinedExpr as PropRef, mainExpr as PropRef]
-        : [mainExpr as PropRef, joinedExpr as PropRef]
+        ? (joinedExpr as PropRef)
+        : (mainExpr as PropRef)
 
-    // The lazyCollectionJoinExpr is of the form `{ tableAlias }.{ joinKey }`
-    // so we need to strip the table alias from this path
-    const [_, ...indexPath] = lazyCollectionJoinExpr.path
+    const activeColl =
+      activeCollection === `main` ? collections[mainTableId]! : lazyCollection
 
-    const lazyCollectionAlias =
-      activeCollection === `main` ? joinedTableAlias : mainTableAlias
-
-    const exprToIndex = convertToBasicExpression(
-      new Func(`eq`, [lazyCollectionJoinExpr, activeCollectionJoinExpr]),
-      lazyCollectionAlias
+    const followRefResult = followRef(
+      rawQuery,
+      lazyCollectionJoinExpr,
+      activeColl
     )!
+    const followRefCollection = followRefResult.collection
+
+    const fieldName = followRefResult.path[0]
+    if (fieldName) {
+      ensureIndexForField(fieldName, followRefResult.path, followRefCollection)
+    }
 
     const activePipelineWithLoading: IStreamBuilder<
       [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
     > = activePipeline.pipe(
-      map(([joinKey, [originalKey, namespacedRow]]) => {
+      tap(([joinKey, _]) => {
         // Find the index for the path we join on
         // we need to find the index inside the map operator
         // because the indexes are only available after the initial sync
         // so we can't fetch it during compilation
-
-        ensureIndexForExpression(exprToIndex, lazyCollection)
-        index ??= findIndexForField(lazyCollection.indexes, indexPath)
+        index ??= findIndexForField(
+          followRefCollection.indexes,
+          followRefResult.path
+        )
 
         // The `callbacks` object is passed by the liveQueryCollection to the compiler.
         // It contains a function to lazy load keys for each lazy collection
@@ -238,27 +245,19 @@ function processJoin(
           )
         }
 
-        const { loadKeys, switchToRegularSubscription } = collectionCallbacks
+        const { loadKeys, loadInitialState } = collectionCallbacks
 
         if (index && index.supports(`eq`)) {
           // Use the index to fetch the PKs of the rows in the lazy collection
           // that match this row from the active collection based on the value of the joinKey
           const matchingKeys = index.lookup(`eq`, joinKey)
           // Inform the lazy collection that those keys need to be loaded
-          console.log(
-            `loading keys in ${lazyCollectionAlias} - ${lazyCollection.id} - ${JSON.stringify(lazyCollectionJoinExpr, null, 2)}: `,
-            JSON.stringify([...matchingKeys.values()], null, 2)
-          )
           loadKeys(matchingKeys)
         } else {
           // We can't optimize the join because there is no index for the join key
-          // on the lazy collection, so we subscribe to all changes
-          switchToRegularSubscription()
+          // on the lazy collection, so we load the initial state
+          loadInitialState()
         }
-
-        // TODO: introduce an identity operator which is not modifying the stream but only applying side effects and use that one instead of map
-        // Return the row unchanged
-        return [joinKey, [originalKey, namespacedRow]]
       })
     )
 

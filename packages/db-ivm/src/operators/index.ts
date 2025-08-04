@@ -1,5 +1,6 @@
 export * from "./pipe.js"
 export * from "./map.js"
+export * from "./tap.js"
 export * from "./filter.js"
 export * from "./negate.js"
 export * from "./concat.js"
