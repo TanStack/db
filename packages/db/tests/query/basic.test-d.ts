@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
+import { z } from "zod"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
@@ -241,6 +242,78 @@ describe(`Query Basic Types`, () => {
     expectTypeOf(results).toEqualTypeOf<
       Array<{
         inserted_at: Date | undefined
+      }>
+    >()
+  })
+
+  test(`selecting optional field with Zod schema should work`, () => {
+    // Define a Zod schema with optional field using .optional()
+    const userWithOptionalSchema = z.object({
+      id: z.number(),
+      name: z.string(),
+      inserted_at: z.date().optional(), // Optional using .optional()
+    })
+
+    const usersWithOptionalCollection = createCollection({
+      id: `test-users-zod-optional`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userWithOptionalSchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithOptionalCollection }).select(({ user }) => ({
+          inserted_at: user.inserted_at,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        inserted_at: Date | undefined
+      }>
+    >()
+  })
+
+  test(`selecting union field with Zod schema should work`, () => {
+    // Define a Zod schema with union type field
+    const userWithUnionSchema = z.object({
+      id: z.number(),
+      name: z.string(),
+      status: z.union([z.literal("active"), z.literal("inactive")]).optional(),
+    })
+
+    const usersWithUnionCollection = createCollection({
+      id: `test-users-zod-union`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userWithUnionSchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithUnionCollection }).select(({ user }) => ({
+          status: user.status,
+          name: user.name,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        status: "active" | "inactive" | undefined
+        name: string
       }>
     >()
   })

@@ -1,6 +1,7 @@
 import type { CollectionImpl } from "../../collection.js"
 import type { Aggregate, BasicExpression } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 export interface Context {
   // The collections available in the base schema
@@ -28,7 +29,17 @@ export type Source = {
 
 // Helper type to infer collection type from CollectionImpl
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer U> ? U : never
+  T extends CollectionImpl<infer U, any, any, infer TSchema, any>
+    ? // If TSchema is a real schema (not the default StandardSchemaV1), use schema inference
+      TSchema extends StandardSchemaV1
+      ? // Check if this is a real schema vs the default
+        TSchema extends { _output: any }
+        ? StandardSchemaV1.InferOutput<TSchema>
+        : TSchema extends { parse: any }
+          ? StandardSchemaV1.InferOutput<TSchema>
+          : U
+      : U
+    : never
 
 // Helper type to create schema from source
 export type SchemaFromSource<T extends Source> = Prettify<{

@@ -134,4 +134,71 @@ describe(`Collection type resolution tests`, () => {
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
     expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
+
+  it(`should automatically infer type from schema without generic arguments`, () => {
+    // This is the key test case that was missing - no generic arguments at all
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: testSchema,
+    })
+
+    type Param = Parameters<typeof collection.insert>[0]
+    // Should infer the schema type automatically
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
+  })
+
+  it(`should automatically infer type from Zod schema with optional fields`, () => {
+    // Test with a Zod schema that has optional fields
+    const userSchema = z.object({
+      id: z.number(),
+      name: z.string(),
+      email: z.string().email().optional(),
+      created_at: z.date().optional(),
+    })
+
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchema,
+    })
+
+    type Param = Parameters<typeof collection.insert>[0]
+    type ExpectedType = {
+      id: number
+      name: string
+      email?: string
+      created_at?: Date
+    }
+    
+    // Should automatically infer the complete Zod schema type
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+
+  it(`should automatically infer type from Zod schema with nullable fields`, () => {
+    // Test with nullable fields (different from optional)
+    const postSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      author_id: z.string().nullable(),
+      published_at: z.date().nullable(),
+    })
+
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: postSchema,
+    })
+
+    type Param = Parameters<typeof collection.insert>[0]
+    type ExpectedType = {
+      id: string
+      title: string
+      author_id: string | null
+      published_at: Date | null
+    }
+    
+    // Should automatically infer nullable types correctly
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
 })

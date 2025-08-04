@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
+import { z } from "zod"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
@@ -548,6 +549,152 @@ describe(`Join Alias Methods - Type Safety`, () => {
       Array<{
         eventTitle: string
         userName: string
+      }>
+    >()
+  })
+
+  test(`join with optional foreign key using Zod schema should work`, () => {
+    // Define Zod schemas with optional foreign key (based on GitHub issue)
+    const userSchema = z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+    })
+
+    const eventSchema = z.object({
+      id: z.string().uuid(),
+      user_id: z.string().uuid().optional(), // Optional foreign key using .optional()
+      title: z.string(),
+    })
+
+    const userCollection = createCollection({
+      id: `test-users-zod-join-optional`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userSchema,
+    })
+
+    const eventCollection = createCollection({
+      id: `test-events-zod-join-optional`,
+      getKey: (event) => event.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: eventSchema,
+    })
+
+    // This should not cause TypeScript errors - optional field as first argument
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ event: eventCollection })
+          .innerJoin(
+            { user: userCollection },
+            ({ event, user }) => eq(event.user_id, user.id)  // Should work with optional field
+          )
+          .select(({ event, user }) => ({
+            eventTitle: event.title,
+            userName: user.name,
+          })),
+    })
+
+    // Also test with argument order swapped (as mentioned in GitHub issue)
+    const liveCollection2 = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ event: eventCollection })
+          .innerJoin(
+            { user: userCollection },
+            ({ event, user }) => eq(user.id, event.user_id)  // Swapped argument order
+          )
+          .select(({ event, user }) => ({
+            eventTitle: event.title,
+            userName: user.name,
+          })),
+    })
+
+    const results = liveCollection.toArray
+    const results2 = liveCollection2.toArray
+    
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        eventTitle: string
+        userName: string
+      }>
+    >()
+    
+    expectTypeOf(results2).toEqualTypeOf<
+      Array<{
+        eventTitle: string
+        userName: string
+      }>
+    >()
+  })
+
+  test(`join with nullable foreign key using Zod schema should work`, () => {
+    // Define Zod schemas with nullable foreign key
+    const userSchema = z.object({
+      id: z.number(),
+      name: z.string(),
+    })
+
+    const postSchema = z.object({
+      id: z.number(),
+      title: z.string(),
+      author_id: z.number().nullable(), // Nullable foreign key
+    })
+
+    const userCollection = createCollection({
+      id: `test-users-zod-nullable`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userSchema,
+    })
+
+    const postCollection = createCollection({
+      id: `test-posts-zod-nullable`,
+      getKey: (post) => post.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: postSchema,
+    })
+
+    // Test left join with nullable field
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ post: postCollection })
+          .leftJoin(
+            { user: userCollection },
+            ({ post, user }) => eq(post.author_id, user.id)  // Should work with nullable field
+          )
+          .select(({ post, user }) => ({
+            postTitle: post.title,
+            authorName: user.name, // This will be string | undefined due to left join
+          })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        postTitle: string
+        authorName: string | undefined
       }>
     >()
   })
