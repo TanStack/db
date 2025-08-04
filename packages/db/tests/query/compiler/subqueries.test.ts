@@ -210,7 +210,7 @@ describe(`Query2 Subqueries`, () => {
   describe(`Subqueries in JOIN clause`, () => {
     const dummyCallbacks = {
       loadKeys: (_: any) => {},
-      switchToRegularSubscription: () => {},
+      loadInitialState: () => {},
     }
 
     it(`supports subquery in join clause`, () => {

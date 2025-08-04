@@ -213,6 +213,8 @@ describe(`Collection Auto-Indexing`, () => {
     unsubscribe()
   })
 
+  it(`should create auto-indexes for transformed fields of subqueries when autoIndex is "eager"`, async () => {})
+
   it(`should not create duplicate auto-indexes for the same field`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,

@@ -7,19 +7,20 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
+import { PropRef } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
-import type { LazyCollectionCallbacks } from "./joins.js"
-import type { Collection } from "../../collection.js"
 import type {
   BasicExpression,
   CollectionRef,
   QueryIR,
   QueryRef,
 } from "../ir.js"
+import type { LazyCollectionCallbacks } from "./joins.js"
+import type { Collection } from "../../collection.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -37,6 +38,72 @@ export interface CompilationResult {
   pipeline: ResultStream
   /** Map of collection aliases to their WHERE clauses for index optimization */
   collectionWhereClauses: Map<string, BasicExpression<boolean>>
+}
+
+function getRefFromAlias(
+  query: QueryIR,
+  alias: string
+): CollectionRef | QueryRef | void {
+  if (query.from.alias === alias) {
+    return query.from
+  }
+
+  for (const join of query.join || []) {
+    if (join.from.alias === alias) {
+      return join.from
+    }
+  }
+}
+
+/**
+ * Follows the given reference in a query
+ * until its finds the root field the reference points to.
+ * @returns The collection, its alias, and the path to the root field in this collection
+ */
+export function followRef(
+  query: QueryIR,
+  ref: PropRef<any>,
+  collection: Collection
+): { collection: Collection; path: Array<string> } | void {
+  if (ref.path.length === 0) {
+    return
+  }
+
+  if (ref.path.length === 1) {
+    // This field should be part of this collection
+    const field = ref.path[0]!
+    // is it part of the select clause?
+    if (query.select) {
+      const selectedField = query.select[field]
+      if (selectedField && selectedField.type === `ref`) {
+        return followRef(query, selectedField, collection)
+      }
+    }
+
+    // Either this field is not part of the select clause
+    // and thus it must be part of the collection itself
+    // or it is part of the select but is not a reference
+    // so we can stop here and don't have to follow it
+    return { collection, path: [field] }
+  }
+
+  if (ref.path.length > 1) {
+    // This is a nested field
+    const [alias, ...rest] = ref.path
+    const aliasRef = getRefFromAlias(query, alias!)
+    if (!aliasRef) {
+      return
+    }
+
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(rest), collection)
+    } else {
+      // This is a reference to a collection
+      // we can't follow it further
+      // so the field must be on the collection itself
+      return { collection: aliasRef.collection, path: rest }
+    }
+  }
 }
 
 /**
@@ -117,7 +184,8 @@ export function compileQuery(
       queryMapping,
       collections,
       callbacks,
-      lazyCollections
+      lazyCollections,
+      rawQuery
     )
   }
 
