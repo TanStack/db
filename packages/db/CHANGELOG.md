@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.1.1
+
+### Patch Changes
+
+- Cleanup transactions after they complete to prevent memory leak and performance degradation ([#371](https://github.com/TanStack/db/pull/371))
+
+- Fix the types on `localOnlyCollectionOptions` and `localStorageCollectionOptions` so that they correctly infer the types from a passed in schema ([#372](https://github.com/TanStack/db/pull/372))
+
 ## 0.1.0
 
 ### Minor Changes

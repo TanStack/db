@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 0.1.3
+
+### Patch Changes
+
+- Add meta support to QueryCollectionConfig to allow passing additional context to queryFn. ([#363](https://github.com/TanStack/db/pull/363))
+
+- Updated dependencies [[`bc2f204`](https://github.com/TanStack/db/commit/bc2f204b8cb8a4870ade00757d10f846524e2090), [`bda3f24`](https://github.com/TanStack/db/commit/bda3f24cc41504f60be0c5e071698b7735f75e28)]:
+  - @tanstack/db@0.1.1
+
 ## 0.1.2
 
 ### Patch Changes
