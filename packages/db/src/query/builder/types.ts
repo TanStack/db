@@ -30,21 +30,22 @@ export type Source = {
 // Helper type to infer collection type from CollectionImpl
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? // If TSchema is a real schema (not the default StandardSchemaV1), use schema inference
-      TSchema extends StandardSchemaV1
-      ? // Check if this is a real schema vs the default
-        TSchema extends { _output: any }
+    ? // Check if TSchema is a real schema by looking for schema-specific properties
+      TSchema extends { _output: any }
+      ? StandardSchemaV1.InferOutput<TSchema>
+      : TSchema extends { parse: any }
         ? StandardSchemaV1.InferOutput<TSchema>
-        : TSchema extends { parse: any }
-          ? StandardSchemaV1.InferOutput<TSchema>
-          : U
-      : U
+        : // If TSchema extends StandardSchemaV1 but doesn't have schema properties, it's the default type
+          TSchema extends StandardSchemaV1
+          ? U
+          : // TSchema is never or some other type, use U
+            U
     : never
 
 // Helper type to create schema from source
 export type SchemaFromSource<T extends Source> = Prettify<{
-  [K in keyof T]: T[K] extends CollectionImpl<infer U>
-    ? U
+  [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any>
+    ? InferCollectionType<T[K]>
     : T[K] extends QueryBuilder<infer TContext>
       ? GetResult<TContext>
       : never

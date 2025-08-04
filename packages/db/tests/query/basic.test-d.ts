@@ -286,7 +286,7 @@ describe(`Query Basic Types`, () => {
     const userWithUnionSchema = z.object({
       id: z.number(),
       name: z.string(),
-      status: z.union([z.literal("active"), z.literal("inactive")]).optional(),
+      status: z.union([z.literal(`active`), z.literal(`inactive`)]).optional(),
     })
 
     const usersWithUnionCollection = createCollection({
@@ -312,7 +312,7 @@ describe(`Query Basic Types`, () => {
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
       Array<{
-        status: "active" | "inactive" | undefined
+        status: `active` | `inactive` | undefined
         name: string
       }>
     >()

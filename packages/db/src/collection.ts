@@ -170,9 +170,9 @@ export function createCollection<
     TKey,
     TSchema,
     ResolveInsertInput<unknown, TSchema, TFallback>
-  > & { 
-    schema: TSchema;
-    utils?: TUtils 
+  > & {
+    schema: TSchema
+    utils?: TUtils
   }
 ): Collection<
   ResolveType<unknown, TSchema, TFallback>,

@@ -170,7 +170,7 @@ describe(`Collection type resolution tests`, () => {
       email?: string
       created_at?: Date
     }
-    
+
     // Should automatically infer the complete Zod schema type
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
   })
@@ -197,7 +197,7 @@ describe(`Collection type resolution tests`, () => {
       author_id: string | null
       published_at: Date | null
     }
-    
+
     // Should automatically infer nullable types correctly
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
   })

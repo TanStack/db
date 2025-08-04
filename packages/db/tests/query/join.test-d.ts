@@ -597,7 +597,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           .from({ event: eventCollection })
           .innerJoin(
             { user: userCollection },
-            ({ event, user }) => eq(event.user_id, user.id)  // Should work with optional field
+            ({ event, user }) => eq(event.user_id, user.id) // Should work with optional field
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -612,7 +612,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           .from({ event: eventCollection })
           .innerJoin(
             { user: userCollection },
-            ({ event, user }) => eq(user.id, event.user_id)  // Swapped argument order
+            ({ event, user }) => eq(user.id, event.user_id) // Swapped argument order
           )
           .select(({ event, user }) => ({
             eventTitle: event.title,
@@ -622,14 +622,14 @@ describe(`Join Alias Methods - Type Safety`, () => {
 
     const results = liveCollection.toArray
     const results2 = liveCollection2.toArray
-    
+
     expectTypeOf(results).toEqualTypeOf<
       Array<{
         eventTitle: string
         userName: string
       }>
     >()
-    
+
     expectTypeOf(results2).toEqualTypeOf<
       Array<{
         eventTitle: string
@@ -682,7 +682,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           .from({ post: postCollection })
           .leftJoin(
             { user: userCollection },
-            ({ post, user }) => eq(post.author_id, user.id)  // Should work with nullable field
+            ({ post, user }) => eq(post.author_id, user.id) // Should work with nullable field
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
