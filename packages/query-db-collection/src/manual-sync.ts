@@ -7,11 +7,14 @@ import {
 import type { QueryClient } from "@tanstack/query-core"
 import type { ChangeMessage, Collection } from "@tanstack/db"
 
-// Track active batch operations
-let activeBatchContext: {
-  operations: Array<SyncOperation<any, any, any>>
-  ctx: SyncContext<any, any>
-} | null = null
+// Track active batch operations per context to prevent cross-collection contamination
+const activeBatchContexts = new WeakMap<
+  SyncContext<any, any>,
+  {
+    operations: Array<SyncOperation<any, any, any>>
+    isActive: boolean
+  }
+>()
 
 // Types for sync operations
 export type SyncOperation<
@@ -220,14 +223,16 @@ export function createWriteUtils<
         data,
       }
 
+      const ctx = ensureContext()
+      const batchContext = activeBatchContexts.get(ctx)
+
       // If we're in a batch, just add to the batch operations
-      if (activeBatchContext) {
-        activeBatchContext.operations.push(operation)
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
         return
       }
 
       // Otherwise, perform the operation immediately
-      const ctx = ensureContext()
       performWriteOperations(operation, ctx)
     },
 
@@ -237,12 +242,14 @@ export function createWriteUtils<
         data,
       }
 
-      if (activeBatchContext) {
-        activeBatchContext.operations.push(operation)
+      const ctx = ensureContext()
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
         return
       }
 
-      const ctx = ensureContext()
       performWriteOperations(operation, ctx)
     },
 
@@ -252,12 +259,14 @@ export function createWriteUtils<
         key,
       }
 
-      if (activeBatchContext) {
-        activeBatchContext.operations.push(operation)
+      const ctx = ensureContext()
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
         return
       }
 
-      const ctx = ensureContext()
       performWriteOperations(operation, ctx)
     },
 
@@ -267,35 +276,54 @@ export function createWriteUtils<
         data,
       }
 
-      if (activeBatchContext) {
-        activeBatchContext.operations.push(operation)
+      const ctx = ensureContext()
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
         return
       }
 
-      const ctx = ensureContext()
       performWriteOperations(operation, ctx)
     },
 
     writeBatch(callback: () => void) {
       const ctx = ensureContext()
 
-      // Set up the batch context
-      activeBatchContext = {
-        operations: [],
-        ctx,
+      // Check if we're already in a batch (nested batch)
+      const existingBatch = activeBatchContexts.get(ctx)
+      if (existingBatch?.isActive) {
+        throw new Error(
+          `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`
+        )
       }
+
+      // Set up the batch context for this specific collection
+      const batchContext = {
+        operations: [] as Array<SyncOperation<TRow, TKey, TInsertInput>>,
+        isActive: true,
+      }
+      activeBatchContexts.set(ctx, batchContext)
 
       try {
         // Execute the callback - any write operations will be collected
-        callback()
+        const result = callback()
+
+        // Check if callback returns a promise (async function)
+        if (result instanceof Promise) {
+          throw new Error(
+            `writeBatch does not support async callbacks. The callback must be synchronous.`
+          )
+        }
 
         // Perform all collected operations
-        if (activeBatchContext.operations.length > 0) {
-          performWriteOperations(activeBatchContext.operations, ctx)
+        if (batchContext.operations.length > 0) {
+          performWriteOperations(batchContext.operations, ctx)
         }
       } finally {
         // Always clear the batch context
-        activeBatchContext = null
+        batchContext.isActive = false
+        activeBatchContexts.delete(ctx)
       }
     },
   }

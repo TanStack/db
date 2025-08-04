@@ -1,5 +1,5 @@
 ---
-"@tanstack/query-db-collection": patch
+"@tanstack/query-db-collection": minor
 ---
 
 Improve writeBatch API to use callback pattern

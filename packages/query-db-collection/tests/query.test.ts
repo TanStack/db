@@ -1386,6 +1386,148 @@ describe(`QueryCollection`, () => {
       expect(cacheAfterBatchError).toHaveLength(2)
       expect(collection.size).toBe(2)
     })
+
+    it(`should throw error for async callbacks in writeBatch`, async () => {
+      const queryKey = [`asyncBatch`]
+      const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(initialItems)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `async-batch-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Test async callback throws error
+      expect(() => {
+        collection.utils.writeBatch(async () => {
+          await Promise.resolve()
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+        })
+      }).toThrow(/async callbacks/)
+
+      // Verify no changes were made
+      expect(collection.size).toBe(1)
+    })
+
+    it(`should prevent nested writeBatch calls`, async () => {
+      const queryKey = [`nestedBatch`]
+      const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(initialItems)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `nested-batch-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Test nested writeBatch throws error
+      expect(() => {
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+
+          // Attempt nested batch
+          collection.utils.writeBatch(() => {
+            collection.utils.writeInsert({ id: `3`, name: `Item 3` })
+          })
+        })
+      }).toThrow(/nest writeBatch/)
+
+      // Verify no operations succeeded due to nested batch error
+      expect(collection.size).toBe(1)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should handle concurrent writeBatch calls from different collections`, async () => {
+      const queryKey1 = [`collection1`]
+      const queryKey2 = [`collection2`]
+      const initialItems1: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const initialItems2: Array<TestItem> = [{ id: `a`, name: `Item A` }]
+
+      const queryFn1 = vi.fn().mockResolvedValue(initialItems1)
+      const queryFn2 = vi.fn().mockResolvedValue(initialItems2)
+
+      const config1: QueryCollectionConfig<TestItem> = {
+        id: `collection-1`,
+        queryClient,
+        queryKey: queryKey1,
+        queryFn: queryFn1,
+        getKey,
+        startSync: true,
+      }
+
+      const config2: QueryCollectionConfig<TestItem> = {
+        id: `collection-2`,
+        queryClient,
+        queryKey: queryKey2,
+        queryFn: queryFn2,
+        getKey,
+        startSync: true,
+      }
+
+      const options1 = queryCollectionOptions(config1)
+      const options2 = queryCollectionOptions(config2)
+      const collection1 = createCollection(options1)
+      const collection2 = createCollection(options2)
+
+      await vi.waitFor(() => {
+        expect(collection1.size).toBe(1)
+        expect(collection2.size).toBe(1)
+      })
+
+      // Execute batches concurrently (simulated by interleaving)
+      let batch1Started = false
+      let batch2Started = false
+
+      collection1.utils.writeBatch(() => {
+        batch1Started = true
+        collection1.utils.writeInsert({ id: `2`, name: `Item 2` })
+
+        // Start second batch while first is still active
+        collection2.utils.writeBatch(() => {
+          batch2Started = true
+          collection2.utils.writeInsert({ id: `b`, name: `Item B` })
+        })
+
+        collection1.utils.writeInsert({ id: `3`, name: `Item 3` })
+      })
+
+      // Verify both batches executed successfully
+      expect(batch1Started).toBe(true)
+      expect(batch2Started).toBe(true)
+
+      // Verify collection 1 has correct items
+      expect(collection1.size).toBe(3)
+      expect(collection1.has(`1`)).toBe(true)
+      expect(collection1.has(`2`)).toBe(true)
+      expect(collection1.has(`3`)).toBe(true)
+
+      // Verify collection 2 has correct items
+      expect(collection2.size).toBe(2)
+      expect(collection2.has(`a`)).toBe(true)
+      expect(collection2.has(`b`)).toBe(true)
+    })
   })
 
   it(`should call markReady when queryFn returns an empty array`, async () => {
