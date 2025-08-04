@@ -7,6 +7,12 @@ import {
 import type { QueryClient } from "@tanstack/query-core"
 import type { ChangeMessage, Collection } from "@tanstack/db"
 
+// Track active batch operations
+let activeBatchContext: {
+  operations: Array<SyncOperation<any, any, any>>
+  ctx: SyncContext<any, any>
+} | null = null
+
 // Types for sync operations
 export type SyncOperation<
   TRow extends object,
@@ -209,28 +215,88 @@ export function createWriteUtils<
 
   return {
     writeInsert(data: TInsertInput | Array<TInsertInput>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `insert`,
+        data,
+      }
+
+      // If we're in a batch, just add to the batch operations
+      if (activeBatchContext) {
+        activeBatchContext.operations.push(operation)
+        return
+      }
+
+      // Otherwise, perform the operation immediately
       const ctx = ensureContext()
-      performWriteOperations({ type: `insert`, data }, ctx)
+      performWriteOperations(operation, ctx)
     },
 
     writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `update`,
+        data,
+      }
+
+      if (activeBatchContext) {
+        activeBatchContext.operations.push(operation)
+        return
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `update`, data }, ctx)
+      performWriteOperations(operation, ctx)
     },
 
     writeDelete(key: TKey | Array<TKey>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `delete`,
+        key,
+      }
+
+      if (activeBatchContext) {
+        activeBatchContext.operations.push(operation)
+        return
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `delete`, key }, ctx)
+      performWriteOperations(operation, ctx)
     },
 
     writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `upsert`,
+        data,
+      }
+
+      if (activeBatchContext) {
+        activeBatchContext.operations.push(operation)
+        return
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `upsert`, data }, ctx)
+      performWriteOperations(operation, ctx)
     },
 
-    writeBatch(operations: Array<SyncOperation<TRow, TKey, TInsertInput>>) {
+    writeBatch(callback: () => void) {
       const ctx = ensureContext()
-      performWriteOperations(operations, ctx)
+
+      // Set up the batch context
+      activeBatchContext = {
+        operations: [],
+        ctx,
+      }
+
+      try {
+        // Execute the callback - any write operations will be collected
+        callback()
+
+        // Perform all collected operations
+        if (activeBatchContext.operations.length > 0) {
+          performWriteOperations(activeBatchContext.operations, ctx)
+        }
+      } finally {
+        // Always clear the batch context
+        activeBatchContext = null
+      }
     },
   }
 }

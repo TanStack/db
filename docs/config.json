@@ -79,6 +79,15 @@
       ]
     },
     {
+      "label": "Collections",
+      "children": [
+        {
+          "label": "Query Collection",
+          "to": "collections/query-collection"
+        }
+      ]
+    },
+    {
       "label": "API Reference",
       "children": [
         {

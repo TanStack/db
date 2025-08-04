@@ -1104,12 +1104,20 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`6`)).toBe(false)
 
       // Test writeBatch with mixed operations
-      collection.utils.writeBatch([
-        { type: `insert`, data: { id: `7`, name: `Batch Insert`, value: 70 } },
-        { type: `update`, data: { id: `4`, name: `Batch Updated Item 4` } },
-        { type: `upsert`, data: { id: `8`, name: `Batch Upsert`, value: 80 } },
-        { type: `delete`, key: `1` },
-      ])
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({
+          id: `7`,
+          name: `Batch Insert`,
+          value: 70,
+        })
+        collection.utils.writeUpdate({ id: `4`, name: `Batch Updated Item 4` })
+        collection.utils.writeUpsert({
+          id: `8`,
+          name: `Batch Upsert`,
+          value: 80,
+        })
+        collection.utils.writeDelete(`1`)
+      })
 
       expect(collection.size).toBe(4) // 3 - 1 (delete) + 2 (insert + upsert) = 4
       expect(collection.get(`7`)?.name).toBe(`Batch Insert`)
@@ -1175,22 +1183,24 @@ describe(`QueryCollection`, () => {
 
       // Test duplicate keys within batch
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `insert`, data: { id: `2`, name: `Item 2` } },
-          { type: `update`, data: { id: `2`, name: `Updated Item 2` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+          collection.utils.writeUpdate({ id: `2`, name: `Updated Item 2` })
+        })
       }).toThrow(/Duplicate key.*found within batch operations/)
 
       // Test updating non-existent item in batch
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `update`, data: { id: `999`, name: `Missing` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeUpdate({ id: `999`, name: `Missing` })
+        })
       }).toThrow(/does not exist/)
 
       // Test deleting non-existent item in batch
       expect(() => {
-        collection.utils.writeBatch([{ type: `delete`, key: `999` }])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeDelete(`999`)
+        })
       }).toThrow(/does not exist/)
     })
 
@@ -1274,12 +1284,20 @@ describe(`QueryCollection`, () => {
       })
 
       // Test writeBatch updates cache with multiple operations
-      collection.utils.writeBatch([
-        { type: `insert`, data: { id: `5`, name: `Batch Item 5`, value: 50 } },
-        { type: `update`, data: { id: `3`, name: `Batch Updated Item 3` } },
-        { type: `delete`, key: `1` },
-        { type: `upsert`, data: { id: `6`, name: `Batch Item 6`, value: 60 } },
-      ])
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({
+          id: `5`,
+          name: `Batch Item 5`,
+          value: 50,
+        })
+        collection.utils.writeUpdate({ id: `3`, name: `Batch Updated Item 3` })
+        collection.utils.writeDelete(`1`)
+        collection.utils.writeUpsert({
+          id: `6`,
+          name: `Batch Item 6`,
+          value: 60,
+        })
+      })
 
       const cacheAfterBatch = queryClient.getQueryData(
         queryKey
@@ -1354,10 +1372,10 @@ describe(`QueryCollection`, () => {
 
       // Try batch with duplicate keys (should throw and not update cache)
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `insert`, data: { id: `3`, name: `Item 3` } },
-          { type: `update`, data: { id: `3`, name: `Duplicate` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `3`, name: `Item 3` })
+          collection.utils.writeUpdate({ id: `3`, name: `Duplicate` })
+        })
       }).toThrow(/Duplicate key/)
 
       // Verify cache wasn't modified

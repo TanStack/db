@@ -6,7 +6,6 @@ import {
   QueryKeyRequiredError,
 } from "./errors"
 import { createWriteUtils } from "./manual-sync"
-import type { SyncOperation } from "./manual-sync"
 import type {
   QueryClient,
   QueryFunctionContext,
@@ -241,9 +240,7 @@ export interface QueryCollectionUtils<
   writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
   writeDelete: (keys: TKey | Array<TKey>) => void
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
-  writeBatch: (
-    operations: Array<SyncOperation<TItem, TKey, TInsertInput>>
-  ) => void
+  writeBatch: (callback: () => void) => void
 }
 
 /**
