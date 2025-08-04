@@ -1,4 +1,5 @@
 import type {
+  CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
@@ -139,7 +140,11 @@ export function localOnlyCollectionOptions<
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
->(config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>) {
+>(
+  config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
+): CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> & {
+  utils: LocalOnlyCollectionUtils
+} {
   type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
 
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config

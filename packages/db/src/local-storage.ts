@@ -206,7 +206,12 @@ export function localStorageCollectionOptions<
   TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
->(config: LocalStorageCollectionConfig<TExplicit, TSchema, TFallback>) {
+>(
+  config: LocalStorageCollectionConfig<TExplicit, TSchema, TFallback>
+): Omit<CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>, `id`> & {
+  id: string
+  utils: LocalStorageCollectionUtils
+} {
   type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
 
   // Validate required parameters
