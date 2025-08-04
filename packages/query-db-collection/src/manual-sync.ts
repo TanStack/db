@@ -310,7 +310,14 @@ export function createWriteUtils<
         const result = callback()
 
         // Check if callback returns a promise (async function)
-        if (result instanceof Promise) {
+        // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
+        if (
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          result &&
+          typeof result === `object` &&
+          `then` in result &&
+          typeof result.then === `function`
+        ) {
           throw new Error(
             `writeBatch does not support async callbacks. The callback must be synchronous.`
           )
