@@ -282,7 +282,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
   })
 
   it(`should work with schema and query builder type inference (bug report reproduction)`, () => {
-    const testSchema = z.object({
+    const queryTestSchema = z.object({
       id: z.string(),
       entityId: z.string(),
       value: z.string(),
@@ -294,7 +294,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
       getKey: (item: any) => item.id,
-      schema: testSchema,
+      schema: queryTestSchema,
     }
 
     const options = localStorageCollectionOptions(config)
