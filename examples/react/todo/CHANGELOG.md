@@ -1,5 +1,12 @@
 # examples/react/todo
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`1220d7e`](https://github.com/TanStack/db/commit/1220d7eb6b544f05c2ea2f629ee75f969ebcda40)]:
+  - @tanstack/query-db-collection@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
