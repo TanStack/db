@@ -31,16 +31,16 @@ let activeBatchContext: { operations: SyncOperation[]; ctx: SyncContext } | null
 
 Both execute synchronously today, but any `await` inside a batch callback (even accidentally) would interleave queue micro‑tasks and create undefined behaviour.
 
-* **Recommendation**
-
-  * Keep the context on the collection instance instead of a module global:
+- **Recommendation**
+  - Keep the context on the collection instance instead of a module global:
 
     ```ts
     class ManualSyncUtils { private _batchCtx?: { … } }
     ```
 
     or
-  * Introduce a `WeakMap<Collection, BatchCtx>` keyed by the collection returned from `ensureContext()`.
+
+  - Introduce a `WeakMap<Collection, BatchCtx>` keyed by the collection returned from `ensureContext()`.
 
 ### 2.2 Synchronous‑only contract
 
@@ -55,12 +55,10 @@ await collection.utils.writeBatch(async () => {
 
 nothing is batched; the insert runs after the context is cleared. This is subtle and will bite users.
 
-* **Recommendation**
-
-  * Either:
-
-    * Accept `() => void` **and** explicitly throw if the callback returns a `Promise`, or
-    * Change the signature to `() => void | Promise<void>` and await it.
+- **Recommendation**
+  - Either:
+    - Accept `() => void` **and** explicitly throw if the callback returns a `Promise`, or
+    - Change the signature to `() => void | Promise<void>` and await it.
 
 ### 2.3 Nested batches
 
@@ -68,7 +66,7 @@ Calling `writeBatch` inside another batch silently resets the outer `activeBatch
 
 ```ts
 if (activeBatchContext) {
-  return callback(); // treat as no‑op or push to outer ctx?
+  return callback() // treat as no‑op or push to outer ctx?
 }
 ```
 
@@ -92,10 +90,12 @@ If the callback throws, `performWriteOperations` is skipped (good), but partial 
 
    ```ts
    // before
-   utils.writeBatch([{ type: 'insert', data }])
+   utils.writeBatch([{ type: "insert", data }])
 
    // after
-   utils.writeBatch(() => { utils.writeInsert(data) })
+   utils.writeBatch(() => {
+     utils.writeInsert(data)
+   })
    ```
 
 3. **Async guardrails** – Whichever path you choose in §2.2, highlight it prominently in the README to avoid misuse.
@@ -104,9 +104,9 @@ If the callback throws, `performWriteOperations` is skipped (good), but partial 
 
 ## 4  Test coverage suggestions
 
-* **Async callback** – Expect a thrown error or correct batching behaviour.
-* **Cross‑collection concurrency** – Simulate two collections calling `writeBatch` in the same tick and ensure isolation.
-* **Nested batch** – Verify error or merge semantics.
+- **Async callback** – Expect a thrown error or correct batching behaviour.
+- **Cross‑collection concurrency** – Simulate two collections calling `writeBatch` in the same tick and ensure isolation.
+- **Nested batch** – Verify error or merge semantics.
 
 The existing duplicate‑key and non‑existent‑item assertions look good ([GitHub][1]).
 
@@ -120,8 +120,8 @@ Fantastic job on the new **Query Collection** guide and the partial‑fetch patt
 
 ## 6  Misc nits
 
-* `manual-sync.ts` – tiny typo in comment `Array>` should be `Array<…>`.
-* Consider adding `eslint-plugin-restrict-imports` rule to prevent someone importing `manual-sync.ts` internals directly.
+- `manual-sync.ts` – tiny typo in comment `Array>` should be `Array<…>`.
+- Consider adding `eslint-plugin-restrict-imports` rule to prevent someone importing `manual-sync.ts` internals directly.
 
 ---
 
@@ -130,4 +130,3 @@ Fantastic job on the new **Query Collection** guide and the partial‑fetch patt
 Great ergonomic improvement and thorough docs/tests. Address the global‑state edge cases (or, at minimum, document sync‑only support), decide on async callback semantics, bump to a minor version, and this will be rock‑solid.
 
 [1]: https://github.com/TanStack/db/pull/378.patch "patch-diff.githubusercontent.com"
-
