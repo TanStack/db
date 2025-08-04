@@ -28,16 +28,26 @@ import type {
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
+/**
+ * Configuration options for creating a Query Collection
+ * @template TItem - The type of items stored in the collection
+ * @template TError - The type of errors that can occur during queries
+ * @template TQueryKey - The type of the query key
+ */
 export interface QueryCollectionConfig<
   TItem extends object,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
 > {
+  /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
+  /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: (context: QueryFunctionContext<TQueryKey>) => Promise<Array<TItem>>
+  /** The TanStack Query client instance */
   queryClient: QueryClient
 
   // Query-specific options
+  /** Whether the query should automatically run (default: true) */
   enabled?: boolean
   refetchInterval?: QueryObserverOptions<
     Array<TItem>,
@@ -69,8 +79,11 @@ export interface QueryCollectionConfig<
   >[`staleTime`]
 
   // Standard Collection configuration properties
+  /** Unique identifier for the collection */
   id?: string
+  /** Function to extract the unique key from an item */
   getKey: CollectionConfig<TItem>[`getKey`]
+  /** Schema for validating items */
   schema?: CollectionConfig<TItem>[`schema`]
   sync?: CollectionConfig<TItem>[`sync`]
   startSync?: CollectionConfig<TItem>[`startSync`]
@@ -225,29 +238,68 @@ export interface QueryCollectionConfig<
 export type RefetchFn = () => Promise<void>
 
 /**
- * Query collection utilities type
- */
-/**
- * Write operation types for batch operations
+ * Utility methods available on Query Collections for direct writes and manual operations.
+ * Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
+ * @template TItem - The type of items stored in the collection
+ * @template TKey - The type of the item keys
+ * @template TInsertInput - The type accepted for insert operations
  */
 export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
 > extends UtilsRecord {
+  /** Manually trigger a refetch of the query */
   refetch: RefetchFn
+  /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
   writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
+  /** Update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
   writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
+  /** Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update */
   writeDelete: (keys: TKey | Array<TKey>) => void
+  /** Insert or update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
+  /** Execute multiple write operations as a single atomic batch to the synced data store */
   writeBatch: (callback: () => void) => void
 }
 
 /**
- * Creates query collection options for use with a standard Collection
+ * Creates query collection options for use with a standard Collection.
+ * This integrates TanStack Query with TanStack DB for automatic synchronization.
  *
  * @param config - Configuration options for the Query collection
- * @returns Collection options with utilities
+ * @returns Collection options with utilities for direct writes and manual operations
+ *
+ * @example
+ * // Basic usage
+ * const todosCollection = createCollection(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: async () => fetch('/api/todos').then(r => r.json()),
+ *     queryClient,
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * @example
+ * // With persistence handlers
+ * const todosCollection = createCollection(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: fetchTodos,
+ *     queryClient,
+ *     getKey: (item) => item.id,
+ *     onInsert: async ({ transaction }) => {
+ *       await api.createTodos(transaction.mutations.map(m => m.modified))
+ *     },
+ *     onUpdate: async ({ transaction }) => {
+ *       await api.updateTodos(transaction.mutations)
+ *     },
+ *     onDelete: async ({ transaction }) => {
+ *       await api.deleteTodos(transaction.mutations.map(m => m.key))
+ *     }
+ *   })
+ * )
  */
 export function queryCollectionOptions<
   TItem extends object,

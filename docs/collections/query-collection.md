@@ -167,7 +167,21 @@ The collection provides these utility methods via `collection.utils`:
 
 ## Direct Writes (Advanced)
 
-Direct writes are an escape hatch for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to manually sync data from alternative sources like WebSockets, server-sent events, or when dealing with large datasets where full refetches are inefficient.
+Direct writes are an escape hatch for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to write directly to the synced data store, bypassing the optimistic update system and query refetch mechanism.
+
+### Understanding the Data Stores
+
+Query Collections maintain two data stores:
+1. **Synced Data Store** - The authoritative state synchronized with the server via `queryFn`
+2. **Optimistic Mutations Store** - Temporary changes that are applied optimistically before server confirmation
+
+Normal collection operations (insert, update, delete) create optimistic mutations that are:
+- Applied immediately to the UI
+- Sent to the server via persistence handlers
+- Rolled back automatically if the server request fails
+- Replaced with server data when the query refetches
+
+Direct writes bypass this system entirely and write directly to the synced data store, making them ideal for handling real-time updates from alternative sources.
 
 ### When to Use Direct Writes
 
@@ -180,18 +194,25 @@ Direct writes should be used when:
 ### Individual Write Operations
 
 ```typescript
-// Insert a new item
+// Insert a new item directly to the synced data store
 todosCollection.utils.writeInsert({ id: '1', text: 'Buy milk', completed: false })
 
-// Update an existing item
+// Update an existing item in the synced data store
 todosCollection.utils.writeUpdate({ id: '1', completed: true })
 
-// Delete an item
+// Delete an item from the synced data store
 todosCollection.utils.writeDelete('1')
 
-// Upsert (insert or update)
+// Upsert (insert or update) in the synced data store
 todosCollection.utils.writeUpsert({ id: '1', text: 'Buy milk', completed: false })
 ```
+
+These operations:
+- Write directly to the synced data store
+- Do NOT create optimistic mutations
+- Do NOT trigger automatic query refetches
+- Update the TanStack Query cache immediately
+- Are immediately visible in the UI
 
 ### Batch Operations
 
