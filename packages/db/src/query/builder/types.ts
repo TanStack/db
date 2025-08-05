@@ -1,7 +1,7 @@
 import type { CollectionImpl } from "../../collection.js"
 import type { Aggregate, BasicExpression } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { ResolveType } from "../../types.js"
 
 export interface Context {
   // The collections available in the base schema
@@ -28,18 +28,10 @@ export type Source = {
 }
 
 // Helper type to infer collection type from CollectionImpl
+// This uses ResolveType directly to ensure consistency with collection creation logic
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? // Check if TSchema is a real schema by looking for schema-specific properties
-      TSchema extends { _output: any }
-      ? StandardSchemaV1.InferOutput<TSchema>
-      : TSchema extends { parse: any }
-        ? StandardSchemaV1.InferOutput<TSchema>
-        : // If TSchema extends StandardSchemaV1 but doesn't have schema properties, it's the default type
-          TSchema extends StandardSchemaV1
-          ? U
-          : // TSchema is never or some other type, use U
-            U
+    ? ResolveType<U, TSchema, U>
     : never
 
 // Helper type to create schema from source

@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { z } from "zod"
+import { type } from "arktype"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
@@ -314,6 +315,162 @@ describe(`Query Basic Types`, () => {
       Array<{
         status: `active` | `inactive` | undefined
         name: string
+      }>
+    >()
+  })
+})
+
+describe(`Query Basic Types with ArkType Schemas`, () => {
+  test(`selecting optional field with ArkType schema should work`, () => {
+    // Define an ArkType schema with optional field using "field?"
+    const userWithOptionalSchema = type({
+      id: `number`,
+      name: `string`,
+      "inserted_at?": `Date`, // Optional using "field?"
+    })
+
+    const usersWithOptionalCollection = createCollection({
+      id: `test-users-arktype-optional`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userWithOptionalSchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithOptionalCollection }).select(({ user }) => ({
+          inserted_at: user.inserted_at,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        inserted_at: Date | undefined
+      }>
+    >()
+  })
+
+  test(`selecting union field with ArkType schema should work`, () => {
+    // Define an ArkType schema with union type field
+    const userWithUnionSchema = type({
+      id: `number`,
+      name: `string`,
+      "status?": `"active" | "inactive"`, // Union type with optional
+    })
+
+    const usersWithUnionCollection = createCollection({
+      id: `test-users-arktype-union`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userWithUnionSchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithUnionCollection }).select(({ user }) => ({
+          status: user.status,
+          name: user.name,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        status: `active` | `inactive` | undefined
+        name: string
+      }>
+    >()
+  })
+
+  test(`selecting array field with ArkType schema should work`, () => {
+    // Define an ArkType schema with array field
+    const userWithArraySchema = type({
+      id: `number`,
+      name: `string`,
+      "tags?": `string[]`, // Array type with optional
+    })
+
+    const usersWithArrayCollection = createCollection({
+      id: `test-users-arktype-array`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userWithArraySchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ user: usersWithArrayCollection }).select(({ user }) => ({
+          tags: user.tags,
+          name: user.name,
+        })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        tags: Array<string> | undefined
+        name: string
+      }>
+    >()
+  })
+
+  test(`WHERE with ArkType schema should work`, () => {
+    // Define an ArkType schema with validation
+    const userSchema = type({
+      id: `number`,
+      name: `string > 0`,
+      age: `number.integer > 0`,
+      "email?": `string.email`,
+    })
+
+    const usersCollection = createCollection({
+      id: `test-users-arktype-where`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userSchema,
+    })
+
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => gt(user.age, 20))
+          .select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            age: user.age,
+            email: user.email,
+          })),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        id: number
+        name: string
+        age: number
+        email: string | undefined
       }>
     >()
   })
