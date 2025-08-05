@@ -60,26 +60,23 @@
  */
 
 // RSS collection functionality
-export {
-  rssCollectionOptions,
-  type RSSCollectionConfig,
-  type RSSItem,
-} from "./rss"
+export { rssCollectionOptions, type RSSCollectionConfig } from "./rss"
 
 // Atom collection functionality
-export {
-  atomCollectionOptions,
-  type AtomCollectionConfig,
-  type AtomItem,
-} from "./rss"
+export { atomCollectionOptions, type AtomCollectionConfig } from "./rss"
 
 // Shared types and utilities
+export { type FeedCollectionUtils } from "./rss"
+
+// Feed item types
 export {
+  type RSSItem,
+  type AtomItem,
   type FeedItem,
   type FeedType,
   type HTTPOptions,
-  type FeedCollectionUtils,
-} from "./rss"
+  type ParsedFeedData,
+} from "./types"
 
 // Error types
 export {

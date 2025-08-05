@@ -5,8 +5,9 @@ RSS/Atom feed collection for TanStack DB - sync data from RSS and Atom feeds wit
 ## Features
 
 - **📡 RSS & Atom Support**: Dedicated option creators for RSS 2.0 and Atom 1.0 feeds
-- **🔄 Automatic Polling**: Configurable polling intervals with intelligent error recovery and manual refresh capability
-- **✨ Deduplication**: Built-in deduplication based on feed item IDs/GUIDs
+- **🔄 Smart Polling**: Configurable polling intervals with automatic detection based on feed metadata (`sy:updatePeriod`/`sy:updateFrequency`)
+- **✨ Content-Aware Deduplication**: Built-in deduplication that detects content changes for existing GUIDs and treats them as updates
+- **📅 RFC-Compliant Date Parsing**: Strict RFC 2822/3339 date parsing for reliable timezone handling
 - **🔧 Transform Functions**: Custom transform functions to normalize feed data to your schema
 - **📝 Full TypeScript Support**: Complete type safety with schema inference
 - **🎛️ Mutation Handlers**: Support for `onInsert`, `onUpdate`, and `onDelete` callbacks
@@ -83,9 +84,51 @@ const atomFeed = createCollection({
 })
 ```
 
+## Smart Features
+
+### Smart Polling Intervals
+
+The RSS collection automatically detects optimal polling intervals based on feed metadata:
+
+- **RSS Syndication**: Uses `<sy:updatePeriod>` and `<sy:updateFrequency>` tags when available
+- **Default**: 5 minutes for all feeds when syndication tags are not present
+
+```typescript
+// The collection will automatically detect and use appropriate intervals
+const feed = createCollection({
+  ...rssCollectionOptions({
+    feedUrl: "https://blog.example.com/feed.xml",
+    // No pollingInterval specified - will use 5 minutes default or sy:updatePeriod if available
+  }),
+})
+```
+
+### Content-Aware Deduplication
+
+Unlike simple GUID-based deduplication, this collection detects when feed items with the same GUID have changed content and treats them as updates:
+
+- **New Items**: Items with unseen GUIDs are inserted
+- **Content Changes**: Items with existing GUIDs but changed content are updated
+- **No Changes**: Items with existing GUIDs and unchanged content are ignored
+
+This ensures that corrections, updates, or content changes in feed items are properly reflected in your database.
+
+### RFC-Compliant Date Parsing
+
+The collection uses strict RFC 2822 (RSS) and RFC 3339 (Atom) date parsing to avoid locale-dependent issues:
+
+```typescript
+import { parseFeedDate } from "@tanstack/rss-db-collection"
+
+// Handles various date formats reliably
+const date1 = parseFeedDate("Mon, 25 Dec 2023 10:30:00 GMT") // RFC 2822
+const date2 = parseFeedDate("2023-12-25T10:30:00Z") // RFC 3339
+const date3 = parseFeedDate("2023-12-25T10:30:00+01:00") // RFC 3339 with offset
+```
+
 ## Configuration Options
 
-### RSS Collection Configuration
+### RSS Collection Options
 
 ```typescript
 interface RSSCollectionConfig {
@@ -94,7 +137,7 @@ interface RSSCollectionConfig {
   getKey: (item: T) => string // Extract unique key from item
 
   // Optional
-  pollingInterval?: number // Polling interval in ms (default: 300000 = 5 minutes)
+  pollingInterval?: number // Polling interval in ms (default: 5 minutes, or based on sy:updatePeriod/sy:updateFrequency)
   startPolling?: boolean // Start polling immediately (default: true)
   maxSeenItems?: number // Max items to track for deduplication (default: 1000)
 

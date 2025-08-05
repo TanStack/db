@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "@tanstack/db"
 import { atomCollectionOptions, rssCollectionOptions } from "../src/rss"
-import type {
-  AtomCollectionConfig,
-  RSSCollectionConfig,
-  RSSItem,
-} from "../src/rss"
+import type { AtomCollectionConfig, RSSCollectionConfig } from "../src/rss"
+import type { RSSItem } from "../src/types"
 
 // Mock fetch globally
 global.fetch = vi.fn()
@@ -620,10 +617,10 @@ describe(`RSS Collection`, () => {
       await collection.utils.refresh()
       expect(collection.size).toBe(3)
 
-      // Note: The RSS collection doesn't update existing items, it only adds new ones
-      // So the existing item should remain unchanged
+      // Note: The RSS collection now detects content changes and updates existing items
+      // So the existing item should be updated with new content
       expect(collection.get(`post-1`)?.description).toBe(
-        `This is the first post`
+        `This is the updated first post`
       )
 
       // Check that new item was added

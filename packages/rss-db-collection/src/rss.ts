@@ -8,6 +8,11 @@ import {
   InvalidPollingIntervalError,
   UnsupportedFeedFormatError,
 } from "./errors"
+import {
+  detectSmartPollingInterval,
+  getContentHash,
+  parseFeedDate,
+} from "./utils"
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
@@ -17,65 +22,9 @@ import type {
   UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { AtomItem, FeedItem, HTTPOptions, RSSItem } from "./types"
 
 const debug = DebugModule.debug(`ts/db:rss`)
-
-/**
- * Types for RSS feed items
- */
-export interface RSSItem {
-  title?: string
-  description?: string
-  link?: string
-  guid?: string
-  pubDate?: string | Date
-  author?: string
-  category?: string | Array<string>
-  enclosure?: {
-    url: string
-    type?: string
-    length?: string
-  }
-  [key: string]: any
-}
-
-/**
- * Types for Atom feed items
- */
-export interface AtomItem {
-  title?: string | { $text?: string; type?: string }
-  summary?: string | { $text?: string; type?: string }
-  content?: string | { $text?: string; type?: string }
-  link?:
-    | string
-    | { href?: string; rel?: string; type?: string }
-    | Array<{ href?: string; rel?: string; type?: string }>
-  id?: string
-  updated?: string | Date
-  published?: string | Date
-  author?: string | { name?: string; email?: string; uri?: string }
-  category?:
-    | string
-    | { term?: string; label?: string }
-    | Array<{ term?: string; label?: string }>
-  [key: string]: any
-}
-
-export type FeedItem = RSSItem | AtomItem
-
-/**
- * Feed type detection
- */
-export type FeedType = `rss` | `atom` | `auto`
-
-/**
- * HTTP options for fetching feeds
- */
-export interface HTTPOptions {
-  timeout?: number
-  headers?: Record<string, string>
-  userAgent?: string
-}
 
 /**
  * Base configuration interface for feed collection options
@@ -305,7 +254,7 @@ function parseFeed(xmlContent: string, parserOptions: any = {}): ParsedFeed {
 function defaultRSSTransform(item: RSSItem): RSSItem {
   return {
     ...item,
-    pubDate: item.pubDate ? new Date(item.pubDate) : undefined,
+    pubDate: item.pubDate ? parseFeedDate(item.pubDate) : undefined,
   }
 }
 
@@ -340,10 +289,10 @@ function defaultAtomTransform(item: AtomItem): AtomItem {
 
   // Handle dates
   if (item.updated) {
-    normalized.updated = new Date(item.updated)
+    normalized.updated = parseFeedDate(item.updated)
   }
   if (item.published) {
-    normalized.published = new Date(item.published)
+    normalized.published = parseFeedDate(item.published)
   }
 
   // Handle author
@@ -447,7 +396,7 @@ function createFeedCollectionOptions<
 ) {
   const {
     feedUrl,
-    pollingInterval = 300000, // 5 minutes default
+    pollingInterval: userPollingInterval,
     httpOptions = {},
     startPolling = true,
     maxSeenItems = 1000,
@@ -461,6 +410,10 @@ function createFeedCollectionOptions<
     ...restConfig
   } = config
 
+  // Smart polling interval detection
+  let pollingInterval =
+    userPollingInterval !== undefined ? userPollingInterval : 300000 // Default 5 minutes
+
   // Validation
   if (!feedUrl) {
     throw new FeedURLRequiredError()
@@ -470,7 +423,10 @@ function createFeedCollectionOptions<
   }
 
   // State management
-  let seenItems = new Map<string, { id: string; lastSeen: number }>()
+  let seenItems = new Map<
+    string,
+    { id: string; lastSeen: number; contentHash: string }
+  >()
   let syncParams:
     | Parameters<
         SyncConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey>[`sync`]
@@ -544,10 +500,22 @@ function createFeedCollectionOptions<
         throw new UnsupportedFeedFormatError(feedUrl)
       }
 
+      // Detect smart polling interval on first fetch
+      if (!userPollingInterval) {
+        const parser = new XMLParser(parserOptions)
+        const feedData = parser.parse(xmlContent)
+        const smartInterval = detectSmartPollingInterval(feedData)
+        if (smartInterval !== pollingInterval) {
+          pollingInterval = smartInterval
+          debug(`Updated polling interval to ${pollingInterval}ms`)
+        }
+      }
+
       const { begin, write, commit } = params
       begin()
 
       let newItemsCount = 0
+      let updatedItemsCount = 0
       const currentTime = Date.now()
 
       for (const rawItem of parsedFeed.items) {
@@ -572,13 +540,18 @@ function createFeedCollectionOptions<
 
         // Generate unique ID for deduplication
         const itemId = getItemId(rawItem, parsedFeed.type)
+        const contentHash = getContentHash(rawItem)
 
         // Check if we've seen this item before
         const seen = seenItems.get(itemId)
 
         if (!seen) {
           // New item
-          seenItems.set(itemId, { id: itemId, lastSeen: currentTime })
+          seenItems.set(itemId, {
+            id: itemId,
+            lastSeen: currentTime,
+            contentHash,
+          })
 
           write({
             type: `insert`,
@@ -586,8 +559,22 @@ function createFeedCollectionOptions<
           })
 
           newItemsCount++
+        } else if (seen.contentHash !== contentHash) {
+          // Item exists but content has changed - treat as update
+          seenItems.set(itemId, {
+            ...seen,
+            lastSeen: currentTime,
+            contentHash,
+          })
+
+          write({
+            type: `update`,
+            value: transformedItem,
+          })
+
+          updatedItemsCount++
         } else {
-          // Update last seen time
+          // Item exists and content hasn't changed - just update last seen time
           seenItems.set(itemId, { ...seen, lastSeen: currentTime })
         }
       }
@@ -596,6 +583,9 @@ function createFeedCollectionOptions<
 
       if (newItemsCount > 0) {
         debug(`Added ${newItemsCount} new items from feed`)
+      }
+      if (updatedItemsCount > 0) {
+        debug(`Updated ${updatedItemsCount} existing items from feed`)
       }
 
       // Clean up old items periodically
@@ -694,6 +684,7 @@ function createFeedCollectionOptions<
     getKey,
     sync,
     startSync: true,
+    rowUpdateMode: `full`,
     onInsert,
     onUpdate,
     onDelete,
