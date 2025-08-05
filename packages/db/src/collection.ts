@@ -182,6 +182,31 @@ export function createCollection<
   ResolveInsertInput<unknown, TSchema, TFallback>
 >
 
+// Overload for when explicit type is provided with schema - explicit type takes precedence
+export function createCollection<
+  TExplicit extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TFallback extends object = Record<string, unknown>,
+>(
+  options: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
+  > & {
+    schema: TSchema
+    utils?: TUtils
+  }
+): Collection<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+>
+
 // Overload for when explicit type is provided or no schema
 export function createCollection<
   TExplicit = unknown,
