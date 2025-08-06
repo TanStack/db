@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 0.2.1
+
+### Patch Changes
+
+- Ensure that you can use optional properties in the `select` and `join` clauses of a query, and fix an issue where standard schemas were not properly carried through to live queries. ([#377](https://github.com/TanStack/db/pull/377))
+
+- Updated dependencies [[`bb5d50e`](https://github.com/TanStack/db/commit/bb5d50e255d9114ef32b8f52eef6b15399255327), [`97b595e`](https://github.com/TanStack/db/commit/97b595e9617b1abb05c14489e3d608b314da08e8)]:
+  - @tanstack/db@0.1.2
+
 ## 0.2.0
 
 ### Minor Changes

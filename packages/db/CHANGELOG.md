@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.1.2
+
+### Patch Changes
+
+- Ensure that you can use optional properties in the `select` and `join` clauses of a query, and fix an issue where standard schemas were not properly carried through to live queries. ([#377](https://github.com/TanStack/db/pull/377))
+
+- Add option to configure how orderBy compares values. This includes ascending/descending order, ordering of null values, and lexical vs locale comparison for strings. ([#314](https://github.com/TanStack/db/pull/314))
+
 ## 0.1.1
 
 ### Patch Changes
