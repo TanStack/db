@@ -834,7 +834,7 @@ describe(`QueryCollection`, () => {
 
       // Wait for refetch to complete
       await vi.waitFor(() => {
-        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(queryFn).toHaveBeenCalledTimes(3)
         expect(collection.size).toBe(2)
       })
 
@@ -1602,5 +1602,37 @@ describe(`QueryCollection`, () => {
     // Verify the collection is empty but ready
     expect(collection.size).toBe(0)
     expect(collection.status).toBe(`ready`)
+  })
+
+  it(`should not refetch after cleanup unsubscribes from cache`, async () => {
+    const queryKey = [`todos`, 123]
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Initial` }])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `unsubscribe-test`,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey,
+      startSync: true,
+    }
+
+    const collection = createCollection(queryCollectionOptions(config))
+
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    await collection.cleanup() // Should unsubscribe from QueryCache
+
+    // Update data
+    queryFn.mockResolvedValue([{ id: `1`, name: `Updated` }])
+
+    // This should NOT trigger another fetch
+    await queryClient.invalidateQueries({ queryKey: [`todos`] })
+
+    await new Promise((r) => setTimeout(r, 100)) // Give event loop time
+
+    expect(queryFn).toHaveBeenCalledTimes(1)
   })
 })

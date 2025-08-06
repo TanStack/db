@@ -1,4 +1,4 @@
-import { QueryObserver } from "@tanstack/query-core"
+import { QueryObserver, partialMatchKey } from "@tanstack/query-core"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -488,8 +488,25 @@ export function queryCollectionOptions<
       }
     })
 
+    const invalidationUnsubscribe = queryClient
+      .getQueryCache()
+      .subscribe((event) => {
+        const { type, action, query } = event
+
+        if (
+          type !== `updated` ||
+          action.type !== `invalidate` ||
+          !partialMatchKey(queryKey, query.queryKey)
+        ) {
+          return
+        }
+
+        refetch()
+      })
+
     return async () => {
       actualUnsubscribeFn()
+      invalidationUnsubscribe()
       await queryClient.cancelQueries({ queryKey })
       queryClient.removeQueries({ queryKey })
     }
