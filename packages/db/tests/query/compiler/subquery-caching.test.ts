@@ -47,7 +47,14 @@ describe(`Subquery Caching`, () => {
 
     // First compilation without shared cache
     const cache1 = new WeakMap()
-    const result1 = compileQuery(mainQuery, inputs, cache1)
+    const result1 = compileQuery(
+      mainQuery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      cache1
+    )
 
     // Verify subquery is in first cache
     expect(cache1.has(subquery)).toBe(true)
@@ -55,7 +62,14 @@ describe(`Subquery Caching`, () => {
 
     // Second compilation with different cache (should recompile everything)
     const cache2 = new WeakMap()
-    const result2 = compileQuery(mainQuery, inputs, cache2)
+    const result2 = compileQuery(
+      mainQuery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      cache2
+    )
 
     // Results should be different objects (different compilation)
     expect(result1).not.toBe(result2)
@@ -65,7 +79,14 @@ describe(`Subquery Caching`, () => {
     expect(cache2.has(mainQuery)).toBe(true)
 
     // Third compilation with the same cache as #2 (should reuse cached results)
-    const result3 = compileQuery(mainQuery, inputs, cache2)
+    const result3 = compileQuery(
+      mainQuery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      cache2
+    )
 
     // Result should be the same object as #2 (reused from cache)
     expect(result3).toBe(result2)
@@ -75,8 +96,22 @@ describe(`Subquery Caching`, () => {
     expect(cache2.has(mainQuery)).toBe(true)
 
     // Fourth compilation: compile just the subquery with cache2 (should reuse)
-    const subqueryResult1 = compileQuery(subquery, inputs, cache2)
-    const subqueryResult2 = compileQuery(subquery, inputs, cache2)
+    const subqueryResult1 = compileQuery(
+      subquery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      cache2
+    )
+    const subqueryResult2 = compileQuery(
+      subquery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      cache2
+    )
 
     // Both subquery compilations should return the same cached result
     expect(subqueryResult1).toBe(subqueryResult2)
@@ -103,11 +138,25 @@ describe(`Subquery Caching`, () => {
     const sharedCache = new WeakMap()
 
     // First compilation - should add to cache
-    const result1 = compileQuery(subquery, inputs, sharedCache)
+    const result1 = compileQuery(
+      subquery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      sharedCache
+    )
     expect(sharedCache.has(subquery)).toBe(true)
 
     // Second compilation with same cache - should return cached result
-    const result2 = compileQuery(subquery, inputs, sharedCache)
+    const result2 = compileQuery(
+      subquery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      sharedCache
+    )
     expect(result1).toBe(result2) // Should be the exact same object reference
   })
 
@@ -143,8 +192,22 @@ describe(`Subquery Caching`, () => {
     const sharedCache = new WeakMap()
 
     // Compile both queries
-    const result1 = compileQuery(subquery1, inputs, sharedCache)
-    const result2 = compileQuery(subquery, inputs, sharedCache)
+    const result1 = compileQuery(
+      subquery1,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      sharedCache
+    )
+    const result2 = compileQuery(
+      subquery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      sharedCache
+    )
 
     // Should have different results since they are different objects
     expect(result1).not.toBe(result2)
@@ -198,7 +261,14 @@ describe(`Subquery Caching`, () => {
     const sharedCache = new WeakMap()
 
     // Compile the outer query - should cache innerSubquery and reuse it
-    const result = compileQuery(outerQuery, inputs, sharedCache)
+    const result = compileQuery(
+      outerQuery,
+      inputs,
+      { users: usersCollection },
+      {},
+      new Set(),
+      sharedCache
+    )
     expect(result).toBeDefined()
 
     // Verify that innerSubquery is cached
