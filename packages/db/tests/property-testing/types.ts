@@ -1,0 +1,257 @@
+// Note: These imports are for type definitions only
+// The actual implementation may not be available during testing
+export type Collection<_T> = any
+export type QueryIR = any
+
+// Re-export types that are used throughout the property testing framework
+export type Aggregate<_T = any> = {
+  type: `agg`
+  name: string
+  args: Array<any>
+}
+
+export type BasicExpression<_T = any> = {
+  type: `val` | `ref` | `func`
+  value?: any
+  path?: Array<string>
+  function?: string
+  args?: Array<any>
+}
+
+export type Func<_T = any> = {
+  type: `func`
+  name: string
+  args: Array<any>
+}
+
+export type OrderByClause = {
+  expression: BasicExpression
+  direction: `asc` | `desc`
+}
+
+export type PropRef = {
+  type: `ref`
+  path: Array<string>
+}
+
+export type Value = {
+  type: `val`
+  value: any
+}
+
+/**
+ * Supported data types for property testing
+ */
+export type SupportedType =
+  | `string`
+  | `number`
+  | `boolean`
+  | `null`
+  | `object`
+  | `array`
+
+/**
+ * Column definition for schema generation
+ */
+export interface ColumnDef {
+  name: string
+  type: SupportedType
+  isPrimaryKey: boolean
+  isNullable: boolean
+  isJoinable: boolean
+}
+
+/**
+ * Table definition for schema generation
+ */
+export interface TableDef {
+  name: string
+  columns: Array<ColumnDef>
+  primaryKey: string
+}
+
+/**
+ * Generated schema for a test run
+ */
+export interface TestSchema {
+  tables: Array<TableDef>
+  joinHints: Array<{
+    table1: string
+    column1: string
+    table2: string
+    column2: string
+  }>
+}
+
+/**
+ * Row data for a table
+ */
+export interface TestRow {
+  [columnName: string]: TestValue
+}
+
+/**
+ * Supported value types for testing
+ */
+export type TestValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | Array<unknown>
+
+/**
+ * Mutation operation types
+ */
+export type MutationType = `insert` | `update` | `delete`
+
+/**
+ * Mutation command for property testing
+ */
+export interface MutationCommand {
+  type: MutationType
+  table: string
+  key?: string | number
+  data?: Partial<TestRow>
+  changes?: Partial<TestRow>
+}
+
+/**
+ * Transaction command types
+ */
+export type TransactionCommand = `begin` | `commit` | `rollback`
+
+/**
+ * Query command for property testing
+ */
+export interface QueryCommand {
+  type: `startQuery` | `stopQuery`
+  queryId: string
+  ast?: QueryIR
+  sql?: string
+}
+
+/**
+ * All possible commands in a test sequence
+ */
+export type TestCommand =
+  | MutationCommand
+  | { type: TransactionCommand }
+  | QueryCommand
+
+/**
+ * Test state maintained during property testing
+ */
+export interface TestState {
+  schema: TestSchema
+  collections: Map<string, Collection<TestRow>>
+  activeQueries: Map<
+    string,
+    {
+      ast: QueryIR
+      sql: string
+      unsubscribe: () => void
+      snapshot: Array<TestRow>
+    }
+  >
+  currentTransaction: string | null
+  sqliteDb: any // better-sqlite3 Database instance
+  commandCount: number
+  seed: number
+}
+
+/**
+ * Generator configuration for property testing
+ */
+export interface GeneratorConfig {
+  maxTables?: number
+  maxColumns?: number
+  minRows?: number
+  maxRows?: number
+  maxRowsPerTable?: number
+  minCommands?: number
+  maxCommands?: number
+  maxQueries?: number
+  floatTolerance?: number
+}
+
+export const DEFAULT_CONFIG: Required<GeneratorConfig> = {
+  maxTables: 3,
+  maxColumns: 5,
+  minRows: 5,
+  maxRows: 20,
+  maxRowsPerTable: 10,
+  minCommands: 10,
+  maxCommands: 30,
+  maxQueries: 5,
+  floatTolerance: 1e-12,
+}
+
+/**
+ * Property test result
+ */
+export interface PropertyTestResult {
+  success: boolean
+  seed?: number
+  commandCount?: number
+  failingCommands?: Array<TestCommand>
+  error?: Error
+  shrunkExample?: Array<TestCommand>
+  errors?: Array<string>
+  snapshotEquality?: boolean
+  incrementalConvergence?: boolean
+  transactionVisibility?: boolean
+  rowCountSanity?: boolean
+  queryResults?: Array<any>
+  patchResults?: Array<any>
+  transactionResults?: Array<any>
+  rowCounts?: Record<string, number>
+  featureCoverage?: {
+    select: number
+    where: number
+    join: number
+    aggregate: number
+    orderBy: number
+    groupBy: number
+    subquery: number
+  }
+  complexQueryResults?: Array<any>
+  dataTypeResults?: Array<any>
+  edgeCaseResults?: Array<any>
+}
+
+/**
+ * Normalized value for comparison
+ */
+export interface NormalizedValue {
+  type: `string` | `number` | `boolean` | `null` | `object` | `array`
+  value: any
+  sortKey: string
+}
+
+/**
+ * SQLite transaction state
+ */
+export interface SQLiteTransaction {
+  savepointId: string
+  isActive: boolean
+}
+
+/**
+ * Query result comparison
+ */
+export interface QueryComparison {
+  tanstackResult: Array<TestRow>
+  sqliteResult: Array<TestRow>
+  normalized: {
+    tanstack: Array<Array<NormalizedValue>>
+    sqlite: Array<Array<NormalizedValue>>
+  }
+  isEqual: boolean
+  differences?: Array<{
+    tanstack: NormalizedValue
+    sqlite: NormalizedValue
+    index: number
+  }>
+}
