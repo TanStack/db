@@ -1,9 +1,9 @@
 import { describe, expectTypeOf, test } from "vitest"
 import {
+  and,
   createLiveQueryCollection,
   eq,
   gt,
-  and,
   or,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
@@ -38,14 +38,14 @@ type Person = {
 // Sample data
 const samplePersons: Array<Person> = [
   {
-    id: "1",
-    name: "John Doe",
+    id: `1`,
+    name: `John Doe`,
     age: 30,
-    email: "john.doe@example.com",
+    email: `john.doe@example.com`,
     isActive: true,
-    team: "team1",
+    team: `team1`,
     profile: {
-      bio: "Senior developer",
+      bio: `Senior developer`,
       score: 85,
       stats: {
         tasksCompleted: 120,
@@ -53,8 +53,8 @@ const samplePersons: Array<Person> = [
       },
     },
     address: {
-      city: "New York",
-      country: "USA",
+      city: `New York`,
+      country: `USA`,
       coordinates: {
         lat: 40.7128,
         lng: -74.006,
@@ -66,17 +66,17 @@ const samplePersons: Array<Person> = [
 function createPersonsCollection() {
   return createCollection(
     mockSyncCollectionOptions<Person>({
-      id: "test-persons",
+      id: `test-persons`,
       getKey: (person) => person.id,
       initialData: samplePersons,
     })
   )
 }
 
-describe("Nested Properties Types", () => {
+describe(`Nested Properties Types`, () => {
   const personsCollection = createPersonsCollection()
 
-  test("select with nested properties returns correct types", () => {
+  test(`select with nested properties returns correct types`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q.from({ persons: personsCollection }).select(({ persons }) => ({
@@ -114,14 +114,14 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("where clause with nested properties", () => {
+  test(`where clause with nested properties`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q
           .from({ persons: personsCollection })
           // Test various nested property comparisons
           .where(({ persons }) => gt(persons.profile?.score, 80))
-          .where(({ persons }) => eq(persons.address?.country, "USA"))
+          .where(({ persons }) => eq(persons.address?.country, `USA`))
           .where(({ persons }) => gt(persons.address?.coordinates.lat, 35))
           .where(({ persons }) => gt(persons.profile?.stats.rating, 4.0))
           .select(({ persons }) => ({
@@ -139,7 +139,7 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("where clause with complex nested expressions", () => {
+  test(`where clause with complex nested expressions`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q
@@ -170,14 +170,14 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("orderBy with nested properties", () => {
+  test(`orderBy with nested properties`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q
           .from({ persons: personsCollection })
-          .orderBy(({ persons }) => persons.profile?.score, "desc")
-          .orderBy(({ persons }) => persons.address?.coordinates.lat, "asc")
-          .orderBy(({ persons }) => persons.profile?.stats.rating, "desc")
+          .orderBy(({ persons }) => persons.profile?.score, `desc`)
+          .orderBy(({ persons }) => persons.address?.coordinates.lat, `asc`)
+          .orderBy(({ persons }) => persons.profile?.stats.rating, `desc`)
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
@@ -199,19 +199,19 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("orderBy with multiple nested properties and options", () => {
+  test(`orderBy with multiple nested properties and options`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q
           .from({ persons: personsCollection })
           .orderBy(({ persons }) => persons.profile?.score, {
-            direction: "desc",
-            nulls: "last",
+            direction: `desc`,
+            nulls: `last`,
           })
           .orderBy(({ persons }) => persons.address?.city, {
-            direction: "asc",
-            nulls: "first",
-            stringSort: "locale",
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `locale`,
           })
           .select(({ persons }) => ({
             id: persons.id,
@@ -228,7 +228,7 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("deeply nested property access in all methods", () => {
+  test(`deeply nested property access in all methods`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q
@@ -236,8 +236,8 @@ describe("Nested Properties Types", () => {
           // WHERE with deeply nested
           .where(({ persons }) => gt(persons.profile?.stats.tasksCompleted, 50))
           // ORDER BY with deeply nested
-          .orderBy(({ persons }) => persons.profile?.stats.rating, "desc")
-          .orderBy(({ persons }) => persons.address?.coordinates.lng, "asc")
+          .orderBy(({ persons }) => persons.profile?.stats.rating, `desc`)
+          .orderBy(({ persons }) => persons.address?.coordinates.lng, `asc`)
           // SELECT with deeply nested
           .select(({ persons }) => ({
             id: persons.id,
@@ -277,7 +277,7 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("direct nested object access", () => {
+  test(`direct nested object access`, () => {
     const collection = createLiveQueryCollection({
       query: (q) =>
         q.from({ persons: personsCollection }).select(({ persons }) => ({
@@ -324,7 +324,7 @@ describe("Nested Properties Types", () => {
     >()
   })
 
-  test("nested properties work at runtime with correct types", () => {
+  test(`nested properties work at runtime with correct types`, () => {
     // Test that nested properties work correctly at runtime
     const collection = createLiveQueryCollection({
       query: (q) =>

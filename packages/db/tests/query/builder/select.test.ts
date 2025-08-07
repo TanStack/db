@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { CollectionImpl } from "../../../src/collection.js"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { avg, count, eq, isUndefined, length, not, upper } from "../../../src/query/builder/functions.js"
+import {
+  avg,
+  count,
+  eq,
+  isUndefined,
+  length,
+  not,
+  upper,
+} from "../../../src/query/builder/functions.js"
 
 // Test schema
 interface Employee {
@@ -24,7 +32,6 @@ interface Employee {
     country: string
   }
 }
-
 
 // Test collection
 const employeesCollection = new CollectionImpl<Employee>({

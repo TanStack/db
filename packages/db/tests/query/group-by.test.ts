@@ -9,13 +9,12 @@ import {
   eq,
   gt,
   gte,
+  isNotUndefined,
   lt,
   max,
   min,
   or,
   sum,
-  isNotUndefined,
-  coalesce,
 } from "../../src/query/builder/functions.js"
 
 // Sample data types for comprehensive GROUP BY testing
@@ -1234,19 +1233,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .groupBy(({ orders }) =>
-                coalesce(
-                  isNotUndefined(orders.shipping?.tracking),
-                  `tracked`,
-                  `untracked`
-                )
+                isNotUndefined(orders.shipping?.tracking)
               )
               .select(({ orders }) => ({
-                tracking_status:
-                  coalesce(
-                    isNotUndefined(orders.shipping?.tracking),
-                    `tracked`,
-                    `untracked`
-                  ),
+                tracking_status: isNotUndefined(orders.shipping?.tracking),
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),
@@ -1255,12 +1245,12 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         const results = trackingSummary.toArray
         expect(results).toHaveLength(2) // tracked and untracked
 
-        const tracked = results.find((r) => r.tracking_status === `tracked`)
+        const tracked = results.find((r) => r.tracking_status === true)
         expect(tracked).toBeDefined()
         expect(tracked?.order_count).toBe(1) // Only order 1 has tracking
         expect(tracked?.total_amount).toBe(100)
 
-        const untracked = results.find((r) => r.tracking_status === `untracked`)
+        const untracked = results.find((r) => r.tracking_status === false)
         expect(untracked).toBeDefined()
         expect(untracked?.order_count).toBeGreaterThan(0) // Orders without tracking + orders without shipping
       })

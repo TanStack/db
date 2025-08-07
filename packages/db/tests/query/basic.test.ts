@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import {
+  concat,
   createLiveQueryCollection,
   eq,
   gt,
   upper,
-  concat,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"

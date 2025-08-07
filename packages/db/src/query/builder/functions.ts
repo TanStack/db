@@ -8,60 +8,68 @@ import type { Ref } from "./types.js"
 type ExpressionLike = BasicExpression | RefProxy<any> | Ref<any> | any
 
 // Helper type to extract the underlying type from various expression types
-type ExtractType<T> = 
-  T extends RefProxy<infer U> ? U
-  : T extends Ref<infer U> ? U
-  : T extends BasicExpression<infer U> ? U
-  : T extends undefined ? undefined
-  : T extends null ? null
-  : T
+type ExtractType<T> =
+  T extends RefProxy<infer U>
+    ? U
+    : T extends Ref<infer U>
+      ? U
+      : T extends BasicExpression<infer U>
+        ? U
+        : T extends undefined
+          ? undefined
+          : T extends null
+            ? null
+            : T
 
 // Helper type to determine aggregate return type based on input nullability
-type AggregateReturnType<T> = ExtractType<T> extends infer U
-  ? U extends number | undefined | null
-    ? Aggregate<U>
-    : U extends number
-      ? Aggregate<number>
-      : Aggregate<number | undefined | null>
-  : Aggregate<number | undefined | null>
+type AggregateReturnType<T> =
+  ExtractType<T> extends infer U
+    ? U extends number | undefined | null
+      ? Aggregate<U>
+      : U extends number
+        ? Aggregate<number>
+        : Aggregate<number | undefined | null>
+    : Aggregate<number | undefined | null>
 
 // Helper type to determine string function return type based on input nullability
-type StringFunctionReturnType<T> = ExtractType<T> extends infer U
-  ? U extends string | undefined | null
-    ? BasicExpression<U>
-    : U extends string
-      ? BasicExpression<string>
-      : BasicExpression<string | undefined | null>
-  : BasicExpression<string | undefined | null>
-
-// Helper type to determine numeric function return type based on input nullability  
-// This handles string, array, and number inputs for functions like length()
-type NumericFunctionReturnType<T> = ExtractType<T> extends infer U
-  ? U extends string
-    ? BasicExpression<number>
-    : U extends string | undefined
-      ? BasicExpression<number | undefined>
-    : U extends string | null
-      ? BasicExpression<number | null>
-    : U extends string | undefined | null
-      ? BasicExpression<number | undefined | null>
-    : U extends Array<any>
-      ? BasicExpression<number>
-    : U extends Array<any> | undefined
-      ? BasicExpression<number | undefined>
-    : U extends Array<any> | null
-      ? BasicExpression<number | null>
-    : U extends Array<any> | undefined | null
-      ? BasicExpression<number | undefined | null>
-    : U extends number | undefined | null
+type StringFunctionReturnType<T> =
+  ExtractType<T> extends infer U
+    ? U extends string | undefined | null
       ? BasicExpression<U>
-    : U extends number
+      : U extends string
+        ? BasicExpression<string>
+        : BasicExpression<string | undefined | null>
+    : BasicExpression<string | undefined | null>
+
+// Helper type to determine numeric function return type based on input nullability
+// This handles string, array, and number inputs for functions like length()
+type NumericFunctionReturnType<T> =
+  ExtractType<T> extends infer U
+    ? U extends string
       ? BasicExpression<number>
-      : BasicExpression<number | undefined | null>
-  : BasicExpression<number | undefined | null>
+      : U extends string | undefined
+        ? BasicExpression<number | undefined>
+        : U extends string | null
+          ? BasicExpression<number | null>
+          : U extends string | undefined | null
+            ? BasicExpression<number | undefined | null>
+            : U extends Array<any>
+              ? BasicExpression<number>
+              : U extends Array<any> | undefined
+                ? BasicExpression<number | undefined>
+                : U extends Array<any> | null
+                  ? BasicExpression<number | null>
+                  : U extends Array<any> | undefined | null
+                    ? BasicExpression<number | undefined | null>
+                    : U extends number | undefined | null
+                      ? BasicExpression<U>
+                      : U extends number
+                        ? BasicExpression<number>
+                        : BasicExpression<number | undefined | null>
+    : BasicExpression<number | undefined | null>
 
 // Helper type for binary numeric operations (combines nullability of both operands)
-type BinaryNumericReturnType<T1, T2> = 
+type BinaryNumericReturnType<T1, T2> =
   ExtractType<T1> extends infer U1
     ? ExtractType<T2> extends infer U2
       ? U1 extends number
@@ -206,7 +214,9 @@ export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`isUndefined`, [toExpression(value)])
 }
 
-export function isNotUndefined(value: ExpressionLike): BasicExpression<boolean> {
+export function isNotUndefined(
+  value: ExpressionLike
+): BasicExpression<boolean> {
   return new Func(`isNotUndefined`, [toExpression(value)])
 }
 
@@ -231,8 +241,10 @@ export function like(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | string | null
-    | string | undefined
+    | string
+    | null
+    | string
+    | undefined
     | BasicExpression<string>
     | BasicExpression<string | null>
     | BasicExpression<string | undefined>
@@ -240,8 +252,10 @@ export function like(
     | undefined,
   right:
     | string
-    | string | null
-    | string | undefined
+    | string
+    | null
+    | string
+    | undefined
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
@@ -261,8 +275,10 @@ export function ilike(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | string | null
-    | string | undefined
+    | string
+    | null
+    | string
+    | undefined
     | BasicExpression<string>
     | BasicExpression<string | null>
     | BasicExpression<string | undefined>
@@ -270,8 +286,10 @@ export function ilike(
     | undefined,
   right:
     | string
-    | string | null
-    | string | undefined
+    | string
+    | null
+    | string
+    | undefined
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
@@ -286,15 +304,21 @@ export function ilike(
 
 // Functions
 
-export function upper<T extends ExpressionLike>(arg: T): StringFunctionReturnType<T> {
+export function upper<T extends ExpressionLike>(
+  arg: T
+): StringFunctionReturnType<T> {
   return new Func(`upper`, [toExpression(arg)]) as StringFunctionReturnType<T>
 }
 
-export function lower<T extends ExpressionLike>(arg: T): StringFunctionReturnType<T> {
+export function lower<T extends ExpressionLike>(
+  arg: T
+): StringFunctionReturnType<T> {
   return new Func(`lower`, [toExpression(arg)]) as StringFunctionReturnType<T>
 }
 
-export function length<T extends ExpressionLike>(arg: T): NumericFunctionReturnType<T> {
+export function length<T extends ExpressionLike>(
+  arg: T
+): NumericFunctionReturnType<T> {
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
 
@@ -318,7 +342,10 @@ export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
   right: T2
 ): BinaryNumericReturnType<T1, T2> {
-  return new Func(`add`, [toExpression(left), toExpression(right)]) as BinaryNumericReturnType<T1, T2>
+  return new Func(`add`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType<T1, T2>
 }
 
 // Aggregates

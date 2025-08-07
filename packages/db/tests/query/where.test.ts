@@ -1413,7 +1413,9 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.contact?.address?.city, `San Francisco`))
+              .where(({ emp }) =>
+                eq(emp.contact?.address?.city, `San Francisco`)
+              )
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
