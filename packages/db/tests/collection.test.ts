@@ -1,14 +1,30 @@
-import { describe, expect, it, vi } from "vitest"
+import { type } from "arktype"
 import mitt from "mitt"
+import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import { z } from "zod"
-import { SchemaValidationError, createCollection } from "../src/collection"
+import { createCollection } from "../src/collection"
+import {
+  CollectionRequiresConfigError,
+  DuplicateKeyError,
+  KeyUpdateNotAllowedError,
+  MissingDeleteHandlerError,
+  MissingInsertHandlerError,
+  MissingUpdateHandlerError,
+  SchemaValidationError,
+} from "../src/errors"
 import { createTransaction } from "../src/transactions"
-import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
+import type {
+  ChangeMessage,
+  MutationFn,
+  OperationType,
+  PendingMutation,
+  ResolveTransactionChanges,
+} from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
-    expect(() => createCollection()).toThrow(`Collection requires a config`)
+    expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
@@ -41,25 +57,19 @@ describe(`Collection`, () => {
     // Verify that insert throws an error
     expect(() => {
       collection.insert({ value: `new value` })
-    }).toThrow(
-      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
-    )
+    }).toThrow(MissingInsertHandlerError)
 
     // Verify that update throws an error
     expect(() => {
       collection.update(`initial`, (draft) => {
         draft.value = `updated value`
       })
-    }).toThrow(
-      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
-    )
+    }).toThrow(MissingUpdateHandlerError)
 
     // Verify that delete throws an error
     expect(() => {
       collection.delete(`initial`)
-    }).toThrow(
-      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
-    )
+    }).toThrow(MissingDeleteHandlerError)
   })
 
   it(`should throw an error when trying to update an item's ID`, async () => {
@@ -94,9 +104,7 @@ describe(`Collection`, () => {
           draft.value = `updated value`
         })
       })
-    }).toThrow(
-      `Updating the key of an item is not allowed. Original key: "item-1", Attempted new key: "item-2". Please delete the old item and create a new one if a key change is necessary.`
-    )
+    }).toThrow(KeyUpdateNotAllowedError)
   })
 
   it(`It shouldn't expose any state until the initial sync is finished`, () => {
@@ -256,15 +264,9 @@ describe(`Collection`, () => {
       value: `bar`,
     })
 
-    // after mutationFn returns, check that the transaction is updated &
-    // optimistic update is gone & synced data & comibned state are all updated.
-    expect(
-      // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
-    ).toEqual({
-      id: 1,
-      value: `bar`,
-    })
+    // after mutationFn returns, check that the transaction is cleaned up,
+    // optimistic update is gone & synced data & combined state are all updated.
+    expect(collection.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
@@ -559,9 +561,7 @@ describe(`Collection`, () => {
     // Try to insert a document with the same ID
     expect(() => {
       tx.mutate(() => collection.insert({ id: 1, value: `duplicate value` }))
-    }).toThrow(
-      `Cannot insert document with ID "1" because it already exists in the collection`
-    )
+    }).toThrow(DuplicateKeyError)
 
     // Should be able to insert a document with a different ID
     const tx2 = createTransaction({ mutationFn })
@@ -718,25 +718,19 @@ describe(`Collection`, () => {
     // Test insert without handler
     expect(() => {
       collection.insert({ id: 2, value: `should fail` })
-    }).toThrow(
-      `Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured.`
-    )
+    }).toThrow(MissingInsertHandlerError)
 
     // Test update without handler
     expect(() => {
       collection.update(1, (draft) => {
         draft.value = `should fail`
       })
-    }).toThrow(
-      `Collection.update called directly (not within an explicit transaction) but no 'onUpdate' handler is configured.`
-    )
+    }).toThrow(MissingUpdateHandlerError)
 
     // Test delete without handler
     expect(() => {
       collection.delete(`1`) // Convert number to string to match expected type
-    }).toThrow(
-      `Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured.`
-    )
+    }).toThrow(MissingDeleteHandlerError)
   })
 
   it(`should not apply optimistic updates when optimistic: false`, async () => {
@@ -950,6 +944,99 @@ describe(`Collection`, () => {
 })
 
 describe(`Collection with schema validation`, () => {
+  it(`should validate data against arktype schema on insert`, () => {
+    // Create a Zod schema for a user
+    const userSchema = type({
+      name: `string > 0`,
+      age: `number.integer > 0`,
+      "email?": `string.email`,
+    })
+
+    // Create a collection with the schema
+    const collection = createCollection<typeof userSchema.infer>({
+      id: `test`,
+      getKey: (item) => item.name,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: userSchema,
+    })
+    const mutationFn = async () => {}
+
+    // Valid data should work
+    const validUser = {
+      name: `Alice`,
+      age: 30,
+      email: `alice@example.com`,
+    }
+
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() => collection.insert(validUser))
+
+    // Invalid data should throw SchemaValidationError
+    const invalidUser = {
+      name: ``, // Empty name (fails min length)
+      age: -5, // Negative age (fails positive)
+      email: `not-an-email`, // Invalid email
+    }
+
+    try {
+      const tx2 = createTransaction({ mutationFn })
+      tx2.mutate(() => collection.insert(invalidUser))
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`insert`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        // Check that we have validation errors for each invalid field
+        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
+          true
+        )
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
+          true
+        )
+        expect(
+          error.issues.some((issue) => issue.path?.includes(`email`))
+        ).toBe(true)
+      }
+    }
+
+    // Partial updates should work with valid data
+    const tx3 = createTransaction({ mutationFn })
+    tx3.mutate(() =>
+      collection.update(`Alice`, (draft) => {
+        draft.age = 31
+      })
+    )
+
+    // Partial updates should fail with invalid data
+    try {
+      const tx4 = createTransaction({ mutationFn })
+      tx4.mutate(() =>
+        collection.update(`Alice`, (draft) => {
+          draft.age = -1
+        })
+      )
+      // Should not reach here
+      expect(true).toBe(false)
+    } catch (error) {
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      if (error instanceof SchemaValidationError) {
+        expect(error.type).toBe(`update`)
+        expect(error.issues.length).toBeGreaterThan(0)
+        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
+          true
+        )
+      }
+    }
+  })
+
   it(`should validate data against schema on insert`, () => {
     // Create a Zod schema for a user
     const userSchema = z.object({
@@ -1041,5 +1128,234 @@ describe(`Collection with schema validation`, () => {
         )
       }
     }
+  })
+
+  it(`should apply schema defaults on insert`, () => {
+    const todoSchema = z.object({
+      id: z
+        .string()
+        .default(() => `todo-${Math.random().toString(36).substr(2, 9)}`),
+      text: z.string(),
+      completed: z.boolean().default(false),
+      createdAt: z.coerce.date().default(() => new Date()),
+      updatedAt: z.coerce.date().default(() => new Date()),
+    })
+
+    // Define inferred types for clarity and use in assertions
+    type Todo = z.infer<typeof todoSchema>
+    type TodoInput = z.input<typeof todoSchema>
+
+    // NOTE: `createCollection<Todo>` breaks the schema type inference.
+    // We have to use only the schema, and not the type generic, like so:
+    const collection = createCollection({
+      id: `defaults-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+      schema: todoSchema,
+    })
+
+    // Type test: should allow inserting input type (with missing fields that have defaults)
+    // Important: Input type is different from the output type (which is inferred using z.infer)
+    // For more details, @see https://github.com/colinhacks/zod/issues/4179#issuecomment-2811669261
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<InsertParam>().toEqualTypeOf<TodoInput | Array<TodoInput>>()
+
+    const mutationFn = async () => {}
+
+    // Minimal data
+    const tx1 = createTransaction<Todo>({ mutationFn })
+    tx1.mutate(() => collection.insert({ text: `task-1` }))
+
+    // Type assertions on the mutation structure
+    expect(tx1.mutations).toHaveLength(1)
+    const mutation = tx1.mutations[0]!
+
+    // Test the mutation type structure
+    expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
+    expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
+    expectTypeOf(mutation.changes).toEqualTypeOf<
+      ResolveTransactionChanges<Todo>
+    >()
+    expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
+
+    // Runtime assertions for actual values
+    expect(mutation.type).toBe(`insert`)
+    expect(mutation.changes).toEqual({ text: `task-1` })
+    expect(mutation.modified.text).toBe(`task-1`)
+    expect(mutation.modified.completed).toBe(false)
+    expect(mutation.modified.id).toBeDefined()
+    expect(mutation.modified.createdAt).toBeInstanceOf(Date)
+    expect(mutation.modified.updatedAt).toBeInstanceOf(Date)
+
+    let insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(1)
+    const insertedItem = insertedItems[0]!
+    expect(insertedItem.text).toBe(`task-1`)
+    expect(insertedItem.completed).toBe(false)
+    expect(insertedItem.id).toBeDefined()
+    expect(typeof insertedItem.id).toBe(`string`)
+    expect(insertedItem.createdAt).toBeInstanceOf(Date)
+    expect(insertedItem.updatedAt).toBeInstanceOf(Date)
+
+    // Partial data
+    const tx2 = createTransaction<Todo>({ mutationFn })
+    tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
+
+    insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(2)
+
+    const secondItem = insertedItems.find((item) => item.text === `task-2`)!
+    expect(secondItem).toBeDefined()
+    expect(secondItem.text).toBe(`task-2`)
+    expect(secondItem.completed).toBe(true)
+    expect(secondItem.id).toBeDefined()
+    expect(typeof secondItem.id).toBe(`string`)
+    expect(secondItem.createdAt).toBeInstanceOf(Date)
+    expect(secondItem.updatedAt).toBeInstanceOf(Date)
+
+    // All fields provided
+    const tx3 = createTransaction<Todo>({ mutationFn })
+
+    tx3.mutate(() =>
+      collection.insert({
+        id: `task-id-3`,
+        text: `task-3`,
+        completed: true,
+        createdAt: new Date(`2023-01-01T00:00:00Z`),
+        updatedAt: new Date(`2023-01-01T00:00:00Z`),
+      })
+    )
+    insertedItems = Array.from(collection.state.values())
+    expect(insertedItems).toHaveLength(3)
+
+    // using insertedItems[2] was finding wrong item for some reason.
+    const thirdItem = insertedItems.find((item) => item.text === `task-3`)
+    expect(thirdItem).toBeDefined()
+    expect(thirdItem!.text).toBe(`task-3`)
+    expect(thirdItem!.completed).toBe(true)
+    expect(thirdItem!.createdAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
+    expect(thirdItem!.updatedAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
+    expect(thirdItem!.id).toBe(`task-id-3`)
+  })
+
+  it(`should not block user actions when keys are recently synced`, async () => {
+    // This test reproduces the ACTUAL issue where rapid user actions get blocked
+    // when optimistic updates back up with slow sync responses
+    const txResolvers: Array<() => void> = []
+    const emitter = mitt()
+    const changeEvents: Array<any> = []
+
+    const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
+      // Simulate SLOW server operation - this is key to reproducing the issue
+      return new Promise((resolve) => {
+        txResolvers.push(() => {
+          emitter.emit(`sync`, transaction.mutations)
+          resolve(null)
+        })
+      })
+    })
+
+    const collection = createCollection<{ id: number; checked: boolean }>({
+      id: `user-action-blocking-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Initialize with checkboxes
+          begin()
+          for (let i = 1; i <= 3; i++) {
+            write({
+              type: `insert`,
+              value: { id: i, checked: false },
+            })
+          }
+          commit()
+          markReady()
+
+          // Listen for sync events - this triggers the problematic batching
+          // @ts-expect-error don't trust mitt's typing
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+        },
+      },
+      onUpdate: mutationFn,
+    })
+
+    // Listen to change events to verify they're emitted (this was the actual problem)
+    collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
+    await collection.stateWhenReady()
+
+    // CRITICAL: Simulate rapid clicking WITHOUT waiting for transactions to complete
+    // This is what actually triggers the bug - multiple pending transactions
+
+    // Step 1: First click
+    const tx1 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+    expect(collection.state.get(1)?.checked).toBe(true)
+    const initialEventCount = changeEvents.length
+
+    // Step 2: Second click immediately (before first completes)
+    const tx2 = collection.update(1, (draft) => {
+      draft.checked = false
+    })
+    expect(collection.state.get(1)?.checked).toBe(false)
+
+    // Step 3: Third click immediately (before others complete)
+    const tx3 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+    expect(collection.state.get(1)?.checked).toBe(true)
+
+    // CRITICAL TEST: Verify events are still being emitted for rapid user actions
+    // Before the fix, these would be batched and UI would freeze
+    expect(changeEvents.length).toBeGreaterThan(initialEventCount)
+    expect(mutationFn).toHaveBeenCalledTimes(3)
+
+    // Now complete the first transaction to trigger sync and batching
+    txResolvers[0]?.()
+    await tx1.isPersisted.promise
+
+    // Step 4: More rapid clicks after sync starts (this is where the bug occurred)
+    const eventCountBeforeRapidClicks = changeEvents.length
+
+    const tx4 = collection.update(1, (draft) => {
+      draft.checked = false
+    })
+    const tx5 = collection.update(1, (draft) => {
+      draft.checked = true
+    })
+
+    // CRITICAL: Verify that even after sync/batching starts, user actions still emit events
+    expect(changeEvents.length).toBeGreaterThan(eventCountBeforeRapidClicks)
+    expect(collection.state.get(1)?.checked).toBe(true) // Last action should win
+
+    // Clean up remaining transactions
+    for (let i = 1; i < txResolvers.length; i++) {
+      txResolvers[i]?.()
+    }
+    await Promise.all([
+      tx2.isPersisted.promise,
+      tx3.isPersisted.promise,
+      tx4.isPersisted.promise,
+      tx5.isPersisted.promise,
+    ])
   })
 })

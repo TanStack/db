@@ -1,5 +1,12 @@
 import { CollectionImpl } from "../../collection.js"
 import { CollectionRef, QueryRef } from "../ir.js"
+import {
+  InvalidSourceError,
+  JoinConditionMustBeEqualityError,
+  OnlyOneSourceAllowedError,
+  QueryMustHaveFromClauseError,
+  SubQueryMustHaveFromClauseError,
+} from "../../errors.js"
 import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
 import type { NamespacedRow } from "../../types.js"
 import type {
@@ -12,12 +19,14 @@ import type {
   QueryIR,
 } from "../ir.js"
 import type {
+  CompareOptions,
   Context,
   GroupByCallback,
   JoinOnCallback,
   MergeContext,
   MergeContextWithJoinType,
   OrderByCallback,
+  OrderByOptions,
   RefProxyForContext,
   ResultTypeFromSelect,
   SchemaFromSource,
@@ -45,7 +54,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     context: string
   ): [string, CollectionRef | QueryRef] {
     if (Object.keys(source).length !== 1) {
-      throw new Error(`Only one source is allowed in the ${context}`)
+      throw new OnlyOneSourceAllowedError(context)
     }
 
     const alias = Object.keys(source)[0]!
@@ -58,13 +67,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     } else if (sourceValue instanceof BaseQueryBuilder) {
       const subQuery = sourceValue._getQuery()
       if (!(subQuery as Partial<QueryIR>).from) {
-        throw new Error(
-          `A sub query passed to a ${context} must have a from clause itself`
-        )
+        throw new SubQueryMustHaveFromClauseError(context)
       }
       ref = new QueryRef(subQuery, alias)
     } else {
-      throw new Error(`Invalid source`)
+      throw new InvalidSourceError()
     }
 
     return [alias, ref]
@@ -166,7 +173,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       left = onExpression.args[0]!
       right = onExpression.args[1]!
     } else {
-      throw new Error(`Join condition must be an equality expression`)
+      throw new JoinConditionMustBeEqualityError()
     }
 
     const joinClause: JoinClause = {
@@ -182,6 +189,110 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       ...this.query,
       join: [...existingJoins, joinClause],
     }) as any
+  }
+
+  /**
+   * Perform a LEFT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the left joined table available
+   *
+   * @example
+   * ```ts
+   * // Left join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .leftJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  leftJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
+  > {
+    return this.join(source, onCallback, `left`)
+  }
+
+  /**
+   * Perform a RIGHT JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the right joined table available
+   *
+   * @example
+   * ```ts
+   * // Right join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .rightJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  rightJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
+  > {
+    return this.join(source, onCallback, `right`)
+  }
+
+  /**
+   * Perform an INNER JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the inner joined table available
+   *
+   * @example
+   * ```ts
+   * // Inner join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .innerJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  innerJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
+  > {
+    return this.join(source, onCallback, `inner`)
+  }
+
+  /**
+   * Perform a FULL JOIN with another table or subquery
+   *
+   * @param source - An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
+   * @param onCallback - A function that receives table references and returns the join condition
+   * @returns A QueryBuilder with the full joined table available
+   *
+   * @example
+   * ```ts
+   * // Full join users with posts
+   * query
+   *   .from({ users: usersCollection })
+   *   .fullJoin({ posts: postsCollection }, ({users, posts}) => eq(users.id, posts.userId))
+   * ```
+   */
+  fullJoin<TSource extends Source>(
+    source: TSource,
+    onCallback: JoinOnCallback<
+      MergeContext<TContext, SchemaFromSource<TSource>>
+    >
+  ): QueryBuilder<
+    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
+  > {
+    return this.join(source, onCallback, `full`)
   }
 
   /**
@@ -369,16 +480,31 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   orderBy(
     callback: OrderByCallback<TContext>,
-    direction: OrderByDirection = `asc`
+    options: OrderByDirection | OrderByOptions = `asc`
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const result = callback(refProxy)
 
+    const opts: CompareOptions =
+      typeof options === `string`
+        ? { direction: options, nulls: `first`, stringSort: `locale` }
+        : {
+            direction: options.direction ?? `asc`,
+            nulls: options.nulls ?? `first`,
+            stringSort: options.stringSort ?? `locale`,
+            locale:
+              options.stringSort === `locale` ? options.locale : undefined,
+            localeOptions:
+              options.stringSort === `locale`
+                ? options.localeOptions
+                : undefined,
+          }
+
     // Create the new OrderBy structure with expression and direction
     const orderByClause: OrderByClause = {
       expression: toExpression(result),
-      direction,
+      compareOptions: opts,
     }
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
@@ -477,6 +603,27 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return new BaseQueryBuilder({
       ...this.query,
       offset: count,
+    }) as any
+  }
+
+  /**
+   * Specify that the query should return distinct rows.
+   * Deduplicates rows based on the selected columns.
+   * @returns A QueryBuilder with distinct enabled
+   *
+   * @example
+   * ```ts
+   * // Get countries our users are from
+   * query
+   *   .from({ users: usersCollection })
+   *   .select(({users}) => users.country)
+   *   .distinct()
+   * ```
+   */
+  distinct(): QueryBuilder<TContext> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      distinct: true,
     }) as any
   }
 
@@ -600,7 +747,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
   _getQuery(): QueryIR {
     if (!this.query.from) {
-      throw new Error(`Query must have a from clause`)
+      throw new QueryMustHaveFromClauseError()
     }
     return this.query as QueryIR
   }

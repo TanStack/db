@@ -1,5 +1,174 @@
 # examples/react/todo
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [[`1220d7e`](https://github.com/TanStack/db/commit/1220d7eb6b544f05c2ea2f629ee75f969ebcda40)]:
+  - @tanstack/query-db-collection@0.2.0
+
+## 0.1.0
+
+### Minor Changes
+
+- 0.1 release - first beta 🎉 ([#332](https://github.com/TanStack/db/pull/332))
+
+### Patch Changes
+
+- Updated dependencies [[`7d2f4be`](https://github.com/TanStack/db/commit/7d2f4be95c43aad29fb61e80e5a04c58c859322b), [`f0eda36`](https://github.com/TanStack/db/commit/f0eda36cb36350399bc8835686a6c4b6ad297e45)]:
+  - @tanstack/electric-db-collection@0.1.0
+  - @tanstack/query-db-collection@0.1.0
+  - @tanstack/react-db@0.1.0
+  - @tanstack/trailbase-db-collection@0.1.0
+
+## 0.0.39
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.15
+  - @tanstack/query-db-collection@0.0.15
+  - @tanstack/react-db@0.0.33
+  - @tanstack/trailbase-db-collection@0.0.9
+
+## 0.0.38
+
+### Patch Changes
+
+- Updated dependencies [[`e04bd12`](https://github.com/TanStack/db/commit/e04bd1252f612d4638104368d17cb644cc85295b)]:
+  - @tanstack/query-db-collection@0.0.14
+  - @tanstack/electric-db-collection@0.0.14
+  - @tanstack/react-db@0.0.32
+  - @tanstack/trailbase-db-collection@0.0.8
+
+## 0.0.37
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.13
+  - @tanstack/query-db-collection@0.0.13
+  - @tanstack/react-db@0.0.31
+  - @tanstack/trailbase-db-collection@0.0.7
+
+## 0.0.36
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.12
+  - @tanstack/query-db-collection@0.0.12
+  - @tanstack/react-db@0.0.30
+  - @tanstack/trailbase-db-collection@0.0.6
+
+## 0.0.35
+
+### Patch Changes
+
+- Updated dependencies [[`5260ee3`](https://github.com/TanStack/db/commit/5260ee3098d12eccc58a5cf903ea479908681402)]:
+  - @tanstack/trailbase-db-collection@0.0.5
+  - @tanstack/electric-db-collection@0.0.11
+  - @tanstack/query-db-collection@0.0.11
+  - @tanstack/react-db@0.0.29
+
+## 0.0.34
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.10
+  - @tanstack/query-db-collection@0.0.10
+  - @tanstack/react-db@0.0.28
+  - @tanstack/trailbase-db-collection@0.0.4
+
+## 0.0.33
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.9
+  - @tanstack/query-db-collection@0.0.9
+  - @tanstack/react-db@0.0.27
+  - @tanstack/trailbase-db-collection@0.0.3
+
+## 0.0.32
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+- Updated dependencies [[`09c6995`](https://github.com/TanStack/db/commit/09c6995ea9c8e6979d077ca63cbdd6215054ae78)]:
+  - @tanstack/trailbase-db-collection@0.0.2
+  - @tanstack/electric-db-collection@0.0.8
+  - @tanstack/query-db-collection@0.0.8
+  - @tanstack/react-db@0.0.26
+
+## 0.0.31
+
+### Patch Changes
+
+- Updated dependencies [[`20f810e`](https://github.com/TanStack/db/commit/20f810e13a7d802bf56da6f0df89b34312ebb2fd)]:
+  - @tanstack/electric-db-collection@0.0.7
+  - @tanstack/query-db-collection@0.0.7
+  - @tanstack/react-db@0.0.25
+
+## 0.0.30
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.6
+  - @tanstack/query-db-collection@0.0.6
+  - @tanstack/react-db@0.0.24
+
+## 0.0.29
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.5
+  - @tanstack/query-db-collection@0.0.5
+  - @tanstack/react-db@0.0.23
+
+## 0.0.28
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.0.4
+  - @tanstack/query-db-collection@0.0.4
+  - @tanstack/react-db@0.0.22
+
+## 0.0.27
+
+### Patch Changes
+
+- Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+  - Move local-only and local-storage collections to main `@tanstack/db` package
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
+  - Create new `@tanstack/query-db-collection` package for TanStack Query integration
+  - Delete `@tanstack/db-collections` package (removed from repo)
+  - Update example app and documentation to use new package structure
+
+  Why?
+  - Better separation of concerns
+  - Independent versioning for each collection type
+  - Cleaner dependencies (electric collections don't need query deps, etc.)
+  - Easier to add more collection types moving forward
+
+- Updated dependencies [[`8e23322`](https://github.com/TanStack/db/commit/8e233229b25eabed07cdaf12948ba913786bf4f9)]:
+  - @tanstack/electric-db-collection@0.0.3
+  - @tanstack/query-db-collection@0.0.3
+  - @tanstack/react-db@0.0.21
+
+## 0.0.26
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-collections@0.0.24
+  - @tanstack/react-db@0.0.20
+
 ## 0.0.25
 
 ### Patch Changes

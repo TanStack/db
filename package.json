@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db-monorepo",
   "private": true,
-  "description": "Optimistic UI library for sync engines",
+  "description": "Reactive client queryable store for sync-first applications",
   "version": "0.0.0",
   "repository": {
     "type": "git",
@@ -17,17 +17,20 @@
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "docs:generate": "node scripts/generateDocs.js",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
-    "test": "pnpm --filter \"./packages/**\" test"
+    "test": "pnpm --filter \"./packages/**\" test",
+    "test:verify-links": "node scripts/verify-links.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.28.1",
     "@eslint/js": "^9.22.0",
     "@stylistic/eslint-plugin": "^4.2.0",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.17.1",
+    "@tanstack/config": "^0.20.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.12",
@@ -41,7 +44,9 @@
     "eslint-plugin-prettier": "^5.2.3",
     "eslint-plugin-react": "^7.37.4",
     "husky": "^9.1.7",
+    "fast-glob": "^3.3.3",
     "jsdom": "^26.0.0",
+    "markdown-link-extractor": "^4.0.2",
     "lint-staged": "^15.5.0",
     "mitt": "^3.0.1",
     "prettier": "^3.5.3",
@@ -72,6 +77,7 @@
   ],
   "overrides": {
     "@tanstack/db": "workspace:*",
+    "@tanstack/db-ivm": "workspace:*",
     "@tanstack/react-db": "workspace:*",
     "@tanstack/vue-db": "workspace:*"
   }

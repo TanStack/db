@@ -1,0 +1,52 @@
+{
+  "name": "@tanstack/svelte-db",
+  "description": "Svelte integration for @tanstack/db",
+  "version": "0.1.2",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/package": "^2.4.0",
+    "@sveltejs/vite-plugin-svelte": "^6.1.0",
+    "@vitest/coverage-istanbul": "^3.0.9",
+    "publint": "^0.3.2",
+    "svelte": "^5.28.6",
+    "svelte-check": "^4.3.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "keywords": [
+    "optimistic",
+    "svelte",
+    "typescript"
+  ],
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/svelte-db"
+  },
+  "scripts": {
+    "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run",
+    "test:types": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "svelte": "./dist/index.js",
+  "type": "module",
+  "types": "./dist/index.d.ts"
+}

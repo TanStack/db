@@ -33,6 +33,15 @@
           ]
         },
         {
+          "label": "solid",
+          "children": [
+            {
+              "label": "Solid Adapter",
+              "to": "framework/solid/adapter"
+            }
+          ]
+        },
+        {
           "label": "vue",
           "children": [
             {
@@ -40,12 +49,43 @@
               "to": "framework/vue/adapter"
             }
           ]
+        },
+        {
+          "label": "svelte",
+          "children": [
+            {
+              "label": "Svelte Adapter",
+              "to": "framework/svelte/adapter"
+            }
+          ]
         }
       ]
     },
     {
       "label": "Guides",
-      "children": []
+      "children": [
+        {
+          "label": "Live Queries",
+          "to": "guides/live-queries"
+        },
+        {
+          "label": "Error Handling",
+          "to": "guides/error-handling"
+        },
+        {
+          "label": "Creating Collection Options Creators",
+          "to": "guides/collection-options-creator"
+        }
+      ]
+    },
+    {
+      "label": "Collections",
+      "children": [
+        {
+          "label": "Query Collection",
+          "to": "collections/query-collection"
+        }
+      ]
     },
     {
       "label": "API Reference",
@@ -53,6 +93,46 @@
         {
           "label": "Core API Reference",
           "to": "reference/index"
+        },
+        {
+          "label": "Collection",
+          "to": "reference/interfaces/collection"
+        },
+        {
+          "label": "createCollection",
+          "to": "reference/functions/createcollection"
+        },
+        {
+          "label": "liveQueryCollectionOptions",
+          "to": "reference/functions/livequerycollectionoptions"
+        },
+        {
+          "label": "createLiveQueryCollection",
+          "to": "reference/functions/createlivequerycollection"
+        },
+        {
+          "label": "createOptimisticAction",
+          "to": "reference/functions/createoptimisticaction"
+        },
+        {
+          "label": "createTransaction",
+          "to": "reference/functions/createtransaction"
+        },
+        {
+          "label": "Electric DB Collection",
+          "to": "reference/electric-db-collection/index"
+        },
+        {
+          "label": "electricCollectionOptions",
+          "to": "reference/electric-db-collection/functions/electriccollectionoptions"
+        },
+        {
+          "label": "Query DB Collection",
+          "to": "reference/query-db-collection/index"
+        },
+        {
+          "label": "queryCollectionOptions",
+          "to": "reference/query-db-collection/functions/querycollectionoptions"
         }
       ],
       "frameworks": [
@@ -62,6 +142,23 @@
             {
               "label": "React Hooks",
               "to": "framework/react/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/react/reference/functions/uselivequery"
+            }
+          ]
+        },
+        {
+          "label": "solid",
+          "children": [
+            {
+              "label": "Solid Hooks",
+              "to": "framework/solid/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/solid/reference/functions/uselivequery"
             }
           ]
         },
@@ -69,23 +166,20 @@
           "label": "vue",
           "children": [
             {
-              "label": "Vue Hooks",
+              "label": "Vue Composables",
               "to": "framework/vue/reference/index"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "label": "Examples",
-      "children": [],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
+            },
             {
-              "label": "Todo List",
-              "to": "framework/react/examples/todo"
+              "label": "useLiveQuery",
+              "to": "framework/vue/reference/functions/uselivequery"
+            },
+            {
+              "label": "UseLiveQueryReturn",
+              "to": "framework/vue/reference/interfaces/uselivequeryreturn"
+            },
+            {
+              "label": "UseLiveQueryReturnWithCollection",
+              "to": "framework/vue/reference/interfaces/uselivequeryreturnwithcollection"
             }
           ]
         }

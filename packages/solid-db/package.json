@@ -1,0 +1,59 @@
+{
+  "name": "@tanstack/solid-db",
+  "description": "Solid integration for @tanstack/db",
+  "version": "0.1.2",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/solid-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "solid",
+    "typescript"
+  ],
+  "packageManager": "pnpm@10.6.3",
+  "dependencies": {
+    "@solid-primitives/map": "^0.7.2",
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@electric-sql/client": "1.0.0",
+    "@solidjs/testing-library": "^0.8.10",
+    "@vitest/coverage-istanbul": "^3.0.9",
+    "jsdom": "^26.0.0",
+    "solid-js": "^1.9.7",
+    "vite-plugin-solid": "^2.11.7",
+    "vitest": "^3.0.9"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "peerDependencies": {
+    "solid-js": ">=1.9.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

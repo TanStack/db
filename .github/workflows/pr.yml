@@ -71,3 +71,17 @@ jobs:
         run: |
           cd examples/react/todo
           pnpm build
+  build-starter:
+    name: Build Example Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@main
+      - name: Build Packages
+        run: pnpm run build
+      - name: Build Starter Site
+        run: |
+          cd examples/react/projects
+          pnpm build
