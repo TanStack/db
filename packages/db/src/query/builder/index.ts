@@ -23,7 +23,6 @@ import type {
   Context,
   GroupByCallback,
   JoinOnCallback,
-  MergeContext,
   MergeContextForJoinCallback,
   MergeContextWithJoinType,
   OrderByCallback,

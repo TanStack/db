@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { type Collection, createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
 import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
 import { eq, gt } from "../../src/query/builder/functions.js"
@@ -1062,10 +1062,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
     })
 
     describe(`Nested Object OrderBy`, () => {
-      let personsCollection: Collection<Person>
-
-      beforeEach(() => {
-        personsCollection = createCollection(
+      const createPersonsCollection = () => {
+        return createCollection(
           mockSyncCollectionOptions<Person>({
             id: `test-persons-nested`,
             getKey: (person) => person.id,
@@ -1073,6 +1071,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             autoIndex,
           })
         )
+      }
+
+      let personsCollection: ReturnType<typeof createPersonsCollection>
+
+      beforeEach(() => {
+        personsCollection = createPersonsCollection()
       })
 
       it(`orders by nested object properties ascending`, async () => {
@@ -1231,7 +1235,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         // Person without profile should have score 0 and be last
         expect(results.map((r) => r.score)).toEqual([92, 85, 78, 0])
-        expect(results[3].name).toBe(`Test Person`)
+        expect(results[3]!.name).toBe(`Test Person`)
       })
 
       it(`maintains ordering during live updates of nested properties`, async () => {
