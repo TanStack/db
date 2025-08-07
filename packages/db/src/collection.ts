@@ -61,6 +61,7 @@ import type {
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
+import { emitDevtoolsEvent } from "./devtools-events"
 
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
@@ -68,6 +69,7 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
     if ((window as any).__TANSTACK_DB_DEVTOOLS__?.registerCollection) {
       ;(window as any).__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
       ;(collection as any).isRegisteredWithDevtools = true
+      emitDevtoolsEvent("collectionRegistered", { id: collection.id })
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
     }
@@ -84,6 +86,7 @@ function triggerDevtoolsUpdate(
       updateCallback()
     }
   }
+  emitDevtoolsEvent("collectionUpdated", { id: collection.id })
 }
 
 // Declare the devtools registry on window

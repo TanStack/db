@@ -8,11 +8,30 @@ import { GenericDetailsPanel } from "./DetailsPanel"
 import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
 
+// Temporary stub types for the grid integration
+// These will be replaced by @tanstack/table-core + virtualizer wiring
+function DataGridPlaceholder() {
+  return (
+    <div style={{ padding: `8px`, color: `#888` }}>
+      Tabular grid view (TanStack Table + virtualizer) coming next
+    </div>
+  )
+}
+
+function RawQueryPlaceholder() {
+  return (
+    <div style={{ padding: `8px`, color: `#888` }}>
+      Raw query/IR display for live queries coming next
+    </div>
+  )
+}
+
 export interface CollectionDetailsPanelProps {
   activeCollection: Accessor<CollectionMetadata | undefined>
 }
 
 type CollectionTab = `summary` | `config` | `state` | `transactions` | `data`
+  | `raw`
 
 export function CollectionDetailsPanel({
   activeCollection,
@@ -52,6 +71,7 @@ export function CollectionDetailsPanel({
     { id: `state`, label: `State` },
     { id: `transactions`, label: `Transactions` },
     { id: `data`, label: `Data` },
+    { id: `raw`, label: `Raw Query` },
   ]
 
   const renderTabContent = () => {
@@ -133,9 +153,10 @@ export function CollectionDetailsPanel({
       }
 
       case `data`: {
-        return (
-          <div class={styles().noDataMessage}>Grid view coming soon...</div>
-        )
+        return <DataGridPlaceholder />
+      }
+      case `raw`: {
+        return <RawQueryPlaceholder />
       }
 
       default:
