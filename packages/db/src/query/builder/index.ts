@@ -24,6 +24,7 @@ import type {
   GroupByCallback,
   JoinOnCallback,
   MergeContext,
+  MergeContextForJoinCallback,
   MergeContextWithJoinType,
   OrderByCallback,
   OrderByOptions,
@@ -142,7 +143,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   >(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >,
     type: TJoinType = `left` as TJoinType
   ): QueryBuilder<
@@ -154,7 +155,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
     const refProxy = createRefProxy(newAliases) as RefProxyForContext<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
 
     // Get the join condition expression
@@ -209,7 +210,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   leftJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
@@ -235,7 +236,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   rightJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
@@ -261,7 +262,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   innerJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
@@ -287,7 +288,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   fullJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>

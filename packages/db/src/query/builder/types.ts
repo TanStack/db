@@ -323,6 +323,22 @@ export type MergeContext<
   TNewSchema extends ContextSchema,
 > = MergeContextWithJoinType<TContext, TNewSchema, `left`>
 
+// Type for join callbacks that doesn't apply optionality - both tables are available
+export type MergeContextForJoinCallback<
+  TContext extends Context,
+  TNewSchema extends ContextSchema,
+> = {
+  baseSchema: TContext[`baseSchema`]
+  // Merge schemas without applying join optionality - both are non-optional in join condition
+  schema: TContext[`schema`] & TNewSchema
+  fromSourceName: TContext[`fromSourceName`]
+  hasJoins: true
+  joinTypes: TContext[`joinTypes`] extends Record<string, any>
+    ? TContext[`joinTypes`]
+    : {}
+  result: TContext[`result`]
+}
+
 // Helper type for updating context with result type
 export type WithResult<TContext extends Context, TResult> = Prettify<
   Omit<TContext, `result`> & {
