@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
 import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
-import { eq, gt } from "../../src/query/builder/functions.js"
+import { eq, gt, isNotUndefined } from "../../src/query/builder/functions.js"
 
 type Person = {
   id: string
@@ -1183,7 +1183,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .where(({ persons }) => persons.address !== undefined)
+            .where(({ persons }) => isNotUndefined(persons.address))
             .orderBy(({ persons }) => persons.address?.coordinates?.lat, `asc`)
             .select(({ persons }) => ({
               id: persons.id,
@@ -1233,9 +1233,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const results = Array.from(collection.values())
         expect(results).toHaveLength(4)
 
-        // Person without profile should have score 0 and be last
-        expect(results.map((r) => r.score)).toEqual([92, 85, 78, 0])
-        expect(results[3]!.name).toBe(`Test Person`)
+        // Person without profile should have undefined score and be first (undefined sorts first)
+        expect(results.map((r) => r.score)).toEqual([undefined, 92, 85, 78])
+        expect(results[0]!.name).toBe(`Test Person`)
       })
 
       it(`maintains ordering during live updates of nested properties`, async () => {
@@ -1302,17 +1302,17 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const results = Array.from(collection.values())
         expect(results).toHaveLength(3)
 
-        // Should be ordered: Los Angeles, New York, undefined (John Smith has no address)
-        // Note: undefined values in ORDER BY may be handled differently by the query engine
+        // Should be ordered: undefined, Los Angeles, New York (undefined sorts first)
+        // Note: undefined values in ORDER BY sort first in our implementation
         expect(results.map((r) => r.city)).toEqual([
+          undefined,
           `Los Angeles`,
           `New York`,
-          undefined,
         ])
         expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
           `Jane Doe`,
           `John Doe`,
-          `John Smith`,
         ])
       })
     })

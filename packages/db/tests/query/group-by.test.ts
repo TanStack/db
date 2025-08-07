@@ -1100,7 +1100,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 state: orders.customer?.address?.state,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                cities: orders.customer?.address?.city,
               })),
         })
 
@@ -1250,7 +1249,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                   ),
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                has_tracking: isNotUndefined(orders.shipping?.tracking),
               })),
         })
 
