@@ -499,7 +499,7 @@ export class CollectionImpl<
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
 
-// Resolve indexes when collection becomes ready
+    // Resolve indexes when collection becomes ready
     if (newStatus === `ready` && !this.isIndexesResolved) {
       // Resolve indexes asynchronously without blocking
       this.resolveAllIndexes().catch((error) => {
@@ -2431,13 +2431,9 @@ export class CollectionImpl<
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()
 
-<<<<<<< HEAD
-    this.recomputeOptimisticState()
+    this.recomputeOptimisticState(false)
 
     // Trigger devtools update after transaction state changes
     triggerDevtoolsUpdate(this)
-=======
-    this.recomputeOptimisticState(false)
->>>>>>> origin/main
   }
 }
