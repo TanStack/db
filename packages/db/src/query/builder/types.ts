@@ -127,25 +127,35 @@ export type WhereCallback<TContext extends Context> = (
  * SelectValue - Union of all valid values in a select clause
  * 
  * This type defines what can be used as values in the object passed to `select()`.
- * It includes:
  * 
  * **Core Expression Types**:
  * - `BasicExpression`: Function calls like `upper(users.name)`
  * - `Aggregate`: Aggregations like `count()`, `avg()`
  * - `RefProxy/Ref`: Direct field references like `users.name`
  * 
+ * **JavaScript Literals** (for constant values in projections):
+ * - `string`: String literals like `'active'`, `'N/A'`
+ * - `number`: Numeric literals like `0`, `42`, `3.14`
+ * - `boolean`: Boolean literals `true`, `false`
+ * - `null`: Explicit null values
+ * 
  * **Advanced Features**:
  * - `undefined`: Allows optional projection values
  * - `{ [key: string]: SelectValue }`: Nested object projection
  * - `PrecomputeRefStructure<any>`: Spread operations like `...users`
  * 
- * **Internal Support** (for spread operations):
- * - `true`, `Array<string>`, `any`: Allow RefProxy internal properties to pass through
+ * Note: The runtime spread implementation uses internal RefProxy properties
+ * but these are hidden from the type system for cleaner typing.
  * 
- * The nested object support enables projections like:
+ * Examples:
  * ```typescript
  * select({
  *   id: users.id,
+ *   name: users.name,
+ *   status: 'active',        // string literal
+ *   priority: 1,             // number literal
+ *   verified: true,          // boolean literal
+ *   notes: null,             // explicit null
  *   profile: {
  *     name: users.name,
  *     email: users.email
@@ -159,13 +169,14 @@ type SelectValue =
   | RefProxy 
   | RefProxyFor<any> 
   | Ref<any>
-  | undefined
+  | string       // String literals
+  | number       // Numeric literals  
+  | boolean      // Boolean literals
+  | null         // Explicit null
+  | undefined    // Optional values
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
   | Array<Ref<any>>
-  | true  // For __refProxy property in spreads
-  | Array<string>  // For __path property in spreads
-  | any  // For __type property in spreads
 
 /**
  * SelectObject - Wrapper type for select clause objects
@@ -194,6 +205,12 @@ export type SelectObject<
  * - `BasicExpression<T>` → `T`: Function results like `upper()` → `string`
  * - `Aggregate<T>` → `T`: Aggregation results like `count()` → `number`
  * 
+ * **JavaScript Literals** (pass through as-is):
+ * - `string` → `string`: String literals remain strings
+ * - `number` → `number`: Numeric literals remain numbers
+ * - `boolean` → `boolean`: Boolean literals remain booleans
+ * - `null` → `null`: Explicit null remains null
+ * 
  * **Nested Objects** (recursive):
  * - Plain objects are recursively processed to handle nested projections
  * - RefProxy objects are detected and excluded from recursion
@@ -205,10 +222,10 @@ export type SelectObject<
  * Example transformation:
  * ```typescript
  * // Input:
- * { id: Ref<number>, name: Ref<string>, profile: { bio: Ref<string> } }
+ * { id: Ref<number>, name: Ref<string>, status: 'active', count: 42, profile: { bio: Ref<string> } }
  * 
  * // Output:
- * { id: number, name: string, profile: { bio: string } }
+ * { id: number, name: string, status: 'active', count: 42, profile: { bio: string } }
  * ```
  */
 export type ResultTypeFromSelect<TSelectObject> = {
@@ -230,6 +247,14 @@ export type ResultTypeFromSelect<TSelectObject> = {
       ? T
     : TSelectObject[K] extends RefProxyFor<infer T>
       ? T
+    : TSelectObject[K] extends string
+      ? string
+    : TSelectObject[K] extends number
+      ? number
+    : TSelectObject[K] extends boolean
+      ? boolean
+    : TSelectObject[K] extends null
+      ? null
     : TSelectObject[K] extends undefined
       ? undefined
     : TSelectObject[K] extends { __type: infer U }
@@ -481,6 +506,7 @@ export type RefProxyFor<T> = IsExactlyUndefined<T> extends true
  * 2. **Recursive structure**: Object properties become nested RefProxy/Ref types
  * 3. **Optionality handling**: undefined/null are placed outside refs for ?. support
  * 4. **Type preservation**: The structure mirrors the original type as closely as possible
+ * 5. **Spread support**: Internal properties are hidden during spread operations
  * 
  * Examples:
  * RefProxy<string> → { __refProxy: true, __path: [...], __type: string }
@@ -493,6 +519,7 @@ export type RefProxyFor<T> = IsExactlyUndefined<T> extends true
  * - For primitive types: Only internal metadata is added
  * - For object types: Properties are recursively transformed with optionality preserved
  * - For undefined: No additional properties (just metadata)
+ * - For spreads: Internal properties are excluded from type checking
  */
 export type RefProxy<T = any> = {
   /** @internal - Runtime marker to identify ref proxy objects */
@@ -526,19 +553,19 @@ export type RefProxy<T = any> = {
 /**
  * Ref - The user-facing ref type with clean IDE display
  * 
- * This is what users see in their IDE and what they use in composable functions.
- * It's actually just an alias for RefProxy<T>, but TypeScript displays it cleanly as "Ref<T>"
- * instead of showing all the internal RefProxy properties.
+ * This is just an alias for RefProxy<T> but provides a cleaner name that
+ * TypeScript will prefer to display in most contexts. While not a perfect
+ * solution for hiding internal structure, it provides better semantics.
  * 
  * Examples in IDE:
- * - Ref<string> instead of { __refProxy: true; __path: Array<string>; __type: string }
- * - Ref<User> instead of the full RefProxy<User> structure
+ * - Ref<string> (when TypeScript chooses to show the alias name)
+ * - RefProxy internals (when TypeScript expands the type)
  * 
- * This unification means:
- * 1. Users get a clean API: all composables use Ref<T>
- * 2. Full functionality: Ref<T> has all RefProxy properties due to the alias  
- * 3. Type compatibility: Ref<T> and RefProxy<T> are interchangeable
- * 4. Better DX: IDEs show meaningful type names instead of complex structures
+ * This alias approach means:
+ * 1. Users get a semantic API: all composables use Ref<T>
+ * 2. Full compatibility: Ref<T> is exactly RefProxy<T>
+ * 3. Type safety: No additional compatibility issues
+ * 4. Cleaner imports: Users import Ref instead of RefProxy
  */
 export type Ref<T> = RefProxy<T>
 
