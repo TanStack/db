@@ -108,9 +108,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
-              budget: dept.budget,
+              user_name: user?.name,
+              department_name: dept?.name,
+              budget: dept?.budget,
             })),
       })
 
@@ -289,8 +289,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
+              user_name: user?.name,
+              department_name: dept?.name,
             })),
       })
 
@@ -332,8 +332,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
+              user_name: user?.name,
+              department_name: dept?.name,
             })),
       })
 
@@ -371,8 +371,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -420,8 +420,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -486,8 +486,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 `inner`
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -561,8 +561,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 `inner`
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -601,9 +601,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ user, dept }) => ({
                 user_id: user.id,
-                user_name: user.name,
-                department_id: user.department_id,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_id: user?.department_id,
+                department_name: dept?.name,
               })),
         })
 

@@ -14,6 +14,8 @@ import {
   min,
   or,
   sum,
+  isNotUndefined,
+  coalesce,
 } from "../../src/query/builder/functions.js"
 
 // Sample data types for comprehensive GROUP BY testing
@@ -1062,10 +1064,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer !== undefined)
-              .groupBy(({ orders }) => orders.customer.tier)
+              .where(({ orders }) => isNotUndefined(orders.customer))
+              .groupBy(({ orders }) => orders.customer?.tier)
               .select(({ orders }) => ({
-                tier: orders.customer.tier,
+                tier: orders.customer?.tier,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
                 avg_amount: avg(orders.amount),
@@ -1092,13 +1094,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer.address !== undefined)
-              .groupBy(({ orders }) => orders.customer.address.state)
+              .where(({ orders }) => isNotUndefined(orders.customer?.address))
+              .groupBy(({ orders }) => orders.customer?.address?.state)
               .select(({ orders }) => ({
-                state: orders.customer.address.state,
+                state: orders.customer?.address?.state,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                cities: orders.customer.address.city,
+                cities: orders.customer?.address?.city,
               })),
         })
 
@@ -1122,14 +1124,14 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.shipping !== undefined)
-              .groupBy(({ orders }) => orders.shipping.method)
+              .where(({ orders }) => isNotUndefined(orders.shipping))
+              .groupBy(({ orders }) => orders.shipping?.method)
               .select(({ orders }) => ({
-                method: orders.shipping.method,
+                method: orders.shipping?.method,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                avg_shipping_cost: avg(orders.shipping.cost),
-                total_shipping_cost: sum(orders.shipping.cost),
+                avg_shipping_cost: avg(orders.shipping?.cost),
+                total_shipping_cost: sum(orders.shipping?.cost),
               })),
         })
 
@@ -1157,15 +1159,15 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .from({ orders: ordersCollection })
               .where(({ orders }) =>
                 and(
-                  orders.customer !== undefined,
-                  orders.shipping !== undefined
+                  isNotUndefined(orders.customer),
+                  isNotUndefined(orders.shipping)
                 )
               )
-              .groupBy(({ orders }) => orders.customer.tier)
-              .groupBy(({ orders }) => orders.shipping.method)
+              .groupBy(({ orders }) => orders.customer?.tier)
+              .groupBy(({ orders }) => orders.shipping?.method)
               .select(({ orders }) => ({
-                tier: orders.customer.tier,
-                method: orders.shipping.method,
+                tier: orders.customer?.tier,
+                method: orders.shipping?.method,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),
@@ -1196,10 +1198,12 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer.preferences !== undefined)
-              .groupBy(({ orders }) => orders.customer.preferences.newsletter)
+              .where(({ orders }) =>
+                isNotUndefined(orders.customer?.preferences)
+              )
+              .groupBy(({ orders }) => orders.customer?.preferences?.newsletter)
               .select(({ orders }) => ({
-                newsletter_subscribed: orders.customer.preferences.newsletter,
+                newsletter_subscribed: orders.customer?.preferences?.newsletter,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
                 avg_amount: avg(orders.amount),
@@ -1231,16 +1235,22 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .groupBy(({ orders }) =>
-                orders.shipping.tracking !== undefined ? `tracked` : `untracked`
+                coalesce(
+                  isNotUndefined(orders.shipping?.tracking),
+                  `tracked`,
+                  `untracked`
+                )
               )
               .select(({ orders }) => ({
                 tracking_status:
-                  orders.shipping.tracking !== undefined
-                    ? `tracked`
-                    : `untracked`,
+                  coalesce(
+                    isNotUndefined(orders.shipping?.tracking),
+                    `tracked`,
+                    `untracked`
+                  ),
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
-                has_tracking: orders.shipping.tracking !== undefined,
+                has_tracking: isNotUndefined(orders.shipping?.tracking),
               })),
         })
 
@@ -1263,10 +1273,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => orders.customer !== undefined)
-              .groupBy(({ orders }) => orders.customer.tier)
+              .where(({ orders }) => isNotUndefined(orders.customer))
+              .groupBy(({ orders }) => orders.customer?.tier)
               .select(({ orders }) => ({
-                tier: orders.customer.tier,
+                tier: orders.customer?.tier,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),

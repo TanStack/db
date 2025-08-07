@@ -386,7 +386,7 @@ describe(`Join Subquery Types`, () => {
             )
             .select(({ issue, activeUser }) => ({
               issue_title: issue.title,
-              user_name: activeUser.name, // Should now be string | undefined
+              user_name: activeUser?.name, // Should now be string | undefined
               issue_status: issue.status,
             }))
         },

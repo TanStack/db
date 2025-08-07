@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection.js"
+import { type Collection, createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
 import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
 import { eq, gt } from "../../src/query/builder/functions.js"
@@ -466,12 +466,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               ({ employees, departments }) =>
                 eq(employees.department_id, departments.id)
             )
-            .orderBy(({ departments }) => departments.name, `asc`)
+            .orderBy(({ departments }) => departments?.name, `asc`)
             .orderBy(({ employees }) => employees.salary, `desc`)
             .select(({ employees, departments }) => ({
               id: employees.id,
               employee_name: employees.name,
-              department_name: departments.name,
+              department_name: departments?.name,
               salary: employees.salary,
             }))
         )
@@ -1062,7 +1062,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
     })
 
     describe(`Nested Object OrderBy`, () => {
-      let personsCollection: ReturnType<typeof createCollection<Person>>
+      let personsCollection: Collection<Person>
 
       beforeEach(() => {
         personsCollection = createCollection(
@@ -1079,11 +1079,11 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile.score, `asc`)
+            .orderBy(({ persons }) => persons.profile?.score, `asc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              score: persons.profile.score,
+              score: persons.profile?.score,
             }))
         )
         await collection.preload()
@@ -1102,11 +1102,11 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              score: persons.profile.score,
+              score: persons.profile?.score,
             }))
         )
         await collection.preload()
@@ -1125,12 +1125,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile.stats.rating, `desc`)
+            .orderBy(({ persons }) => persons.profile?.stats?.rating, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              rating: persons.profile.stats.rating,
-              tasksCompleted: persons.profile.stats.tasksCompleted,
+              rating: persons.profile?.stats?.rating,
+              tasksCompleted: persons.profile?.stats?.tasksCompleted,
             }))
         )
         await collection.preload()
@@ -1150,12 +1150,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           q
             .from({ persons: personsCollection })
             .orderBy(({ persons }) => persons.team, `asc`)
-            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
               team: persons.team,
-              score: persons.profile.score,
+              score: persons.profile?.score,
             }))
         )
         await collection.preload()
@@ -1180,12 +1180,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           q
             .from({ persons: personsCollection })
             .where(({ persons }) => persons.address !== undefined)
-            .orderBy(({ persons }) => persons.address.coordinates.lat, `asc`)
+            .orderBy(({ persons }) => persons.address?.coordinates?.lat, `asc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              city: persons.address.city,
-              lat: persons.address.coordinates.lat,
+              city: persons.address?.city,
+              lat: persons.address?.coordinates?.lat,
             }))
         )
         await collection.preload()
@@ -1217,11 +1217,11 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              score: persons.profile.score,
+              score: persons.profile?.score,
             }))
         )
         await collection.preload()
@@ -1238,11 +1238,11 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile.score, `desc`)
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              score: persons.profile.score,
+              score: persons.profile?.score,
             }))
         )
         await collection.preload()
@@ -1286,11 +1286,11 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.address.city, `asc`)
+            .orderBy(({ persons }) => persons.address?.city, `asc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              city: persons.address.city,
+              city: persons.address?.city,
             }))
         )
         await collection.preload()

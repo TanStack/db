@@ -1388,17 +1388,17 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
       })
 
       test(`should filter by nested object properties`, () => {
-        // Filter by nested profile.skills array
+        // Filter by nested profile?.skills array
         const jsDevs = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => inArray(`JavaScript`, emp.profile.skills))
+              .where(({ emp }) => inArray(`JavaScript`, emp.profile?.skills))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                skills: emp.profile.skills,
+                skills: emp.profile?.skills,
               })),
         })
 
@@ -1411,11 +1411,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.contact.address.city, `San Francisco`))
+              .where(({ emp }) => eq(emp.contact?.address.city, `San Francisco`))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                city: emp.contact.address.city,
+                city: emp.contact?.address.city,
               })),
         })
 
@@ -1432,11 +1432,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.contact.address, null))
+              .where(({ emp }) => eq(emp.contact?.address, null))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                hasAddress: emp.contact.address !== null,
+                hasAddress: emp.contact?.address !== null,
               })),
         })
 
@@ -1455,8 +1455,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                skills: emp.profile.skills,
-                years: emp.profile.experience.years,
+                skills: emp.profile?.skills,
+                years: emp.profile?.experience.years,
               })),
         })
 
@@ -1473,15 +1473,15 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .where(({ emp }) =>
                 and(
                   eq(emp.active, true),
-                  eq(emp.contact.address.state, `CA`),
-                  gte(emp.profile.experience.years, 5)
+                  eq(emp.contact?.address.state, `CA`),
+                  gte(emp.profile?.experience.years, 5)
                 )
               )
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                years: emp.profile.experience.years,
-                state: emp.contact.address.state,
+                years: emp.profile?.experience.years,
+                state: emp.contact?.address.state,
               })),
         })
 
@@ -1502,14 +1502,14 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .where(({ emp }) =>
                 and(
                   gt(emp.salary, 60000),
-                  inArray(`Python`, emp.profile.skills)
+                  inArray(`Python`, emp.profile?.skills)
                 )
               )
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
                 salary: emp.salary,
-                skills: emp.profile.skills,
+                skills: emp.profile?.skills,
               })),
         })
 
@@ -1524,12 +1524,12 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => emp.contact.emergency !== undefined)
+              .where(({ emp }) => emp.contact?.emergency !== undefined)
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                emergencyName: emp.contact.emergency.name,
-                relation: emp.contact.emergency.relation,
+                emergencyName: emp.contact?.emergency.name,
+                relation: emp.contact?.emergency.relation,
               })),
         })
 
@@ -1594,11 +1594,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => gte(emp.profile.experience.years, 5))
+              .where(({ emp }) => gte(emp.profile?.experience.years, 5))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                years: emp.profile.experience.years,
+                years: emp.profile?.experience.years,
               })),
         })
 
@@ -1613,11 +1613,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => emp.profile.skills !== undefined)
+              .where(({ emp }) => emp.profile?.skills !== undefined)
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                skillCount: length(emp.profile.skills),
+                skillCount: length(emp.profile?.skills),
               })),
         })
 
@@ -1633,15 +1633,15 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
                 or(
-                  eq(emp.contact.address.city, `San Francisco`),
-                  inArray(`Python`, emp.profile.skills)
+                  eq(emp.contact?.address.city, `San Francisco`),
+                  inArray(`Python`, emp.profile?.skills)
                 )
               )
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                city: emp.contact.address.city,
-                hasPython: inArray(`Python`, emp.profile.skills),
+                city: emp.contact?.address.city,
+                hasPython: inArray(`Python`, emp.profile?.skills),
               })),
         })
 

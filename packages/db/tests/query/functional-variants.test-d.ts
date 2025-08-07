@@ -450,11 +450,11 @@ describe(`Functional Variants Types`, () => {
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
             eq(user.department_id, dept.id)
           )
-          .groupBy(({ dept }) => dept.name)
+          .groupBy(({ dept }) => dept?.name)
           .fn.having((row) => row.dept?.name !== `HR`)
           .select(({ dept, user }) => ({
-            departmentId: dept.id,
-            departmentName: dept.name,
+            departmentId: dept?.id,
+            departmentName: dept?.name,
             totalEmployees: count(user.id),
           })),
     })
