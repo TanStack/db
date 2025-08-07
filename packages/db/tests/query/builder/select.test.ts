@@ -301,7 +301,7 @@ describe(`QueryBuilder.select`, () => {
         hasProfile: not(isUndefined(employees.profile)),
         profileBio: employees.profile?.bio,
         addressStreet: employees.address?.street,
-        contactEmail: employees.profile?.contact?.email,
+        contactEmail: employees.profile?.contact.email,
       }))
 
     const builtQuery = getQueryIR(query)

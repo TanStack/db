@@ -1129,12 +1129,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .orderBy(({ persons }) => persons.profile?.stats?.rating, `desc`)
+            .orderBy(({ persons }) => persons.profile?.stats.rating, `desc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-              rating: persons.profile?.stats?.rating,
-              tasksCompleted: persons.profile?.stats?.tasksCompleted,
+              rating: persons.profile?.stats.rating,
+              tasksCompleted: persons.profile?.stats.tasksCompleted,
             }))
         )
         await collection.preload()
@@ -1184,12 +1184,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           q
             .from({ persons: personsCollection })
             .where(({ persons }) => isNotUndefined(persons.address))
-            .orderBy(({ persons }) => persons.address?.coordinates?.lat, `asc`)
+            .orderBy(({ persons }) => persons.address?.coordinates.lat, `asc`)
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
               city: persons.address?.city,
-              lat: persons.address?.coordinates?.lat,
+              lat: persons.address?.coordinates.lat,
             }))
         )
         await collection.preload()

@@ -1094,9 +1094,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) => isNotUndefined(orders.customer?.address))
-              .groupBy(({ orders }) => orders.customer?.address?.state)
+              .groupBy(({ orders }) => orders.customer?.address.state)
               .select(({ orders }) => ({
-                state: orders.customer?.address?.state,
+                state: orders.customer?.address.state,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),
@@ -1199,9 +1199,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .where(({ orders }) =>
                 isNotUndefined(orders.customer?.preferences)
               )
-              .groupBy(({ orders }) => orders.customer?.preferences?.newsletter)
+              .groupBy(({ orders }) => orders.customer?.preferences.newsletter)
               .select(({ orders }) => ({
-                newsletter_subscribed: orders.customer?.preferences?.newsletter,
+                newsletter_subscribed: orders.customer?.preferences.newsletter,
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
                 avg_amount: avg(orders.amount),

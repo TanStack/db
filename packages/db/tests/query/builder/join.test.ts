@@ -75,7 +75,7 @@ describe(`QueryBuilder.join`, () => {
           eq(employees.department_id, departments.id)
       )
       .join({ projects: projectsCollection }, ({ departments, projects }) =>
-        eq(departments?.id, projects?.department_id)
+        eq(departments?.id, projects.department_id)
       )
 
     const builtQuery = getQueryIR(query)

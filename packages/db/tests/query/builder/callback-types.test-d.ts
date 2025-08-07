@@ -482,8 +482,8 @@ describe(`Query Builder Callback Types`, () => {
         .from({ user: usersCollection })
         .join({ dept: departmentsCollection }, ({ user, dept }) => {
           expectTypeOf(user.id).toEqualTypeOf<Ref<number>>()
-          expectTypeOf(dept?.id).toEqualTypeOf<Ref<number>>()
-          expectTypeOf(dept?.location).toEqualTypeOf<Ref<string>>()
+          expectTypeOf(dept.id).toEqualTypeOf<Ref<number>>()
+          expectTypeOf(dept.location).toEqualTypeOf<Ref<string>>()
           return eq(user.department_id, dept.id)
         })
         .join({ project: projectsCollection }, ({ user, dept, project }) => {
