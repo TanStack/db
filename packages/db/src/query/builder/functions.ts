@@ -121,6 +121,23 @@ export function not(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`not`, [toExpression(value)])
 }
 
+// Null/undefined checking functions
+export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(`isUndefined`, [toExpression(value)])
+}
+
+export function isNotUndefined(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(`isNotUndefined`, [toExpression(value)])
+}
+
+export function isNull(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(`isNull`, [toExpression(value)])
+}
+
+export function isNotNull(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(`isNotNull`, [toExpression(value)])
+}
+
 export function inArray(
   value: ExpressionLike,
   array: ExpressionLike
@@ -134,8 +151,25 @@ export function like(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | BasicExpression<string>,
-  right: string | RefProxy<string> | BasicExpression<string>
+    | string | null
+    | string | undefined
+    | BasicExpression<string>
+    | BasicExpression<string | null>
+    | BasicExpression<string | undefined>
+    | null
+    | undefined,
+  right:
+    | string
+    | string | null
+    | string | undefined
+    | RefProxy<string>
+    | RefProxy<string | null>
+    | RefProxy<string | undefined>
+    | BasicExpression<string>
+    | BasicExpression<string | null>
+    | BasicExpression<string | undefined>
+    | null
+    | undefined
 ): BasicExpression<boolean>
 export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
@@ -147,8 +181,25 @@ export function ilike(
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | BasicExpression<string>,
-  right: string | RefProxy<string> | BasicExpression<string>
+    | string | null
+    | string | undefined
+    | BasicExpression<string>
+    | BasicExpression<string | null>
+    | BasicExpression<string | undefined>
+    | null
+    | undefined,
+  right:
+    | string
+    | string | null
+    | string | undefined
+    | RefProxy<string>
+    | RefProxy<string | null>
+    | RefProxy<string | undefined>
+    | BasicExpression<string>
+    | BasicExpression<string | null>
+    | BasicExpression<string | undefined>
+    | null
+    | undefined
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }
@@ -159,9 +210,16 @@ export function upper(
   arg:
     | RefProxy<string>
     | RefProxy<string | undefined>
+    | RefProxy<string | null>
     | string
+    | string | undefined
+    | string | null
     | BasicExpression<string>
-): BasicExpression<string> {
+    | BasicExpression<string | undefined>
+    | BasicExpression<string | null>
+    | undefined
+    | null
+): BasicExpression<string | undefined | null> {
   return new Func(`upper`, [toExpression(arg)])
 }
 
@@ -169,9 +227,16 @@ export function lower(
   arg:
     | RefProxy<string>
     | RefProxy<string | undefined>
+    | RefProxy<string | null>
     | string
+    | string | undefined
+    | string | null
     | BasicExpression<string>
-): BasicExpression<string> {
+    | BasicExpression<string | undefined>
+    | BasicExpression<string | null>
+    | undefined
+    | null
+): BasicExpression<string | undefined | null> {
   return new Func(`lower`, [toExpression(arg)])
 }
 
@@ -179,13 +244,25 @@ export function length(
   arg:
     | RefProxy<string>
     | RefProxy<string | undefined>
+    | RefProxy<string | null>
     | RefProxy<Array<any>>
     | RefProxy<Array<any> | undefined>
+    | RefProxy<Array<any> | null>
     | string
+    | string | undefined
+    | string | null
     | Array<any>
+    | Array<any> | undefined
+    | Array<any> | null
     | BasicExpression<string>
+    | BasicExpression<string | undefined>
+    | BasicExpression<string | null>
     | BasicExpression<Array<any>>
-): BasicExpression<number> {
+    | BasicExpression<Array<any> | undefined>
+    | BasicExpression<Array<any> | null>
+    | undefined
+    | null
+): BasicExpression<number | undefined | null> {
   return new Func(`length`, [toExpression(arg)])
 }
 
@@ -209,14 +286,28 @@ export function add(
   left:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
-    | BasicExpression<number>,
+    | number | undefined
+    | number | null
+    | BasicExpression<number>
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null,
   right:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
+    | number | undefined
+    | number | null
     | BasicExpression<number>
-): BasicExpression<number> {
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null
+): BasicExpression<number | undefined | null> {
   return new Func(`add`, [toExpression(left), toExpression(right)])
 }
 
@@ -230,9 +321,16 @@ export function avg(
   arg:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
+    | number | undefined
+    | number | null
     | BasicExpression<number>
-): Aggregate<number> {
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null
+): Aggregate<number | undefined | null> {
   return new Aggregate(`avg`, [toExpression(arg)])
 }
 
@@ -240,9 +338,16 @@ export function sum(
   arg:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
+    | number | undefined
+    | number | null
     | BasicExpression<number>
-): Aggregate<number> {
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null
+): Aggregate<number | undefined | null> {
   return new Aggregate(`sum`, [toExpression(arg)])
 }
 
@@ -250,9 +355,16 @@ export function min(
   arg:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
+    | number | undefined
+    | number | null
     | BasicExpression<number>
-): Aggregate<number> {
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null
+): Aggregate<number | undefined | null> {
   return new Aggregate(`min`, [toExpression(arg)])
 }
 
@@ -260,9 +372,16 @@ export function max(
   arg:
     | RefProxy<number>
     | RefProxy<number | undefined>
+    | RefProxy<number | null>
     | number
+    | number | undefined
+    | number | null
     | BasicExpression<number>
-): Aggregate<number> {
+    | BasicExpression<number | undefined>
+    | BasicExpression<number | null>
+    | undefined
+    | null
+): Aggregate<number | undefined | null> {
   return new Aggregate(`max`, [toExpression(arg)])
 }
 

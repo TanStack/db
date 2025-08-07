@@ -52,11 +52,19 @@ export type WhereCallback<TContext extends Context> = (
 ) => any
 
 // Callback return type for select clauses
+// Allows nested object structures for projection
+type SelectValue = 
+  | BasicExpression 
+  | Aggregate 
+  | RefProxy 
+  | RefProxyFor<any> 
+  | undefined
+  | { [key: string]: SelectValue }
+  | PrecomputeRefStructure<any>
+  | Array<RefProxy<any>>
+
 export type SelectObject<
-  T extends Record<
-    string,
-    BasicExpression | Aggregate | RefProxy | RefProxyFor<any>
-  > = Record<string, BasicExpression | Aggregate | RefProxy | RefProxyFor<any>>,
+  T extends Record<string, SelectValue> = Record<string, SelectValue>,
 > = T
 
 // Helper type to get the result type from a select object
@@ -73,7 +81,11 @@ export type ResultTypeFromSelect<TSelectObject> = {
             ? undefined
             : TSelectObject[K] extends { __type: infer U }
               ? U
-              : never
+              : TSelectObject[K] extends Record<string, any>
+                ? TSelectObject[K] extends { __refProxy: true }
+                  ? never // This is a RefProxy, handled above
+                  : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
+                : never
 }
 
 // Callback type for orderBy clauses
@@ -115,8 +127,20 @@ export type JoinOnCallback<TContext extends Context> = (
 ) => any
 
 // Type for creating RefProxy objects based on context
+// This handles optionality logic and precomputes the ref structure directly
 export type RefProxyForContext<TContext extends Context> = {
-  [K in keyof TContext[`schema`]]: RefProxyFor<TContext[`schema`][K]>
+  [K in keyof TContext[`schema`]]: IsExactlyUndefined<TContext[`schema`][K]> extends true
+    ? // T is exactly undefined
+      RefProxy<TContext[`schema`][K]>
+    : IsOptional<TContext[`schema`][K]> extends true
+      ? // T is optional (T | undefined) but not exactly undefined
+        NonUndefined<TContext[`schema`][K]> extends Record<string, any>
+        ? PrecomputeRefStructure<NonUndefined<TContext[`schema`][K]>> | undefined
+        : RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
+      : // T is not optional
+        TContext[`schema`][K] extends Record<string, any>
+        ? PrecomputeRefStructure<TContext[`schema`][K]>
+        : RefProxy<TContext[`schema`][K]>
 }
 
 // Helper type to check if T is exactly undefined
@@ -128,49 +152,33 @@ type IsOptional<T> = undefined extends T ? true : false
 // Helper type to extract non-undefined type
 type NonUndefined<T> = T extends undefined ? never : T
 
-// Helper type to create RefProxy for a specific type with optionality passthrough
-// This is used to create the RefProxy object that is used in the query builder.
-// Much of the complexity here is due to the fact that we need to handle optionality
-// from joins. A left join will make the joined table optional, a right join will make
-// the main table optional etc. This is applied to the schema, with the new namespaced
-// source being `SourceType | undefined`.
-// We then follow this through the ref proxy system so that accessing a property on
-// and optional source will itsself be optional.
-// If for example we join in `joinedTable` with a left join, then
-// `where(({ joinedTable }) => joinedTable.name === `John`)`
-// we want the the type of `name` to be `RefProxy<string | undefined>` to indicate that
-// the `name` property is optional, as the joinedTable is also optional.
-export type RefProxyFor<T> = OmitRefProxy<
-  IsExactlyUndefined<T> extends true
-    ? // T is exactly undefined
-      RefProxy<T>
-    : IsOptional<T> extends true
-      ? // T is optional (T | undefined) but not exactly undefined
-        NonUndefined<T> extends Record<string, any>
-        ? {
-            [K in keyof NonUndefined<T>]-?: NonUndefined<T>[K] extends Record<
-              string,
-              any
-            >
-              ? RefProxyFor<NonUndefined<T>[K]> &
-                  RefProxy<NonUndefined<T>[K] | undefined>
-              : RefProxy<NonUndefined<T>[K] | undefined>
-          } & RefProxy<T>
-        : RefProxy<T>
-      : // T is not optional
-        T extends Record<string, any>
-        ? {
-            // Make all properties required, but for optional ones, include undefined in the RefProxy type
-            [K in keyof T]-?: undefined extends T[K]
-              ? T[K] extends Record<string, any>
-                ? RefProxyFor<T[K]> & RefProxy<T[K]>
-                : RefProxy<T[K]>
-              : T[K] extends Record<string, any>
-                ? RefProxyFor<T[K]> & RefProxy<T[K]>
-                : RefProxy<T[K]>
-          } & RefProxy<T>
-        : RefProxy<T>
->
+// Precompute the ref structure for an object type
+// This transforms { bio: string, contact: { email: string } } into
+// { bio: Ref<string>, contact: { email: Ref<string> } }
+// Only leaf values are wrapped in RefProxy, intermediate objects remain plain
+type PrecomputeRefStructure<T extends Record<string, any>> = {
+  [K in keyof T]: IsExactlyUndefined<T[K]> extends true
+    ? RefProxy<T[K]>
+    : IsOptional<T[K]> extends true
+      ? NonUndefined<T[K]> extends Record<string, any>
+        ? PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
+        : RefProxy<NonUndefined<T[K]>> | undefined
+      : T[K] extends Record<string, any>
+        ? PrecomputeRefStructure<T[K]>
+        : RefProxy<T[K]>
+}
+
+// Helper type for backward compatibility and reusable query callbacks
+// This is a simplified version that just handles the optionality logic
+export type RefProxyFor<T> = IsExactlyUndefined<T> extends true
+  ? RefProxy<T>
+  : IsOptional<T> extends true
+    ? NonUndefined<T> extends Record<string, any>
+      ? PrecomputeRefStructure<NonUndefined<T>> | undefined
+      : RefProxy<T>
+    : T extends Record<string, any>
+      ? PrecomputeRefStructure<T>
+      : RefProxy<T>
 
 // This is the public type that is exported from the query builder
 // and is used when constructing reusable query callbacks.
@@ -178,15 +186,23 @@ export type Ref<T> = RefProxyFor<T>
 
 type OmitRefProxy<T> = Omit<T, `__refProxy` | `__path` | `__type`>
 
-// The core RefProxy interface
-export interface RefProxy<T = any> {
+// The core RefProxy interface with recursive structure
+export type RefProxy<T = any> = {
   /** @internal */
   readonly __refProxy: true
   /** @internal */
   readonly __path: Array<string>
   /** @internal */
   readonly __type: T
-}
+} & (T extends undefined
+  ? {}
+  : T extends Record<string, any>
+    ? {
+        [K in keyof T]: T[K] extends Record<string, any>
+          ? RefProxy<T[K]>
+          : RefProxy<T[K]>
+      }
+    : {})
 
 // Helper type to apply join optionality immediately when merging contexts
 export type MergeContextWithJoinType<
