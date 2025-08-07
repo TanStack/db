@@ -176,6 +176,7 @@ type SelectValue =
   | undefined    // Optional values
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
+  | SpreadableRefProxy<any>  // For spread operations without internal properties
   | Array<Ref<any>>
 
 /**
@@ -247,6 +248,8 @@ export type ResultTypeFromSelect<TSelectObject> = {
       ? T
     : TSelectObject[K] extends RefProxyFor<infer T>
       ? T
+    : TSelectObject[K] extends SpreadableRefProxy<infer T>
+      ? ResultTypeFromSelect<SpreadableRefProxy<T>>
     : TSelectObject[K] extends string
       ? string
     : TSelectObject[K] extends number
@@ -549,6 +552,24 @@ export type RefProxy<T = any> = {
                   : Ref<T[K]> // Required leaf: clean Ref display
       }
     : {}) // Primitive types get no additional properties
+
+/**
+ * SpreadableRefProxy - Type for spread operations that excludes internal properties
+ * 
+ * This type represents what you get when you spread a RefProxy. It omits the internal
+ * properties (__refProxy, __path, __type) and only includes the user-facing properties
+ * that should be part of the spread operation.
+ * 
+ * This enables clean spread operations like:
+ * ```typescript
+ * select({
+ *   id: employees.id,
+ *   name: employees.name,
+ *   ...employees.profile  // Only spreads bio, skills, contact - not __refProxy etc.
+ * })
+ * ```
+ */
+export type SpreadableRefProxy<T> = Omit<RefProxy<T>, '__refProxy' | '__path' | '__type'>
 
 /**
  * Ref - The user-facing ref type with clean IDE display

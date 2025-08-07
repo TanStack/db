@@ -439,6 +439,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         select[key] = toExpression(value)
       } else if (
         typeof value === `object` &&
+        value !== null &&
         `type` in value &&
         (value.type === `agg` || value.type === `func`)
       ) {
