@@ -2,19 +2,20 @@ import { Aggregate, Func } from "../ir"
 import { toExpression } from "./ref-proxy.js"
 import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
+import type { Ref } from "./types.js"
 
 // Helper type for any expression-like value
-type ExpressionLike = BasicExpression | RefProxy<any> | any
+type ExpressionLike = BasicExpression | RefProxy<any> | Ref<any> | any
 
 // Operators
 
 export function eq<T>(
-  left: RefProxy<T>,
-  right: T | RefProxy<T> | BasicExpression<T>
+  left: RefProxy<T> | undefined,
+  right: T | RefProxy<T> | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
-  left: T | BasicExpression<T>,
-  right: T | BasicExpression<T>
+  left: T | BasicExpression<T> | undefined,
+  right: T | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
@@ -22,12 +23,12 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gt<T>(
-  left: RefProxy<T>,
-  right: T | RefProxy<T> | BasicExpression<T>
+  left: RefProxy<T> | undefined,
+  right: T | RefProxy<T> | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
-  left: T | BasicExpression<T>,
-  right: T | BasicExpression<T>
+  left: T | BasicExpression<T> | undefined,
+  right: T | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gt(left: any, right: any): BasicExpression<boolean> {
@@ -35,12 +36,12 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gte<T>(
-  left: RefProxy<T>,
-  right: T | RefProxy<T> | BasicExpression<T>
+  left: RefProxy<T> | undefined,
+  right: T | RefProxy<T> | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
-  left: T | BasicExpression<T>,
-  right: T | BasicExpression<T>
+  left: T | BasicExpression<T> | undefined,
+  right: T | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gte(left: any, right: any): BasicExpression<boolean> {
@@ -48,12 +49,12 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lt<T>(
-  left: RefProxy<T>,
-  right: T | RefProxy<T> | BasicExpression<T>
+  left: RefProxy<T> | undefined,
+  right: T | RefProxy<T> | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
-  left: T | BasicExpression<T>,
-  right: T | BasicExpression<T>
+  left: T | BasicExpression<T> | undefined,
+  right: T | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
@@ -61,12 +62,12 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lte<T>(
-  left: RefProxy<T>,
-  right: T | RefProxy<T> | BasicExpression<T>
+  left: RefProxy<T> | undefined,
+  right: T | RefProxy<T> | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
-  left: T | BasicExpression<T>,
-  right: T | BasicExpression<T>
+  left: T | BasicExpression<T> | undefined,
+  right: T | BasicExpression<T> | undefined
 ): BasicExpression<boolean>
 export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lte(left: any, right: any): BasicExpression<boolean> {
@@ -211,6 +212,9 @@ export function upper(
     | RefProxy<string>
     | RefProxy<string | undefined>
     | RefProxy<string | null>
+    | Ref<string>
+    | Ref<string | undefined>
+    | Ref<string | null>
     | string
     | string | undefined
     | string | null

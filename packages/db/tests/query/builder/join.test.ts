@@ -101,8 +101,8 @@ describe(`QueryBuilder.join`, () => {
       .select(({ employees, departments }) => ({
         id: employees.id,
         name: employees.name,
-        department_name: departments.name,
-        department_budget: departments.budget,
+        department_name: departments?.name,
+        department_budget: departments?.budget,
       }))
 
     const builtQuery = getQueryIR(query)
@@ -122,7 +122,7 @@ describe(`QueryBuilder.join`, () => {
         ({ employees, departments }) =>
           eq(employees.department_id, departments.id)
       )
-      .where(({ departments }) => gt(departments.budget, 1000000))
+      .where(({ departments }) => gt(departments?.budget, 1000000))
 
     const builtQuery = getQueryIR(query)
     expect(builtQuery.where).toBeDefined()
@@ -160,13 +160,13 @@ describe(`QueryBuilder.join`, () => {
           eq(employees.department_id, departments.id)
       )
       .where(({ employees, departments }) =>
-        and(gt(employees.salary, 50000), gt(departments.budget, 1000000))
+        and(gt(employees.salary, 50000), gt(departments?.budget, 1000000))
       )
       .select(({ employees, departments }) => ({
         id: employees.id,
         name: employees.name,
-        department_name: departments.name,
-        dept_location: departments.location,
+        department_name: departments?.name,
+        dept_location: departments?.location,
       }))
 
     const builtQuery = getQueryIR(query)

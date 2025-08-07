@@ -58,10 +58,11 @@ type SelectValue =
   | Aggregate 
   | RefProxy 
   | RefProxyFor<any> 
+  | Ref<any>
   | undefined
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
-  | Array<RefProxy<any>>
+  | Array<Ref<any>>
 
 export type SelectObject<
   T extends Record<string, SelectValue> = Record<string, SelectValue>,
@@ -158,14 +159,14 @@ type NonUndefined<T> = T extends undefined ? never : T
 // Only leaf values are wrapped in RefProxy, intermediate objects remain plain
 type PrecomputeRefStructure<T extends Record<string, any>> = {
   [K in keyof T]: IsExactlyUndefined<T[K]> extends true
-    ? RefProxy<T[K]>
+    ? Ref<T[K]>
     : IsOptional<T[K]> extends true
       ? NonUndefined<T[K]> extends Record<string, any>
         ? PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
-        : RefProxy<NonUndefined<T[K]>> | undefined
+        : Ref<NonUndefined<T[K]>> | undefined
       : T[K] extends Record<string, any>
         ? PrecomputeRefStructure<T[K]>
-        : RefProxy<T[K]>
+        : Ref<T[K]>
 }
 
 // Helper type for backward compatibility and reusable query callbacks
@@ -179,10 +180,6 @@ export type RefProxyFor<T> = IsExactlyUndefined<T> extends true
     : T extends Record<string, any>
       ? PrecomputeRefStructure<T>
       : RefProxy<T>
-
-// This is the public type that is exported from the query builder
-// and is used when constructing reusable query callbacks.
-export type Ref<T> = RefProxyFor<T>
 
 type OmitRefProxy<T> = Omit<T, `__refProxy` | `__path` | `__type`>
 
@@ -203,6 +200,14 @@ export type RefProxy<T = any> = {
           : RefProxy<T[K]>
       }
     : {})
+
+// Clean branded type for better IDE display  
+// This creates a distinct type that displays as Ref<T> but is structurally compatible
+export type Ref<T> = {
+  readonly __refProxy: true
+  readonly __path: Array<string>  
+  readonly __type: T
+}
 
 // Helper type to apply join optionality immediately when merging contexts
 export type MergeContextWithJoinType<

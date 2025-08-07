@@ -795,4 +795,4 @@ export type ExtractContext<T> =
       : never
 
 // Export the types from types.ts for convenience
-export type { Context, Source, GetResult } from "./types.js"
+export type { Context, Source, GetResult, Ref } from "./types.js"
