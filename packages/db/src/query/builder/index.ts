@@ -23,7 +23,7 @@ import type {
   Context,
   GroupByCallback,
   JoinOnCallback,
-  MergeContext,
+  MergeContextForJoinCallback,
   MergeContextWithJoinType,
   OrderByCallback,
   OrderByOptions,
@@ -142,7 +142,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   >(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >,
     type: TJoinType = `left` as TJoinType
   ): QueryBuilder<
@@ -154,7 +154,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
     const refProxy = createRefProxy(newAliases) as RefProxyForContext<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
 
     // Get the join condition expression
@@ -209,7 +209,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   leftJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
@@ -235,7 +235,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   rightJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
@@ -261,7 +261,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   innerJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
@@ -287,7 +287,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   fullJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
@@ -432,10 +432,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Then add the explicit select fields
     for (const [key, value] of Object.entries(selectObject)) {
-      if (isRefProxy(value)) {
+      if (value === undefined) {
+        // Handle undefined values from optional chaining
+        select[key] = toExpression(null) // Convert undefined to null for SQL compatibility
+      } else if (isRefProxy(value)) {
         select[key] = toExpression(value)
       } else if (
         typeof value === `object` &&
+        value !== null &&
         `type` in value &&
         (value.type === `agg` || value.type === `func`)
       ) {
@@ -552,10 +556,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       ? result.map((r) => toExpression(r))
       : [toExpression(result)]
 
-    // Replace existing groupBy expressions instead of extending them
+    // Extend existing groupBy expressions (multiple groupBy calls should accumulate)
+    const existingGroupBy = this.query.groupBy || []
     return new BaseQueryBuilder({
       ...this.query,
-      groupBy: newExpressions,
+      groupBy: [...existingGroupBy, ...newExpressions],
     }) as any
   }
 
@@ -792,4 +797,4 @@ export type ExtractContext<T> =
       : never
 
 // Export the types from types.ts for convenience
-export type { Context, Source, GetResult } from "./types.js"
+export type { Context, Source, GetResult, Ref } from "./types.js"
