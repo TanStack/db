@@ -72,21 +72,27 @@ export type SelectObject<
 export type ResultTypeFromSelect<TSelectObject> = {
   [K in keyof TSelectObject]: TSelectObject[K] extends RefProxy<infer T>
     ? T
+    : TSelectObject[K] extends Ref<infer T>
+      ? T
+    : TSelectObject[K] extends Ref<infer T> | undefined
+      ? T | undefined
+    : TSelectObject[K] extends RefProxy<infer T> | undefined
+      ? T | undefined
     : TSelectObject[K] extends BasicExpression<infer T>
       ? T
-      : TSelectObject[K] extends Aggregate<infer T>
-        ? T
-        : TSelectObject[K] extends RefProxyFor<infer T>
-          ? T
-          : TSelectObject[K] extends undefined
-            ? undefined
-            : TSelectObject[K] extends { __type: infer U }
-              ? U
-              : TSelectObject[K] extends Record<string, any>
-                ? TSelectObject[K] extends { __refProxy: true }
-                  ? never // This is a RefProxy, handled above
-                  : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
-                : never
+    : TSelectObject[K] extends Aggregate<infer T>
+      ? T
+    : TSelectObject[K] extends RefProxyFor<infer T>
+      ? T
+    : TSelectObject[K] extends undefined
+      ? undefined
+    : TSelectObject[K] extends { __type: infer U }
+      ? U
+    : TSelectObject[K] extends Record<string, any>
+      ? TSelectObject[K] extends { __refProxy: true }
+        ? never // This is a RefProxy, handled above
+        : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
+      : never
 }
 
 // Callback type for orderBy clauses
@@ -135,13 +141,9 @@ export type RefProxyForContext<TContext extends Context> = {
       RefProxy<TContext[`schema`][K]>
     : IsOptional<TContext[`schema`][K]> extends true
       ? // T is optional (T | undefined) but not exactly undefined
-        NonUndefined<TContext[`schema`][K]> extends Record<string, any>
-        ? PrecomputeRefStructure<NonUndefined<TContext[`schema`][K]>> | undefined
-        : RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
-      : // T is not optional
-        TContext[`schema`][K] extends Record<string, any>
-        ? PrecomputeRefStructure<TContext[`schema`][K]>
-        : RefProxy<TContext[`schema`][K]>
+        RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
+      : // T is not optional - always wrap in RefProxy for top-level schema types
+        RefProxy<TContext[`schema`][K]>
 }
 
 // Helper type to check if T is exactly undefined
@@ -195,9 +197,15 @@ export type RefProxy<T = any> = {
   ? {}
   : T extends Record<string, any>
     ? {
-        [K in keyof T]: T[K] extends Record<string, any>
-          ? RefProxy<T[K]>
-          : RefProxy<T[K]>
+        [K in keyof T]: IsExactlyUndefined<T[K]> extends true
+          ? Ref<T[K]>
+          : IsOptional<T[K]> extends true
+            ? NonUndefined<T[K]> extends Record<string, any>
+              ? RefProxy<NonUndefined<T[K]>> | undefined
+              : Ref<NonUndefined<T[K]>> | undefined
+            : T[K] extends Record<string, any>
+              ? RefProxy<T[K]>
+              : Ref<T[K]>
       }
     : {})
 
