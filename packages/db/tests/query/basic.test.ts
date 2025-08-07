@@ -4,6 +4,7 @@ import {
   eq,
   gt,
   upper,
+  concat,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
@@ -786,12 +787,12 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .where(({ user }) =>
-              eq(user.profile.bio, `Software engineer with 5 years experience`)
+              eq(user.profile?.bio, `Software engineer with 5 years experience`)
             )
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              bio: user.profile.bio,
+              bio: user.profile?.bio,
             })),
       })
 
@@ -808,11 +809,11 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.profile.preferences.theme, `dark`))
+            .where(({ user }) => eq(user.profile?.preferences.theme, `dark`))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              theme: user.profile.preferences.theme,
+              theme: user.profile?.preferences.theme,
             })),
       })
 
@@ -831,9 +832,9 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            preferences: user.profile.preferences,
-            city: user.address.city,
-            coordinates: user.address.coordinates,
+            preferences: user.profile?.preferences,
+            city: user.address?.city,
+            coordinates: user.address?.coordinates,
           })),
       })
 
@@ -899,8 +900,8 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            theme: user.profile.preferences.theme,
-            notifications: user.profile.preferences.notifications,
+            theme: user.profile?.preferences.theme,
+            notifications: user.profile?.preferences.notifications,
           })),
       })
 
@@ -991,10 +992,10 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            street: user.address.street,
-            city: user.address.city,
-            country: user.address.country,
-            coordinates: user.address.coordinates,
+            street: user.address?.street,
+            city: user.address?.city,
+            country: user.address?.country,
+            coordinates: user.address?.coordinates,
           })),
       })
 
@@ -1021,12 +1022,12 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.address.city, `New York`))
+            .where(({ user }) => eq(user.address?.city, `New York`))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              lat: user.address.coordinates.lat,
-              lng: user.address.coordinates.lng,
+              lat: user.address?.coordinates.lat,
+              lng: user.address?.coordinates.lng,
             })),
       })
 
@@ -1044,11 +1045,11 @@ function createBasicTests(autoIndex: `off` | `eager`) {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.address.coordinates.lat, 38))
+            .where(({ user }) => gt(user.address?.coordinates.lat, 38))
             .select(({ user }) => ({
               id: user.id,
               name: user.name,
-              city: user.address.city,
+              city: user.address?.city,
             })),
       })
 
@@ -1067,10 +1068,10 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q.from({ user: usersCollection }).select(({ user }) => ({
             id: user.id,
             name: user.name,
-            city: user.address.city,
-            country: user.address.country,
-            hasNotifications: user.profile.preferences.notifications,
-            profileSummary: concat(upper(user.name), ` - `, user.profile.bio),
+            city: user.address?.city,
+            country: user.address?.country,
+            hasNotifications: user.profile?.preferences.notifications,
+            profileSummary: concat(upper(user.name), ` - `, user.profile?.bio),
           })),
       })
 

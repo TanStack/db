@@ -229,7 +229,7 @@ describe(`QueryBuilder.select`, () => {
       .select(({ employees }) => ({
         id: employees.id,
         name: employees.name,
-        ...employees.profile!,
+        ...employees.profile,
       }))
 
     const builtQuery = getQueryIR(query)

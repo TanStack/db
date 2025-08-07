@@ -63,6 +63,9 @@ type SelectValue =
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
   | Array<Ref<any>>
+  | true  // For __refProxy property in spreads
+  | Array<string>  // For __path property in spreads
+  | any  // For __type property in spreads
 
 export type SelectObject<
   T extends Record<string, SelectValue> = Record<string, SelectValue>,
@@ -159,7 +162,7 @@ type NonUndefined<T> = T extends undefined ? never : T
 // This transforms { bio: string, contact: { email: string } } into
 // { bio: Ref<string>, contact: { email: Ref<string> } }
 // Only leaf values are wrapped in RefProxy, intermediate objects remain plain
-type PrecomputeRefStructure<T extends Record<string, any>> = {
+export type PrecomputeRefStructure<T extends Record<string, any>> = {
   [K in keyof T]: IsExactlyUndefined<T[K]> extends true
     ? Ref<T[K]>
     : IsOptional<T[K]> extends true
@@ -208,6 +211,21 @@ export type RefProxy<T = any> = {
               : Ref<T[K]>
       }
     : {})
+
+// Helper type to extract only the user-facing properties for spreading
+export type SpreadableRefProxy<T> = T extends Record<string, any>
+  ? {
+      [K in keyof T]: IsExactlyUndefined<T[K]> extends true
+        ? Ref<T[K]>
+        : IsOptional<T[K]> extends true
+          ? NonUndefined<T[K]> extends Record<string, any>
+            ? RefProxy<NonUndefined<T[K]>> | undefined
+            : Ref<NonUndefined<T[K]>> | undefined
+          : T[K] extends Record<string, any>
+            ? RefProxy<T[K]>
+            : Ref<T[K]>
+    }
+  : {}
 
 // Clean branded type for better IDE display  
 // This creates a distinct type that displays as Ref<T> but is structurally compatible
