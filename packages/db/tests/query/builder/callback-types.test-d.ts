@@ -100,7 +100,7 @@ describe(`Query Builder Callback Types`, () => {
         expectTypeOf(user.age).toEqualTypeOf<Ref<number>>()
         expectTypeOf(user.active).toEqualTypeOf<Ref<boolean>>()
         expectTypeOf(user.department_id).toEqualTypeOf<
-          Ref<number | null>
+          Ref<number> | null
         >()
         expectTypeOf(user.salary).toEqualTypeOf<Ref<number>>()
         expectTypeOf(user.created_at).toEqualTypeOf<Ref<string>>()
@@ -122,7 +122,7 @@ describe(`Query Builder Callback Types`, () => {
         .select(({ user, dept }) => {
           // Test cross-table property access
           expectTypeOf(user.department_id).toEqualTypeOf<
-            Ref<number | null>
+            Ref<number> | null
           >()
           expectTypeOf(dept?.id).toEqualTypeOf<Ref<number> | undefined>()
           expectTypeOf(dept?.name).toEqualTypeOf<Ref<string> | undefined>()
@@ -209,7 +209,7 @@ describe(`Query Builder Callback Types`, () => {
         expectTypeOf(user.id).toEqualTypeOf<Ref<number>>()
         expectTypeOf(user.active).toEqualTypeOf<Ref<boolean>>()
         expectTypeOf(user.department_id).toEqualTypeOf<
-          Ref<number | null>
+          Ref<number> | null
         >()
 
         return eq(user.active, true)
@@ -298,7 +298,7 @@ describe(`Query Builder Callback Types`, () => {
         .join({ dept: departmentsCollection }, ({ user, dept }) => {
           // Test property access for join conditions
           expectTypeOf(user.department_id).toEqualTypeOf<
-            Ref<number | null>
+            Ref<number> | null
           >()
           expectTypeOf(dept.id).toEqualTypeOf<Ref<number>>()
 
@@ -394,7 +394,7 @@ describe(`Query Builder Callback Types`, () => {
         // Test that user is the correct RefProxy type
         // expectTypeOf(user).toEqualTypeOf<RefProxy<User>>()
         expectTypeOf(user.department_id).toEqualTypeOf<
-          Ref<number | null>
+          Ref<number> | null
         >()
         expectTypeOf(user.active).toEqualTypeOf<Ref<boolean>>()
 
@@ -407,7 +407,7 @@ describe(`Query Builder Callback Types`, () => {
         // Test array return type for multiple columns
         const groupColumns = [user.department_id, user.active]
         expectTypeOf(groupColumns).toEqualTypeOf<
-          Array<Ref<number | null> | Ref<boolean>>
+          Array<(Ref<number> | null) | Ref<boolean>>
         >()
 
         return [user.department_id, user.active]
@@ -438,7 +438,7 @@ describe(`Query Builder Callback Types`, () => {
         .having(({ user }) => {
           expectTypeOf(user.id).toEqualTypeOf<Ref<number>>()
           expectTypeOf(user.department_id).toEqualTypeOf<
-            Ref<number | null>
+            Ref<number> | null
           >()
 
           return gt(count(user.id), 5)
@@ -452,7 +452,7 @@ describe(`Query Builder Callback Types`, () => {
         .having(({ user }) => {
           expectTypeOf(user.id).toEqualTypeOf<Ref<number>>()
           expectTypeOf(user.department_id).toEqualTypeOf<
-            Ref<number | null>
+            Ref<number> | null
           >()
           // Test aggregate functions in having
           expectTypeOf(count(user.id)).toEqualTypeOf<Aggregate<number>>()

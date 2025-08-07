@@ -89,12 +89,12 @@ type BinaryNumericReturnType<T1, T2> =
 // Operators
 
 export function eq<T>(
-  left: RefProxy<T> | undefined,
-  right: T | RefProxy<T> | BasicExpression<T> | undefined
+  left: RefProxy<T> | Ref<T> | undefined | null,
+  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
-  left: T | BasicExpression<T> | undefined,
-  right: T | BasicExpression<T> | undefined
+  left: T | BasicExpression<T> | undefined | null,
+  right: T | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
@@ -102,12 +102,12 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gt<T>(
-  left: RefProxy<T> | undefined,
-  right: T | RefProxy<T> | BasicExpression<T> | undefined
+  left: RefProxy<T> | Ref<T> | undefined | null,
+  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined,
-  right: T | BasicExpression<T> | undefined
+  left: T | BasicExpression<T> | undefined | null,
+  right: T | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gt(left: any, right: any): BasicExpression<boolean> {
@@ -115,12 +115,12 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gte<T>(
-  left: RefProxy<T> | undefined,
-  right: T | RefProxy<T> | BasicExpression<T> | undefined
+  left: RefProxy<T> | Ref<T> | undefined | null,
+  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined,
-  right: T | BasicExpression<T> | undefined
+  left: T | BasicExpression<T> | undefined | null,
+  right: T | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gte(left: any, right: any): BasicExpression<boolean> {
@@ -128,12 +128,12 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lt<T>(
-  left: RefProxy<T> | undefined,
-  right: T | RefProxy<T> | BasicExpression<T> | undefined
+  left: RefProxy<T> | Ref<T> | undefined | null,
+  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined,
-  right: T | BasicExpression<T> | undefined
+  left: T | BasicExpression<T> | undefined | null,
+  right: T | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
@@ -141,12 +141,12 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lte<T>(
-  left: RefProxy<T> | undefined,
-  right: T | RefProxy<T> | BasicExpression<T> | undefined
+  left: RefProxy<T> | Ref<T> | undefined | null,
+  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined,
-  right: T | BasicExpression<T> | undefined
+  left: T | BasicExpression<T> | undefined | null,
+  right: T | BasicExpression<T> | undefined | null
 ): BasicExpression<boolean>
 export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lte(left: any, right: any): BasicExpression<boolean> {

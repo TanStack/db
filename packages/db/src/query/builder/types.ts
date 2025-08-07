@@ -79,8 +79,12 @@ export type ResultTypeFromSelect<TSelectObject> = {
       ? T
     : TSelectObject[K] extends Ref<infer T> | undefined
       ? T | undefined
+    : TSelectObject[K] extends Ref<infer T> | null
+      ? T | null
     : TSelectObject[K] extends RefProxy<infer T> | undefined
       ? T | undefined
+    : TSelectObject[K] extends RefProxy<infer T> | null
+      ? T | null
     : TSelectObject[K] extends BasicExpression<infer T>
       ? T
     : TSelectObject[K] extends Aggregate<infer T>
@@ -142,21 +146,42 @@ export type RefProxyForContext<TContext extends Context> = {
   [K in keyof TContext[`schema`]]: IsExactlyUndefined<TContext[`schema`][K]> extends true
     ? // T is exactly undefined
       RefProxy<TContext[`schema`][K]>
-    : IsOptional<TContext[`schema`][K]> extends true
-      ? // T is optional (T | undefined) but not exactly undefined
-        RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
-      : // T is not optional - always wrap in RefProxy for top-level schema types
+    : IsExactlyNull<TContext[`schema`][K]> extends true
+      ? // T is exactly null
         RefProxy<TContext[`schema`][K]>
+      : IsOptional<TContext[`schema`][K]> extends true
+        ? // T is optional (T | undefined) but not exactly undefined
+          RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
+        : IsNullable<TContext[`schema`][K]> extends true
+          ? // T is nullable (T | null) but not exactly null
+            RefProxy<NonNull<TContext[`schema`][K]>> | null
+          : // T is not optional or nullable - always wrap in RefProxy for top-level schema types
+            RefProxy<TContext[`schema`][K]>
 }
 
 // Helper type to check if T is exactly undefined
 type IsExactlyUndefined<T> = [T] extends [undefined] ? true : false
 
+// Helper type to check if T is exactly null
+type IsExactlyNull<T> = [T] extends [null] ? true : false
+
 // Helper type to check if T includes undefined (is optional)
 type IsOptional<T> = undefined extends T ? true : false
 
+// Helper type to check if T includes null (is nullable)
+type IsNullable<T> = null extends T ? true : false
+
+// Helper type to check if T includes undefined or null
+type IsOptionalOrNullable<T> = IsOptional<T> extends true ? true : IsNullable<T> extends true ? true : false
+
 // Helper type to extract non-undefined type
 type NonUndefined<T> = T extends undefined ? never : T
+
+// Helper type to extract non-null type
+type NonNull<T> = T extends null ? never : T
+
+// Helper type to extract non-undefined and non-null type
+type NonUndefinedNonNull<T> = NonUndefined<NonNull<T>>
 
 // Precompute the ref structure for an object type
 // This transforms { bio: string, contact: { email: string } } into
@@ -165,13 +190,19 @@ type NonUndefined<T> = T extends undefined ? never : T
 export type PrecomputeRefStructure<T extends Record<string, any>> = {
   [K in keyof T]: IsExactlyUndefined<T[K]> extends true
     ? Ref<T[K]>
-    : IsOptional<T[K]> extends true
-      ? NonUndefined<T[K]> extends Record<string, any>
-        ? PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
-        : Ref<NonUndefined<T[K]>> | undefined
-      : T[K] extends Record<string, any>
-        ? PrecomputeRefStructure<T[K]>
-        : Ref<T[K]>
+    : IsExactlyNull<T[K]> extends true
+      ? Ref<T[K]>
+      : IsOptional<T[K]> extends true
+        ? NonUndefined<T[K]> extends Record<string, any>
+          ? PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
+          : Ref<NonUndefined<T[K]>> | undefined
+        : IsNullable<T[K]> extends true
+          ? NonNull<T[K]> extends Record<string, any>
+            ? PrecomputeRefStructure<NonNull<T[K]>> | null
+            : Ref<NonNull<T[K]>> | null
+          : T[K] extends Record<string, any>
+            ? PrecomputeRefStructure<T[K]>
+            : Ref<T[K]>
 }
 
 // Helper type for backward compatibility and reusable query callbacks
@@ -202,13 +233,19 @@ export type RefProxy<T = any> = {
     ? {
         [K in keyof T]: IsExactlyUndefined<T[K]> extends true
           ? Ref<T[K]>
-          : IsOptional<T[K]> extends true
-            ? NonUndefined<T[K]> extends Record<string, any>
-              ? RefProxy<NonUndefined<T[K]>> | undefined
-              : Ref<NonUndefined<T[K]>> | undefined
-            : T[K] extends Record<string, any>
-              ? RefProxy<T[K]>
-              : Ref<T[K]>
+          : IsExactlyNull<T[K]> extends true
+            ? Ref<T[K]>
+            : IsOptional<T[K]> extends true
+              ? NonUndefined<T[K]> extends Record<string, any>
+                ? RefProxy<NonUndefined<T[K]>> | undefined
+                : Ref<NonUndefined<T[K]>> | undefined
+              : IsNullable<T[K]> extends true
+                ? NonNull<T[K]> extends Record<string, any>
+                  ? RefProxy<NonNull<T[K]>> | null
+                  : Ref<NonNull<T[K]>> | null
+                : T[K] extends Record<string, any>
+                  ? RefProxy<T[K]>
+                  : Ref<T[K]>
       }
     : {})
 
@@ -217,13 +254,19 @@ export type SpreadableRefProxy<T> = T extends Record<string, any>
   ? {
       [K in keyof T]: IsExactlyUndefined<T[K]> extends true
         ? Ref<T[K]>
-        : IsOptional<T[K]> extends true
-          ? NonUndefined<T[K]> extends Record<string, any>
-            ? RefProxy<NonUndefined<T[K]>> | undefined
-            : Ref<NonUndefined<T[K]>> | undefined
-          : T[K] extends Record<string, any>
-            ? RefProxy<T[K]>
-            : Ref<T[K]>
+        : IsExactlyNull<T[K]> extends true
+          ? Ref<T[K]>
+          : IsOptional<T[K]> extends true
+            ? NonUndefined<T[K]> extends Record<string, any>
+              ? RefProxy<NonUndefined<T[K]>> | undefined
+              : Ref<NonUndefined<T[K]>> | undefined
+            : IsNullable<T[K]> extends true
+              ? NonNull<T[K]> extends Record<string, any>
+                ? RefProxy<NonNull<T[K]>> | null
+                : Ref<NonNull<T[K]>> | null
+              : T[K] extends Record<string, any>
+                ? RefProxy<T[K]>
+                : Ref<T[K]>
     }
   : {}
 

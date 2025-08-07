@@ -1411,11 +1411,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.contact?.address.city, `San Francisco`))
+              .where(({ emp }) => eq(emp.contact?.address?.city, `San Francisco`))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                city: emp.contact?.address.city,
+                city: emp.contact?.address?.city,
               })),
         })
 
@@ -1473,7 +1473,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .where(({ emp }) =>
                 and(
                   eq(emp.active, true),
-                  eq(emp.contact?.address.state, `CA`),
+                  eq(emp.contact?.address?.state, `CA`),
                   gte(emp.profile?.experience.years, 5)
                 )
               )
@@ -1481,7 +1481,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                 id: emp.id,
                 name: emp.name,
                 years: emp.profile?.experience.years,
-                state: emp.contact?.address.state,
+                state: emp.contact?.address?.state,
               })),
         })
 
@@ -1633,14 +1633,14 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
                 or(
-                  eq(emp.contact?.address.city, `San Francisco`),
+                  eq(emp.contact?.address?.city, `San Francisco`),
                   inArray(`Python`, emp.profile?.skills)
                 )
               )
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                city: emp.contact?.address.city,
+                city: emp.contact?.address?.city,
                 hasPython: inArray(`Python`, emp.profile?.skills),
               })),
         })
