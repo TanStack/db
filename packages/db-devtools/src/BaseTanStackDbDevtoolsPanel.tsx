@@ -12,11 +12,7 @@ import {
   TransactionsPanel,
 } from "./components"
 import type { Accessor, JSX } from "solid-js"
-import type {
-  CollectionMetadata,
-  DbDevtoolsRegistry,
-  TransactionDetails,
-} from "./types"
+import type { DbDevtoolsRegistry } from "./types"
 import { useDevtoolsCollections, useDevtoolsTransactions } from "./state"
 
 export interface BaseDbDevtoolsPanelOptions {

@@ -7,19 +7,19 @@ import { getDevtoolsRegistry } from "./devtools"
 import type { CollectionMetadata, TransactionDetails } from "./types"
 
 // Collections metadata store
-const collectionsStore = createCollection(
+const collectionsStore = createCollection<CollectionMetadata>(
   localOnlyCollectionOptions<CollectionMetadata>({
     id: "__devtools-collections__",
-    getKey: (m) => m.id,
+    getKey: (m: CollectionMetadata) => m.id,
     initialData: [],
   })
 )
 
 // Transactions store (flattened list)
-const transactionsStore = createCollection(
+const transactionsStore = createCollection<TransactionDetails>(
   localOnlyCollectionOptions<TransactionDetails>({
     id: "__devtools-transactions__",
-    getKey: (t) => t.id,
+    getKey: (t: TransactionDetails) => t.id,
     initialData: [],
   })
 )
@@ -34,13 +34,13 @@ function seedFromRegistry() {
     existingIds.add(meta.id)
     const current = collectionsStore.get(meta.id)
     if (current) {
-      collectionsStore.update(meta.id, (draft) => Object.assign(draft, meta))
+      collectionsStore.update(meta.id, (draft: CollectionMetadata) => Object.assign(draft, meta))
     } else {
       collectionsStore.insert(meta)
     }
   }
   // Remove deleted
-  for (const { id } of collectionsStore.syncedData.values()) {
+  for (const { id } of collectionsStore.syncedData.values() as IterableIterator<CollectionMetadata>) {
     if (!existingIds.has(id)) {
       collectionsStore.delete(id)
     }
@@ -53,18 +53,17 @@ function seedFromRegistry() {
     txIds.add(tx.id)
     const current = transactionsStore.get(tx.id)
     if (current) {
-      transactionsStore.update(tx.id, (draft) => Object.assign(draft, tx))
+      transactionsStore.update(tx.id, (draft: TransactionDetails) => Object.assign(draft, tx))
     } else {
       transactionsStore.insert(tx)
     }
   }
-  for (const { id } of transactionsStore.syncedData.values()) {
+  for (const { id } of transactionsStore.syncedData.values() as IterableIterator<TransactionDetails>) {
     if (!txIds.has(id)) transactionsStore.delete(id)
   }
 }
 
-export function useDevtoolsCollections() {
-  // Subscribe to events and mirror registry into store
+export function useDevtoolsCollections(): Array<CollectionMetadata> {
   onMount(() => {
     // Initial seed
     seedFromRegistry()
@@ -86,15 +85,19 @@ export function useDevtoolsCollections() {
     })
   })
 
-  const { data } = useLiveQuery((q) => q.from({ c: collectionsStore }).select(({ c }) => c))
+  const { data } = useLiveQuery<CollectionMetadata[]>((q) =>
+    q.from({ c: collectionsStore }).select(({ c }) => c)
+  )
   return data
 }
 
-export function useDevtoolsTransactions() {
+export function useDevtoolsTransactions(): Array<TransactionDetails> {
   onMount(() => {
     // keep in sync via seed
     seedFromRegistry()
   })
-  const { data } = useLiveQuery((q) => q.from({ t: transactionsStore }).select(({ t }) => t))
+  const { data } = useLiveQuery<TransactionDetails[]>((q) =>
+    q.from({ t: transactionsStore }).select(({ t }) => t)
+  )
   return data
 }

@@ -9,16 +9,6 @@ import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
 import { DataGrid } from "./DataGrid"
 
-// Temporary stub types for the grid integration
-// These will be replaced by @tanstack/table-core + virtualizer wiring
-function DataGridPlaceholder() {
-  return (
-    <div style={{ padding: `8px`, color: `#888` }}>
-      Tabular grid view (TanStack Table + virtualizer) coming next
-    </div>
-  )
-}
-
 function RawQueryPlaceholder(props: { value: () => any }) {
   const value = props.value
   const data = () => value()
