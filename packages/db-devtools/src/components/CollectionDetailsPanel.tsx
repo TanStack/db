@@ -18,11 +18,13 @@ function DataGridPlaceholder() {
   )
 }
 
-function RawQueryPlaceholder() {
+function RawQueryPlaceholder(props: { value: () => any }) {
+  const value = props.value
+  const data = () => value()
   return (
-    <div style={{ padding: `8px`, color: `#888` }}>
-      Raw query/IR display for live queries coming next
-    </div>
+    <pre style={{ padding: `8px`, color: `#ddd`, "white-space": `pre-wrap` }}>
+      {JSON.stringify(data(), null, 2)}
+    </pre>
   )
 }
 
@@ -30,7 +32,12 @@ export interface CollectionDetailsPanelProps {
   activeCollection: Accessor<CollectionMetadata | undefined>
 }
 
-type CollectionTab = `summary` | `config` | `state` | `transactions` | `data`
+type CollectionTab =
+  | `summary`
+  | `config`
+  | `state`
+  | `transactions`
+  | `data`
   | `raw`
 
 export function CollectionDetailsPanel({
@@ -156,7 +163,19 @@ export function CollectionDetailsPanel({
         return <DataGridPlaceholder />
       }
       case `raw`: {
-        return <RawQueryPlaceholder />
+        if (!instance)
+          return <div class={styles().noDataMessage}>No instance</div>
+        const anyInstance = instance as any
+        const devtools =
+          anyInstance.config?.__devtools ?? anyInstance.__devtools
+        if (!devtools?.getIR) {
+          return (
+            <div class={styles().noDataMessage}>Raw query not available</div>
+          )
+        }
+        const ir = devtools.getIR?.()
+        const where = devtools.getWhereClauses?.() ?? null
+        return <RawQueryPlaceholder value={() => ({ ir, where })} />
       }
 
       default:

@@ -403,6 +403,11 @@ export interface CollectionConfig<
    */
   collectionType?: string
   /**
+   * Internal Devtools metadata hook (not part of public API)
+   * @internal
+   */
+  __devtools?: Record<string, unknown>
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value

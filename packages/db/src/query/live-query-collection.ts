@@ -385,6 +385,11 @@ export function liveQueryCollectionOptions<
     startSync: config.startSync,
     // Mark as live query for devtools
     collectionType: `live-query` as const,
+    // Non-public devtools metadata hook
+    __devtools: {
+      getIR: () => query,
+      getWhereClauses: () => collectionWhereClausesCache,
+    },
   }
 }
 
