@@ -1,5 +1,5 @@
 import { clsx as cx } from "clsx"
-import { Show, createEffect, createMemo, createSignal } from "solid-js"
+import { Show, createMemo, createSignal } from "solid-js"
 import { useDevtoolsOnClose } from "./contexts"
 import { useStyles } from "./useStyles"
 import { useLocalStorage } from "./useLocalStorage"
@@ -17,6 +17,7 @@ import type {
   DbDevtoolsRegistry,
   TransactionDetails,
 } from "./types"
+import { useDevtoolsCollections, useDevtoolsTransactions } from "./state"
 
 export interface BaseDbDevtoolsPanelOptions {
   /**
@@ -70,12 +71,8 @@ export const BaseTanStackDbDevtoolsPanel =
     const [selectedTransaction, setSelectedTransaction] = createSignal<
       string | null
     >(null)
-    const [collections, setCollections] = createSignal<
-      Array<CollectionMetadata>
-    >([])
-    const [transactions, setTransactions] = createSignal<
-      Array<TransactionDetails>
-    >([])
+    const collections = () => useDevtoolsCollections()
+    const transactions = () => useDevtoolsTransactions()
 
     // Computed values
     const activeCollection = createMemo(() => {
@@ -88,35 +85,11 @@ export const BaseTanStackDbDevtoolsPanel =
       return found
     })
 
-    // Use reactive signals for immediate updates
-    createEffect(() => {
-      try {
-        // Get collections from reactive signal
-        const newCollections = registry().collectionsSignal()
-
-        // Simple auto-selection: if no collection is selected and we have collections, select the first one
-        if (activeCollectionId() === `` && newCollections.length > 0) {
-          setActiveCollectionId(newCollections[0]?.id ?? ``)
-        }
-
-        // Update collections state
-        setCollections(newCollections)
-      } catch {
-        // console.error(`Error updating collections:`, error)
-      }
-    })
-
-    createEffect(() => {
-      try {
-        // Get transactions from reactive signal
-        const newTransactions = registry().transactionsSignal()
-
-        // Update transactions state
-        setTransactions(newTransactions)
-      } catch {
-        // console.error(`Error updating transactions:`, error)
-      }
-    })
+    // Auto-select first collection if none selected
+    const currentCollections = () => collections() ?? []
+    if (activeCollectionId() === `` && currentCollections().length > 0) {
+      setActiveCollectionId(currentCollections()[0]?.id ?? ``)
+    }
 
     return (
       <div
@@ -176,7 +149,7 @@ export const BaseTanStackDbDevtoolsPanel =
             <div class={styles().sidebarContent}>
               <Show when={selectedView() === `collections`}>
                 <CollectionsPanel
-                  collections={collections}
+                  collections={() => currentCollections()}
                   activeCollectionId={activeCollectionId}
                   onSelectCollection={(c) => setActiveCollectionId(c.id)}
                 />
@@ -184,7 +157,7 @@ export const BaseTanStackDbDevtoolsPanel =
 
               <Show when={selectedView() === `transactions`}>
                 <TransactionsPanel
-                  transactions={transactions}
+                  transactions={() => transactions() ?? []}
                   selectedTransaction={selectedTransaction}
                   onSelectTransaction={setSelectedTransaction}
                 />
