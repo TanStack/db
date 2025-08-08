@@ -7,6 +7,7 @@ import { TransactionsPanel } from "./TransactionsPanel"
 import { GenericDetailsPanel } from "./DetailsPanel"
 import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
+import { DataGrid } from "./DataGrid"
 
 // Temporary stub types for the grid integration
 // These will be replaced by @tanstack/table-core + virtualizer wiring
@@ -160,7 +161,8 @@ export function CollectionDetailsPanel({
       }
 
       case `data`: {
-        return <DataGridPlaceholder />
+        if (!instance) return <div class={styles().noDataMessage}>No instance</div>
+        return <DataGrid instance={instance} />
       }
       case `raw`: {
         if (!instance)
