@@ -18,82 +18,105 @@ export function processSelectToResults(
 ): NamespacedAndKeyedStream {
   // Build ordered operations to preserve authoring order (spreads and fields)
   type Op =
-    | { kind: `spread`; tableAlias: string }
-    | { kind: `nested_spread`; targetPath: Array<string>; compiled: (row: NamespacedRow) => any }
+    | { kind: `merge`; targetPath: Array<string>; source: (row: NamespacedRow) => any }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
 
   const ops: Array<Op> = []
 
-  for (const [key, expression] of Object.entries(select)) {
-    if (key.startsWith(`__SPREAD_SENTINEL__`)) {
-      const rest = key.slice(`__SPREAD_SENTINEL__`.length)
-      const splitIndex = rest.indexOf(`__`)
-      const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
-      ops.push({ kind: `spread`, tableAlias })
-    } else if (key.startsWith(`__NESTED_SPREAD__`)) {
-      // Pattern: __NESTED_SPREAD__path.to.target__123
-      const rest = key.slice(`__NESTED_SPREAD__`.length)
-      const splitIndex = rest.lastIndexOf(`__`)
-      const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
-      const targetPath = pathStr.split(`.`)
-      ops.push({
-        kind: `nested_spread`,
-        targetPath,
-        compiled: compileExpression(expression as BasicExpression),
-      })
-    } else {
+  function addFromObject(prefixPath: Array<string>, obj: Select) {
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+        const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+        const splitIndex = rest.lastIndexOf(`__`)
+        const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+        const isRefExpr =
+          value &&
+          typeof value === `object` &&
+          `type` in (value as any) &&
+          (value as any).type === `ref`
+        if (pathStr.includes(`.`) || isRefExpr) {
+          // Nested destination path encoded in key; source comes from expression (PropRef)
+          const targetPath = [...prefixPath, ...pathStr.split(`.`)]
+          const compiled = compileExpression(value as BasicExpression)
+          ops.push({ kind: `merge`, targetPath, source: compiled })
+        } else {
+          // Table-level: pathStr is the alias; merge from namespaced row at the current prefix
+          const tableAlias = pathStr
+          const targetPath = [...prefixPath]
+          ops.push({
+            kind: `merge`,
+            targetPath,
+            source: (row) => (row as any)[tableAlias],
+          })
+        }
+        continue
+      }
+
+      const expression = value as any
+      if (
+        expression &&
+        typeof expression === `object` &&
+        !(`type` in expression)
+      ) {
+        // Nested selection object
+        addFromObject([...prefixPath, key], expression as Select)
+        continue
+      }
+
       if (isAggregateExpression(expression)) {
         // Placeholder for group-by processing later
-        ops.push({ kind: `field`, alias: key, compiled: () => null })
+        ops.push({
+          kind: `field`,
+          alias: [...prefixPath, key].join(`.`),
+          compiled: () => null,
+        })
       } else {
         ops.push({
           kind: `field`,
-          alias: key,
+          alias: [...prefixPath, key].join(`.`),
           compiled: compileExpression(expression as BasicExpression),
         })
       }
     }
   }
 
+  addFromObject([], select)
+
   return pipeline.pipe(
     map(([key, namespacedRow]) => {
       const selectResults: Record<string, any> = {}
 
       for (const op of ops) {
-        if (op.kind === `spread`) {
-          const tableData = (namespacedRow as any)[op.tableAlias]
-          if (tableData && typeof tableData === `object`) {
-            for (const [fieldName, fieldValue] of Object.entries(tableData)) {
-              // Last-wins semantics: always overwrite
-              selectResults[fieldName] = fieldValue
-            }
-          }
-        } else if (op.kind === `nested_spread`) {
-          const value = op.compiled(namespacedRow)
+        if (op.kind === `merge`) {
+          const value = op.source(namespacedRow)
           if (value && typeof value === `object`) {
             // Ensure target object exists
             let cursor: any = selectResults
             const path = op.targetPath
-            // Create all parents except the last segment
-            for (let i = 0; i < path.length; i++) {
-              const seg = path[i]!
-              if (i === path.length - 1) {
-                // For the leaf, spread properties into existing or new object
-                const dest = (cursor[seg] ??= {})
-                if (typeof dest === `object`) {
-                  for (const [k, v] of Object.entries(value)) {
-                    dest[k] = v
+            if (path.length === 0) {
+              // Top-level merge
+              for (const [k, v] of Object.entries(value)) {
+                selectResults[k] = v
+              }
+            } else {
+              for (let i = 0; i < path.length; i++) {
+                const seg = path[i]!
+                if (i === path.length - 1) {
+                  const dest = (cursor[seg] ??= {})
+                  if (typeof dest === `object`) {
+                    for (const [k, v] of Object.entries(value)) {
+                      dest[k] = v
+                    }
+                  } else {
+                    cursor[seg] = { ...value }
                   }
                 } else {
-                  // If non-object is present, overwrite with a shallow clone of value
-                  cursor[seg] = { ...value }
+                  const next = cursor[seg]
+                  if (next == null || typeof next !== `object`) {
+                    cursor[seg] = {}
+                  }
+                  cursor = cursor[seg]
                 }
-              } else {
-                const next = cursor[seg]
-                if (next == null || typeof next !== `object`) {
-                  cursor[seg] = {}
-                }
-                cursor = cursor[seg]
               }
             }
           }
@@ -141,28 +164,47 @@ export function processSelect(
   _allInputs: Record<string, KeyedStream>
 ): KeyedStream {
   type Op =
-    | { kind: `spread`; tableAlias: string }
-    | { kind: `nested_spread`; targetPath: Array<string>; compiled: (row: NamespacedRow) => any }
+    | { kind: `merge`; targetPath: Array<string>; source: (row: NamespacedRow) => any }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
   const ops: Array<Op> = []
 
-  for (const [key, expression] of Object.entries(select)) {
-    if (key.startsWith(`__SPREAD_SENTINEL__`)) {
-      const rest = key.slice(`__SPREAD_SENTINEL__`.length)
-      const splitIndex = rest.indexOf(`__`)
-      const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
-      ops.push({ kind: `spread`, tableAlias })
-    } else if (key.startsWith(`__NESTED_SPREAD__`)) {
-      const rest = key.slice(`__NESTED_SPREAD__`.length)
-      const splitIndex = rest.lastIndexOf(`__`)
-      const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
-      const targetPath = pathStr.split(`.`)
-      ops.push({
-        kind: `nested_spread`,
-        targetPath,
-        compiled: compileExpression(expression as BasicExpression),
-      })
-    } else {
+  function addFromObject(prefixPath: Array<string>, obj: Select) {
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+        const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+        const splitIndex = rest.lastIndexOf(`__`)
+        const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+        const isRefExpr =
+          value &&
+          typeof value === `object` &&
+          `type` in (value as any) &&
+          (value as any).type === `ref`
+        if (pathStr.includes(`.`) || isRefExpr) {
+          const targetPath = [...prefixPath, ...pathStr.split(`.`)]
+          const compiled = compileExpression(value as BasicExpression)
+          ops.push({ kind: `merge`, targetPath, source: compiled })
+        } else {
+          const tableAlias = pathStr
+          const targetPath = [...prefixPath]
+          ops.push({
+            kind: `merge`,
+            targetPath,
+            source: (row) => (row as any)[tableAlias],
+          })
+        }
+        continue
+      }
+
+      const expression = value as any
+      if (
+        expression &&
+        typeof expression === `object` &&
+        !(`type` in expression)
+      ) {
+        addFromObject([...prefixPath, key], expression as Select)
+        continue
+      }
+
       if (isAggregateExpression(expression)) {
         throw new Error(
           `Aggregate expressions in SELECT clause should be handled by GROUP BY processing`
@@ -170,45 +212,46 @@ export function processSelect(
       }
       ops.push({
         kind: `field`,
-        alias: key,
+        alias: [...prefixPath, key].join(`.`),
         compiled: compileExpression(expression as BasicExpression),
       })
     }
   }
 
+  addFromObject([], select)
+
   return pipeline.pipe(
     map(([key, namespacedRow]) => {
       const result: Record<string, any> = {}
       for (const op of ops) {
-        if (op.kind === `spread`) {
-          const tableData = (namespacedRow as any)[op.tableAlias]
-          if (tableData && typeof tableData === `object`) {
-            for (const [fieldName, fieldValue] of Object.entries(tableData)) {
-              result[fieldName] = fieldValue
-            }
-          }
-        } else if (op.kind === `nested_spread`) {
-          const value = op.compiled(namespacedRow)
+        if (op.kind === `merge`) {
+          const value = op.source(namespacedRow)
           if (value && typeof value === `object`) {
             let cursor: any = result
             const path = op.targetPath
-            for (let i = 0; i < path.length; i++) {
-              const seg = path[i]!
-              if (i === path.length - 1) {
-                const dest = (cursor[seg] ??= {})
-                if (typeof dest === `object`) {
-                  for (const [k, v] of Object.entries(value)) {
-                    dest[k] = v
+            if (path.length === 0) {
+              for (const [k, v] of Object.entries(value)) {
+                result[k] = v
+              }
+            } else {
+              for (let i = 0; i < path.length; i++) {
+                const seg = path[i]!
+                if (i === path.length - 1) {
+                  const dest = (cursor[seg] ??= {})
+                  if (typeof dest === `object`) {
+                    for (const [k, v] of Object.entries(value)) {
+                      dest[k] = v
+                    }
+                  } else {
+                    cursor[seg] = { ...value }
                   }
                 } else {
-                  cursor[seg] = { ...value }
+                  const next = cursor[seg]
+                  if (next == null || typeof next !== `object`) {
+                    cursor[seg] = {}
+                  }
+                  cursor = cursor[seg]
                 }
-              } else {
-                const next = cursor[seg]
-                if (next == null || typeof next !== `object`) {
-                  cursor[seg] = {}
-                }
-                cursor = cursor[seg]
               }
             }
           }

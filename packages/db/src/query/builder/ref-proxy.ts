@@ -125,9 +125,9 @@ export function createRefProxy<T extends Record<string, any>>(
             })
           }
         } else if (path.length > 1) {
-          // Nested spread: inject a nested spread sentinel using dotted path
+          // Nested spread: inject a unified spread sentinel using dotted path
           const id = ++accessId
-          const sentinelKey = `__NESTED_SPREAD__${path.join(`.`)}__${id}`
+          const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
           if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
             Object.defineProperty(target, sentinelKey, {
               enumerable: true,

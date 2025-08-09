@@ -27,7 +27,7 @@ export interface QueryIR {
 export type From = CollectionRef | QueryRef
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate
+  [alias: string]: BasicExpression | Aggregate | Select
 }
 
 export type Join = Array<JoinClause>

@@ -482,15 +482,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       for (const k of keys) {
         const subKey = String(k)
         const subVal = (obj as any)[k]
-        if (typeof subKey === `string` && subKey.startsWith(`__NESTED_SPREAD__`)) {
-          // subKey encodes the full path and id: __NESTED_SPREAD__alias.path__id
-          const rest = subKey.slice(`__NESTED_SPREAD__`.length)
+        if (typeof subKey === `string` && subKey.startsWith(`__SPREAD_SENTINEL__`)) {
+          // subKey encodes the full source path and id: __SPREAD_SENTINEL__alias.path__id
+          const rest = subKey.slice(`__SPREAD_SENTINEL__`.length)
           const idx = rest.lastIndexOf(`__`)
           const pathStr = idx >= 0 ? rest.slice(0, idx) : rest
           const id = idx >= 0 ? Number(rest.slice(idx + 2)) || 0 : 0
           const path = pathStr.split(`.`)
           const expr = new PropRef(path)
-          const nestedKey = `__NESTED_SPREAD__${topKey}__${id}`
+          // Rewrite to use unified sentinel with destination path only
+          const nestedKey = `__SPREAD_SENTINEL__${topKey}__${id}`
           ops.push({ type: `field`, key: nestedKey, expr, id })
           currentId = id
           continue
@@ -509,10 +510,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       }
       return ops
     }
-    for (const [key, value] of Object.entries(selectObject)) {
+    for (const [key, value] of Object.entries(selectObject as Record<string, any>)) {
+      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
+        // Skip here; we'll add orderly via collectTopLevelSpreadOps
+        continue
+      }
       if (isPlainObject(value)) {
         const hasNestedSpread = Object.keys(value).some(
-          (k) => typeof k === `string` && k.startsWith(`__NESTED_SPREAD__`)
+          (k) => typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)
         )
         if (hasNestedSpread) {
           const nestedOps = flattenNested(key, value)
@@ -546,7 +551,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const ops = [...fieldOps, ...collectTopLevelSpreadOps(selectObject)] as Array<FieldOp>
     ops.sort((a, b) => a.id - b.id)
 
-    // Construct the final select map in the determined order
+    // Construct the final flat select map in the determined order
     const select: Record<string, BasicExpression | Aggregate> = {}
     for (const op of ops) {
       if (op.key.startsWith(`__SPREAD_SENTINEL__`)) {

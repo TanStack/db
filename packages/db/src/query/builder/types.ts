@@ -179,6 +179,9 @@ type SelectValue =
   | SpreadableRefProxy<any> // For spread operations without internal properties
   | Array<Ref<any>>
 
+// Recursive shape for select objects allowing nested projections
+type SelectShape = { [key: string]: SelectValue | SelectShape }
+
 /**
  * SelectObject - Wrapper type for select clause objects
  *
@@ -187,7 +190,7 @@ type SelectValue =
  * messages when invalid selections are attempted.
  */
 export type SelectObject<
-  T extends Record<string, SelectValue> = Record<string, SelectValue>,
+  T extends SelectShape = SelectShape,
 > = T
 
 /**
