@@ -19,6 +19,7 @@ export function processSelectToResults(
   // Build ordered operations to preserve authoring order (spreads and fields)
   type Op =
     | { kind: `spread`; tableAlias: string }
+    | { kind: `nested_spread`; targetPath: Array<string>; compiled: (row: NamespacedRow) => any }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
 
   const ops: Array<Op> = []
@@ -26,10 +27,20 @@ export function processSelectToResults(
   for (const [key, expression] of Object.entries(select)) {
     if (key.startsWith(`__SPREAD_SENTINEL__`)) {
       const rest = key.slice(`__SPREAD_SENTINEL__`.length)
-      // Support optional order suffix: __SPREAD_SENTINEL__alias__123
       const splitIndex = rest.indexOf(`__`)
       const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
       ops.push({ kind: `spread`, tableAlias })
+    } else if (key.startsWith(`__NESTED_SPREAD__`)) {
+      // Pattern: __NESTED_SPREAD__path.to.target__123
+      const rest = key.slice(`__NESTED_SPREAD__`.length)
+      const splitIndex = rest.lastIndexOf(`__`)
+      const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+      const targetPath = pathStr.split(`.`)
+      ops.push({
+        kind: `nested_spread`,
+        targetPath,
+        compiled: compileExpression(expression as BasicExpression),
+      })
     } else {
       if (isAggregateExpression(expression)) {
         // Placeholder for group-by processing later
@@ -57,8 +68,52 @@ export function processSelectToResults(
               selectResults[fieldName] = fieldValue
             }
           }
+        } else if (op.kind === `nested_spread`) {
+          const value = op.compiled(namespacedRow)
+          if (value && typeof value === `object`) {
+            // Ensure target object exists
+            let cursor: any = selectResults
+            const path = op.targetPath
+            // Create all parents except the last segment
+            for (let i = 0; i < path.length; i++) {
+              const seg = path[i]!
+              if (i === path.length - 1) {
+                // For the leaf, spread properties into existing or new object
+                const dest = (cursor[seg] ??= {})
+                if (typeof dest === `object`) {
+                  for (const [k, v] of Object.entries(value)) {
+                    dest[k] = v
+                  }
+                } else {
+                  // If non-object is present, overwrite with a shallow clone of value
+                  cursor[seg] = { ...value }
+                }
+              } else {
+                const next = cursor[seg]
+                if (next == null || typeof next !== `object`) {
+                  cursor[seg] = {}
+                }
+                cursor = cursor[seg]
+              }
+            }
+          }
         } else {
-          selectResults[op.alias] = op.compiled(namespacedRow)
+          // Support nested alias paths like "meta.author.name"
+          const path = op.alias.split(`.`)
+          if (path.length === 1) {
+            selectResults[op.alias] = op.compiled(namespacedRow)
+          } else {
+            let cursor: any = selectResults
+            for (let i = 0; i < path.length - 1; i++) {
+              const seg = path[i]!
+              const next = cursor[seg]
+              if (next == null || typeof next !== `object`) {
+                cursor[seg] = {}
+              }
+              cursor = cursor[seg]
+            }
+            cursor[path[path.length - 1]!] = op.compiled(namespacedRow)
+          }
         }
       }
 
@@ -87,6 +142,7 @@ export function processSelect(
 ): KeyedStream {
   type Op =
     | { kind: `spread`; tableAlias: string }
+    | { kind: `nested_spread`; targetPath: Array<string>; compiled: (row: NamespacedRow) => any }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
   const ops: Array<Op> = []
 
@@ -96,6 +152,16 @@ export function processSelect(
       const splitIndex = rest.indexOf(`__`)
       const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
       ops.push({ kind: `spread`, tableAlias })
+    } else if (key.startsWith(`__NESTED_SPREAD__`)) {
+      const rest = key.slice(`__NESTED_SPREAD__`.length)
+      const splitIndex = rest.lastIndexOf(`__`)
+      const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+      const targetPath = pathStr.split(`.`)
+      ops.push({
+        kind: `nested_spread`,
+        targetPath,
+        compiled: compileExpression(expression as BasicExpression),
+      })
     } else {
       if (isAggregateExpression(expression)) {
         throw new Error(
@@ -119,6 +185,31 @@ export function processSelect(
           if (tableData && typeof tableData === `object`) {
             for (const [fieldName, fieldValue] of Object.entries(tableData)) {
               result[fieldName] = fieldValue
+            }
+          }
+        } else if (op.kind === `nested_spread`) {
+          const value = op.compiled(namespacedRow)
+          if (value && typeof value === `object`) {
+            let cursor: any = result
+            const path = op.targetPath
+            for (let i = 0; i < path.length; i++) {
+              const seg = path[i]!
+              if (i === path.length - 1) {
+                const dest = (cursor[seg] ??= {})
+                if (typeof dest === `object`) {
+                  for (const [k, v] of Object.entries(value)) {
+                    dest[k] = v
+                  }
+                } else {
+                  cursor[seg] = { ...value }
+                }
+              } else {
+                const next = cursor[seg]
+                if (next == null || typeof next !== `object`) {
+                  cursor[seg] = {}
+                }
+                cursor = cursor[seg]
+              }
             }
           }
         } else {

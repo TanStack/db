@@ -61,7 +61,6 @@ describe(`ref-proxy`, () => {
       expect(`__refProxy` in proxy).toBe(true)
       expect(`__path` in proxy).toBe(true)
       expect(`__type` in proxy).toBe(true)
-      expect(`__events` in proxy).toBe(true)
       expect(`users` in proxy).toBe(true)
       expect(`nonexistent` in proxy).toBe(false)
     })
@@ -78,7 +77,6 @@ describe(`ref-proxy`, () => {
       expect(keys).toContain(`__refProxy`)
       expect(keys).toContain(`__path`)
       expect(keys).toContain(`__type`)
-      expect(keys).toContain(`__events`)
     })
 
     it(`handles getOwnPropertyDescriptor correctly`, () => {
@@ -113,16 +111,11 @@ describe(`ref-proxy`, () => {
       ])
 
       // Access ownKeys on table-level proxy (should mark as spread)
-      Object.getOwnPropertyNames(proxy.users)
-
-      const events = (proxy as any).__events as Array<{
-        type: `spread`
-        alias: string
-        id: number
-      }>
-      expect(
-        events.some((e) => e.type === `spread` && e.alias === `users`)
-      ).toBe(true)
+      const keys = Object.getOwnPropertyNames((proxy as any).users)
+      // table spread sentinel should exist on table proxy
+      expect(keys.some((k) => k.startsWith(`__SPREAD_SENTINEL__users__`))).toBe(
+        true
+      )
     })
 
     it(`handles accessing undefined alias`, () => {

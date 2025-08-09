@@ -237,9 +237,7 @@ describe(`select spreads (runtime)`, () => {
     expect(r1.text).toBe(`hello`)
   })
 
-  // TODO: Nested spread into a sub-object is not yet supported by the runtime
-  // These tests document desired semantics without enforcing them now
-  it.skip(`nested object property supports spreading another object under that key`, async () => {
+  it(`nested object property supports spreading another object under that key`, async () => {
     const messagesNested = createMessagesWithMetaCollection()
     const collection = createLiveQueryCollection((q) =>
       q.from({ m: messagesNested }).select(({ m }) => ({
@@ -260,13 +258,14 @@ describe(`select spreads (runtime)`, () => {
     expect(r1.meta.author).toEqual({ name: `sam`, rating: 5 })
   })
 
-  it.skip(`nested spread respects last-wins within the nested object`, async () => {
+  it(`nested spread respects last-wins within the nested object`, async () => {
     const messagesNested = createMessagesWithMetaCollection()
     const collection = createLiveQueryCollection((q) =>
       q.from({ m: messagesNested }).select(({ m }) => ({
         id: m.id,
         meta: {
           // override first
+          // @ts-expect-error - user is overridden by spread
           author: { name: upper(m.user), rating: 0 },
           // last spread restores original author
           ...m.meta,

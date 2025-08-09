@@ -18,6 +18,7 @@ import type {
   OrderByDirection,
   QueryIR,
 } from "../ir.js"
+import { PropRef } from "../ir.js"
 import type {
   CompareOptions,
   Context,
@@ -418,13 +419,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const selectObject = callback(refProxy)
 
-    // Collect ordered events (spreads) and field order ids from the callback
-    const events = ((refProxy as any).__events ?? []) as Array<{
-      type: `spread`
-      alias: string
-      id: number
-    }>
-
     // Helper to ensure we have a BasicExpression/Aggregate for a value
     function toExpr(value: any): BasicExpression | Aggregate {
       if (value === undefined) return toExpression(null)
@@ -468,29 +462,95 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       id: number
     }
     const fieldOps: Array<FieldOp> = []
+
+    function isPlainObject(value: any): value is Record<string, any> {
+      return (
+        value !== null &&
+        typeof value === `object` &&
+        !(`type` in value) &&
+        !(value as any).__refProxy
+      )
+    }
+
+    function flattenNested(
+      topKey: string,
+      obj: Record<string, any>
+    ): Array<FieldOp> {
+      const ops: Array<FieldOp> = []
+      let currentId = 0
+      const keys = Object.keys(obj)
+      for (const k of keys) {
+        const subKey = String(k)
+        const subVal = (obj as any)[k]
+        if (typeof subKey === `string` && subKey.startsWith(`__NESTED_SPREAD__`)) {
+          // subKey encodes the full path and id: __NESTED_SPREAD__alias.path__id
+          const rest = subKey.slice(`__NESTED_SPREAD__`.length)
+          const idx = rest.lastIndexOf(`__`)
+          const pathStr = idx >= 0 ? rest.slice(0, idx) : rest
+          const id = idx >= 0 ? Number(rest.slice(idx + 2)) || 0 : 0
+          const path = pathStr.split(`.`)
+          const expr = new PropRef(path)
+          const nestedKey = `__NESTED_SPREAD__${topKey}__${id}`
+          ops.push({ type: `field`, key: nestedKey, expr, id })
+          currentId = id
+          continue
+        }
+        const nestedKey = `${topKey}.${subKey}`
+        if (isPlainObject(subVal)) {
+          const inner = flattenNested(nestedKey, subVal as Record<string, any>)
+          for (const op of inner) {
+            if (!op.id) op.id = currentId
+            ops.push(op)
+          }
+          continue
+        }
+        const expr = toExpr(subVal)
+        ops.push({ type: `field`, key: nestedKey, expr, id: currentId })
+      }
+      return ops
+    }
     for (const [key, value] of Object.entries(selectObject)) {
+      if (isPlainObject(value)) {
+        const hasNestedSpread = Object.keys(value).some(
+          (k) => typeof k === `string` && k.startsWith(`__NESTED_SPREAD__`)
+        )
+        if (hasNestedSpread) {
+          const nestedOps = flattenNested(key, value)
+          fieldOps.push(...nestedOps)
+          continue
+        }
+      }
       const expr = toExpr(value)
       const id = computeOrderId(expr)
       fieldOps.push({ type: `field`, key, expr, id })
     }
 
     // Build a single ordered list by id (stable)
-    const ops = [...events, ...fieldOps] as Array<
-      { type: `spread`; alias: string; id: number } | FieldOp
-    >
+    // Plus table-level spreads encoded as own enumerable sentinel keys on alias proxies
+    function collectTopLevelSpreadOps(obj: any): Array<FieldOp> {
+      const ops: Array<FieldOp> = []
+      if (!obj || typeof obj !== `object`) return ops
+      for (const [k] of Object.entries(obj)) {
+        if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
+          // Re-emit this sentinel as-is with a literal value for compiler matching
+          const expr = toExpr(k) // value is irrelevant; compiler only needs the key
+          const rest = k.slice(`__SPREAD_SENTINEL__`.length)
+          const idx = rest.lastIndexOf(`__`)
+          const id = idx >= 0 ? Number(rest.slice(idx + 2)) || 0 : 0
+          ops.push({ type: `field`, key: k, expr, id })
+        }
+      }
+      return ops
+    }
+
+    const ops = [...fieldOps, ...collectTopLevelSpreadOps(selectObject)] as Array<FieldOp>
     ops.sort((a, b) => a.id - b.id)
 
     // Construct the final select map in the determined order
     const select: Record<string, BasicExpression | Aggregate> = {}
     for (const op of ops) {
-      if ((op as any).type === `spread`) {
-        const { alias, id } = op as {
-          type: `spread`
-          alias: string
-          id: number
-        }
-        const sentinelKey = `__SPREAD_SENTINEL__${alias}__${id}`
-        select[sentinelKey] = toExpression(alias)
+      if (op.key.startsWith(`__SPREAD_SENTINEL__`)) {
+        select[op.key] = op.expr
       } else {
         const { key, expr } = op as FieldOp
         select[key] = expr

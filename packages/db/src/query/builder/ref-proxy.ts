@@ -85,7 +85,6 @@ export function createRefProxy<T extends Record<string, any>>(
 ): RefProxy<T> & T {
   const cache = new Map<string, any>()
   let accessId = 0 // Monotonic counter to record evaluation order
-  const events: Array<{ type: `spread`; alias: string; id: number }> = []
 
   function createProxy(path: Array<string>): any {
     const pathKey = path.join(`.`)
@@ -113,10 +112,29 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       ownKeys(target) {
-        // If this is a table-level proxy (path length 1), record a spread event
+        // If this is a table-level proxy (path length 1), inject a table spread sentinel
         if (path.length === 1) {
           const aliasName = path[0]!
-          events.push({ type: `spread`, alias: aliasName, id: ++accessId })
+          const id = ++accessId
+          const sentinelKey = `__SPREAD_SENTINEL__${aliasName}__${id}`
+          if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
+            Object.defineProperty(target, sentinelKey, {
+              enumerable: true,
+              configurable: true,
+              value: true,
+            })
+          }
+        } else if (path.length > 1) {
+          // Nested spread: inject a nested spread sentinel using dotted path
+          const id = ++accessId
+          const sentinelKey = `__NESTED_SPREAD__${path.join(`.`)}__${id}`
+          if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
+            Object.defineProperty(target, sentinelKey, {
+              enumerable: true,
+              configurable: true,
+              value: true,
+            })
+          }
         }
         return Reflect.ownKeys(target)
       },
@@ -148,7 +166,6 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
-      if (prop === `__events`) return events // Expose ordered events
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
@@ -163,8 +180,7 @@ export function createRefProxy<T extends Record<string, any>>(
       if (
         prop === `__refProxy` ||
         prop === `__path` ||
-        prop === `__type` ||
-        prop === `__events`
+        prop === `__type`
       )
         return true
       if (typeof prop === `string` && aliases.includes(prop)) return true
@@ -172,15 +188,14 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     ownKeys(_target) {
-      return [...aliases, `__refProxy`, `__path`, `__type`, `__events`]
+      return [...aliases, `__refProxy`, `__path`, `__type`]
     },
 
     getOwnPropertyDescriptor(target, prop) {
       if (
         prop === `__refProxy` ||
         prop === `__path` ||
-        prop === `__type` ||
-        prop === `__events`
+        prop === `__type`
       ) {
         return { enumerable: false, configurable: true }
       }
