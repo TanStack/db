@@ -19,7 +19,12 @@ export default defineConfig({
       fileName: (format) => `index.${format === `es` ? `js` : `cjs`}`,
     },
     rollupOptions: {
-      external: [`solid-js`, `solid-js/web`, `@tanstack/db`],
+      external: [
+        `solid-js`,
+        `solid-js/web`,
+        `@tanstack/db`,
+        `@tanstack/solid-db`,
+      ],
     },
   },
 })

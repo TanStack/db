@@ -14,16 +14,23 @@ export default [
     rules: {
       "prettier/prettier": `error`,
       "stylistic/quotes": [`error`, `backtick`],
+      "pnpm/enforce-catalog": `off`,
+      "pnpm/json-enforce-catalog": `off`,
       ...prettierConfig.rules,
+    },
+  },
+  {
+    files: [`**/*.ts`, `**/*.tsx`],
+    rules: {
       "@typescript-eslint/no-unused-vars": [
         `error`,
         { argsIgnorePattern: `^_`, varsIgnorePattern: `^_` },
       ],
       "@typescript-eslint/naming-convention": [
-        "error",
+        `error`,
         {
-          selector: "typeParameter",
-          format: ["PascalCase"],
+          selector: `typeParameter`,
+          format: [`PascalCase`],
           leadingUnderscore: `allow`,
         },
       ],

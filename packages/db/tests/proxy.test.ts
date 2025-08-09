@@ -497,14 +497,16 @@ describe(`Proxy Library`, () => {
         }
       }
 
-      // Verify the original map was modified
+      // Verify the original map was not modified
       expect(map.get(`key1`)?.count).toBe(1)
 
-      // Force a change to ensure the proxy tracks it
-      proxy.myMap.set(`key3`, { count: 3 })
-
-      // Check that the change was tracked
-      expect(getChanges()).not.toEqual({})
+      // Check that the change was tracked correctly
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 10 }],
+          [`key2`, { count: 2 }],
+        ]),
+      })
     })
 
     it(`should track changes when Set object values are modified via iterator`, () => {
@@ -524,7 +526,7 @@ describe(`Proxy Library`, () => {
         }
       }
 
-      // Verify the original set was modified
+      // Verify the original set was not modified
       let found = false
       for (const item of set) {
         if (item.id === 1) {
@@ -534,11 +536,16 @@ describe(`Proxy Library`, () => {
       }
       expect(found).toBe(true)
 
-      // Force a change to ensure the proxy tracks it
-      proxy.mySet.add({ id: 3, value: `three` })
-
-      // Check that the change was tracked
-      expect(getChanges()).not.toEqual({})
+      // Check that the change was tracked correctly
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ])
+      )
     })
 
     it(`should track changes when Map values are modified via forEach`, () => {
@@ -558,14 +565,16 @@ describe(`Proxy Library`, () => {
         }
       })
 
-      // Verify the original map was modified
+      // Verify the original map was not modified
       expect(map.get(`key2`)?.count).toBe(2)
 
-      // Force a change to ensure the proxy tracks it
-      proxy.myMap.set(`key3`, { count: 3 })
-
-      // Check that the change was tracked
-      expect(getChanges()).not.toEqual({})
+      // Check that the change was tracked correctly
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 1 }],
+          [`key2`, { count: 20 }],
+        ]),
+      })
     })
 
     it(`should track changes when Set values are modified via forEach`, () => {
@@ -585,7 +594,7 @@ describe(`Proxy Library`, () => {
         }
       })
 
-      // Verify the original set was modified
+      // Verify the original set was not modified
       let found = false
       for (const item of set) {
         if (item.id === 2) {
@@ -595,11 +604,165 @@ describe(`Proxy Library`, () => {
       }
       expect(found).toBe(true)
 
-      // Force a change to ensure the proxy tracks it
-      proxy.mySet.add({ id: 3, value: `three` })
+      // Check that the change was tracked correctly
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `one` },
+          { id: 2, value: `modified two` },
+        ])
+      )
+    })
 
-      // Check that the change was tracked
-      expect(getChanges()).not.toEqual({})
+    it(`should handle multiple modifications to the same object via different iterators`, () => {
+      const map = new Map([
+        [`key1`, { count: 1, name: `test` }],
+        [`key2`, { count: 2, name: `test2` }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify via entries()
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 10
+        }
+      }
+
+      // Modify via values()
+      for (const value of proxy.myMap.values()) {
+        if (value.name === `test`) {
+          value.name = `modified`
+        }
+      }
+
+      // Verify the original map was not modified.
+      expect(map.get(`key1`)).toEqual({ count: 1, name: `test` })
+
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 10, name: `modified` }],
+          [`key2`, { count: 2, name: `test2` }],
+        ]),
+      })
+    })
+
+    it(`should handle nested object modifications via iterators`, () => {
+      const map = new Map([
+        [`user1`, { profile: { name: `Alice`, settings: { theme: `dark` } } }],
+        [`user2`, { profile: { name: `Bob`, settings: { theme: `light` } } }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      for (const [key, user] of proxy.myMap.entries()) {
+        if (key === `user1`) {
+          user.profile.settings.theme = `auto`
+        }
+      }
+
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [
+            `user1`,
+            { profile: { name: `Alice`, settings: { theme: `auto` } } },
+          ],
+          [`user2`, { profile: { name: `Bob`, settings: { theme: `light` } } }],
+        ]),
+      })
+      expect(map.get(`user1`)?.profile.settings.theme).toBe(`dark`)
+    })
+
+    it(`should handle Set modifications with duplicate objects`, () => {
+      const obj1 = { id: 1, value: `one` }
+      const obj2 = { id: 2, value: `two` }
+      const set = new Set([obj1, obj2, obj1]) // obj1 appears twice but Set deduplicates
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      for (const item of proxy.mySet) {
+        if (item.id === 1) {
+          item.value = `modified`
+        }
+      }
+
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      expect(changes.mySet.size).toBe(2)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ])
+      )
+      expect(obj1.value).toBe(`one`) // Original unchanged
+    })
+
+    it(`should handle reverting changes made via iterators`, () => {
+      const map = new Map([
+        [`key1`, { count: 5 }],
+        [`key2`, { count: 10 }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify via entries()
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 20 // Change
+          value.count = 5 // Revert to original
+        }
+      }
+
+      // Should have no changes since we reverted
+      expect(getChanges()).toEqual({})
+    })
+
+    it(`should handle mixed Map and Set nested operations`, () => {
+      const data = {
+        userGroups: new Map([
+          [
+            `admins`,
+            {
+              users: new Set([
+                { id: 1, name: `Alice` },
+                { id: 2, name: `Bob` },
+              ]),
+            },
+          ],
+          [
+            `users`,
+            {
+              users: new Set([{ id: 3, name: `Charlie` }]),
+            },
+          ],
+        ]),
+      }
+      const { proxy, getChanges } = createChangeProxy(data)
+
+      // Navigate through Map.values() then Set iteration
+      for (const group of proxy.userGroups.values()) {
+        for (const user of group.users) {
+          if (user.name === `Alice`) {
+            user.name = `Alice Admin`
+          }
+        }
+      }
+
+      const changes = getChanges()
+      expect(changes.userGroups).toBeInstanceOf(Map)
+      const adminGroup = changes.userGroups.get(`admins`)
+      expect(adminGroup?.users).toBeInstanceOf(Set)
+      const users = Array.from(adminGroup?.users as Set<any>)
+      expect(users).toEqual(
+        expect.arrayContaining([
+          { id: 1, name: `Alice Admin` },
+          { id: 2, name: `Bob` },
+        ])
+      )
     })
   })
 
@@ -728,9 +891,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array without the last element
+      // Call pop() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = proxies[0].items.slice(0, -1)
+      proxies[0].items.pop()
 
       expect(getChanges()).toEqual([
         {
@@ -745,10 +908,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array without the first element
-
+      // Call shift() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = proxies[0].items.slice(1)
+      proxies[0].items.shift()
 
       expect(getChanges()).toEqual([
         {
@@ -763,10 +925,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`banana`, `cherry`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array with an element added at the beginning
+      // Call unshift() method directly
       // @ts-expect-error ok possibly undefined
-
-      proxies[0].items = [`apple`, ...proxies[0].items]
+      proxies[0].items.unshift(`apple`)
 
       expect(getChanges()).toEqual([
         {
@@ -774,22 +935,28 @@ describe(`Proxy Library`, () => {
         },
       ])
       // @ts-expect-error ok possibly undefined
-
       expect(objs[0].items).toEqual([`banana`, `cherry`])
+    })
+
+    it(`should track array push() operations`, () => {
+      const obj = { items: [`apple`, `banana`] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.push(`cherry`)
+
+      expect(getChanges()).toEqual({
+        items: [`apple`, `banana`, `cherry`],
+      })
+      expect(obj.items).toEqual([`apple`, `banana`])
     })
 
     it(`should track array splice() operations`, () => {
       const objs = [{ items: [`apple`, `banana`, `cherry`, `date`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new array with elements replaced in the middle
+      // Call splice() method directly
       // @ts-expect-error ok possibly undefined
-
-      const newItems = [...proxies[0].items]
-      newItems.splice(1, 2, `blueberry`, `cranberry`)
-      // @ts-expect-error ok possibly undefined
-
-      proxies[0].items = newItems
+      proxies[0].items.splice(1, 2, `blueberry`, `cranberry`)
 
       expect(getChanges()).toEqual([
         {
@@ -804,9 +971,9 @@ describe(`Proxy Library`, () => {
       const objs = [{ items: [`cherry`, `apple`, `banana`] }]
       const { proxies, getChanges } = createArrayChangeProxy(objs)
 
-      // Create a new sorted array
+      // Call sort() method directly
       // @ts-expect-error ok possibly undefined
-      proxies[0].items = [...proxies[0].items].sort()
+      proxies[0].items.sort()
 
       expect(getChanges()).toEqual([
         {
@@ -815,6 +982,65 @@ describe(`Proxy Library`, () => {
       ])
       // @ts-expect-error ok possibly undefined
       expect(objs[0].items).toEqual([`cherry`, `apple`, `banana`])
+    })
+
+    it(`should track array reverse() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call reverse() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.reverse()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`cherry`, `banana`, `apple`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array fill() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call fill() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.fill(`orange`, 1, 3)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `orange`, `orange`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array copyWithin() operations`, () => {
+      const objs = [
+        { items: [`apple`, `banana`, `cherry`, `date`, `elderberry`] },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call copyWithin() method directly - copy elements from index 3-4 to index 0-1
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.copyWithin(0, 3, 5)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`date`, `elderberry`, `cherry`, `date`, `elderberry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([
+        `apple`,
+        `banana`,
+        `cherry`,
+        `date`,
+        `elderberry`,
+      ])
     })
 
     it(`should track changes in multi-dimensional arrays`, () => {
@@ -1256,7 +1482,7 @@ describe(`Proxy Library`, () => {
       proxy.name = `Jane`
       proxy.name = `John`
 
-      // Modify and revert njkested
+      // Modify and revert nested
       proxy.nested.count = 10
       proxy.nested.count = 5
 

@@ -1,5 +1,317 @@
 # @tanstack/db
 
+## 0.1.2
+
+### Patch Changes
+
+- Ensure that you can use optional properties in the `select` and `join` clauses of a query, and fix an issue where standard schemas were not properly carried through to live queries. ([#377](https://github.com/TanStack/db/pull/377))
+
+- Add option to configure how orderBy compares values. This includes ascending/descending order, ordering of null values, and lexical vs locale comparison for strings. ([#314](https://github.com/TanStack/db/pull/314))
+
+## 0.1.1
+
+### Patch Changes
+
+- Cleanup transactions after they complete to prevent memory leak and performance degradation ([#371](https://github.com/TanStack/db/pull/371))
+
+- Fix the types on `localOnlyCollectionOptions` and `localStorageCollectionOptions` so that they correctly infer the types from a passed in schema ([#372](https://github.com/TanStack/db/pull/372))
+
+## 0.1.0
+
+### Minor Changes
+
+- 0.1 release - first beta 🎉 ([#332](https://github.com/TanStack/db/pull/332))
+
+### Patch Changes
+
+- We have moved development of the differential dataflow implementation from @electric-sql/d2mini to a new @tanstack/db-ivm package inside the tanstack db monorepo to make development simpler. ([#330](https://github.com/TanStack/db/pull/330))
+
+- Updated dependencies [[`7d2f4be`](https://github.com/TanStack/db/commit/7d2f4be95c43aad29fb61e80e5a04c58c859322b), [`f0eda36`](https://github.com/TanStack/db/commit/f0eda36cb36350399bc8835686a6c4b6ad297e45)]:
+  - @tanstack/db-ivm@0.1.0
+
+## 0.0.33
+
+### Patch Changes
+
+- bump d2mini to latest which has a significant speedup ([#321](https://github.com/TanStack/db/pull/321))
+
+## 0.0.32
+
+### Patch Changes
+
+- Fix LiveQueryCollection hanging when source collections have no data ([#309](https://github.com/TanStack/db/pull/309))
+
+  Fixed an issue where `LiveQueryCollection.preload()` would hang indefinitely when source collections call `markReady()` without data changes (e.g., when queryFn returns empty array).
+
+  The fix implements a proper event-based solution:
+  - Collections now emit empty change events when becoming ready with no data
+  - WHERE clause filtered subscriptions now correctly pass through empty ready signals
+  - Both regular and WHERE clause optimized LiveQueryCollections now work correctly with empty source collections
+
+## 0.0.31
+
+### Patch Changes
+
+- Fix UI responsiveness issue with rapid user interactions in collections ([#308](https://github.com/TanStack/db/pull/308))
+
+  Fixed a critical issue where rapid user interactions (like clicking multiple checkboxes quickly) would cause the UI to become unresponsive when using collections with slow backend responses. The problem occurred when optimistic updates would back up and the UI would stop reflecting user actions.
+
+  **Root Causes:**
+  - Event filtering logic was blocking ALL events for keys with recent sync operations, including user-initiated actions
+  - Event batching was queuing user actions instead of immediately updating the UI during high-frequency operations
+
+  **Solution:**
+  - Added `triggeredByUserAction` parameter to `recomputeOptimisticState()` to distinguish user actions from sync operations
+  - Modified event filtering to allow user-initiated actions to bypass sync status checks
+  - Enhanced `emitEvents()` with `forceEmit` parameter to skip batching for immediate user action feedback
+  - Updated all user action code paths to properly identify themselves as user-triggered
+
+  This ensures the UI remains responsive during rapid user interactions while maintaining the performance benefits of event batching and duplicate event filtering for sync operations.
+
+## 0.0.30
+
+### Patch Changes
+
+- Remove OrderedIndex in favor of more efficient BTree index. ([#302](https://github.com/TanStack/db/pull/302))
+
+## 0.0.29
+
+### Patch Changes
+
+- Automatically restart collections from cleaned-up state when operations are called ([#285](https://github.com/TanStack/db/pull/285))
+
+  Collections in a `cleaned-up` state now automatically restart when operations like `insert()`, `update()`, or `delete()` are called on them. This matches the behavior of other collection access patterns and provides a better developer experience by avoiding unnecessary errors.
+
+- Add collection index system for optimized queries and subscriptions ([#257](https://github.com/TanStack/db/pull/257))
+
+  This release introduces a comprehensive index system for collections that enables fast lookups and query optimization:
+
+- Enabled live queries to use the collection indexes ([#258](https://github.com/TanStack/db/pull/258))
+
+  Live queries now use the collection indexes for many queries, using the optimized query pipeline to push where clauses to the collection, which is then able to use the index to filter the data.
+
+- Added an auto-indexing system that creates indexes on collection eagerly when querying, this is a performance optimization that can be disabled by setting the autoIndex option to `off`. ([#292](https://github.com/TanStack/db/pull/292))
+
+- feat: Replace string-based errors with named error classes for better error handling ([#297](https://github.com/TanStack/db/pull/297))
+
+  This comprehensive update replaces all string-based error throws throughout the TanStack DB codebase with named error classes, providing better type safety and developer experience.
+
+  ## New Features
+  - **Root `TanStackDBError` class** - all errors inherit from a common base for unified error handling
+  - **Named error classes** organized by package and functional area
+  - **Type-safe error handling** using `instanceof` checks instead of string matching
+  - **Package-specific error definitions** - each adapter has its own error classes
+  - **Better IDE support** with autocomplete for error types
+
+  ## Package Structure
+
+  ### Core Package (`@tanstack/db`)
+
+  Contains generic errors used across the ecosystem:
+  - Collection configuration, state, and operation errors
+  - Transaction lifecycle and mutation errors
+  - Query building, compilation, and execution errors
+  - Storage and serialization errors
+
+  ### Adapter Packages
+
+  Each adapter now exports its own specific error classes:
+  - **`@tanstack/electric-db-collection`**: Electric-specific errors
+  - **`@tanstack/trailbase-db-collection`**: TrailBase-specific errors
+  - **`@tanstack/query-db-collection`**: Query collection specific errors
+
+  ## Breaking Changes
+  - Error handling code using string matching will need to be updated to use `instanceof` checks
+  - Some error messages may have slight formatting changes
+  - Adapter-specific errors now need to be imported from their respective packages
+
+  ## Migration Guide
+
+  ### Core DB Errors
+
+  **Before:**
+
+  ```ts
+  try {
+    collection.insert(data)
+  } catch (error) {
+    if (error.message.includes("already exists")) {
+      // Handle duplicate key error
+    }
+  }
+  ```
+
+  **After:**
+
+  ```ts
+  import { DuplicateKeyError } from "@tanstack/db"
+
+  try {
+    collection.insert(data)
+  } catch (error) {
+    if (error instanceof DuplicateKeyError) {
+      // Type-safe error handling
+    }
+  }
+  ```
+
+  ### Adapter-Specific Errors
+
+  **Before:**
+
+  ```ts
+  // Electric collection errors were imported from @tanstack/db
+  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  ```
+
+  **After:**
+
+  ```ts
+  // Now import from the specific adapter package
+  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  ```
+
+  ### Unified Error Handling
+
+  **New:**
+
+  ```ts
+  import { TanStackDBError } from "@tanstack/db"
+
+  try {
+    // Any TanStack DB operation
+  } catch (error) {
+    if (error instanceof TanStackDBError) {
+      // Handle all TanStack DB errors uniformly
+      console.log("TanStack DB error:", error.message)
+    }
+  }
+  ```
+
+  ## Benefits
+  - **Type Safety**: All errors now have specific types that can be caught with `instanceof`
+  - **Unified Error Handling**: Root `TanStackDBError` class allows catching all library errors with a single check
+  - **Better Package Separation**: Each adapter manages its own error types
+  - **Developer Experience**: Better IDE support with autocomplete for error types
+  - **Maintainability**: Error definitions are co-located with their usage
+  - **Consistency**: Uniform error handling patterns across the entire codebase
+
+  All error classes maintain the same error messages and behavior while providing better structure and package separation.
+
+## 0.0.28
+
+### Patch Changes
+
+- fixed an issue with joins where a specific order of references in the `eq()` expression was required, and added additional validation ([#291](https://github.com/TanStack/db/pull/291))
+
+- Add comprehensive documentation for creating collection options creators ([#284](https://github.com/TanStack/db/pull/284))
+
+  This adds a new documentation page `collection-options-creator.md` that provides detailed guidance for developers building collection options creators. The documentation covers:
+  - Core requirements and configuration interfaces
+  - Sync implementation patterns with transaction lifecycle (begin, write, commit, markReady)
+  - Data parsing and type conversion using field-specific conversions
+  - Two distinct mutation handler patterns:
+    - Pattern A: User-provided handlers (ElectricSQL, Query style)
+    - Pattern B: Built-in handlers (Trailbase, WebSocket style)
+  - Complete WebSocket collection example with full round-trip flow
+  - Managing optimistic state with various strategies (transaction IDs, ID-based tracking, refetch, timestamps)
+  - Best practices for deduplication, error handling, and testing
+  - Row update modes and advanced configuration options
+
+  The documentation helps developers understand when to create custom collections versus using the query collection, and provides practical examples following the established patterns from existing collection implementations.
+
+## 0.0.27
+
+### Patch Changes
+
+- fix arktype schemas for collections ([#279](https://github.com/TanStack/db/pull/279))
+
+## 0.0.26
+
+### Patch Changes
+
+- Add initial release of TrailBase collection for TanStack DB. TrailBase is a blazingly fast, open-source alternative to Firebase built on Rust, SQLite, and V8. It provides type-safe REST and realtime APIs with sub-millisecond latencies, integrated authentication, and flexible access control - all in a single executable. This collection type enables seamless integration with TrailBase backends for high-performance real-time applications. ([#228](https://github.com/TanStack/db/pull/228))
+
+## 0.0.25
+
+### Patch Changes
+
+- Fix iterator-based change tracking in proxy system ([#271](https://github.com/TanStack/db/pull/271))
+
+  This fixes several issues with iterator-based change tracking for Maps and Sets:
+  - **Map.entries()** now correctly updates actual Map entries instead of creating duplicate keys
+  - **Map.values()** now tracks back to original Map keys using value-to-key mapping instead of using symbol placeholders
+  - **Set iterators** now properly replace objects in Set when modified instead of creating symbol-keyed entries
+  - **forEach()** methods continue to work correctly
+
+  The implementation now uses a sophisticated parent-child tracking system with specialized `updateMap` and `updateSet` functions to ensure that changes made to objects accessed through iterators are properly attributed to the correct collection entries.
+
+  This brings the proxy system in line with how mature libraries like Immer handle iterator-based change tracking, using method interception rather than trying to proxy all property access.
+
+- Add explicit collection readiness detection with `isReady()` and `markReady()` ([#270](https://github.com/TanStack/db/pull/270))
+  - Add `isReady()` method to check if a collection is ready for use
+  - Add `onFirstReady()` method to register callbacks for when collection becomes ready
+  - Add `markReady()` to SyncConfig interface for sync implementations to explicitly signal readiness
+  - Replace `onFirstCommit()` with `onFirstReady()` for better semantics
+  - Update status state machine to allow `loading` → `ready` transition for cases with no data to commit
+  - Update all sync implementations (Electric, Query, Local-only, Local-storage) to use `markReady()`
+  - Improve error handling by allowing collections to be marked ready even when sync errors occur
+
+  This provides a more intuitive and ergonomic API for determining collection readiness, replacing the previous approach of using commits as a readiness signal.
+
+## 0.0.24
+
+### Patch Changes
+
+- Add query optimizer with predicate pushdown ([#256](https://github.com/TanStack/db/pull/256))
+
+  Implements automatic query optimization that moves WHERE clauses closer to data sources, reducing intermediate result sizes and improving performance for queries with joins.
+
+- Add `leftJoin`, `rightJoin`, `innerJoin` and `fullJoin` aliases of the main `join` method on the query builder. ([#269](https://github.com/TanStack/db/pull/269))
+
+- • Add proper tracking for array mutating methods (push, pop, shift, unshift, splice, sort, reverse, fill, copyWithin) ([#267](https://github.com/TanStack/db/pull/267))
+  • Fix existing array tests that were misleadingly named but didn't actually call the methods they claimed to test
+  • Add comprehensive test coverage for all supported array mutating methods
+
+## 0.0.23
+
+### Patch Changes
+
+- Ensure schemas can apply defaults when inserting ([#209](https://github.com/TanStack/db/pull/209))
+
+## 0.0.22
+
+### Patch Changes
+
+- New distinct operator for queries. ([#244](https://github.com/TanStack/db/pull/244))
+
+## 0.0.21
+
+### Patch Changes
+
+- Move Collections to their own packages ([#252](https://github.com/TanStack/db/pull/252))
+  - Move local-only and local-storage collections to main `@tanstack/db` package
+  - Create new `@tanstack/electric-db-collection` package for ElectricSQL integration
+  - Create new `@tanstack/query-db-collection` package for TanStack Query integration
+  - Delete `@tanstack/db-collections` package (removed from repo)
+  - Update example app and documentation to use new package structure
+
+  Why?
+  - Better separation of concerns
+  - Independent versioning for each collection type
+  - Cleaner dependencies (electric collections don't need query deps, etc.)
+  - Easier to add more collection types moving forward
+
+## 0.0.20
+
+### Patch Changes
+
+- Add non-optimistic mutations support ([#250](https://github.com/TanStack/db/pull/250))
+  - Add `optimistic` option to insert, update, and delete operations
+  - Default `optimistic: true` maintains backward compatibility
+  - When `optimistic: false`, mutations only apply after server confirmation
+  - Enables better control for server-validated operations and confirmation workflows
+
 ## 0.0.19
 
 ### Patch Changes

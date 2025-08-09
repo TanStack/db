@@ -1,0 +1,63 @@
+{
+  "name": "@tanstack/electric-db-collection",
+  "description": "ElectricSQL collection for TanStack DB",
+  "version": "0.1.2",
+  "dependencies": {
+    "@electric-sql/client": "1.0.0",
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db": "workspace:*",
+    "@tanstack/store": "^0.7.0",
+    "debug": "^4.4.1"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.12",
+    "@vitest/coverage-istanbul": "^3.0.9"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.6.3",
+  "peerDependencies": {
+    "@electric-sql/client": ">=1.0.0",
+    "typescript": ">=4.7"
+  },
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/electric-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "electric",
+    "sql",
+    "optimistic",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

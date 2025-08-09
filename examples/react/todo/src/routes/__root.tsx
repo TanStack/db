@@ -4,8 +4,7 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router"
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
-import { TanStackReactDbDevtools } from "@tanstack/react-db-devtools"
+
 
 import appCss from "../styles.css?url"
 
@@ -20,7 +19,7 @@ export const Route = createRootRoute({
         content: `width=device-width, initial-scale=1`,
       },
       {
-        title: `TanStack Start/DB/Electric Starter`,
+        title: `TanStack React DB Example`,
       },
     ],
     links: [
@@ -34,8 +33,7 @@ export const Route = createRootRoute({
   component: () => (
     <RootDocument>
       <Outlet />
-      <TanStackRouterDevtools />
-      <TanStackReactDbDevtools position="bottom-right" />
+
     </RootDocument>
   ),
 })

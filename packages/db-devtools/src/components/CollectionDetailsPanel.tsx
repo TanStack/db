@@ -7,12 +7,29 @@ import { TransactionsPanel } from "./TransactionsPanel"
 import { GenericDetailsPanel } from "./DetailsPanel"
 import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
+import { DataGrid } from "./DataGrid"
+
+function RawQueryPlaceholder(props: { value: () => any }) {
+  const value = props.value
+  const data = () => value()
+  return (
+    <pre style={{ padding: `8px`, color: `#ddd`, "white-space": `pre-wrap` }}>
+      {JSON.stringify(data(), null, 2)}
+    </pre>
+  )
+}
 
 export interface CollectionDetailsPanelProps {
   activeCollection: Accessor<CollectionMetadata | undefined>
 }
 
-type CollectionTab = `summary` | `config` | `state` | `transactions` | `data`
+type CollectionTab =
+  | `summary`
+  | `config`
+  | `state`
+  | `transactions`
+  | `data`
+  | `raw`
 
 export function CollectionDetailsPanel({
   activeCollection,
@@ -52,6 +69,7 @@ export function CollectionDetailsPanel({
     { id: `state`, label: `State` },
     { id: `transactions`, label: `Transactions` },
     { id: `data`, label: `Data` },
+    { id: `raw`, label: `Raw Query` },
   ]
 
   const renderTabContent = () => {
@@ -133,9 +151,23 @@ export function CollectionDetailsPanel({
       }
 
       case `data`: {
-        return (
-          <div class={styles().noDataMessage}>Grid view coming soon...</div>
-        )
+        if (!instance) return <div class={styles().noDataMessage}>No instance</div>
+        return <DataGrid instance={instance} />
+      }
+      case `raw`: {
+        if (!instance)
+          return <div class={styles().noDataMessage}>No instance</div>
+        const anyInstance = instance as any
+        const devtools =
+          anyInstance.config?.__devtools ?? anyInstance.__devtools
+        if (!devtools?.getIR) {
+          return (
+            <div class={styles().noDataMessage}>Raw query not available</div>
+          )
+        }
+        const ir = devtools.getIR?.()
+        const where = devtools.getWhereClauses?.() ?? null
+        return <RawQueryPlaceholder value={() => ({ ir, where })} />
       }
 
       default:

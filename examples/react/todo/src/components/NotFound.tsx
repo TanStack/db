@@ -30,6 +30,11 @@ export function NotFound() {
                 Electric Demo
               </button>
             </Link>
+            <Link to="/trailbase" className="flex-1">
+              <button className="w-full px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm">
+                TrailBase Demo
+              </button>
+            </Link>
           </div>
         </div>
       </div>

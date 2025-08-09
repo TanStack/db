@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { D2 } from "@electric-sql/d2mini"
+import { D2 } from "@tanstack/db-ivm"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"

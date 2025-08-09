@@ -52,9 +52,12 @@ describe(`Collection Lifecycle Management`, () => {
         id: `status-test`,
         getKey: (item) => item.id,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginCallback = begin as () => void
-            commitCallback = commit as () => void
+            commitCallback = () => {
+              commit()
+              markReady()
+            }
           },
         },
       })
@@ -80,9 +83,12 @@ describe(`Collection Lifecycle Management`, () => {
         getKey: (item) => item.id,
         startSync: true,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginCallback = begin as () => void
-            commitCallback = commit as () => void
+            commitCallback = () => {
+              commit()
+              markReady()
+            }
           },
         },
       })
@@ -121,9 +127,12 @@ describe(`Collection Lifecycle Management`, () => {
         getKey: (item) => item.id,
         gcTime: 0,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginCallback = begin as () => void
-            commitCallback = commit as () => void
+            commitCallback = () => {
+              commit()
+              markReady()
+            }
           },
         },
       })
@@ -154,9 +163,10 @@ describe(`Collection Lifecycle Management`, () => {
         getKey: (item) => item.id,
         startSync: false, // Test lazy loading behavior
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             begin()
             commit()
+            markReady()
             syncCallCount++
           },
         },
@@ -327,9 +337,12 @@ describe(`Collection Lifecycle Management`, () => {
         getKey: (item) => item.id,
         startSync: true,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginCallback = begin as () => void
-            commitCallback = commit as () => void
+            commitCallback = () => {
+              commit()
+              markReady()
+            }
           },
         },
       })
@@ -389,18 +402,16 @@ describe(`Collection Lifecycle Management`, () => {
   })
 
   describe(`Lifecycle Events`, () => {
-    it(`should call onFirstCommit callbacks`, () => {
-      let beginCallback: (() => void) | undefined
-      let commitCallback: (() => void) | undefined
+    it(`should call onFirstReady callbacks`, () => {
+      let markReadyCallback: (() => void) | undefined
       const callbacks: Array<() => void> = []
 
       const collection = createCollection<{ id: string; name: string }>({
-        id: `first-commit-test`,
+        id: `first-ready-test`,
         getKey: (item) => item.id,
         sync: {
-          sync: ({ begin, commit }) => {
-            beginCallback = begin as () => void
-            commitCallback = commit as () => void
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady as () => void
           },
         },
       })
@@ -408,23 +419,21 @@ describe(`Collection Lifecycle Management`, () => {
       const unsubscribe = collection.subscribeChanges(() => {})
 
       // Register callbacks
-      collection.onFirstCommit(() => callbacks.push(() => `callback1`))
-      collection.onFirstCommit(() => callbacks.push(() => `callback2`))
+      collection.onFirstReady(() => callbacks.push(() => `callback1`))
+      collection.onFirstReady(() => callbacks.push(() => `callback2`))
 
       expect(callbacks).toHaveLength(0)
 
-      // Trigger first commit
-      if (beginCallback && commitCallback) {
-        beginCallback()
-        commitCallback()
+      // Trigger first ready
+      if (markReadyCallback) {
+        markReadyCallback()
       }
 
       expect(callbacks).toHaveLength(2)
 
-      // Subsequent commits should not trigger callbacks
-      if (beginCallback && commitCallback) {
-        beginCallback()
-        commitCallback()
+      // Subsequent markReady calls should not trigger callbacks
+      if (markReadyCallback) {
+        markReadyCallback()
       }
       expect(callbacks).toHaveLength(2)
 

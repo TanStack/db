@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
+import { eq } from "../src/query/builder/functions"
 import type {
   ChangeMessage,
   ChangesPayload,
@@ -641,5 +642,172 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Callback shouldn't be called after unsubscribe
     expect(callback).not.toHaveBeenCalled()
+  })
+
+  it(`should correctly handle filtered updates that transition between filter states`, () => {
+    const callback = vi.fn()
+
+    // Create collection with items that have a status field
+    const collection = createCollection<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>({
+      id: `filtered-updates-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Start with some initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `item1`, status: `inactive` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `item2`, status: `active` },
+          })
+          commit()
+        },
+      },
+    })
+
+    const mutationFn: MutationFn = async () => {
+      // Simulate sync by writing the mutations back
+      const syncCollection = collection as any
+      syncCollection.config.sync.sync({
+        collection: syncCollection,
+        begin: () => {
+          syncCollection.pendingSyncedTransactions.push({
+            committed: false,
+            operations: [],
+          })
+        },
+        write: (messageWithoutKey: any) => {
+          const pendingTransaction =
+            syncCollection.pendingSyncedTransactions[
+              syncCollection.pendingSyncedTransactions.length - 1
+            ]
+          const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
+          const message = { ...messageWithoutKey, key }
+          pendingTransaction.operations.push(message)
+        },
+        commit: () => {
+          const pendingTransaction =
+            syncCollection.pendingSyncedTransactions[
+              syncCollection.pendingSyncedTransactions.length - 1
+            ]
+          pendingTransaction.committed = true
+          syncCollection.commitPendingTransactions()
+        },
+        markReady: () => {
+          syncCollection.markReady()
+        },
+      })
+      return Promise.resolve()
+    }
+
+    // Subscribe to changes with a filter for active items only
+    const unsubscribe = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+      where: (row) => eq(row.status, `active`),
+    })
+
+    // Should only receive the active item in initial state
+    expect(callback).toHaveBeenCalledTimes(1)
+    const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(initialChanges).toHaveLength(1)
+    expect(initialChanges[0]!.key).toBe(2)
+    expect(initialChanges[0]!.type).toBe(`insert`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Test 1: Update an inactive item to active (should emit insert)
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.status = `active`
+      })
+    )
+
+    // Should emit an insert event for the newly active item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const insertChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(insertChanges).toHaveLength(1)
+    expect(insertChanges[0]!.type).toBe(`insert`)
+    expect(insertChanges[0]!.key).toBe(1)
+    expect(insertChanges[0]!.value.status).toBe(`active`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Test 2: Update an active item to inactive (should emit delete)
+    const tx2 = createTransaction({ mutationFn })
+    tx2.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.status = `inactive`
+      })
+    )
+
+    // Should emit a delete event for the newly inactive item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(deleteChanges).toHaveLength(1)
+    expect(deleteChanges[0]!.type).toBe(`delete`)
+    expect(deleteChanges[0]!.key).toBe(2)
+    expect(deleteChanges[0]!.value.status).toBe(`active`) // Should be the previous value (active)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Test 3: Update an active item while keeping it active (should emit update)
+    const tx3 = createTransaction({ mutationFn })
+    tx3.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `updated item1`
+      })
+    )
+
+    // Should emit an update event for the active item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const updateChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(updateChanges).toHaveLength(1)
+    expect(updateChanges[0]!.type).toBe(`update`)
+    expect(updateChanges[0]!.key).toBe(1)
+    expect(updateChanges[0]!.value.value).toBe(`updated item1`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Test 4: Update an inactive item while keeping it inactive (should emit nothing)
+    const tx4 = createTransaction({ mutationFn })
+    tx4.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.value = `updated inactive item`
+      })
+    )
+
+    // Should not emit any events for inactive items
+    expect(callback).not.toHaveBeenCalled()
+
+    // Clean up
+    unsubscribe()
   })
 })

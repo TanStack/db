@@ -31,22 +31,23 @@ const sampleUsers: Array<User> = [
   { id: 4, name: `Dave`, age: 22, email: `dave@example.com`, active: true },
 ]
 
-function createUsersCollection() {
+function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<User>({
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
+      autoIndex,
     })
   )
 }
 
-describe(`Query`, () => {
-  describe(`basic`, () => {
+function createBasicTests(autoIndex: `off` | `eager`) {
+  describe(`with autoIndex ${autoIndex}`, () => {
     let usersCollection: ReturnType<typeof createUsersCollection>
 
     beforeEach(() => {
-      usersCollection = createUsersCollection()
+      usersCollection = createUsersCollection(autoIndex)
     })
 
     test(`should create, update and delete a live query collection with config`, () => {
@@ -714,5 +715,12 @@ describe(`Query`, () => {
       expect(liveCollection.size).toBe(3)
       expect(liveCollection.get(5)).toBeUndefined()
     })
+  })
+}
+
+describe(`Query`, () => {
+  describe(`basic`, () => {
+    createBasicTests(`off`)
+    createBasicTests(`eager`)
   })
 })

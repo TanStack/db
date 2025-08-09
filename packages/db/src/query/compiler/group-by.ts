@@ -1,5 +1,11 @@
-import { filter, groupBy, groupByOperators, map } from "@electric-sql/d2mini"
+import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
 import { Func, PropRef } from "../ir.js"
+import {
+  AggregateFunctionNotInSelectError,
+  NonAggregateExpressionNotInGroupByError,
+  UnknownHavingExpressionTypeError,
+  UnsupportedAggregateFunctionError,
+} from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import type {
   Aggregate,
@@ -48,9 +54,7 @@ function validateAndCreateMapping(
     )
 
     if (groupIndex === -1) {
-      throw new Error(
-        `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`
-      )
+      throw new NonAggregateExpressionNotInGroupByError(alias)
     }
 
     // Cache the mapping
@@ -354,7 +358,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `max`:
       return max(valueExtractor)
     default:
-      throw new Error(`Unsupported aggregate function: ${aggExpr.name}`)
+      throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
 }
 
@@ -376,9 +380,7 @@ function transformHavingClause(
         }
       }
       // If no matching aggregate found in SELECT, throw error
-      throw new Error(
-        `Aggregate function in HAVING clause must also be in SELECT clause: ${aggExpr.name}`
-      )
+      throw new AggregateFunctionNotInSelectError(aggExpr.name)
     }
 
     case `func`: {
@@ -410,9 +412,7 @@ function transformHavingClause(
       return havingExpr as BasicExpression
 
     default:
-      throw new Error(
-        `Unknown expression type in HAVING clause: ${(havingExpr as any).type}`
-      )
+      throw new UnknownHavingExpressionTypeError((havingExpr as any).type)
   }
 }
 

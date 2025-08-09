@@ -1,38 +1,67 @@
-import { filter, map } from "@electric-sql/d2mini"
+import { distinct, filter, map } from "@tanstack/db-ivm"
+import { optimizeQuery } from "../optimizer.js"
+import {
+  CollectionInputNotFoundError,
+  DistinctRequiresSelectError,
+  HavingRequiresGroupByError,
+  LimitOffsetRequireOrderByError,
+  UnsupportedFromTypeError,
+} from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
-import type { CollectionRef, QueryIR, QueryRef } from "../ir.js"
+import type {
+  BasicExpression,
+  CollectionRef,
+  QueryIR,
+  QueryRef,
+} from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
   ResultStream,
 } from "../../types.js"
+import type { QueryCache, QueryMapping } from "./types.js"
 
 /**
- * Cache for compiled subqueries to avoid duplicate compilation
+ * Result of query compilation including both the pipeline and collection-specific WHERE clauses
  */
-type QueryCache = WeakMap<QueryIR, ResultStream>
+export interface CompilationResult {
+  /** The compiled query pipeline */
+  pipeline: ResultStream
+  /** Map of collection aliases to their WHERE clauses for index optimization */
+  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+}
 
 /**
  * Compiles a query2 IR into a D2 pipeline
- * @param query The query IR to compile
+ * @param rawQuery The query IR to compile
  * @param inputs Mapping of collection names to input streams
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
- * @returns A stream builder representing the compiled query
+ * @param queryMapping Optional mapping from optimized queries to original queries
+ * @returns A CompilationResult with the pipeline and collection WHERE clauses
  */
 export function compileQuery(
-  query: QueryIR,
+  rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
-  cache: QueryCache = new WeakMap()
-): ResultStream {
-  // Check if this query has already been compiled
-  const cachedResult = cache.get(query)
+  cache: QueryCache = new WeakMap(),
+  queryMapping: QueryMapping = new WeakMap()
+): CompilationResult {
+  // Check if the original raw query has already been compiled
+  const cachedResult = cache.get(rawQuery)
   if (cachedResult) {
     return cachedResult
   }
+
+  // Optimize the query before compilation
+  const { optimizedQuery: query, collectionWhereClauses } =
+    optimizeQuery(rawQuery)
+
+  // Create mapping from optimized query to original for caching
+  queryMapping.set(query, rawQuery)
+  mapNestedQueries(query, rawQuery, queryMapping)
 
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
@@ -44,7 +73,8 @@ export function compileQuery(
   const { alias: mainTableAlias, input: mainInput } = processFrom(
     query.from,
     allInputs,
-    cache
+    cache,
+    queryMapping
   )
   tables[mainTableAlias] = mainInput
 
@@ -68,17 +98,16 @@ export function compileQuery(
       tables,
       mainTableAlias,
       allInputs,
-      cache
+      cache,
+      queryMapping
     )
   }
 
   // Process the WHERE clause if it exists
   if (query.where && query.where.length > 0) {
-    // Compile all WHERE expressions
-    const compiledWheres = query.where.map((where) => compileExpression(where))
-
     // Apply each WHERE condition as a filter (they are ANDed together)
-    for (const compiledWhere of compiledWheres) {
+    for (const where of query.where) {
+      const compiledWhere = compileExpression(where)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return compiledWhere(namespacedRow)
@@ -98,8 +127,12 @@ export function compileQuery(
     }
   }
 
+  if (query.distinct && !query.fnSelect && !query.select) {
+    throw new DistinctRequiresSelectError()
+  }
+
   // Process the SELECT clause early - always create __select_results
-  // This eliminates duplication and allows for future DISTINCT implementation
+  // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
     // Handle functional select - apply the function to transform the row
     pipeline = pipeline.pipe(
@@ -170,7 +203,7 @@ export function compileQuery(
       : false
 
     if (!hasAggregates) {
-      throw new Error(`HAVING clause requires GROUP BY clause`)
+      throw new HavingRequiresGroupByError()
     }
   }
 
@@ -188,6 +221,11 @@ export function compileQuery(
         })
       )
     }
+  }
+
+  // Process the DISTINCT clause if it exists
+  if (query.distinct) {
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
   }
 
   // Process orderBy parameter if it exists
@@ -209,14 +247,17 @@ export function compileQuery(
     )
 
     const result = resultPipeline
-    // Cache the result before returning
-    cache.set(query, result)
-    return result
+    // Cache the result before returning (use original query as key)
+    const compilationResult = {
+      pipeline: result,
+      collectionWhereClauses,
+    }
+    cache.set(rawQuery, compilationResult)
+
+    return compilationResult
   } else if (query.limit !== undefined || query.offset !== undefined) {
     // If there's a limit or offset without orderBy, throw an error
-    throw new Error(
-      `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
-    )
+    throw new LimitOffsetRequireOrderByError()
   }
 
   // Final step: extract the __select_results and return tuple format (no orderBy)
@@ -232,9 +273,14 @@ export function compileQuery(
   )
 
   const result = resultPipeline
-  // Cache the result before returning
-  cache.set(query, result)
-  return result
+  // Cache the result before returning (use original query as key)
+  const compilationResult = {
+    pipeline: result,
+    collectionWhereClauses,
+  }
+  cache.set(rawQuery, compilationResult)
+
+  return compilationResult
 }
 
 /**
@@ -243,21 +289,31 @@ export function compileQuery(
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
-  cache: QueryCache
+  cache: QueryCache,
+  queryMapping: QueryMapping
 ): { alias: string; input: KeyedStream } {
   switch (from.type) {
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
-        throw new Error(
-          `Input for collection "${from.collection.id}" not found in inputs map`
-        )
+        throw new CollectionInputNotFoundError(from.collection.id)
       }
       return { alias: from.alias, input }
     }
     case `queryRef`: {
+      // Find the original query for caching purposes
+      const originalQuery = queryMapping.get(from.query) || from.query
+
       // Recursively compile the sub-query with cache
-      const subQueryInput = compileQuery(from.query, allInputs, cache)
+      const subQueryResult = compileQuery(
+        originalQuery,
+        allInputs,
+        cache,
+        queryMapping
+      )
+
+      // Extract the pipeline from the compilation result
+      const subQueryInput = subQueryResult.pipeline
 
       // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
       // We need to extract just the value for use in parent queries
@@ -271,6 +327,56 @@ function processFrom(
       return { alias: from.alias, input: extractedInput }
     }
     default:
-      throw new Error(`Unsupported FROM type: ${(from as any).type}`)
+      throw new UnsupportedFromTypeError((from as any).type)
+  }
+}
+
+/**
+ * Recursively maps optimized subqueries to their original queries for proper caching.
+ * This ensures that when we encounter the same QueryRef object in different contexts,
+ * we can find the original query to check the cache.
+ */
+function mapNestedQueries(
+  optimizedQuery: QueryIR,
+  originalQuery: QueryIR,
+  queryMapping: QueryMapping
+): void {
+  // Map the FROM clause if it's a QueryRef
+  if (
+    optimizedQuery.from.type === `queryRef` &&
+    originalQuery.from.type === `queryRef`
+  ) {
+    queryMapping.set(optimizedQuery.from.query, originalQuery.from.query)
+    // Recursively map nested queries
+    mapNestedQueries(
+      optimizedQuery.from.query,
+      originalQuery.from.query,
+      queryMapping
+    )
+  }
+
+  // Map JOIN clauses if they exist
+  if (optimizedQuery.join && originalQuery.join) {
+    for (
+      let i = 0;
+      i < optimizedQuery.join.length && i < originalQuery.join.length;
+      i++
+    ) {
+      const optimizedJoin = optimizedQuery.join[i]!
+      const originalJoin = originalQuery.join[i]!
+
+      if (
+        optimizedJoin.from.type === `queryRef` &&
+        originalJoin.from.type === `queryRef`
+      ) {
+        queryMapping.set(optimizedJoin.from.query, originalJoin.from.query)
+        // Recursively map nested queries in joins
+        mapNestedQueries(
+          optimizedJoin.from.query,
+          originalJoin.from.query,
+          queryMapping
+        )
+      }
+    }
   }
 }
