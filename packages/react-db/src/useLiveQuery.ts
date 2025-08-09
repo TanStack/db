@@ -187,9 +187,11 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.id === `string`
 
   // Use refs to cache collection and track dependencies
-  const collectionRef = useRef<any>(null)
+  const collectionRef = useRef<Collection<object, string | number, {}> | null>(
+    null
+  )
   const depsRef = useRef<Array<unknown> | null>(null)
-  const configRef = useRef<any>(null)
+  const configRef = useRef<unknown>(null)
 
   // Check if we need to create/recreate the collection
   const needsNewCollection =
@@ -214,13 +216,13 @@ export function useLiveQuery(
           query: configOrQueryOrCollection,
           startSync: true,
           gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
-        })
+        }) as unknown as Collection<object, string | number, {}>
       } else {
         collectionRef.current = createLiveQueryCollection({
           startSync: true,
           gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
           ...configOrQueryOrCollection,
-        })
+        }) as unknown as Collection<object, string | number, {}>
       }
       depsRef.current = [...deps]
     }
@@ -229,7 +231,7 @@ export function useLiveQuery(
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
   const snapshotRef = useRef<{
-    collection: Collection<any, any, any, any, any>
+    collection: Collection<object, string | number, {}>
     version: number
   } | null>(null)
 
@@ -259,7 +261,7 @@ export function useLiveQuery(
   // Create stable getSnapshot function using ref
   const getSnapshotRef = useRef<
     | (() => {
-        collection: Collection<any, any, any, any, any>
+        collection: Collection<object, string | number, {}>
         version: number
       })
     | null
@@ -276,7 +278,7 @@ export function useLiveQuery(
         snapshotRef.current.collection !== currentCollection
       ) {
         snapshotRef.current = {
-          collection: currentCollection as Collection<any, any, any, any, any>,
+          collection: currentCollection,
           version: currentVersion,
         }
       }
@@ -293,20 +295,11 @@ export function useLiveQuery(
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
   const returnedSnapshotRef = useRef<{
-    collection: Collection<any, any, any, any, any>
+    collection: Collection<object, string | number, {}>
     version: number
   } | null>(null)
-  const returnedRef = useRef<{
-    state: Map<any, any>
-    data: Array<any>
-    collection: Collection<any, any, any, any, any>
-    status: CollectionStatus
-    isLoading: boolean
-    isReady: boolean
-    isIdle: boolean
-    isError: boolean
-    isCleanedUp: boolean
-  } | null>(null)
+  // Keep implementation return loose to satisfy overload signatures
+  const returnedRef = useRef<any>(null)
 
   // Rebuild returned object only when the snapshot changes (version or collection identity)
   if (
@@ -314,12 +307,24 @@ export function useLiveQuery(
     returnedSnapshotRef.current.version !== snapshot.version ||
     returnedSnapshotRef.current.collection !== snapshot.collection
   ) {
-    const state = new Map(snapshot.collection.entries())
-    const data = Array.from(snapshot.collection.values())
+    // Capture a stable view of entries for this snapshot to avoid tearing
+    const entries = Array.from(snapshot.collection.entries())
+    let stateCache: Map<string | number, unknown> | null = null
+    let dataCache: Array<unknown> | null = null
 
     returnedRef.current = {
-      state,
-      data,
+      get state() {
+        if (!stateCache) {
+          stateCache = new Map(entries)
+        }
+        return stateCache
+      },
+      get data() {
+        if (!dataCache) {
+          dataCache = entries.map(([, value]) => value)
+        }
+        return dataCache
+      },
       collection: snapshot.collection,
       status: snapshot.collection.status,
       isLoading:
