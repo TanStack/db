@@ -37,6 +37,7 @@ import {
   UpdateKeyNotFoundError,
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
+import { emitDevtoolsEvent } from "./devtools-events"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
@@ -61,7 +62,6 @@ import type {
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
-import { emitDevtoolsEvent } from "./devtools-events"
 
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
@@ -69,7 +69,7 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
     if ((window as any).__TANSTACK_DB_DEVTOOLS__?.registerCollection) {
       ;(window as any).__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
       ;(collection as any).isRegisteredWithDevtools = true
-      emitDevtoolsEvent("collectionRegistered", { id: collection.id })
+      emitDevtoolsEvent(`collectionRegistered`, { id: collection.id })
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
     }
@@ -86,7 +86,7 @@ function triggerDevtoolsUpdate(
       updateCallback()
     }
   }
-  emitDevtoolsEvent("collectionUpdated", { id: collection.id })
+  emitDevtoolsEvent(`collectionUpdated`, { id: collection.id })
 }
 
 // Declare the devtools registry on window
@@ -2438,5 +2438,6 @@ export class CollectionImpl<
 
     // Trigger devtools update after transaction state changes
     triggerDevtoolsUpdate(this)
+    emitDevtoolsEvent(`transactionsUpdated`, { collectionId: this.id })
   }
 }
