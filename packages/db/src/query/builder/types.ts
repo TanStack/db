@@ -230,46 +230,61 @@ export type SelectObject<
  * ```
  */
 export type ResultTypeFromSelect<TSelectObject> = {
-  [K in keyof TSelectObject]: TSelectObject[K] extends RefProxy<infer T>
+  [K in keyof StripInternalKeys<TSelectObject>]: StripInternalKeys<TSelectObject>[K] extends RefProxy<
+    infer T
+  >
     ? T
-    : TSelectObject[K] extends Ref<infer T>
+    : StripInternalKeys<TSelectObject>[K] extends Ref<infer T>
       ? T
-      : TSelectObject[K] extends Ref<infer T> | undefined
+      : StripInternalKeys<TSelectObject>[K] extends Ref<infer T> | undefined
         ? T | undefined
-        : TSelectObject[K] extends Ref<infer T> | null
+        : StripInternalKeys<TSelectObject>[K] extends Ref<infer T> | null
           ? T | null
-          : TSelectObject[K] extends RefProxy<infer T> | undefined
+          : StripInternalKeys<TSelectObject>[K] extends
+                | RefProxy<infer T>
+                | undefined
             ? T | undefined
-            : TSelectObject[K] extends RefProxy<infer T> | null
+            : StripInternalKeys<TSelectObject>[K] extends RefProxy<
+                  infer T
+                > | null
               ? T | null
-              : TSelectObject[K] extends BasicExpression<infer T>
+              : StripInternalKeys<TSelectObject>[K] extends BasicExpression<
+                    infer T
+                  >
                 ? T
-                : TSelectObject[K] extends Aggregate<infer T>
+                : StripInternalKeys<TSelectObject>[K] extends Aggregate<infer T>
                   ? T
-                  : TSelectObject[K] extends RefProxyFor<infer T>
-                    ? T
-                    : TSelectObject[K] extends SpreadableRefProxy<infer T>
-                      ? ResultTypeFromSelect<SpreadableRefProxy<T>>
-                      : TSelectObject[K] extends string
-                        ? string
-                        : TSelectObject[K] extends number
-                          ? number
-                          : TSelectObject[K] extends boolean
-                            ? boolean
-                            : TSelectObject[K] extends null
-                              ? null
-                              : TSelectObject[K] extends undefined
-                                ? undefined
-                                : TSelectObject[K] extends { __type: infer U }
-                                  ? U
-                                  : TSelectObject[K] extends Record<string, any>
-                                    ? TSelectObject[K] extends {
-                                        __refProxy: true
-                                      }
-                                      ? never // This is a RefProxy, handled above
-                                      : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
-                                    : never
+                  : StripInternalKeys<TSelectObject>[K] extends string
+                    ? string
+                    : StripInternalKeys<TSelectObject>[K] extends number
+                      ? number
+                      : StripInternalKeys<TSelectObject>[K] extends boolean
+                        ? boolean
+                        : StripInternalKeys<TSelectObject>[K] extends null
+                          ? null
+                          : StripInternalKeys<TSelectObject>[K] extends undefined
+                            ? undefined
+                            : StripInternalKeys<TSelectObject>[K] extends {
+                                  __type: infer U
+                                }
+                              ? U
+                              : StripInternalKeys<TSelectObject>[K] extends Record<
+                                    string,
+                                    any
+                                  >
+                                ? ResultTypeFromSelect<
+                                    StripInternalKeys<
+                                      StripInternalKeys<TSelectObject>[K]
+                                    >
+                                  >
+                                : never
 }
+
+// Helper to strip internal RefProxy keys from any object type
+type StripInternalKeys<T> =
+  T extends Record<string, any>
+    ? Omit<T, `__refProxy` | `__path` | `__type`>
+    : T
 
 /**
  * OrderByCallback - Type for orderBy clause callback functions

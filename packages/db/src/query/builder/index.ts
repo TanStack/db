@@ -418,34 +418,82 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const selectObject = callback(refProxy)
 
-    // Check if any tables were spread during the callback
-    const spreadSentinels = (refProxy as any).__spreadSentinels as Set<string>
+    // Collect ordered events (spreads) and field order ids from the callback
+    const events = ((refProxy as any).__events ?? []) as Array<{
+      type: `spread`
+      alias: string
+      id: number
+    }>
 
-    // Convert the select object to use expressions, including spread sentinels
-    const select: Record<string, BasicExpression | Aggregate> = {}
-
-    // First, add spread sentinels for any tables that were spread
-    for (const spreadAlias of spreadSentinels) {
-      const sentinelKey = `__SPREAD_SENTINEL__${spreadAlias}`
-      select[sentinelKey] = toExpression(spreadAlias) // Use alias as a simple reference
+    // Helper to ensure we have a BasicExpression/Aggregate for a value
+    function toExpr(value: any): BasicExpression | Aggregate {
+      if (value === undefined) return toExpression(null)
+      if (isRefProxy(value)) return toExpression(value)
+      if (
+        value &&
+        typeof value === `object` &&
+        `type` in value &&
+        (value.type === `agg` ||
+          value.type === `func` ||
+          value.type === `ref` ||
+          value.type === `val`)
+      ) {
+        return value as BasicExpression | Aggregate
+      }
+      return toExpression(value)
     }
 
-    // Then add the explicit select fields
+    // Recursively compute the max order id from an expression tree
+    function computeOrderId(expr: BasicExpression | Aggregate): number {
+      if (!expr || typeof expr !== `object` || !(`type` in expr)) return 0
+      if ((expr as any).type === `ref`) return (expr as any).__orderId ?? 0
+      if ((expr as any).type === `val`) return 0
+      const args = (expr as any).args as Array<BasicExpression | Aggregate>
+      if (Array.isArray(args) && args.length) {
+        let maxId = 0
+        for (const a of args) {
+          const id = computeOrderId(a)
+          if (id > maxId) maxId = id
+        }
+        return maxId
+      }
+      return 0
+    }
+
+    // Convert the select object to ordered operations
+    type FieldOp = {
+      type: `field`
+      key: string
+      expr: BasicExpression | Aggregate
+      id: number
+    }
+    const fieldOps: Array<FieldOp> = []
     for (const [key, value] of Object.entries(selectObject)) {
-      if (value === undefined) {
-        // Handle undefined values from optional chaining
-        select[key] = toExpression(null) // Convert undefined to null for SQL compatibility
-      } else if (isRefProxy(value)) {
-        select[key] = toExpression(value)
-      } else if (
-        typeof value === `object` &&
-        value !== null &&
-        `type` in value &&
-        (value.type === `agg` || value.type === `func`)
-      ) {
-        select[key] = value as BasicExpression | Aggregate
+      const expr = toExpr(value)
+      const id = computeOrderId(expr)
+      fieldOps.push({ type: `field`, key, expr, id })
+    }
+
+    // Build a single ordered list by id (stable)
+    const ops = [...events, ...fieldOps] as Array<
+      { type: `spread`; alias: string; id: number } | FieldOp
+    >
+    ops.sort((a, b) => a.id - b.id)
+
+    // Construct the final select map in the determined order
+    const select: Record<string, BasicExpression | Aggregate> = {}
+    for (const op of ops) {
+      if ((op as any).type === `spread`) {
+        const { alias, id } = op as {
+          type: `spread`
+          alias: string
+          id: number
+        }
+        const sentinelKey = `__SPREAD_SENTINEL__${alias}__${id}`
+        select[sentinelKey] = toExpression(alias)
       } else {
-        select[key] = toExpression(value)
+        const { key, expr } = op as FieldOp
+        select[key] = expr
       }
     }
 

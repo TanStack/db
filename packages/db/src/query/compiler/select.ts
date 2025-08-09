@@ -16,30 +16,29 @@ export function processSelectToResults(
   select: Select,
   _allInputs: Record<string, KeyedStream>
 ): NamespacedAndKeyedStream {
-  // Pre-compile all select expressions
-  const compiledSelect: Array<{
-    alias: string
-    compiledExpression: (row: NamespacedRow) => any
-  }> = []
-  const spreadAliases: Array<string> = []
+  // Build ordered operations to preserve authoring order (spreads and fields)
+  type Op =
+    | { kind: `spread`; tableAlias: string }
+    | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
 
-  for (const [alias, expression] of Object.entries(select)) {
-    if (alias.startsWith(`__SPREAD_SENTINEL__`)) {
-      // Extract the table alias from the sentinel key
-      const tableAlias = alias.replace(`__SPREAD_SENTINEL__`, ``)
-      spreadAliases.push(tableAlias)
+  const ops: Array<Op> = []
+
+  for (const [key, expression] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+      const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+      // Support optional order suffix: __SPREAD_SENTINEL__alias__123
+      const splitIndex = rest.indexOf(`__`)
+      const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+      ops.push({ kind: `spread`, tableAlias })
     } else {
       if (isAggregateExpression(expression)) {
-        // For aggregates, we'll store the expression info for GROUP BY processing
-        // but still compile a placeholder that will be replaced later
-        compiledSelect.push({
-          alias,
-          compiledExpression: () => null, // Placeholder - will be handled by GROUP BY
-        })
+        // Placeholder for group-by processing later
+        ops.push({ kind: `field`, alias: key, compiled: () => null })
       } else {
-        compiledSelect.push({
-          alias,
-          compiledExpression: compileExpression(expression as BasicExpression),
+        ops.push({
+          kind: `field`,
+          alias: key,
+          compiled: compileExpression(expression as BasicExpression),
         })
       }
     }
@@ -49,22 +48,18 @@ export function processSelectToResults(
     map(([key, namespacedRow]) => {
       const selectResults: Record<string, any> = {}
 
-      // First pass: spread table data for any spread sentinels
-      for (const tableAlias of spreadAliases) {
-        const tableData = namespacedRow[tableAlias]
-        if (tableData && typeof tableData === `object`) {
-          // Spread the table data into the result, but don't overwrite explicit fields
-          for (const [fieldName, fieldValue] of Object.entries(tableData)) {
-            if (!(fieldName in selectResults)) {
+      for (const op of ops) {
+        if (op.kind === `spread`) {
+          const tableData = (namespacedRow as any)[op.tableAlias]
+          if (tableData && typeof tableData === `object`) {
+            for (const [fieldName, fieldValue] of Object.entries(tableData)) {
+              // Last-wins semantics: always overwrite
               selectResults[fieldName] = fieldValue
             }
           }
+        } else {
+          selectResults[op.alias] = op.compiled(namespacedRow)
         }
-      }
-
-      // Second pass: evaluate all compiled select expressions (non-aggregates)
-      for (const { alias, compiledExpression } of compiledSelect) {
-        selectResults[alias] = compiledExpression(namespacedRow)
       }
 
       // Return the namespaced row with __select_results added
@@ -90,28 +85,27 @@ export function processSelect(
   select: Select,
   _allInputs: Record<string, KeyedStream>
 ): KeyedStream {
-  // Pre-compile all select expressions
-  const compiledSelect: Array<{
-    alias: string
-    compiledExpression: (row: NamespacedRow) => any
-  }> = []
-  const spreadAliases: Array<string> = []
+  type Op =
+    | { kind: `spread`; tableAlias: string }
+    | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
+  const ops: Array<Op> = []
 
-  for (const [alias, expression] of Object.entries(select)) {
-    if (alias.startsWith(`__SPREAD_SENTINEL__`)) {
-      // Extract the table alias from the sentinel key
-      const tableAlias = alias.replace(`__SPREAD_SENTINEL__`, ``)
-      spreadAliases.push(tableAlias)
+  for (const [key, expression] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) {
+      const rest = key.slice(`__SPREAD_SENTINEL__`.length)
+      const splitIndex = rest.indexOf(`__`)
+      const tableAlias = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
+      ops.push({ kind: `spread`, tableAlias })
     } else {
       if (isAggregateExpression(expression)) {
-        // Aggregates should be handled by GROUP BY processing, not here
         throw new Error(
           `Aggregate expressions in SELECT clause should be handled by GROUP BY processing`
         )
       }
-      compiledSelect.push({
-        alias,
-        compiledExpression: compileExpression(expression as BasicExpression),
+      ops.push({
+        kind: `field`,
+        alias: key,
+        compiled: compileExpression(expression as BasicExpression),
       })
     }
   }
@@ -119,23 +113,17 @@ export function processSelect(
   return pipeline.pipe(
     map(([key, namespacedRow]) => {
       const result: Record<string, any> = {}
-
-      // First pass: spread table data for any spread sentinels
-      for (const tableAlias of spreadAliases) {
-        const tableData = namespacedRow[tableAlias]
-        if (tableData && typeof tableData === `object`) {
-          // Spread the table data into the result, but don't overwrite explicit fields
-          for (const [fieldName, fieldValue] of Object.entries(tableData)) {
-            if (!(fieldName in result)) {
+      for (const op of ops) {
+        if (op.kind === `spread`) {
+          const tableData = (namespacedRow as any)[op.tableAlias]
+          if (tableData && typeof tableData === `object`) {
+            for (const [fieldName, fieldValue] of Object.entries(tableData)) {
               result[fieldName] = fieldValue
             }
           }
+        } else {
+          result[op.alias] = op.compiled(namespacedRow)
         }
-      }
-
-      // Second pass: evaluate all compiled select expressions
-      for (const { alias, compiledExpression } of compiledSelect) {
-        result[alias] = compiledExpression(namespacedRow)
       }
 
       return [key, result] as [string, typeof result]
