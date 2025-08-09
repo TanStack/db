@@ -229,10 +229,8 @@ export function useLiveQuery(
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
   const snapshotRef = useRef<{
-    state: Map<any, any>
-    data: Array<any>
-    collection: Collection<any, any, any>
-    _version: number
+    collection: Collection<any, any, any, any, any>
+    version: number
   } | null>(null)
 
   // Reset refs when collection changes
@@ -248,6 +246,7 @@ export function useLiveQuery(
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = collectionRef.current!.subscribeChanges(() => {
+        // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
       })
@@ -260,9 +259,8 @@ export function useLiveQuery(
   // Create stable getSnapshot function using ref
   const getSnapshotRef = useRef<
     | (() => {
-        state: Map<any, any>
-        data: Array<any>
-        collection: Collection<any, any, any>
+        collection: Collection<any, any, any, any, any>
+        version: number
       })
     | null
   >(null)
@@ -271,20 +269,15 @@ export function useLiveQuery(
       const currentVersion = versionRef.current
       const currentCollection = collectionRef.current!
 
-      // If we don't have a snapshot or the version changed, create a new one
+      // Recreate snapshot object only if version/collection changed
       if (
         !snapshotRef.current ||
-        snapshotRef.current._version !== currentVersion
+        snapshotRef.current.version !== currentVersion ||
+        snapshotRef.current.collection !== currentCollection
       ) {
         snapshotRef.current = {
-          get state() {
-            return new Map(currentCollection.entries())
-          },
-          get data() {
-            return Array.from(currentCollection.values())
-          },
-          collection: currentCollection,
-          _version: currentVersion,
+          collection: currentCollection as Collection<any, any, any, any, any>,
+          version: currentVersion,
         }
       }
 
@@ -298,17 +291,49 @@ export function useLiveQuery(
     getSnapshotRef.current
   )
 
-  return {
-    state: snapshot.state,
-    data: snapshot.data,
-    collection: snapshot.collection,
-    status: snapshot.collection.status,
-    isLoading:
-      snapshot.collection.status === `loading` ||
-      snapshot.collection.status === `initialCommit`,
-    isReady: snapshot.collection.status === `ready`,
-    isIdle: snapshot.collection.status === `idle`,
-    isError: snapshot.collection.status === `error`,
-    isCleanedUp: snapshot.collection.status === `cleaned-up`,
+  // Track last snapshot (from useSyncExternalStore) and the returned value separately
+  const returnedSnapshotRef = useRef<{
+    collection: Collection<any, any, any, any, any>
+    version: number
+  } | null>(null)
+  const returnedRef = useRef<{
+    state: Map<any, any>
+    data: Array<any>
+    collection: Collection<any, any, any, any, any>
+    status: CollectionStatus
+    isLoading: boolean
+    isReady: boolean
+    isIdle: boolean
+    isError: boolean
+    isCleanedUp: boolean
+  } | null>(null)
+
+  // Rebuild returned object only when the snapshot changes (version or collection identity)
+  if (
+    !returnedSnapshotRef.current ||
+    returnedSnapshotRef.current.version !== snapshot.version ||
+    returnedSnapshotRef.current.collection !== snapshot.collection
+  ) {
+    const state = new Map(snapshot.collection.entries())
+    const data = Array.from(snapshot.collection.values())
+
+    returnedRef.current = {
+      state,
+      data,
+      collection: snapshot.collection,
+      status: snapshot.collection.status,
+      isLoading:
+        snapshot.collection.status === `loading` ||
+        snapshot.collection.status === `initialCommit`,
+      isReady: snapshot.collection.status === `ready`,
+      isIdle: snapshot.collection.status === `idle`,
+      isError: snapshot.collection.status === `error`,
+      isCleanedUp: snapshot.collection.status === `cleaned-up`,
+    }
+
+    // Remember the snapshot that produced this returned value
+    returnedSnapshotRef.current = snapshot
   }
+
+  return returnedRef.current!
 }
