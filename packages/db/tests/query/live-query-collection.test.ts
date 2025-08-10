@@ -5,18 +5,6 @@ import { Query } from "../../src/query/builder/index.js"
 import { mockSyncCollectionOptions } from "../utls.js"
 import type { ChangeMessage } from "../../src/types.js"
 
-// This test file includes tests that reproduce a bug where live query collections
-// don't properly transition to 'ready' status when source collections are preloaded
-// after the live query collection is created.
-//
-// The issue: When a live query collection is created before its source collections
-// are preloaded, the live query gets stuck in 'initialCommit' status instead of
-// transitioning to 'ready' status, even though it has the correct data.
-//
-// This matches the original error report: "if I don't preload the collection before
-// rendering, It won't update after being loaded. It'll only update, when some
-// mutation/remote update happens"
-
 // Sample user type for tests
 type User = {
   id: number
