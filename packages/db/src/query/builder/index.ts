@@ -1,5 +1,13 @@
 import { CollectionImpl } from "../../collection.js"
-import { CollectionRef, QueryRef } from "../ir.js"
+import {
+  Aggregate as AggregateExpr,
+  CollectionRef,
+  Func as FuncExpr,
+  PropRef,
+  QueryRef,
+  Value as ValueExpr,
+  isExpressionLike,
+} from "../ir.js"
 import {
   InvalidSourceError,
   JoinConditionMustBeEqualityError,
@@ -418,40 +426,49 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const selectObject = callback(refProxy)
 
-    // Check if any tables were spread during the callback
-    const spreadSentinels = (refProxy as any).__spreadSentinels as Set<string>
-
-    // Convert the select object to use expressions, including spread sentinels
-    const select: Record<string, BasicExpression | Aggregate> = {}
-
-    // First, add spread sentinels for any tables that were spread
-    for (const spreadAlias of spreadSentinels) {
-      const sentinelKey = `__SPREAD_SENTINEL__${spreadAlias}`
-      select[sentinelKey] = toExpression(spreadAlias) // Use alias as a simple reference
-    }
-
-    // Then add the explicit select fields
-    for (const [key, value] of Object.entries(selectObject)) {
-      if (value === undefined) {
-        // Handle undefined values from optional chaining
-        select[key] = toExpression(null) // Convert undefined to null for SQL compatibility
-      } else if (isRefProxy(value)) {
-        select[key] = toExpression(value)
-      } else if (
-        typeof value === `object` &&
-        value !== null &&
-        `type` in value &&
-        (value.type === `agg` || value.type === `func`)
+    // Helper to ensure we have a BasicExpression/Aggregate for a value
+    function toExpr(value: any): BasicExpression | Aggregate {
+      if (value === undefined) return toExpression(null)
+      if (isRefProxy(value)) return toExpression(value)
+      if (
+        value instanceof AggregateExpr ||
+        value instanceof FuncExpr ||
+        value instanceof PropRef ||
+        value instanceof ValueExpr
       ) {
-        select[key] = value as BasicExpression | Aggregate
-      } else {
-        select[key] = toExpression(value)
+        return value as BasicExpression | Aggregate
       }
+      return toExpression(value)
     }
+
+    function isPlainObject(value: any): value is Record<string, any> {
+      return (
+        value !== null &&
+        typeof value === `object` &&
+        !isExpressionLike(value) &&
+        !value.__refProxy
+      )
+    }
+
+    function buildNestedSelect(obj: any): any {
+      if (!isPlainObject(obj)) return toExpr(obj)
+      const out: Record<string, any> = {}
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
+          // Preserve sentinel key and its value (value is unimportant at compile time)
+          out[k] = v
+          continue
+        }
+        out[k] = buildNestedSelect(v)
+      }
+      return out
+    }
+
+    const select = buildNestedSelect(selectObject)
 
     return new BaseQueryBuilder({
       ...this.query,
-      select,
+      select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
   }

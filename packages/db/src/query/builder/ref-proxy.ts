@@ -84,7 +84,7 @@ export function createRefProxy<T extends Record<string, any>>(
   aliases: Array<string>
 ): RefProxy<T> & T {
   const cache = new Map<string, any>()
-  const spreadSentinels = new Set<string>() // Track which aliases have been spread
+  let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
     const pathKey = path.join(`.`)
@@ -97,6 +97,7 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        if (prop === `__orderId`) return target.__orderId
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -110,10 +111,14 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       ownKeys(target) {
-        // If this is a table-level proxy (path length 1), mark it as spread
-        if (path.length === 1) {
-          const aliasName = path[0]!
-          spreadSentinels.add(aliasName)
+        const id = ++accessId
+        const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
+        if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
+          Object.defineProperty(target, sentinelKey, {
+            enumerable: true,
+            configurable: true,
+            value: true,
+          })
         }
         return Reflect.ownKeys(target)
       },
@@ -126,6 +131,15 @@ export function createRefProxy<T extends Record<string, any>>(
       },
     })
 
+    // Assign a non-enumerable order id on first creation for this path
+    if (!proxy.__orderId) {
+      Object.defineProperty(proxy, `__orderId`, {
+        value: ++accessId,
+        enumerable: false,
+        configurable: true,
+      })
+    }
+
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -136,7 +150,6 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
-      if (prop === `__spreadSentinels`) return spreadSentinels // Expose spread sentinels
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
@@ -148,28 +161,18 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     has(target, prop) {
-      if (
-        prop === `__refProxy` ||
-        prop === `__path` ||
-        prop === `__type` ||
-        prop === `__spreadSentinels`
-      )
+      if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
         return true
       if (typeof prop === `string` && aliases.includes(prop)) return true
       return Reflect.has(target, prop)
     },
 
     ownKeys(_target) {
-      return [...aliases, `__refProxy`, `__path`, `__type`, `__spreadSentinels`]
+      return [...aliases, `__refProxy`, `__path`, `__type`]
     },
 
     getOwnPropertyDescriptor(target, prop) {
-      if (
-        prop === `__refProxy` ||
-        prop === `__path` ||
-        prop === `__type` ||
-        prop === `__spreadSentinels`
-      ) {
+      if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
         return { enumerable: false, configurable: true }
       }
       if (typeof prop === `string` && aliases.includes(prop)) {
@@ -190,7 +193,9 @@ export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
-    return new PropRef(value.__path)
+    const expr = new PropRef(value.__path)
+    ;(expr as any).__orderId = (value as any).__orderId
+    return expr
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (
