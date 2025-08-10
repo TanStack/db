@@ -392,9 +392,8 @@ export class CollectionImpl<
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
 
-        // If the collection is empty when it becomes ready, emit an empty change event
         // to notify subscribers (like LiveQueryCollection) that the collection is ready
-        if (this.size === 0 && this.changeListeners.size > 0) {
+        if (this.changeListeners.size > 0) {
           this.emitEmptyReadyEvent()
         }
       }
