@@ -43,7 +43,7 @@ export const electricTodoCollection = createCollection(
       const txids = await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original todo not found for update`)
           }
           const response = await api.todos.update(original.id, changes)
@@ -56,7 +56,7 @@ export const electricTodoCollection = createCollection(
       const txids = await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original todo not found for delete`)
           }
           const response = await api.todos.delete(original.id)
@@ -98,7 +98,7 @@ export const queryTodoCollection = createCollection(
       return await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original todo not found for update`)
           }
           return await api.todos.update(original.id, changes)
@@ -109,7 +109,7 @@ export const queryTodoCollection = createCollection(
       return await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original todo not found for delete`)
           }
           await api.todos.delete(original.id)
@@ -170,7 +170,7 @@ export const electricConfigCollection = createCollection(
       const txids = await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original config not found for update`)
           }
           const response = await api.config.update(original.id, changes)
@@ -208,7 +208,7 @@ export const queryConfigCollection = createCollection(
       const txids = await Promise.all(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
-          if (!original || !(`id` in original)) {
+          if (!(`id` in original)) {
             throw new Error(`Original config not found for update`)
           }
           const response = await api.config.update(original.id, changes)
