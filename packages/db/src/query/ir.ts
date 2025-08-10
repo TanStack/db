@@ -128,3 +128,16 @@ export class Aggregate<T = any> extends BaseExpression<T> {
     super()
   }
 }
+
+/**
+ * Runtime helper to detect IR expression-like objects.
+ * Prefer this over ad-hoc local implementations to keep behavior consistent.
+ */
+export function isExpressionLike(value: any): boolean {
+  return (
+    value instanceof Aggregate ||
+    value instanceof Func ||
+    value instanceof PropRef ||
+    value instanceof Value
+  )
+}

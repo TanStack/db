@@ -7,12 +7,12 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
+import { Value as ValClass } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
-import { Value as ValClass } from "../ir.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -246,8 +246,11 @@ export function compileQuery(
         const finalResults =
           raw instanceof ValClass
             ? raw.value
-            : raw && typeof raw === `object` && `type` in raw && (raw as any).type === `val`
-              ? (raw as any).value
+            : raw &&
+                typeof raw === `object` &&
+                `type` in raw &&
+                raw.type === `val`
+              ? raw.value
               : raw
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       })
@@ -275,8 +278,11 @@ export function compileQuery(
       const finalResults =
         raw instanceof ValClass
           ? raw.value
-          : raw && typeof raw === `object` && `type` in raw && (raw as any).type === `val`
-            ? (raw as any).value
+          : raw &&
+              typeof raw === `object` &&
+              `type` in raw &&
+              raw.type === `val`
+            ? raw.value
             : raw
       return [key, [finalResults, undefined]] as [
         unknown,
@@ -335,8 +341,11 @@ function processFrom(
           const [key, [value, _orderByIndex]] = data
           // Unwrap Value expressions that might have leaked through as the entire row
           const unwrapped =
-            value && typeof value === `object` && `type` in value && value.type === `val`
-              ? (value as any).value
+            value &&
+            typeof value === `object` &&
+            `type` in value &&
+            value.type === `val`
+              ? value.value
               : value
           return [key, unwrapped] as [unknown, any]
         })

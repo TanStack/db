@@ -1,7 +1,7 @@
 import { map } from "@tanstack/db-ivm"
+import { PropRef, Value as ValClass, isExpressionLike } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import type { Aggregate, BasicExpression, Select } from "../ir.js"
-import { Aggregate as AggClass, Func as FuncClass, PropRef, Value as ValClass } from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -19,19 +19,14 @@ export function processSelectToResults(
 ): NamespacedAndKeyedStream {
   // Build ordered operations to preserve authoring order (spreads and fields)
   type Op =
-    | { kind: `merge`; targetPath: Array<string>; source: (row: NamespacedRow) => any }
+    | {
+        kind: `merge`
+        targetPath: Array<string>
+        source: (row: NamespacedRow) => any
+      }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
 
   const ops: Array<Op> = []
-
-  function isExpressionLike(expr: any): boolean {
-    return (
-      expr instanceof AggClass ||
-      expr instanceof FuncClass ||
-      expr instanceof PropRef ||
-      expr instanceof ValClass
-    )
-  }
 
   function addFromObject(prefixPath: Array<string>, obj: any) {
     for (const [key, value] of Object.entries(obj)) {
@@ -210,21 +205,13 @@ export function processSelect(
   _allInputs: Record<string, KeyedStream>
 ): KeyedStream {
   type Op =
-    | { kind: `merge`; targetPath: Array<string>; source: (row: NamespacedRow) => any }
+    | {
+        kind: `merge`
+        targetPath: Array<string>
+        source: (row: NamespacedRow) => any
+      }
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
   const ops: Array<Op> = []
-
-  function isExpressionLike(expr: any): boolean {
-    return (
-      !!expr &&
-      typeof expr === `object` &&
-      `type` in (expr as any) &&
-      ((expr as any).type === `agg` ||
-        (expr as any).type === `func` ||
-        (expr as any).type === `ref` ||
-        (expr as any).type === `val`)
-    )
-  }
 
   function addFromObject(prefixPath: Array<string>, obj: any) {
     for (const [key, value] of Object.entries(obj)) {

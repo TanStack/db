@@ -26,15 +26,15 @@ type User = {
 function createUsers() {
   return createCollection(
     mockSyncCollectionOptions<User>({
-      id: "nested-select-users-type",
+      id: `nested-select-users-type`,
       getKey: (u) => u.id,
       initialData: [],
     })
   )
 }
 
-describe("nested select types", () => {
-  test("nested object selection infers nested result type", () => {
+describe(`nested select types`, () => {
+  test(`nested object selection infers nested result type`, () => {
     const users = createUsers()
     const col = createLiveQueryCollection((q) =>
       q.from({ u: users }).select(({ u }) => ({
@@ -57,7 +57,7 @@ describe("nested select types", () => {
     expectTypeOf(col.toArray).toEqualTypeOf<Expected>()
   })
 
-  test("nested spread preserves object structure types", () => {
+  test(`nested spread preserves object structure types`, () => {
     const users = createUsers()
     const col = createLiveQueryCollection((q) =>
       q.from({ u: users }).select(({ u }) => ({
@@ -83,5 +83,3 @@ describe("nested select types", () => {
     expectTypeOf(col.toArray).toEqualTypeOf<Expected>()
   })
 })
-
-

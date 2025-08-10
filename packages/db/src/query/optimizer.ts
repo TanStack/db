@@ -120,10 +120,11 @@ import { CannotCombineEmptyExpressionListError } from "../errors.js"
 import {
   CollectionRef as CollectionRefClass,
   Func,
+  PropRef,
   QueryRef as QueryRefClass,
 } from "./ir.js"
 import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
-import type { BasicExpression, From, QueryIR } from "./ir.js"
+import type { BasicExpression, From, QueryIR, Select } from "./ir.js"
 
 /**
  * Represents a WHERE clause after source analysis
@@ -715,7 +716,7 @@ function optimizeFromWithTracking(
   // SAFETY CHECK: Only check safety when pushing WHERE clauses into existing subqueries
   // We need to be careful about pushing WHERE clauses into subqueries that already have
   // aggregates, HAVING, or ORDER BY + LIMIT since that could change their semantics
-  if (!isSafeToPushIntoExistingSubquery(from.query)) {
+  if (!isSafeToPushIntoExistingSubquery(from.query, whereClause, from.alias)) {
     // Return a copy without optimization to maintain immutability
     // Do NOT mark as optimized since we didn't actually optimize it
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
@@ -760,23 +761,19 @@ function optimizeFromWithTracking(
  * { from: users, select: { id, name } }
  * ```
  */
-function isSafeToPushIntoExistingSubquery(query: QueryIR): boolean {
-  // Do not push predicates into subqueries that already have any SELECT clause.
-  // SELECT may rename or compute fields, so outer predicates referencing the
-  // subquery alias won't be valid inside. Without alias/field rewriting, it's unsafe.
+function isSafeToPushIntoExistingSubquery(
+  query: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  // If the subquery has a SELECT clause, block pushdown when the WHERE references
+  // fields that are computed by the subquery's SELECT (non pass-through projections).
   if (query.select) {
-    return false
-  }
-
-  // Check for aggregates in SELECT clause (redundant once we block any SELECT,
-  // but keep for clarity if rules change later)
-  if (query.select) {
-    const hasAggregates = Object.values(query.select).some(
-      (expr) => expr.type === `agg`
+    if (selectHasAggregates(query.select)) return false
+    if (
+      whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
     )
-    if (hasAggregates) {
       return false
-    }
   }
 
   // Check for GROUP BY clause
@@ -807,6 +804,83 @@ function isSafeToPushIntoExistingSubquery(query: QueryIR): boolean {
 
   // If none of the unsafe conditions are present, it's safe to optimize
   return true
+}
+
+/**
+ * Detects whether a SELECT projection contains any aggregate expressions.
+ * Recursively traverses nested select objects.
+ *
+ * @param select - The SELECT object from the IR
+ * @returns True if any field is an aggregate, false otherwise
+ */
+function selectHasAggregates(select: Select): boolean {
+  for (const value of Object.values(select)) {
+    if (typeof value === `object`) {
+      const v: any = value
+      if (v.type === `agg`) return true
+      if (!(`type` in v)) {
+        if (selectHasAggregates(v as unknown as Select)) return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Determines whether the provided WHERE clause references fields that are
+ * computed by a subquery SELECT rather than pass-through properties.
+ *
+ * If true, pushing the WHERE clause into the subquery could change semantics
+ * (since computed fields do not necessarily exist at the subquery input level),
+ * so predicate pushdown must be avoided.
+ *
+ * @param select - The subquery SELECT map
+ * @param whereClause - The WHERE expression to analyze
+ * @param outerAlias - The alias of the subquery in the outer query
+ * @returns True if WHERE references computed fields, otherwise false
+ */
+function whereReferencesComputedSelectFields(
+  select: Select,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  // Build a set of computed field names at the top-level of the subquery output
+  const computed = new Set<string>()
+  for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    if (value instanceof PropRef) continue
+    // Nested object or non-PropRef expression counts as computed
+    computed.add(key)
+  }
+
+  const refs: Array<PropRef> = []
+  function collectRefs(expr: any) {
+    if (expr == null || typeof expr !== `object`) return
+    switch (expr.type) {
+      case `ref`:
+        refs.push(expr as PropRef)
+        break
+      case `func`:
+      case `agg`:
+        for (const arg of expr.args ?? []) collectRefs(arg)
+        break
+      case `val`:
+        break
+      default:
+        break
+    }
+  }
+  collectRefs(whereClause)
+
+  for (const ref of refs) {
+    const path = (ref as any).path as Array<string>
+    if (!Array.isArray(path) || path.length < 2) continue
+    const alias = path[0]
+    const field = path[1] as string
+    if (alias !== outerAlias) continue
+    if (computed.has(field)) return true
+  }
+  return false
 }
 
 /**

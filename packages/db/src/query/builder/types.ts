@@ -189,9 +189,7 @@ type SelectShape = { [key: string]: SelectValue | SelectShape }
  * for all their properties. It's a simple wrapper that provides better error
  * messages when invalid selections are attempted.
  */
-export type SelectObject<
-  T extends SelectShape = SelectShape,
-> = T
+export type SelectObject<T extends SelectShape = SelectShape> = T
 
 /**
  * ResultTypeFromSelect - Infers the result type from a select object

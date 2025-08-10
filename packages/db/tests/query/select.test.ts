@@ -26,19 +26,19 @@ type User = {
 const data: Array<User> = [
   {
     id: 1,
-    name: "Alice",
+    name: `Alice`,
     profile: {
-      bio: "Engineer",
-      preferences: { notifications: true, theme: "dark" },
+      bio: `Engineer`,
+      preferences: { notifications: true, theme: `dark` },
     },
-    address: { city: "NYC", coordinates: { lat: 40.7, lng: -74.0 } },
+    address: { city: `NYC`, coordinates: { lat: 40.7, lng: -74.0 } },
   },
   {
     id: 2,
-    name: "Bob",
+    name: `Bob`,
     profile: {
-      bio: "Dev",
-      preferences: { notifications: false, theme: "light" },
+      bio: `Dev`,
+      preferences: { notifications: false, theme: `light` },
     },
   },
 ]
@@ -46,21 +46,21 @@ const data: Array<User> = [
 function createUsers() {
   return createCollection(
     mockSyncCollectionOptions<User>({
-      id: "nested-select-users",
+      id: `nested-select-users`,
       getKey: (u) => u.id,
       initialData: data,
     })
   )
 }
 
-describe("nested select projections", () => {
+describe(`nested select projections`, () => {
   let users: ReturnType<typeof createUsers>
 
   beforeEach(() => {
     users = createUsers()
   })
 
-  it("selects nested object structure", async () => {
+  it(`selects nested object structure`, async () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ u: users }).select(({ u }) => ({
         id: u.id,
@@ -76,7 +76,7 @@ describe("nested select projections", () => {
     const r1 = collection.get(1) as any
     expect(r1).toMatchObject({
       id: 1,
-      meta: { city: "NYC", coords: { lat: 40.7, lng: -74.0 } },
+      meta: { city: `NYC`, coords: { lat: 40.7, lng: -74.0 } },
     })
 
     const r2 = collection.get(2) as any
@@ -85,7 +85,7 @@ describe("nested select projections", () => {
     expect(r2.meta?.coords).toBeUndefined()
   })
 
-  it("supports nested spread of object refs under a key", async () => {
+  it(`supports nested spread of object refs under a key`, async () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ u: users }).select(({ u }) => ({
         id: u.id,
@@ -99,13 +99,13 @@ describe("nested select projections", () => {
     await collection.preload()
 
     const r1 = collection.get(1) as any
-    expect(r1.preferences).toEqual({ notifications: true, theme: "dark" })
+    expect(r1.preferences).toEqual({ notifications: true, theme: `dark` })
 
     const r2 = collection.get(2) as any
-    expect(r2.preferences).toEqual({ notifications: false, theme: "light" })
+    expect(r2.preferences).toEqual({ notifications: false, theme: `light` })
   })
 
-  it("allows mixing nested spreads and computed fields", async () => {
+  it(`allows mixing nested spreads and computed fields`, async () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ u: users }).select(({ u }) => ({
         user: {
@@ -122,12 +122,10 @@ describe("nested select projections", () => {
 
     const r1 = collection.get(1) as any
     expect(r1.user.id).toBe(1)
-    expect(r1.user.nameUpper).toBe("ALICE")
+    expect(r1.user.nameUpper).toBe(`ALICE`)
     expect(r1.user.profile).toEqual({
-      bio: "Engineer",
-      preferences: { notifications: true, theme: "dark" },
+      bio: `Engineer`,
+      preferences: { notifications: true, theme: `dark` },
     })
   })
 })
-
-

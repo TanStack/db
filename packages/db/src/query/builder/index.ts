@@ -1,5 +1,13 @@
 import { CollectionImpl } from "../../collection.js"
-import { CollectionRef, QueryRef, Aggregate as AggregateExpr, Func as FuncExpr, PropRef, Value as ValueExpr } from "../ir.js"
+import {
+  Aggregate as AggregateExpr,
+  CollectionRef,
+  Func as FuncExpr,
+  PropRef,
+  QueryRef,
+  Value as ValueExpr,
+  isExpressionLike,
+} from "../ir.js"
 import {
   InvalidSourceError,
   JoinConditionMustBeEqualityError,
@@ -438,8 +446,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       return (
         value !== null &&
         typeof value === `object` &&
-        !(`type` in value) &&
-        !(value as any).__refProxy
+        !isExpressionLike(value) &&
+        !value.__refProxy
       )
     }
 
@@ -461,7 +469,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     return new BaseQueryBuilder({
       ...this.query,
-      select: select as any,
+      select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
   }

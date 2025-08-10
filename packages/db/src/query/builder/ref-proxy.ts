@@ -177,11 +177,7 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     has(target, prop) {
-      if (
-        prop === `__refProxy` ||
-        prop === `__path` ||
-        prop === `__type`
-      )
+      if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
         return true
       if (typeof prop === `string` && aliases.includes(prop)) return true
       return Reflect.has(target, prop)
@@ -192,11 +188,7 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     getOwnPropertyDescriptor(target, prop) {
-      if (
-        prop === `__refProxy` ||
-        prop === `__path` ||
-        prop === `__type`
-      ) {
+      if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
         return { enumerable: false, configurable: true }
       }
       if (typeof prop === `string` && aliases.includes(prop)) {
