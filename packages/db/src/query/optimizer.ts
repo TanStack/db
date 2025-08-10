@@ -761,7 +761,15 @@ function optimizeFromWithTracking(
  * ```
  */
 function isSafeToPushIntoExistingSubquery(query: QueryIR): boolean {
-  // Check for aggregates in SELECT clause
+  // Do not push predicates into subqueries that already have any SELECT clause.
+  // SELECT may rename or compute fields, so outer predicates referencing the
+  // subquery alias won't be valid inside. Without alias/field rewriting, it's unsafe.
+  if (query.select) {
+    return false
+  }
+
+  // Check for aggregates in SELECT clause (redundant once we block any SELECT,
+  // but keep for clarity if rules change later)
   if (query.select) {
     const hasAggregates = Object.values(query.select).some(
       (expr) => expr.type === `agg`

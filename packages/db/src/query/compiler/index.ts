@@ -12,6 +12,7 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
+import { Value as ValClass } from "../ir.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -241,7 +242,13 @@ export function compileQuery(
     const resultPipeline = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from __select_results and include orderBy index
-        const finalResults = (row as any).__select_results
+        const raw = (row as any).__select_results
+        const finalResults =
+          raw instanceof ValClass
+            ? raw.value
+            : raw && typeof raw === `object` && `type` in raw && (raw as any).type === `val`
+              ? (raw as any).value
+              : raw
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       })
     )
@@ -264,7 +271,13 @@ export function compileQuery(
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
       // Extract the final results from __select_results and return [key, [results, undefined]]
-      const finalResults = (row as any).__select_results
+      const raw = (row as any).__select_results
+      const finalResults =
+        raw instanceof ValClass
+          ? raw.value
+          : raw && typeof raw === `object` && `type` in raw && (raw as any).type === `val`
+            ? (raw as any).value
+            : raw
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
@@ -320,7 +333,12 @@ function processFrom(
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
-          return [key, value] as [unknown, any]
+          // Unwrap Value expressions that might have leaked through as the entire row
+          const unwrapped =
+            value && typeof value === `object` && `type` in value && value.type === `val`
+              ? (value as any).value
+              : value
+          return [key, unwrapped] as [unknown, any]
         })
       )
 

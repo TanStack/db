@@ -1,5 +1,5 @@
 import { CollectionImpl } from "../../collection.js"
-import { CollectionRef, QueryRef } from "../ir.js"
+import { CollectionRef, QueryRef, Aggregate as AggregateExpr, Func as FuncExpr, PropRef, Value as ValueExpr } from "../ir.js"
 import {
   InvalidSourceError,
   JoinConditionMustBeEqualityError,
@@ -18,7 +18,7 @@ import type {
   OrderByDirection,
   QueryIR,
 } from "../ir.js"
-import { PropRef } from "../ir.js"
+// import { PropRef } from "../ir.js"
 import type {
   CompareOptions,
   Context,
@@ -424,44 +424,15 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       if (value === undefined) return toExpression(null)
       if (isRefProxy(value)) return toExpression(value)
       if (
-        value &&
-        typeof value === `object` &&
-        `type` in value &&
-        (value.type === `agg` ||
-          value.type === `func` ||
-          value.type === `ref` ||
-          value.type === `val`)
+        value instanceof AggregateExpr ||
+        value instanceof FuncExpr ||
+        value instanceof PropRef ||
+        value instanceof ValueExpr
       ) {
         return value as BasicExpression | Aggregate
       }
       return toExpression(value)
     }
-
-    // Recursively compute the max order id from an expression tree
-    function computeOrderId(expr: BasicExpression | Aggregate): number {
-      if (!expr || typeof expr !== `object` || !(`type` in expr)) return 0
-      if ((expr as any).type === `ref`) return (expr as any).__orderId ?? 0
-      if ((expr as any).type === `val`) return 0
-      const args = (expr as any).args as Array<BasicExpression | Aggregate>
-      if (Array.isArray(args) && args.length) {
-        let maxId = 0
-        for (const a of args) {
-          const id = computeOrderId(a)
-          if (id > maxId) maxId = id
-        }
-        return maxId
-      }
-      return 0
-    }
-
-    // Convert the select object to ordered operations
-    type FieldOp = {
-      type: `field`
-      key: string
-      expr: BasicExpression | Aggregate
-      id: number
-    }
-    const fieldOps: Array<FieldOp> = []
 
     function isPlainObject(value: any): value is Record<string, any> {
       return (
@@ -472,99 +443,25 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       )
     }
 
-    function flattenNested(
-      topKey: string,
-      obj: Record<string, any>
-    ): Array<FieldOp> {
-      const ops: Array<FieldOp> = []
-      let currentId = 0
-      const keys = Object.keys(obj)
-      for (const k of keys) {
-        const subKey = String(k)
-        const subVal = (obj as any)[k]
-        if (typeof subKey === `string` && subKey.startsWith(`__SPREAD_SENTINEL__`)) {
-          // subKey encodes the full source path and id: __SPREAD_SENTINEL__alias.path__id
-          const rest = subKey.slice(`__SPREAD_SENTINEL__`.length)
-          const idx = rest.lastIndexOf(`__`)
-          const pathStr = idx >= 0 ? rest.slice(0, idx) : rest
-          const id = idx >= 0 ? Number(rest.slice(idx + 2)) || 0 : 0
-          const path = pathStr.split(`.`)
-          const expr = new PropRef(path)
-          // Rewrite to use unified sentinel with destination path only
-          const nestedKey = `__SPREAD_SENTINEL__${topKey}__${id}`
-          ops.push({ type: `field`, key: nestedKey, expr, id })
-          currentId = id
-          continue
-        }
-        const nestedKey = `${topKey}.${subKey}`
-        if (isPlainObject(subVal)) {
-          const inner = flattenNested(nestedKey, subVal as Record<string, any>)
-          for (const op of inner) {
-            if (!op.id) op.id = currentId
-            ops.push(op)
-          }
-          continue
-        }
-        const expr = toExpr(subVal)
-        ops.push({ type: `field`, key: nestedKey, expr, id: currentId })
-      }
-      return ops
-    }
-    for (const [key, value] of Object.entries(selectObject as Record<string, any>)) {
-      if (typeof key === `string` && key.startsWith(`__SPREAD_SENTINEL__`)) {
-        // Skip here; we'll add orderly via collectTopLevelSpreadOps
-        continue
-      }
-      if (isPlainObject(value)) {
-        const hasNestedSpread = Object.keys(value).some(
-          (k) => typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)
-        )
-        if (hasNestedSpread) {
-          const nestedOps = flattenNested(key, value)
-          fieldOps.push(...nestedOps)
-          continue
-        }
-      }
-      const expr = toExpr(value)
-      const id = computeOrderId(expr)
-      fieldOps.push({ type: `field`, key, expr, id })
-    }
-
-    // Build a single ordered list by id (stable)
-    // Plus table-level spreads encoded as own enumerable sentinel keys on alias proxies
-    function collectTopLevelSpreadOps(obj: any): Array<FieldOp> {
-      const ops: Array<FieldOp> = []
-      if (!obj || typeof obj !== `object`) return ops
-      for (const [k] of Object.entries(obj)) {
+    function buildNestedSelect(obj: any): any {
+      if (!isPlainObject(obj)) return toExpr(obj)
+      const out: Record<string, any> = {}
+      for (const [k, v] of Object.entries(obj)) {
         if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
-          // Re-emit this sentinel as-is with a literal value for compiler matching
-          const expr = toExpr(k) // value is irrelevant; compiler only needs the key
-          const rest = k.slice(`__SPREAD_SENTINEL__`.length)
-          const idx = rest.lastIndexOf(`__`)
-          const id = idx >= 0 ? Number(rest.slice(idx + 2)) || 0 : 0
-          ops.push({ type: `field`, key: k, expr, id })
+          // Preserve sentinel key and its value (value is unimportant at compile time)
+          out[k] = v
+          continue
         }
+        out[k] = buildNestedSelect(v)
       }
-      return ops
+      return out
     }
 
-    const ops = [...fieldOps, ...collectTopLevelSpreadOps(selectObject)] as Array<FieldOp>
-    ops.sort((a, b) => a.id - b.id)
-
-    // Construct the final flat select map in the determined order
-    const select: Record<string, BasicExpression | Aggregate> = {}
-    for (const op of ops) {
-      if (op.key.startsWith(`__SPREAD_SENTINEL__`)) {
-        select[op.key] = op.expr
-      } else {
-        const { key, expr } = op as FieldOp
-        select[key] = expr
-      }
-    }
+    const select = buildNestedSelect(selectObject)
 
     return new BaseQueryBuilder({
       ...this.query,
-      select,
+      select: select as any,
       fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
   }

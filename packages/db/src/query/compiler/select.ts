@@ -1,6 +1,7 @@
 import { map } from "@tanstack/db-ivm"
 import { compileExpression } from "./evaluators.js"
 import type { Aggregate, BasicExpression, Select } from "../ir.js"
+import { Aggregate as AggClass, Func as FuncClass, PropRef, Value as ValClass } from "../ir.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -23,7 +24,16 @@ export function processSelectToResults(
 
   const ops: Array<Op> = []
 
-  function addFromObject(prefixPath: Array<string>, obj: Select) {
+  function isExpressionLike(expr: any): boolean {
+    return (
+      expr instanceof AggClass ||
+      expr instanceof FuncClass ||
+      expr instanceof PropRef ||
+      expr instanceof ValClass
+    )
+  }
+
+  function addFromObject(prefixPath: Array<string>, obj: any) {
     for (const [key, value] of Object.entries(obj)) {
       if (key.startsWith(`__SPREAD_SENTINEL__`)) {
         const rest = key.slice(`__SPREAD_SENTINEL__`.length)
@@ -35,9 +45,12 @@ export function processSelectToResults(
           `type` in (value as any) &&
           (value as any).type === `ref`
         if (pathStr.includes(`.`) || isRefExpr) {
-          // Nested destination path encoded in key; source comes from expression (PropRef)
-          const targetPath = [...prefixPath, ...pathStr.split(`.`)]
-          const compiled = compileExpression(value as BasicExpression)
+          // Merge into the current destination (prefixPath) from the referenced source path
+          const targetPath = [...prefixPath]
+          const expr = isRefExpr
+            ? (value as BasicExpression)
+            : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+          const compiled = compileExpression(expr)
           ops.push({ kind: `merge`, targetPath, source: compiled })
         } else {
           // Table-level: pathStr is the alias; merge from namespaced row at the current prefix
@@ -56,10 +69,10 @@ export function processSelectToResults(
       if (
         expression &&
         typeof expression === `object` &&
-        !(`type` in expression)
+        !isExpressionLike(expression)
       ) {
         // Nested selection object
-        addFromObject([...prefixPath, key], expression as Select)
+        addFromObject([...prefixPath, key], expression)
         continue
       }
 
@@ -71,11 +84,29 @@ export function processSelectToResults(
           compiled: () => null,
         })
       } else {
-        ops.push({
-          kind: `field`,
-          alias: [...prefixPath, key].join(`.`),
-          compiled: compileExpression(expression as BasicExpression),
-        })
+        if (expression === undefined || !isExpressionLike(expression)) {
+          ops.push({
+            kind: `field`,
+            alias: [...prefixPath, key].join(`.`),
+            compiled: () => expression,
+          })
+          continue
+        }
+        // If the expression is a Value wrapper, embed the literal to avoid re-compilation mishaps
+        if (expression instanceof ValClass) {
+          const val = expression.value
+          ops.push({
+            kind: `field`,
+            alias: [...prefixPath, key].join(`.`),
+            compiled: () => val,
+          })
+        } else {
+          ops.push({
+            kind: `field`,
+            alias: [...prefixPath, key].join(`.`),
+            compiled: compileExpression(expression as BasicExpression),
+          })
+        }
       }
     }
   }
@@ -140,16 +171,31 @@ export function processSelectToResults(
         }
       }
 
+      // Recursively unwrap any Value expressions that might have leaked through
+      function unwrapVals(input: any): any {
+        if (input instanceof ValClass) return input.value
+        if (Array.isArray(input)) return input.map(unwrapVals)
+        if (input && typeof input === `object`) {
+          const out: Record<string, any> = {}
+          for (const [k, v] of Object.entries(input)) {
+            out[k] = unwrapVals(v)
+          }
+          return out
+        }
+        return input
+      }
+      const normalizedResults = unwrapVals(selectResults)
+
       // Return the namespaced row with __select_results added
       return [
         key,
         {
           ...namespacedRow,
-          __select_results: selectResults,
+          __select_results: normalizedResults,
         },
       ] as [
         string,
-        typeof namespacedRow & { __select_results: typeof selectResults },
+        typeof namespacedRow & { __select_results: typeof normalizedResults },
       ]
     })
   )
@@ -168,7 +214,19 @@ export function processSelect(
     | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
   const ops: Array<Op> = []
 
-  function addFromObject(prefixPath: Array<string>, obj: Select) {
+  function isExpressionLike(expr: any): boolean {
+    return (
+      !!expr &&
+      typeof expr === `object` &&
+      `type` in (expr as any) &&
+      ((expr as any).type === `agg` ||
+        (expr as any).type === `func` ||
+        (expr as any).type === `ref` ||
+        (expr as any).type === `val`)
+    )
+  }
+
+  function addFromObject(prefixPath: Array<string>, obj: any) {
     for (const [key, value] of Object.entries(obj)) {
       if (key.startsWith(`__SPREAD_SENTINEL__`)) {
         const rest = key.slice(`__SPREAD_SENTINEL__`.length)
@@ -180,8 +238,11 @@ export function processSelect(
           `type` in (value as any) &&
           (value as any).type === `ref`
         if (pathStr.includes(`.`) || isRefExpr) {
-          const targetPath = [...prefixPath, ...pathStr.split(`.`)]
-          const compiled = compileExpression(value as BasicExpression)
+          const targetPath = [...prefixPath]
+          const expr = isRefExpr
+            ? (value as BasicExpression)
+            : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+          const compiled = compileExpression(expr)
           ops.push({ kind: `merge`, targetPath, source: compiled })
         } else {
           const tableAlias = pathStr
@@ -199,9 +260,9 @@ export function processSelect(
       if (
         expression &&
         typeof expression === `object` &&
-        !(`type` in expression)
+        !isExpressionLike(expression)
       ) {
-        addFromObject([...prefixPath, key], expression as Select)
+        addFromObject([...prefixPath, key], expression)
         continue
       }
 

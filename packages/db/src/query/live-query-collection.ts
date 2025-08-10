@@ -220,6 +220,10 @@ export function liveQueryCollectionOptions<
 
           begin()
           messages
+            .map((o) => {
+              console.log(`message`, JSON.stringify(o, null, 2))
+              return o
+            })
             .reduce((acc, [[key, tupleData], multiplicity]) => {
               // All queries now consistently return [value, orderByIndex] format
               // where orderByIndex is undefined for queries without ORDER BY
@@ -249,11 +253,12 @@ export function liveQueryCollectionOptions<
 
               // Store the key of the result so that we can retrieve it in the
               // getKey function
-              resultKeys.set(value, rawKey)
+              console.log(`setting resultKeys`, value, rawKey)
+              resultKeys.set(value as unknown as object, rawKey)
 
               // Store the orderBy index if it exists
               if (orderByIndex !== undefined) {
-                orderByIndices.set(value, orderByIndex)
+                orderByIndices.set(value as unknown as object, orderByIndex)
               }
 
               // Simple singular insert.
@@ -374,7 +379,13 @@ export function liveQueryCollectionOptions<
   return {
     id,
     getKey:
-      config.getKey || ((item) => resultKeys.get(item) as string | number),
+      config.getKey ||
+      ((item) =>
+        resultKeys.get(
+          (item !== null && (typeof item === 'object' || typeof item === 'function'))
+            ? (item as object)
+            : ({ __wrapped: item } as unknown as object)
+        ) as string | number),
     sync,
     compare,
     gcTime: config.gcTime || 5000, // 5 seconds by default for live queries
