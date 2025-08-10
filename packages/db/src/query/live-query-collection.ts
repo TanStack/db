@@ -168,6 +168,13 @@ export function liveQueryCollectionOptions<
     )
   }
 
+  const allCollectionsReadyOrInitialCommit = () => {
+    return Object.values(collections).every(
+      (collection) =>
+        collection.status === `ready` || collection.status === `initialCommit`
+    )
+  }
+
   let graphCache: D2 | undefined
   let inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   let pipelineCache: ResultStream | undefined
@@ -293,7 +300,7 @@ export function liveQueryCollectionOptions<
 
       const maybeRunGraph = () => {
         // We only run the graph if all the collections are ready
-        if (allCollectionsReady()) {
+        if (allCollectionsReadyOrInitialCommit()) {
           graph.run()
           // On the initial run, we may need to do an empty commit to ensure that
           // the collection is initialized
@@ -302,7 +309,9 @@ export function liveQueryCollectionOptions<
             commit()
           }
           // Mark the collection as ready after the first successful run
-          markReady()
+          if (allCollectionsReady()) {
+            markReady()
+          }
         }
       }
 

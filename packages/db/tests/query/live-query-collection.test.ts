@@ -171,7 +171,7 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.size).toBe(0)
   })
 
-  it(`shouldn't call markReady when source collection sync doesn't call markReady`, async () => {
+  it(`shouldn't call markReady when source collection sync doesn't call markReady`, () => {
     const collection = createCollection<{ id: string }>({
       sync: {
         sync({ begin, commit }) {

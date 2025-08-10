@@ -230,7 +230,10 @@ export function useLiveQuery(
 
     if (isCollection) {
       // It's already a collection, ensure sync is started for Vue hooks
-      unwrappedParam.startSyncImmediate()
+      // Only start sync if the collection is in idle state
+      if (unwrappedParam.status === `idle`) {
+        unwrappedParam.startSyncImmediate()
+      }
       return unwrappedParam
     }
 
