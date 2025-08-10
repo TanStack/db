@@ -1,5 +1,33 @@
 # @tanstack/query-db-collection
 
+## 0.2.1
+
+### Patch Changes
+
+- Ensure that you can use optional properties in the `select` and `join` clauses of a query, and fix an issue where standard schemas were not properly carried through to live queries. ([#377](https://github.com/TanStack/db/pull/377))
+
+- Updated dependencies [[`bb5d50e`](https://github.com/TanStack/db/commit/bb5d50e255d9114ef32b8f52eef6b15399255327), [`97b595e`](https://github.com/TanStack/db/commit/97b595e9617b1abb05c14489e3d608b314da08e8)]:
+  - @tanstack/db@0.1.2
+
+## 0.2.0
+
+### Minor Changes
+
+- Improve writeBatch API to use callback pattern ([#378](https://github.com/TanStack/db/pull/378))
+  - Changed `writeBatch` from accepting an array of operations to accepting a callback function
+  - Write operations called within the callback are automatically batched together
+  - This provides a more intuitive API similar to database transactions
+  - Added comprehensive documentation for Query Collections including direct writes feature
+
+## 0.1.3
+
+### Patch Changes
+
+- Add meta support to QueryCollectionConfig to allow passing additional context to queryFn. ([#363](https://github.com/TanStack/db/pull/363))
+
+- Updated dependencies [[`bc2f204`](https://github.com/TanStack/db/commit/bc2f204b8cb8a4870ade00757d10f846524e2090), [`bda3f24`](https://github.com/TanStack/db/commit/bda3f24cc41504f60be0c5e071698b7735f75e28)]:
+  - @tanstack/db@0.1.1
+
 ## 0.1.2
 
 ### Patch Changes

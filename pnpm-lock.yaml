@@ -250,7 +250,7 @@ importers:
         specifier: ^5.75.7
         version: 5.83.0
       '@tanstack/query-db-collection':
-        specifier: ^0.1.0
+        specifier: ^0.2.0
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.0

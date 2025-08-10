@@ -155,8 +155,81 @@ export interface Collection<
  *   sync: { sync: () => {} }
  * })
  *
- * // Note: You must provide either an explicit type or a schema, but not both.
+ * // Note: You can provide an explicit type, a schema, or both. When both are provided, the explicit type takes precedence.
  */
+
+// Overload for when schema is provided - infers schema type
+export function createCollection<
+  TSchema extends StandardSchemaV1,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TFallback extends object = Record<string, unknown>,
+>(
+  options: CollectionConfig<
+    ResolveType<unknown, TSchema, TFallback>,
+    TKey,
+    TSchema,
+    ResolveInsertInput<unknown, TSchema, TFallback>
+  > & {
+    schema: TSchema
+    utils?: TUtils
+  }
+): Collection<
+  ResolveType<unknown, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInsertInput<unknown, TSchema, TFallback>
+>
+
+// Overload for when explicit type is provided with schema - explicit type takes precedence
+export function createCollection<
+  TExplicit extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TFallback extends object = Record<string, unknown>,
+>(
+  options: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
+  > & {
+    schema: TSchema
+    utils?: TUtils
+  }
+): Collection<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+>
+
+// Overload for when explicit type is provided or no schema
+export function createCollection<
+  TExplicit = unknown,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TFallback extends object = Record<string, unknown>,
+>(
+  options: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    TSchema,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
+  > & { utils?: TUtils }
+): Collection<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+>
+
+// Implementation
 export function createCollection<
   TExplicit = unknown,
   TKey extends string | number = string | number,
@@ -703,12 +776,9 @@ export class CollectionImpl<
     this.optimisticDeletes.clear()
 
     const activeTransactions: Array<Transaction<any>> = []
-    const completedTransactions: Array<Transaction<any>> = []
 
     for (const transaction of this.transactions.values()) {
-      if (transaction.state === `completed`) {
-        completedTransactions.push(transaction)
-      } else if (![`completed`, `failed`].includes(transaction.state)) {
+      if (![`completed`, `failed`].includes(transaction.state)) {
         activeTransactions.push(transaction)
       }
     }
@@ -761,21 +831,11 @@ export class CollectionImpl<
     // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
     if (this.pendingSyncedTransactions.length > 0 && !triggeredByUserAction) {
       const pendingSyncKeys = new Set<TKey>()
-      const completedTransactionMutations = new Set<string>()
 
       // Collect keys from pending sync operations
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
           pendingSyncKeys.add(operation.key as TKey)
-        }
-      }
-
-      // Collect mutation IDs from completed transactions
-      for (const tx of completedTransactions) {
-        for (const mutation of tx.mutations) {
-          if (mutation.collection === this) {
-            completedTransactionMutations.add(mutation.mutationId)
-          }
         }
       }
 
@@ -1290,6 +1350,30 @@ export class CollectionImpl<
     }
   }
 
+  /**
+   * Schedule cleanup of a transaction when it completes
+   * @private
+   */
+  private scheduleTransactionCleanup(transaction: Transaction<any>): void {
+    // Only schedule cleanup for transactions that aren't already completed
+    if (transaction.state === `completed`) {
+      this.transactions.delete(transaction.id)
+      return
+    }
+
+    // Schedule cleanup when the transaction completes
+    transaction.isPersisted.promise
+      .then(() => {
+        // Transaction completed successfully, remove it immediately
+        this.transactions.delete(transaction.id)
+      })
+      .catch(() => {
+        // Transaction failed, but we want to keep failed transactions for reference
+        // so don't remove it.
+        // This empty catch block is necessary to prevent unhandled promise rejections.
+      })
+  }
+
   private ensureStandardSchema(schema: unknown): StandardSchema<T> {
     // If the schema already implements the standard-schema interface, return it
     if (schema && `~standard` in (schema as {})) {
@@ -1650,6 +1734,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.scheduleTransactionCleanup(ambientTransaction)
       this.recomputeOptimisticState(true)
 
       return ambientTransaction
@@ -1675,6 +1760,7 @@ export class CollectionImpl<
 
       // Add the transaction to the collection's transactions store
       this.transactions.set(directOpTransaction.id, directOpTransaction)
+      this.scheduleTransactionCleanup(directOpTransaction)
       this.recomputeOptimisticState(true)
 
       return directOpTransaction
@@ -1864,6 +1950,8 @@ export class CollectionImpl<
         mutationFn: async () => {},
       })
       emptyTransaction.commit()
+      // Schedule cleanup for empty transaction
+      this.scheduleTransactionCleanup(emptyTransaction)
       return emptyTransaction
     }
 
@@ -1872,6 +1960,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.scheduleTransactionCleanup(ambientTransaction)
       this.recomputeOptimisticState(true)
 
       return ambientTransaction
@@ -1901,6 +1990,7 @@ export class CollectionImpl<
     // Add the transaction to the collection's transactions store
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
+    this.scheduleTransactionCleanup(directOpTransaction)
     this.recomputeOptimisticState(true)
 
     return directOpTransaction
@@ -1988,6 +2078,7 @@ export class CollectionImpl<
       ambientTransaction.applyMutations(mutations)
 
       this.transactions.set(ambientTransaction.id, ambientTransaction)
+      this.scheduleTransactionCleanup(ambientTransaction)
       this.recomputeOptimisticState(true)
 
       return ambientTransaction
@@ -2014,6 +2105,7 @@ export class CollectionImpl<
     directOpTransaction.commit()
 
     this.transactions.set(directOpTransaction.id, directOpTransaction)
+    this.scheduleTransactionCleanup(directOpTransaction)
     this.recomputeOptimisticState(true)
 
     return directOpTransaction

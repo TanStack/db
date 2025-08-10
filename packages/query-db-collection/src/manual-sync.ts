@@ -7,6 +7,15 @@ import {
 import type { QueryClient } from "@tanstack/query-core"
 import type { ChangeMessage, Collection } from "@tanstack/db"
 
+// Track active batch operations per context to prevent cross-collection contamination
+const activeBatchContexts = new WeakMap<
+  SyncContext<any, any>,
+  {
+    operations: Array<SyncOperation<any, any, any>>
+    isActive: boolean
+  }
+>()
+
 // Types for sync operations
 export type SyncOperation<
   TRow extends object,
@@ -209,28 +218,121 @@ export function createWriteUtils<
 
   return {
     writeInsert(data: TInsertInput | Array<TInsertInput>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `insert`,
+        data,
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `insert`, data }, ctx)
+      const batchContext = activeBatchContexts.get(ctx)
+
+      // If we're in a batch, just add to the batch operations
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
+        return
+      }
+
+      // Otherwise, perform the operation immediately
+      performWriteOperations(operation, ctx)
     },
 
     writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `update`,
+        data,
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `update`, data }, ctx)
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
+        return
+      }
+
+      performWriteOperations(operation, ctx)
     },
 
     writeDelete(key: TKey | Array<TKey>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `delete`,
+        key,
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `delete`, key }, ctx)
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
+        return
+      }
+
+      performWriteOperations(operation, ctx)
     },
 
     writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
+      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+        type: `upsert`,
+        data,
+      }
+
       const ctx = ensureContext()
-      performWriteOperations({ type: `upsert`, data }, ctx)
+      const batchContext = activeBatchContexts.get(ctx)
+
+      if (batchContext?.isActive) {
+        batchContext.operations.push(operation)
+        return
+      }
+
+      performWriteOperations(operation, ctx)
     },
 
-    writeBatch(operations: Array<SyncOperation<TRow, TKey, TInsertInput>>) {
+    writeBatch(callback: () => void) {
       const ctx = ensureContext()
-      performWriteOperations(operations, ctx)
+
+      // Check if we're already in a batch (nested batch)
+      const existingBatch = activeBatchContexts.get(ctx)
+      if (existingBatch?.isActive) {
+        throw new Error(
+          `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`
+        )
+      }
+
+      // Set up the batch context for this specific collection
+      const batchContext = {
+        operations: [] as Array<SyncOperation<TRow, TKey, TInsertInput>>,
+        isActive: true,
+      }
+      activeBatchContexts.set(ctx, batchContext)
+
+      try {
+        // Execute the callback - any write operations will be collected
+        const result = callback()
+
+        // Check if callback returns a promise (async function)
+        if (
+          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          result &&
+          typeof result === `object` &&
+          `then` in result &&
+          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
+          typeof result.then === `function`
+        ) {
+          throw new Error(
+            `writeBatch does not support async callbacks. The callback must be synchronous.`
+          )
+        }
+
+        // Perform all collected operations
+        if (batchContext.operations.length > 0) {
+          performWriteOperations(batchContext.operations, ctx)
+        }
+      } finally {
+        // Always clear the batch context
+        batchContext.isActive = false
+        activeBatchContexts.delete(ctx)
+      }
     },
   }
 }

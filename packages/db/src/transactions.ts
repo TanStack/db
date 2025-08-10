@@ -355,6 +355,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
+      this.isPersisted.resolve(this)
 
       return this
     }

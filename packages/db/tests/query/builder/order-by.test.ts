@@ -20,7 +20,7 @@ const employeesCollection = new CollectionImpl<Employee>({
 })
 
 describe(`QueryBuilder.orderBy`, () => {
-  it(`sets the order by clause correctly with default ascending`, () => {
+  it(`sets the order by clause correctly with default options`, () => {
     const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
@@ -38,7 +38,9 @@ describe(`QueryBuilder.orderBy`, () => {
       `employees`,
       `name`,
     ])
-    expect(builtQuery.orderBy![0]!.direction).toBe(`asc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
   })
 
   it(`supports descending order`, () => {
@@ -58,7 +60,9 @@ describe(`QueryBuilder.orderBy`, () => {
       `employees`,
       `salary`,
     ])
-    expect(builtQuery.orderBy![0]!.direction).toBe(`desc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`desc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
   })
 
   it(`supports ascending order explicitly`, () => {
@@ -70,6 +74,98 @@ describe(`QueryBuilder.orderBy`, () => {
     const builtQuery = getQueryIR(query)
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
+  })
+
+  it(`supports nulls first/last`, () => {
+    const builder = new Query()
+    const query = builder
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.hire_date, {
+        direction: `asc`,
+        nulls: `last`,
+      })
+      .select(({ employees }) => ({
+        id: employees.id,
+        hire_date: employees.hire_date,
+      }))
+
+    const builtQuery = getQueryIR(query)
+    expect(builtQuery.orderBy).toBeDefined()
+    expect(builtQuery.orderBy).toHaveLength(1)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`last`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+  })
+
+  it(`supports stringSort`, () => {
+    const builder = new Query()
+    const query = builder
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.name, {
+        direction: `asc`,
+        stringSort: `lexical`,
+      })
+      .select(({ employees }) => ({
+        id: employees.id,
+        name: employees.name,
+      }))
+
+    const builtQuery = getQueryIR(query)
+    expect(builtQuery.orderBy).toBeDefined()
+    expect(builtQuery.orderBy).toHaveLength(1)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`lexical`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+  })
+
+  it(`supports locale`, () => {
+    const builder = new Query()
+    const query = builder
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.name, {
+        direction: `asc`,
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+      .select(({ employees }) => ({
+        id: employees.id,
+        name: employees.name,
+      }))
+
+    const builtQuery = getQueryIR(query)
+    expect(builtQuery.orderBy).toBeDefined()
+    expect(builtQuery.orderBy).toHaveLength(1)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.locale).toBe(`de-DE`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+  })
+
+  it(`supports locale options`, () => {
+    const builder = new Query()
+    const query = builder
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.name, {
+        direction: `asc`,
+        stringSort: `locale`,
+        locale: `de-DE`,
+        localeOptions: { sensitivity: `base` },
+      })
+      .select(({ employees }) => ({
+        id: employees.id,
+        name: employees.name,
+      }))
+
+    const builtQuery = getQueryIR(query)
+    expect(builtQuery.orderBy).toBeDefined()
+    expect(builtQuery.orderBy).toHaveLength(1)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.locale).toBe(`de-DE`)
+    expect(builtQuery.orderBy![0]!.compareOptions.localeOptions).toEqual({
+      sensitivity: `base`,
+    })
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
   })
 
   it(`supports simple order by expressions`, () => {
@@ -104,7 +200,9 @@ describe(`QueryBuilder.orderBy`, () => {
     // The function expression gets wrapped, so we check if it contains the function
     const orderByClause = builtQuery.orderBy![0]!
     expect(orderByClause.expression.type).toBeDefined()
-    expect(orderByClause.direction).toBe(`asc`)
+    expect(orderByClause.compareOptions.direction).toBe(`asc`)
+    expect(orderByClause.compareOptions.nulls).toBe(`first`)
+    expect(orderByClause.compareOptions.stringSort).toBe(`locale`)
   })
 
   it(`can be combined with other clauses`, () => {
@@ -141,12 +239,16 @@ describe(`QueryBuilder.orderBy`, () => {
       `employees`,
       `name`,
     ])
-    expect(builtQuery.orderBy![0]!.direction).toBe(`asc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+    expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
     expect((builtQuery.orderBy![1]!.expression as any).path).toEqual([
       `employees`,
       `salary`,
     ])
-    expect(builtQuery.orderBy![1]!.direction).toBe(`desc`)
+    expect(builtQuery.orderBy![1]!.compareOptions.direction).toBe(`desc`)
+    expect(builtQuery.orderBy![1]!.compareOptions.nulls).toBe(`first`)
+    expect(builtQuery.orderBy![1]!.compareOptions.stringSort).toBe(`locale`)
   })
 
   it(`supports limit and offset with order by`, () => {

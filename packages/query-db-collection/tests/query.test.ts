@@ -6,7 +6,6 @@ import type {
   CollectionImpl,
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  Transaction,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
@@ -400,6 +399,33 @@ describe(`QueryCollection`, () => {
     expect(collection.get(`item3`)).toEqual(updatedItems[1])
   })
 
+  it(`should pass meta property to queryFn context`, async () => {
+    const queryKey = [`metaTest`]
+    const meta = { errorMessage: `Failed to load items` }
+    const queryFn = vi.fn().mockResolvedValueOnce([])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `test`,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey,
+      meta,
+      startSync: true,
+    }
+
+    const options = queryCollectionOptions(config)
+    createCollection(options)
+
+    // Wait for query to execute
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    // Verify queryFn was called with the correct context, including the meta object
+    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
+  })
+
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       const queryKey = [`directPersistenceTest`]
@@ -435,22 +461,34 @@ describe(`QueryCollection`, () => {
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      // Create a mock transaction for testing
-      const mockTransaction = {
-        id: `test-transaction`,
-      } as Transaction<TestItem>
+      // Create mock transactions for testing with proper types
+      const insertTransaction = {
+        id: `test-transaction-insert`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `insert`>
+
+      const updateTransaction = {
+        id: `test-transaction-update`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `update`>
+
+      const deleteTransaction = {
+        id: `test-transaction-delete`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `delete`>
+
       const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: insertTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
       const updateMockParams: UpdateMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: updateTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
       const deleteMockParams: DeleteMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: deleteTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
@@ -485,12 +523,14 @@ describe(`QueryCollection`, () => {
     })
 
     it(`should call refetch based on handler return value`, async () => {
-      // Create a mock transaction for testing
-      const mockTransaction = {
-        id: `test-transaction`,
-      } as Transaction<TestItem>
+      // Create a mock transaction for testing with proper type
+      const insertTransaction = {
+        id: `test-transaction-insert`,
+        mutations: [] as any,
+      } as TransactionWithMutations<TestItem, `insert`>
+
       const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: mockTransaction as TransactionWithMutations<TestItem>,
+        transaction: insertTransaction,
         // @ts-ignore not testing this
         collection: {} as CollectionImpl,
       }
@@ -1104,12 +1144,20 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`6`)).toBe(false)
 
       // Test writeBatch with mixed operations
-      collection.utils.writeBatch([
-        { type: `insert`, data: { id: `7`, name: `Batch Insert`, value: 70 } },
-        { type: `update`, data: { id: `4`, name: `Batch Updated Item 4` } },
-        { type: `upsert`, data: { id: `8`, name: `Batch Upsert`, value: 80 } },
-        { type: `delete`, key: `1` },
-      ])
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({
+          id: `7`,
+          name: `Batch Insert`,
+          value: 70,
+        })
+        collection.utils.writeUpdate({ id: `4`, name: `Batch Updated Item 4` })
+        collection.utils.writeUpsert({
+          id: `8`,
+          name: `Batch Upsert`,
+          value: 80,
+        })
+        collection.utils.writeDelete(`1`)
+      })
 
       expect(collection.size).toBe(4) // 3 - 1 (delete) + 2 (insert + upsert) = 4
       expect(collection.get(`7`)?.name).toBe(`Batch Insert`)
@@ -1175,22 +1223,24 @@ describe(`QueryCollection`, () => {
 
       // Test duplicate keys within batch
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `insert`, data: { id: `2`, name: `Item 2` } },
-          { type: `update`, data: { id: `2`, name: `Updated Item 2` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+          collection.utils.writeUpdate({ id: `2`, name: `Updated Item 2` })
+        })
       }).toThrow(/Duplicate key.*found within batch operations/)
 
       // Test updating non-existent item in batch
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `update`, data: { id: `999`, name: `Missing` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeUpdate({ id: `999`, name: `Missing` })
+        })
       }).toThrow(/does not exist/)
 
       // Test deleting non-existent item in batch
       expect(() => {
-        collection.utils.writeBatch([{ type: `delete`, key: `999` }])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeDelete(`999`)
+        })
       }).toThrow(/does not exist/)
     })
 
@@ -1274,12 +1324,20 @@ describe(`QueryCollection`, () => {
       })
 
       // Test writeBatch updates cache with multiple operations
-      collection.utils.writeBatch([
-        { type: `insert`, data: { id: `5`, name: `Batch Item 5`, value: 50 } },
-        { type: `update`, data: { id: `3`, name: `Batch Updated Item 3` } },
-        { type: `delete`, key: `1` },
-        { type: `upsert`, data: { id: `6`, name: `Batch Item 6`, value: 60 } },
-      ])
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({
+          id: `5`,
+          name: `Batch Item 5`,
+          value: 50,
+        })
+        collection.utils.writeUpdate({ id: `3`, name: `Batch Updated Item 3` })
+        collection.utils.writeDelete(`1`)
+        collection.utils.writeUpsert({
+          id: `6`,
+          name: `Batch Item 6`,
+          value: 60,
+        })
+      })
 
       const cacheAfterBatch = queryClient.getQueryData(
         queryKey
@@ -1354,10 +1412,10 @@ describe(`QueryCollection`, () => {
 
       // Try batch with duplicate keys (should throw and not update cache)
       expect(() => {
-        collection.utils.writeBatch([
-          { type: `insert`, data: { id: `3`, name: `Item 3` } },
-          { type: `update`, data: { id: `3`, name: `Duplicate` } },
-        ])
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `3`, name: `Item 3` })
+          collection.utils.writeUpdate({ id: `3`, name: `Duplicate` })
+        })
       }).toThrow(/Duplicate key/)
 
       // Verify cache wasn't modified
@@ -1367,6 +1425,148 @@ describe(`QueryCollection`, () => {
       expect(cacheAfterBatchError).toEqual(initialCache)
       expect(cacheAfterBatchError).toHaveLength(2)
       expect(collection.size).toBe(2)
+    })
+
+    it(`should throw error for async callbacks in writeBatch`, async () => {
+      const queryKey = [`asyncBatch`]
+      const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(initialItems)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `async-batch-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Test async callback throws error
+      expect(() => {
+        collection.utils.writeBatch(async () => {
+          await Promise.resolve()
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+        })
+      }).toThrow(/async callbacks/)
+
+      // Verify no changes were made
+      expect(collection.size).toBe(1)
+    })
+
+    it(`should prevent nested writeBatch calls`, async () => {
+      const queryKey = [`nestedBatch`]
+      const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(initialItems)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `nested-batch-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Test nested writeBatch throws error
+      expect(() => {
+        collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `2`, name: `Item 2` })
+
+          // Attempt nested batch
+          collection.utils.writeBatch(() => {
+            collection.utils.writeInsert({ id: `3`, name: `Item 3` })
+          })
+        })
+      }).toThrow(/nest writeBatch/)
+
+      // Verify no operations succeeded due to nested batch error
+      expect(collection.size).toBe(1)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should handle concurrent writeBatch calls from different collections`, async () => {
+      const queryKey1 = [`collection1`]
+      const queryKey2 = [`collection2`]
+      const initialItems1: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const initialItems2: Array<TestItem> = [{ id: `a`, name: `Item A` }]
+
+      const queryFn1 = vi.fn().mockResolvedValue(initialItems1)
+      const queryFn2 = vi.fn().mockResolvedValue(initialItems2)
+
+      const config1: QueryCollectionConfig<TestItem> = {
+        id: `collection-1`,
+        queryClient,
+        queryKey: queryKey1,
+        queryFn: queryFn1,
+        getKey,
+        startSync: true,
+      }
+
+      const config2: QueryCollectionConfig<TestItem> = {
+        id: `collection-2`,
+        queryClient,
+        queryKey: queryKey2,
+        queryFn: queryFn2,
+        getKey,
+        startSync: true,
+      }
+
+      const options1 = queryCollectionOptions(config1)
+      const options2 = queryCollectionOptions(config2)
+      const collection1 = createCollection(options1)
+      const collection2 = createCollection(options2)
+
+      await vi.waitFor(() => {
+        expect(collection1.size).toBe(1)
+        expect(collection2.size).toBe(1)
+      })
+
+      // Execute batches concurrently (simulated by interleaving)
+      let batch1Started = false
+      let batch2Started = false
+
+      collection1.utils.writeBatch(() => {
+        batch1Started = true
+        collection1.utils.writeInsert({ id: `2`, name: `Item 2` })
+
+        // Start second batch while first is still active
+        collection2.utils.writeBatch(() => {
+          batch2Started = true
+          collection2.utils.writeInsert({ id: `b`, name: `Item B` })
+        })
+
+        collection1.utils.writeInsert({ id: `3`, name: `Item 3` })
+      })
+
+      // Verify both batches executed successfully
+      expect(batch1Started).toBe(true)
+      expect(batch2Started).toBe(true)
+
+      // Verify collection 1 has correct items
+      expect(collection1.size).toBe(3)
+      expect(collection1.has(`1`)).toBe(true)
+      expect(collection1.has(`2`)).toBe(true)
+      expect(collection1.has(`3`)).toBe(true)
+
+      // Verify collection 2 has correct items
+      expect(collection2.size).toBe(2)
+      expect(collection2.has(`a`)).toBe(true)
+      expect(collection2.has(`b`)).toBe(true)
     })
   })
 

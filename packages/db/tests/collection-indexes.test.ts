@@ -14,6 +14,7 @@ import {
   or,
 } from "../src/query/builder/functions"
 import { expectIndexUsage, withIndexTracking } from "./utls"
+import type { Collection } from "../src/collection"
 import type { MutationFn, PendingMutation } from "../src/types"
 
 interface TestItem {
@@ -25,7 +26,7 @@ interface TestItem {
   createdAt: Date
 }
 describe(`Collection Indexes`, () => {
-  let collection: ReturnType<typeof createCollection<TestItem, string>>
+  let collection: Collection<TestItem, string>
   let testData: Array<TestItem>
   let mutationFn: MutationFn
   let emitter: any

@@ -2,6 +2,7 @@
 This is the intermediate representation of the query.
 */
 
+import type { CompareOptions } from "./builder/types"
 import type { CollectionImpl } from "../collection"
 import type { NamespacedRow } from "../types"
 
@@ -48,7 +49,7 @@ export type OrderBy = Array<OrderByClause>
 
 export type OrderByClause = {
   expression: BasicExpression
-  direction: OrderByDirection
+  compareOptions: CompareOptions
 }
 
 export type OrderByDirection = `asc` | `desc`

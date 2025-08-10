@@ -58,21 +58,14 @@ describe(`Collection type resolution tests`, () => {
   type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
   type ItemOf<T> = T extends Array<infer U> ? U : T
 
-  it(`should prioritize explicit type when provided`, () => {
+  it(`should use explicit type when provided without schema`, () => {
     const _collection = createCollection<ExplicitType>({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
-      schema: testSchema,
     })
 
-    type ExpectedType = ResolveType<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
 
   it(`should use schema type when explicit type is not provided`, () => {
@@ -133,5 +126,72 @@ describe(`Collection type resolution tests`, () => {
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
     expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
+  })
+
+  it(`should automatically infer type from schema without generic arguments`, () => {
+    // This is the key test case that was missing - no generic arguments at all
+    const _collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: testSchema,
+    })
+
+    type Param = Parameters<typeof _collection.insert>[0]
+    // Should infer the schema type automatically
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
+  })
+
+  it(`should automatically infer type from Zod schema with optional fields`, () => {
+    // Test with a Zod schema that has optional fields
+    const userSchema = z.object({
+      id: z.number(),
+      name: z.string(),
+      email: z.string().email().optional(),
+      created_at: z.date().optional(),
+    })
+
+    const _collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchema,
+    })
+
+    type Param = Parameters<typeof _collection.insert>[0]
+    type ExpectedType = {
+      id: number
+      name: string
+      email?: string
+      created_at?: Date
+    }
+
+    // Should automatically infer the complete Zod schema type
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+
+  it(`should automatically infer type from Zod schema with nullable fields`, () => {
+    // Test with nullable fields (different from optional)
+    const postSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      author_id: z.string().nullable(),
+      published_at: z.date().nullable(),
+    })
+
+    const _collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: postSchema,
+    })
+
+    type Param = Parameters<typeof _collection.insert>[0]
+    type ExpectedType = {
+      id: string
+      title: string
+      author_id: string | null
+      published_at: Date | null
+    }
+
+    // Should automatically infer nullable types correctly
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
   })
 })
