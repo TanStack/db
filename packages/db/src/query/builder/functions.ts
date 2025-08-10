@@ -237,33 +237,31 @@ export function inArray(
 
 export function like(
   left:
+    | Ref<string>
+    | Ref<string | null>
+    | Ref<string | undefined>
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | string
     | null
-    | string
     | undefined
     | BasicExpression<string>
     | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
-    | null
-    | undefined,
+    | BasicExpression<string | undefined>,
   right:
     | string
-    | string
     | null
-    | string
     | undefined
+    | Ref<string>
+    | Ref<string | null>
+    | Ref<string | undefined>
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | BasicExpression<string>
     | BasicExpression<string | null>
     | BasicExpression<string | undefined>
-    | null
-    | undefined
 ): BasicExpression<boolean>
 export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
@@ -271,33 +269,31 @@ export function like(left: any, right: any): BasicExpression<boolean> {
 
 export function ilike(
   left:
+    | Ref<string>
+    | Ref<string | null>
+    | Ref<string | undefined>
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | string
-    | string
     | null
-    | string
     | undefined
     | BasicExpression<string>
     | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
-    | null
-    | undefined,
+    | BasicExpression<string | undefined>,
   right:
     | string
-    | string
     | null
-    | string
     | undefined
+    | Ref<string>
+    | Ref<string | null>
+    | Ref<string | undefined>
     | RefProxy<string>
     | RefProxy<string | null>
     | RefProxy<string | undefined>
     | BasicExpression<string>
     | BasicExpression<string | null>
     | BasicExpression<string | undefined>
-    | null
-    | undefined
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }

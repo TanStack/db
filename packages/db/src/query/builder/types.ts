@@ -583,21 +583,38 @@ export type SpreadableRefProxy<T> = Omit<
 /**
  * Ref - The user-facing ref type with clean IDE display
  *
- * This is just an alias for RefProxy<T> but provides a cleaner name that
- * TypeScript will prefer to display in most contexts. While not a perfect
- * solution for hiding internal structure, it provides better semantics.
+ * Structurally compatible with `RefProxy<T>` so runtime proxies can be used
+ * wherever a `Ref<T>` is expected, while hiding internal proxy properties.
  *
- * Examples in IDE:
- * - Ref<string> (when TypeScript chooses to show the alias name)
- * - RefProxy internals (when TypeScript expands the type)
- *
- * This alias approach means:
- * 1. Users get a semantic API: all composables use Ref<T>
- * 2. Full compatibility: Ref<T> is exactly RefProxy<T>
- * 3. Type safety: No additional compatibility issues
- * 4. Cleaner imports: Users import Ref instead of RefProxy
+ * - For object types: exposes the same nested property structure, with leaves
+ *   typed as `Ref<Leaf>` and optionality/nullability preserved outside the Ref.
+ * - For primitives: an opaque branded wrapper so hovers show `Ref<T>`.
  */
-export type Ref<T> = RefProxy<T>
+declare const RefBrand: unique symbol
+type RefLeaf<T> = { readonly [RefBrand]?: T }
+export type Ref<T = any> = T extends undefined
+  ? RefLeaf<T>
+  : T extends Record<string, any>
+    ? {
+        [K in keyof T]: IsExactlyUndefined<T[K]> extends true
+          ? Ref<T[K]>
+          : IsExactlyNull<T[K]> extends true
+            ? Ref<T[K]>
+            : IsOptional<T[K]> extends true
+              ? NonUndefined<T[K]> extends Record<string, any>
+                ?
+                    | (Ref<NonUndefined<T[K]>> | RefProxy<NonUndefined<T[K]>>)
+                    | undefined
+                : Ref<NonUndefined<T[K]>> | undefined
+              : IsNullable<T[K]> extends true
+                ? NonNull<T[K]> extends Record<string, any>
+                  ? (Ref<NonNull<T[K]>> | RefProxy<NonNull<T[K]>>) | null
+                  : Ref<NonNull<T[K]>> | null
+                : T[K] extends Record<string, any>
+                  ? Ref<T[K]> | RefProxy<T[K]>
+                  : Ref<T[K]>
+      } & RefLeaf<T>
+    : RefLeaf<T>
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
