@@ -101,8 +101,7 @@ export function createRefProxy<T extends Record<string, any>>(
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
-        const child = createProxy(newPath)
-        return child
+        return createProxy(newPath)
       },
 
       has(target, prop) {
@@ -112,29 +111,14 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       ownKeys(target) {
-        // If this is a table-level proxy (path length 1), inject a table spread sentinel
-        if (path.length === 1) {
-          const aliasName = path[0]!
-          const id = ++accessId
-          const sentinelKey = `__SPREAD_SENTINEL__${aliasName}__${id}`
-          if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
-            Object.defineProperty(target, sentinelKey, {
-              enumerable: true,
-              configurable: true,
-              value: true,
-            })
-          }
-        } else if (path.length > 1) {
-          // Nested spread: inject a unified spread sentinel using dotted path
-          const id = ++accessId
-          const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
-          if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
-            Object.defineProperty(target, sentinelKey, {
-              enumerable: true,
-              configurable: true,
-              value: true,
-            })
-          }
+        const id = ++accessId
+        const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__${id}`
+        if (!Object.prototype.hasOwnProperty.call(target, sentinelKey)) {
+          Object.defineProperty(target, sentinelKey, {
+            enumerable: true,
+            configurable: true,
+            value: true,
+          })
         }
         return Reflect.ownKeys(target)
       },

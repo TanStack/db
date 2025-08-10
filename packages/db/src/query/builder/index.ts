@@ -26,7 +26,6 @@ import type {
   OrderByDirection,
   QueryIR,
 } from "../ir.js"
-// import { PropRef } from "../ir.js"
 import type {
   CompareOptions,
   Context,
