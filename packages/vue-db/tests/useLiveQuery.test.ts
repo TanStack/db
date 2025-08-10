@@ -1258,6 +1258,142 @@ describe(`Query Collections`, () => {
       minAge.value = 25
       await waitFor(() => expect(isReady.value).toBe(true))
     })
+
+    it(`should handle async status transitions correctly`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `async-status-transition-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, status } = useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+      )
+
+      // Initially should be loading
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+      expect(status.value).toBe(`loading`)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn && markReadyFn) {
+        beginFn()
+        commitFn()
+        // Simulate async delay before marking ready
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        markReadyFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Wait for the status to transition correctly
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+        expect(isReady.value).toBe(true)
+        expect(status.value).toBe(`ready`)
+      })
+    })
+
+    it(`should handle status transitions without change events`, async () => {
+      // This test reproduces the bug where status gets stuck in 'initialCommit'
+      // when the collection status changes without triggering change events
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `status-stuck-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, status } = useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+      )
+
+      // Initially should be loading
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn && markReadyFn) {
+        beginFn()
+        commitFn()
+        // Simulate async delay before marking ready
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        markReadyFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Wait for the status to transition correctly
+      // This should work even if no change events are fired
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+        expect(isReady.value).toBe(true)
+        expect(status.value).toBe(`ready`)
+      })
+    })
   })
 
   it(`should accept config object with pre-built QueryBuilder instance`, async () => {
