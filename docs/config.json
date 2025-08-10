@@ -84,6 +84,10 @@
         {
           "label": "Query Collection",
           "to": "collections/query-collection"
+        },
+        {
+          "label": "RSS Collection",
+          "to": "collections/rss-collection"
         }
       ]
     },

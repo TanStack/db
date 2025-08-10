@@ -154,7 +154,7 @@ There are a number of built-in collection types:
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
-4. [`RSSCollection` and `AtomCollection`](#rsscollection-and-atomcollection) to sync data from RSS and Atom feeds with automatic polling
+4. [`RSSCollection` and `AtomCollection`](#rsscollection-and-atomcollection) to sync data from RSS and Atom feeds with automatic polling, deduplication, and type safety
 5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
 6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
@@ -374,6 +374,8 @@ blogFeed.utils.clearSeenItems()
 // Check how many items have been tracked
 console.log(`Tracked items: ${blogFeed.utils.getSeenItemsCount()}`)
 ```
+
+For detailed documentation on RSS and Atom collections, including advanced features like smart polling intervals, content-aware deduplication, and RFC-compliant date parsing, see the [RSS Collection documentation](collections/rss-collection.md).
 
 #### `LocalStorageCollection`
 
