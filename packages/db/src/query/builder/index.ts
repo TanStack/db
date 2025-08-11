@@ -432,10 +432,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Then add the explicit select fields
     for (const [key, value] of Object.entries(selectObject)) {
-      if (value === undefined) {
-        // Handle undefined values from optional chaining
-        select[key] = toExpression(null) // Convert undefined to null for SQL compatibility
-      } else if (isRefProxy(value)) {
+      if (isRefProxy(value)) {
         select[key] = toExpression(value)
       } else if (
         typeof value === `object` &&
