@@ -186,4 +186,33 @@ describe(`Query collection type resolution tests`, () => {
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
   })
+  it(`types getKey param as schema OUTPUT and onInsert as schema INPUT`, () => {
+    const schema = z.object({
+      id: z.string(),
+      created_at: z.string().transform((s) => new Date(s)),
+      updated_at: z.string().transform((s) => new Date(s)),
+    })
+
+    type Output = z.output<typeof schema>
+    type Input = z.input<typeof schema>
+
+    const queryClient = new QueryClient()
+
+    const options = queryCollectionOptions({
+      queryClient,
+      queryKey: [`users`],
+      queryFn: () => Promise.resolve([] as Array<any>),
+      schema,
+      getKey: (item) => item.id,
+      onInsert: async () => {},
+      onUpdate: async () => {},
+    })
+
+    expectTypeOf(options.getKey).parameters.toEqualTypeOf<[Output]>()
+    // utils.writeInsert should accept schema INPUT
+    type WriteInsertParam0 = Parameters<
+      (typeof options.utils)[`writeInsert`]
+    >[0]
+    expectTypeOf<WriteInsertParam0>().toEqualTypeOf<Input | Array<Input>>()
+  })
 })

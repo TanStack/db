@@ -3,7 +3,8 @@
   "description": "TanStack Query collection for TanStack DB",
   "version": "0.2.1",
   "dependencies": {
-    "@tanstack/db": "workspace:*"
+    "@tanstack/db": "workspace:*",
+    "@standard-schema/spec": "^1.0.0"
   },
   "devDependencies": {
     "@tanstack/query-core": "^5.0.5",

@@ -3,6 +3,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
+  ResolveInsertInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
@@ -26,7 +27,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalOnlyCollectionConfig<
-  TExplicit = unknown,
+  TExplicit extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -51,7 +52,7 @@ export interface LocalOnlyCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
+      ResolveInsertInput<TExplicit, TSchema, TFallback>,
       TKey,
       LocalOnlyCollectionUtils
     >
@@ -136,33 +137,56 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * )
  */
 export function localOnlyCollectionOptions<
-  TExplicit = unknown,
+  TExplicit extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(
   config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> & {
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+> & {
   utils: LocalOnlyCollectionUtils
 } {
-  type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
+  type TItem = ResolveType<TExplicit, TSchema, TFallback>
+  type TInsertInput = ResolveInsertInput<TExplicit, TSchema, TFallback>
 
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<ResolvedType, TKey>(initialData)
+  const syncResult = createLocalOnlySync<TItem, TKey>(
+    initialData as Array<TItem> | undefined
+  )
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
    * Wraps the user's onInsert handler to also confirm the transaction immediately
    */
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: InsertMutationFnParams<TItem, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
     if (onInsert) {
-      handlerResult = (await onInsert(params)) ?? {}
+      handlerResult =
+        (await (
+          onInsert as (
+            p: InsertMutationFnParams<
+              TInsertInput,
+              TKey,
+              LocalOnlyCollectionUtils
+            >
+          ) => Promise<any>
+        )(
+          params as unknown as InsertMutationFnParams<
+            TInsertInput,
+            TKey,
+            LocalOnlyCollectionUtils
+          >
+        )) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -175,7 +199,7 @@ export function localOnlyCollectionOptions<
    * Wrapper for onUpdate handler that also confirms the transaction immediately
    */
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: UpdateMutationFnParams<TItem, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -193,7 +217,7 @@ export function localOnlyCollectionOptions<
    * Wrapper for onDelete handler that also confirms the transaction immediately
    */
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: DeleteMutationFnParams<TItem, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult

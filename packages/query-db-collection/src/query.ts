@@ -19,11 +19,14 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFn,
   InsertMutationFnParams,
+  ResolveInsertInput,
+  ResolveType,
   SyncConfig,
   UpdateMutationFn,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
@@ -35,14 +38,19 @@ export type { SyncOperation } from "./manual-sync"
  * @template TQueryKey - The type of the query key
  */
 export interface QueryCollectionConfig<
-  TItem extends object,
+  TExplicit extends object = Record<string, unknown>,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
 > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
   /** Function that fetches data from the server. Must return the complete collection state */
-  queryFn: (context: QueryFunctionContext<TQueryKey>) => Promise<Array<TItem>>
+  queryFn: (
+    context: QueryFunctionContext<TQueryKey>
+  ) => Promise<Array<ResolveType<TExplicit, TSchema, TFallback>>>
   /** The TanStack Query client instance */
   queryClient: QueryClient
 
@@ -50,31 +58,31 @@ export interface QueryCollectionConfig<
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
   refetchInterval?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TQueryKey
   >[`refetchInterval`]
   retry?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TQueryKey
   >[`retry`]
   retryDelay?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TQueryKey
   >[`retryDelay`]
   staleTime?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
+    Array<ResolveType<TExplicit, TSchema, TFallback>>,
     TQueryKey
   >[`staleTime`]
 
@@ -82,11 +90,16 @@ export interface QueryCollectionConfig<
   /** Unique identifier for the collection */
   id?: string
   /** Function to extract the unique key from an item */
-  getKey: CollectionConfig<TItem>[`getKey`]
+  getKey: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey
+  >[`getKey`]
   /** Schema for validating items */
-  schema?: CollectionConfig<TItem>[`schema`]
-  sync?: CollectionConfig<TItem>[`sync`]
-  startSync?: CollectionConfig<TItem>[`startSync`]
+  schema?: TSchema
+  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
+  startSync?: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>
+  >[`startSync`]
 
   // Direct persistence handlers
   /**
@@ -129,7 +142,10 @@ export interface QueryCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<TItem>
+  onInsert?: InsertMutationFn<
+    ResolveInsertInput<TExplicit, TSchema, TFallback>,
+    TKey
+  >
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -182,7 +198,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onUpdate?: UpdateMutationFn<TItem>
+  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TFallback>, TKey>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -228,7 +244,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onDelete?: DeleteMutationFn<TItem>
+  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TFallback>, TKey>
   // TODO type returning { refetch: boolean }
 
   /**
@@ -324,16 +340,35 @@ export interface QueryCollectionUtils<
  * )
  */
 export function queryCollectionOptions<
-  TItem extends object,
+  TExplicit extends object = Record<string, unknown>,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TItem,
 >(
-  config: QueryCollectionConfig<TItem, TError, TQueryKey>
-): CollectionConfig<TItem> & {
-  utils: QueryCollectionUtils<TItem, TKey, TInsertInput>
+  config: QueryCollectionConfig<
+    TExplicit,
+    TSchema,
+    TFallback,
+    TError,
+    TQueryKey,
+    TKey
+  >
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TSchema,
+  ResolveInsertInput<TExplicit, TSchema, TFallback>
+> & {
+  utils: QueryCollectionUtils<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    TKey,
+    ResolveInsertInput<TExplicit, TSchema, TFallback>
+  >
 } {
+  type TItem = ResolveType<TExplicit, TSchema, TFallback>
+  type TInsertInput = ResolveInsertInput<TExplicit, TSchema, TFallback>
   const {
     queryKey,
     queryFn,
@@ -372,7 +407,7 @@ export function queryCollectionOptions<
     throw new GetKeyRequiredError()
   }
 
-  const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
+  const internalSync: SyncConfig<TItem, TKey>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
     const observerOptions: QueryObserverOptions<
@@ -418,7 +453,7 @@ export function queryCollectionOptions<
         }
 
         const currentSyncedItems = new Map(collection.syncedData)
-        const newItemsMap = new Map<string | number, TItem>()
+        const newItemsMap = new Map<TKey, TItem>()
         newItemsArray.forEach((item) => {
           const key = getKey(item)
           newItemsMap.set(key, item)
@@ -512,12 +547,12 @@ export function queryCollectionOptions<
     queryKey: Array<unknown>
     getKey: (item: TItem) => TKey
     begin: () => void
-    write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
+    write: (message: Omit<ChangeMessage<TItem, TKey>, `key`>) => void
     commit: () => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
-  const enhancedInternalSync: SyncConfig<TItem>[`sync`] = (params) => {
+  const enhancedInternalSync: SyncConfig<TItem, TKey>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
     // Store references for manual write operations
@@ -542,7 +577,7 @@ export function queryCollectionOptions<
 
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<TItem>) => {
+    ? async (params: InsertMutationFnParams<TInsertInput, TKey>) => {
         const handlerResult = (await onInsert(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -556,7 +591,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<TItem>) => {
+    ? async (params: UpdateMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onUpdate(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -570,7 +605,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<TItem>) => {
+    ? async (params: DeleteMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onDelete(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
