@@ -75,6 +75,13 @@ class TopKTree<V> implements TopK<V> {
     this.#tree = new BTree(undefined, comparator)
   }
 
+  get size(): number {
+    const offset = this.#topKStart
+    const limit = this.#topKEnd - this.#topKStart
+    const available = this.#tree.size - offset
+    return Math.max(0, Math.min(limit, available))
+  }
+
   /**
    * Insert a *new* value.
    * Ignores the value if it is already present.

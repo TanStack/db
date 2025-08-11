@@ -1,9 +1,23 @@
 import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
 import { defaultComparator, makeComparator } from "../../utils/comparison.js"
 import { compileExpression } from "./evaluators.js"
-import type { OrderByClause } from "../ir.js"
+import type { OrderByClause, OrderByDirection, QueryIR } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
+import type { BaseIndex } from "../../indexes/base-index.js"
+import type { Collection } from "../../collection.js"
+import { followRef } from "./index.js"
+import { ensureIndexForField } from "../../indexes/auto-index.js"
+import { findIndexForField } from "../../utils/index-optimization.js"
+
+export type OrderByOptimizationInfo = {
+  offset: number
+  limit: number
+  direction: OrderByDirection
+  comparator: (a: any, b: any) => number
+  index: BaseIndex<string | number>
+  dataNeeded?: () => number
+}
 
 /**
  * Processes the ORDER BY clause
@@ -11,8 +25,11 @@ import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
  * Always uses fractional indexing and adds the index as __ordering_index to the result
  */
 export function processOrderBy(
+  rawQuery: QueryIR,
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
+  collection: Collection,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
@@ -78,6 +95,64 @@ export function processOrderBy(
 
     return defaultComparator(a, b)
   }
+  
+
+  let setSizeCallback: ((getSize: () => number) => void) | undefined
+
+  // Optimize the orderBy operator to lazily load elements
+  // by using the range index of the collection.
+  // Only for orderBy clause on a single column for now (no composite ordering)
+  if (limit && orderByClause.length === 1) {
+    const clause = orderByClause[0]!
+    const orderByExpression = clause.expression
+
+    if (orderByExpression.type === `ref`) {
+      const followRefResult = followRef(
+        rawQuery,
+        orderByExpression,
+        collection
+      )!
+
+      const followRefCollection = followRefResult.collection
+      const fieldName = followRefResult.path[0]
+      if (fieldName) {
+        ensureIndexForField(
+          fieldName,
+          followRefResult.path,
+          followRefCollection
+        )
+      }
+
+      const index: BaseIndex<string | number> | undefined = findIndexForField(
+        followRefCollection.indexes,
+        followRefResult.path
+      )
+
+      if (index && index.supports(`gt`)) {
+        // We found an index that we can use to lazily load ordered data
+        const orderByOptimizationInfo = {
+          offset: offset ?? 0,
+          limit,
+          direction: clause.compareOptions.direction,
+          comparator,
+          index,
+        }
+
+        optimizableOrderByCollections[followRefCollection.id] =
+          orderByOptimizationInfo
+
+        setSizeCallback = (getSize: () => number) => {
+          optimizableOrderByCollections[followRefCollection.id] = {
+            ...optimizableOrderByCollections[followRefCollection.id]!,
+            dataNeeded: () => {
+              const size = getSize()
+              return Math.max(0, limit - size)
+            },
+          }
+        }
+      }
+    }
+  }
 
   // Use fractional indexing and return the tuple [value, index]
   return pipeline.pipe(
@@ -85,6 +160,7 @@ export function processOrderBy(
       limit,
       offset,
       comparator,
+      setSizeCallback,
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )

@@ -9,6 +9,7 @@ import type { IStreamBuilder, PipedOperator } from "../types.js"
 export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
+  setSizeCallback?: (getSize: () => number) => void
 }
 
 export type TopKChanges<V> = {
@@ -23,6 +24,7 @@ export type TopKChanges<V> = {
  * and returns changes to the topK.
  */
 export interface TopK<V> {
+  size: number
   insert: (value: V) => TopKChanges<V>
   delete: (value: V) => TopKChanges<V>
 }
@@ -47,6 +49,13 @@ class TopKArray<V> implements TopK<V> {
     this.#topKStart = offset
     this.#topKEnd = offset + limit
     this.#comparator = comparator
+  }
+
+  get size(): number {
+    const offset = this.#topKStart
+    const limit = this.#topKEnd - this.#topKStart
+    const available = this.#sortedValues.length - offset
+    return Math.max(0, Math.min(limit, available))
   }
 
   insert(value: V): TopKChanges<V> {
@@ -169,6 +178,8 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
    */
   #topK: TopK<TaggedValue<K, T>>
 
+  #limit: number
+
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, T]>,
@@ -177,7 +188,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     options: TopKWithFractionalIndexOptions
   ) {
     super(id, inputA, output)
-    const limit = options.limit ?? Infinity
+    this.#limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
     const compareTaggedValues = (
       a: TaggedValue<K, T>,
@@ -193,7 +204,8 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
       const tieBreakerB = getTag(b)
       return tieBreakerA - tieBreakerB
     }
-    this.#topK = this.createTopK(offset, limit, compareTaggedValues)
+    this.#topK = this.createTopK(offset, this.#limit, compareTaggedValues)
+    options.setSizeCallback?.(() => this.#topK.size)
   }
 
   protected createTopK(

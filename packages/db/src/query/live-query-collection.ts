@@ -4,6 +4,7 @@ import { createFilterFunctionFromExpression } from "../change-events.js"
 import { compileQuery } from "./compiler/index.js"
 import { buildQuery, getQueryIR } from "./builder/index.js"
 import { convertToBasicExpression } from "./compiler/expressions.js"
+import type { OrderByOptimizationInfo } from "./compiler/order-by.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection.js"
 import type {
@@ -188,6 +189,9 @@ export function liveQueryCollectionOptions<
   const lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
   const lazyCollections = new Set<string>()
+  // Set of collection IDs that include an optimizable ORDER BY clause
+  const optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> =
+    {}
 
   const compileBasePipeline = () => {
     graphCache = new D2()
@@ -207,7 +211,8 @@ export function liveQueryCollectionOptions<
       inputsCache as Record<string, KeyedStream>,
       collections,
       lazyCollectionsCallbacks,
-      lazyCollections
+      lazyCollections,
+      optimizableOrderByCollections
     ))
   }
 
@@ -313,13 +318,14 @@ export function liveQueryCollectionOptions<
 
       let subscribedToAllCollections = false
 
-      const maybeRunGraph = () => {
+      const maybeRunGraph = (callback?: () => boolean) => {
         // We only run the graph if all the collections are ready
         if (
           allCollectionsReadyOrInitialCommit() &&
           subscribedToAllCollections
         ) {
           graph.run()
+          const ready = callback?.() ?? true
           // On the initial run, we may need to do an empty commit to ensure that
           // the collection is initialized
           if (messagesCount === 0) {
@@ -327,7 +333,7 @@ export function liveQueryCollectionOptions<
             commit()
           }
           // Mark the collection as ready after the first successful run
-          if (allCollectionsReady()) {
+          if (ready && allCollectionsReady()) {
             markReady()
           }
         }
@@ -346,10 +352,61 @@ export function liveQueryCollectionOptions<
             : undefined
 
         const sendChangesToPipeline = (
-          changes: Array<ChangeMessage<any, string | number>>
+          changes: Iterable<ChangeMessage<any, string | number>>,
+          callback?: () => boolean
         ) => {
           sendChangesToInput(input, changes, collection.config.getKey)
-          maybeRunGraph()
+          maybeRunGraph(callback)
+        }
+
+        // Wraps the sendChangesToPipeline function
+        // in order to turn `update`s into `insert`s
+        // for keys that have not been sent to the pipeline yet
+        // and filter out deletes for keys that have not been sent
+        const sendVisibleChangesToPipeline = (
+          changes: Array<ChangeMessage<any, string | number>>,
+          loadedInitialState: boolean,
+          sentKeys: Set<string | number>
+        ) => {
+          if (loadedInitialState) {
+            // There was no index for the join key
+            // so we loaded the initial state
+            // so we can safely assume that the pipeline has seen all keys
+            return sendChangesToPipeline(changes)
+          }
+
+          const newChanges = []
+          for (const change of changes) {
+            let newChange = change
+            if (!sentKeys.has(change.key)) {
+              if (change.type === `update`) {
+                newChange = { ...change, type: `insert` }
+              } else if (change.type === `delete`) {
+                // filter out deletes for keys that have not been sent
+                continue
+              }
+            }
+            newChanges.push(newChange)
+          }
+
+          return sendChangesToPipeline(newChanges)
+        }
+
+        const loadKeys = (
+          keys: Iterable<string | number>,
+          sentKeys: Set<string | number>,
+          filterFn: (item: object) => boolean
+        ) => {
+          for (const key of keys) {
+            // Only load the key once
+            if (sentKeys.has(key)) continue
+
+            const value = collection.get(key)
+            if (value !== undefined && filterFn(value)) {
+              sentKeys.add(key)
+              sendChangesToPipeline([{ type: `insert`, key, value }])
+            }
+          }
         }
 
         const subscribeToAllChanges = (
@@ -371,69 +428,33 @@ export function liveQueryCollectionOptions<
         const subscribeToMatchingChanges = (
           whereExpression: BasicExpression<boolean> | undefined
         ) => {
+          let loadedInitialState = false
           const sentKeys = new Set<string | number>()
 
-          // Wraps the sendChangesToPipeline function
-          // in order to turn `update`s into `insert`s
-          // for keys that have not been sent to the pipeline yet
-          // and filter out deletes for keys that have not been sent
-          const sendVisibleChangesToPipeline = (
+          const sendVisibleChanges = (
             changes: Array<ChangeMessage<any, string | number>>
           ) => {
-            if (loadedInitialState) {
-              // There was no index for the join key
-              // so we loaded the initial state
-              // so we can safely assume that the pipeline has seen all keys
-              return sendChangesToPipeline(changes)
-            }
-
-            const newChanges = []
-            for (const change of changes) {
-              let newChange = change
-              if (!sentKeys.has(change.key)) {
-                if (change.type === `update`) {
-                  newChange = { ...change, type: `insert` }
-                } else if (change.type === `delete`) {
-                  // filter out deletes for keys that have not been sent
-                  continue
-                }
-              }
-              newChanges.push(newChange)
-            }
-
-            return sendChangesToPipeline(newChanges)
+            sendVisibleChangesToPipeline(changes, loadedInitialState, sentKeys)
           }
 
-          const unsubscribe = collection.subscribeChanges(
-            sendVisibleChangesToPipeline,
-            { whereExpression }
-          )
+          const unsubscribe = collection.subscribeChanges(sendVisibleChanges, {
+            whereExpression,
+          })
 
           // Create a function that loads keys from the collection
           // into the query pipeline on demand
           const filterFn = whereExpression
             ? createFilterFunctionFromExpression(whereExpression)
             : () => true
-          const loadKeys = (keys: Set<string | number>) => {
-            for (const key of keys) {
-              // Only load the key once
-              if (sentKeys.has(key)) continue
-
-              const value = collection.get(key)
-              if (value !== undefined && filterFn(value)) {
-                sentKeys.add(key)
-                sendChangesToPipeline([{ type: `insert`, key, value }])
-              }
-            }
+          const loadKs = (keys: Set<string | number>) => {
+            return loadKeys(keys, sentKeys, filterFn)
           }
-
-          let loadedInitialState = false
 
           // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
           // This is used by the join operator to dynamically load matching keys from the lazy collection
           // or to get the full initial state of the collection if there's no index for the join key
           lazyCollectionsCallbacks[collectionId] = {
-            loadKeys,
+            loadKeys: loadKs,
             loadInitialState: () => {
               // Make sure we only load the initial state once
               if (loadedInitialState) return
@@ -448,12 +469,160 @@ export function liveQueryCollectionOptions<
           return unsubscribe
         }
 
+        const subscribeToOrderedChanges = (
+          whereExpression: BasicExpression<boolean> | undefined
+        ) => {
+          const { offset, limit, direction, comparator, index, dataNeeded } =
+            optimizableOrderByCollections[collectionId]!
+
+          if (!dataNeeded) {
+            // This should never happen because the topK operator should always set the size callback
+            // which in turn should lead to the orderBy operator setting the dataNeeded callback
+            throw new Error(
+              `Missing dataNeeded callback for collection ${collectionId}`
+            )
+          }
+
+          // This function is called by maybeRunGraph
+          // after each iteration of the query pipeline
+          // to ensure that the orderBy operator has enough data to work with
+          const loadMoreIfNeeded = () => {
+            // `dataNeeded` probes the orderBy operator to see if it needs more data
+            // if it needs more data, it returns the number of items it needs
+            const n = dataNeeded()
+            if (n > 0) {
+              loadNextItems(n)
+            }
+
+            // Indicate that we're done loading data if we didn't need to load more data
+            return n === 0
+          }
+
+          // At runtime, if the orderBy operator notices that it doesn't have a range index on the orderBy key
+          // then it invokes this function
+          /*
+          const deoptimize = () => {
+            unsubscribe()
+            unsubscribeCallbacks.delete(unsubscribe)
+
+            // Send the entire current state through the pipeline
+            // except for the keys that we've already sent
+            const changes = collection.currentStateAsChanges({
+              whereExpression,
+            })
+            const filteredChanges = changes.filter(
+              (change) => !sentKeys.has(change.key)
+            )
+            sendChangesToPipeline(filteredChanges)
+
+            // Subscribe to all changes and always send them through the pipeline (no optimization)
+            const unsub = collection.subscribeChanges(sendChangesToPipeline, {
+              whereExpression,
+            })
+            unsubscribeCallbacks.add(unsub)
+          }
+          */
+
+          /*
+          const changes = collection.currentStateAsChanges({
+            whereExpression,
+          })
+          // TODO: make this more efficient later by not sorting all the changes but just keeping the `offset` + `limit` smallest changes
+          const sortedChanges = changes.sort(comparator)
+          const topKChanges = sortedChanges.slice(offset, offset + limit)
+          */
+
+          // TODO: implement the index method.
+          //       Don't implement take but rather lookup + next()
+          //       so take would be lookup(minimumValue) + n times next()
+          //       and loading more data at runtime would be lookup(maximumValue) + n times next()
+
+          // Keep track of the keys we've sent
+          // and also the biggest value we've sent so far
+          // and the smallest value we've sent so far
+          const sentValuesInfo: {
+            sentKeys: Set<string | number>
+            biggest: any
+          } = {
+            sentKeys: new Set<string | number>(),
+            biggest: undefined,
+          }
+
+          const sendChangesToPipelineWithTracking = (
+            changes: Iterable<ChangeMessage<any, string | number>>
+          ) => {
+            const trackedChanges = trackSentValues(
+              changes,
+              comparator,
+              sentValuesInfo
+            )
+            sendChangesToPipeline(trackedChanges, loadMoreIfNeeded)
+          }
+
+          // Loads the next `n` items from the collection
+          // starting from the biggest item it has sent
+          const loadNextItems = (n: number) => {
+            const biggestSentValue = sentValuesInfo.biggest
+            // Take the `n` items after the biggest sent value
+            const nextOrderedKeys = index.take(n, direction, biggestSentValue)
+            const nextInserts: Array<ChangeMessage<any, string | number>> =
+              nextOrderedKeys.map((key) => {
+                return { type: `insert`, key, value: collection.get(key) }
+              })
+            sendChangesToPipelineWithTracking(nextInserts)
+          }
+
+          // Load the first `offset + limit` values from the index
+          // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+          loadNextItems(offset + limit)
+
+          const sendChangesInRange = (
+            changes: Iterable<ChangeMessage<any, string | number>>
+          ) => {
+            // Split live updates into a delete of the old value and an insert of the new value
+            // and filter out changes that are bigger than the biggest value we've sent so far
+            // because they can't affect the topK
+            const splittedChanges = splitUpdates(changes)
+            const filteredChanges = filterChangesSmallerThanMax(
+              splittedChanges,
+              comparator,
+              sentValuesInfo.biggest
+            )
+            sendChangesToPipeline(filteredChanges, loadMoreIfNeeded)
+          }
+
+          // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
+          // values that are bigger don't need to be sent because they can't affect the topK
+          const unsubscribe = collection.subscribeChanges(sendChangesInRange, {
+            whereExpression,
+          })
+
+          return unsubscribe
+        }
+
         const subscribeToChanges = (
           whereExpression?: BasicExpression<boolean>
         ) => {
           let unsubscribe: () => void
           if (lazyCollections.has(collectionId)) {
             unsubscribe = subscribeToMatchingChanges(whereExpression)
+          } else if (
+            Object.hasOwn(optimizableOrderByCollections, collectionId)
+          ) {
+            unsubscribe = subscribeToOrderedChanges(whereExpression)
+
+            // We need to send at least `limit` elements from the collection into the pipeline
+            // if some of them are filtered out throughout the pipeline and the order by
+            // operator has not enough elements it will request us to send more elements
+
+            // I think we will need to do similar flipping of inserts/updates/deletes as in subscribeToMatchingChanges
+            // based on what we've sent into the pipeline
+            // but first need to do these two:
+            // + filter of inserts/deletes that are < maxValue
+            // + flipping of updates for move-ins/move-outs
+
+            // loadInitialState callback will need to send all the data > maxValue it has sent so far
+            // and stop filtering/flipping of inserts/updates/deletes
           } else {
             unsubscribe = subscribeToAllChanges(whereExpression)
           }
@@ -620,7 +789,7 @@ function bridgeToCreateCollection<
  */
 function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
-  changes: Array<ChangeMessage>,
+  changes: Iterable<ChangeMessage>,
   getKey: (item: ChangeMessage[`value`]) => any
 ) {
   const multiSetArray: MultiSetArray<unknown> = []
@@ -718,4 +887,73 @@ function findCollectionAlias(
   }
 
   return undefined
+}
+
+function* trackSentValues(
+  changes: Iterable<ChangeMessage<any, string | number>>,
+  comparator: (a: any, b: any) => number,
+  tracker: { sentKeys: Set<string | number>; biggest: any }
+) {
+  for (const change of changes) {
+    tracker.sentKeys.add(change.key)
+
+    if (!tracker.biggest) {
+      tracker.biggest = change.value
+    } else if (comparator(tracker.biggest, change.value) < 0) {
+      tracker.biggest = change.value
+    }
+
+    yield change
+  }
+}
+
+/** Splits updates into a delete of the old value and an insert of the new value */
+function* splitUpdates<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(
+  changes: Iterable<ChangeMessage<T, TKey>>
+): Generator<ChangeMessage<T, TKey>> {
+  for (const change of changes) {
+    if (change.type === `update`) {
+      yield { type: `delete`, key: change.key, value: change.previousValue! }
+      yield { type: `insert`, key: change.key, value: change.value }
+    } else {
+      yield change
+    }
+  }
+}
+
+function* filterChanges<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(
+  changes: Iterable<ChangeMessage<T, TKey>>,
+  f: (change: ChangeMessage<T, TKey>) => boolean
+): Generator<ChangeMessage<T, TKey>> {
+  for (const change of changes) {
+    if (f(change)) {
+      yield change
+    }
+  }
+}
+
+/**
+ * Filters changes to only include those that are smaller than the provided max value
+ * @param changes - Iterable of changes to filter
+ * @param comparator - Comparator function to use for filtering
+ * @param maxValue - Range to filter changes within (range boundaries are exclusive)
+ * @returns Iterable of changes that fall within the range
+ */
+function* filterChangesSmallerThanMax<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(
+  changes: Iterable<ChangeMessage<T, TKey>>,
+  comparator: (a: any, b: any) => number,
+  maxValue: any
+): Generator<ChangeMessage<T, TKey>> {
+  yield* filterChanges(changes, (change) => {
+    return !maxValue || comparator(change.value, maxValue) < 0
+  })
 }

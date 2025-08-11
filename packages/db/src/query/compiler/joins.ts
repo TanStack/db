@@ -18,6 +18,7 @@ import { findIndexForField } from "../../utils/index-optimization.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery, followRef } from "./index.js"
+import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -57,6 +58,7 @@ export function processJoins(
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
@@ -74,6 +76,7 @@ export function processJoins(
       collections,
       callbacks,
       lazyCollections,
+      optimizableOrderByCollections,
       rawQuery
     )
   }
@@ -96,6 +99,7 @@ function processJoin(
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR
 ): NamespacedAndKeyedStream {
   // Get the joined table alias and input stream
@@ -109,6 +113,7 @@ function processJoin(
     collections,
     callbacks,
     lazyCollections,
+    optimizableOrderByCollections,
     cache,
     queryMapping
   )
@@ -218,10 +223,16 @@ function processJoin(
       ensureIndexForField(fieldName, followRefResult.path, followRefCollection)
     }
 
+    let deoptimized = false
+
     const activePipelineWithLoading: IStreamBuilder<
       [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
     > = activePipeline.pipe(
       tap(([joinKey, _]) => {
+        if (deoptimized) {
+          return
+        }
+
         // Find the index for the path we join on
         // we need to find the index inside the map operator
         // because the indexes are only available after the initial sync
@@ -253,6 +264,7 @@ function processJoin(
         } else {
           // We can't optimize the join because there is no index for the join key
           // on the lazy collection, so we load the initial state
+          deoptimized = true
           loadInitialState()
         }
       })
@@ -358,6 +370,7 @@ function processJoinSource(
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping
 ): { alias: string; input: KeyedStream; collectionId: string } {
@@ -380,6 +393,7 @@ function processJoinSource(
         collections,
         callbacks,
         lazyCollections,
+        optimizableOrderByCollections,
         cache,
         queryMapping
       )
