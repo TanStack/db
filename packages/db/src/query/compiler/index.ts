@@ -13,6 +13,7 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
+import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
   CollectionRef,
@@ -54,6 +55,7 @@ export function compileQuery(
   collections: Record<string, Collection<any, any, any, any, any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
@@ -88,6 +90,7 @@ export function compileQuery(
     collections,
     callbacks,
     lazyCollections,
+    optimizableOrderByCollections,
     cache,
     queryMapping
   )
@@ -119,6 +122,7 @@ export function compileQuery(
       collections,
       callbacks,
       lazyCollections,
+      optimizableOrderByCollections,
       rawQuery
     )
   }
@@ -251,8 +255,11 @@ export function compileQuery(
   // Process orderBy parameter if it exists
   if (query.orderBy && query.orderBy.length > 0) {
     const orderedPipeline = processOrderBy(
+      rawQuery,
       pipeline,
       query.orderBy,
+      collections[mainCollectionId]!,
+      optimizableOrderByCollections,
       query.limit,
       query.offset
     )
@@ -314,6 +321,7 @@ function processFrom(
   collections: Record<string, Collection>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping
 ): { alias: string; input: KeyedStream; collectionId: string } {
@@ -336,6 +344,7 @@ function processFrom(
         collections,
         callbacks,
         lazyCollections,
+        optimizableOrderByCollections,
         cache,
         queryMapping
       )

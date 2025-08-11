@@ -48,7 +48,8 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
-        new Set()
+        new Set(),
+        {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -101,7 +102,8 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
-        new Set()
+        new Set(),
+        {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -176,7 +178,8 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
-        new Set()
+        new Set(),
+        {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -239,7 +242,8 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
-        new Set()
+        new Set(),
+        {}
       )
 
       const messages: Array<MultiSet<any>> = []

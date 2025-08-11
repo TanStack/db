@@ -254,6 +254,14 @@ export class BTree<K = any, V = any> {
     )
   }
 
+  /** Returns the next key larger than the specified key, or undefined if there is none.
+   *  Also, nextHigherKey(undefined) returns the lowest key.
+   */
+  nextHigherKey(key: K | undefined): K | undefined {
+    const p = this.nextHigherPair(key, ReusedArray as [K, V])
+    return p && p[0]
+  }
+
   /** Returns the next pair whose key is smaller than the specified key (or undefined if there is none).
    *  If key === undefined, this function returns the highest pair.
    * @param key The key to search for.
@@ -266,6 +274,14 @@ export class BTree<K = any, V = any> {
       return this._root.maxPair(reusedArray)
     }
     return this._root.getPairOrNextLower(key, this._compare, false, reusedArray)
+  }
+
+  /** Returns the next key smaller than the specified key, or undefined if there is none.
+   *  Also, nextLowerKey(undefined) returns the highest key.
+   */
+  nextLowerKey(key: K | undefined): K | undefined {
+    const p = this.nextLowerPair(key, ReusedArray as [K, V])
+    return p && p[0]
   }
 
   /** Adds all pairs from a list of key-value pairs.
@@ -1001,6 +1017,7 @@ const EmptyLeaf = (function () {
   n.isShared = true
   return n
 })()
+const ReusedArray: Array<any> = [] // assumed thread-local
 
 function check(fact: boolean, ...args: Array<any>) {
   if (!fact) {
