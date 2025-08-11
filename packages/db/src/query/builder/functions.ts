@@ -4,6 +4,36 @@ import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
 import type { Ref } from "./types.js"
 
+type StringRef = Ref<string> | Ref<string | null> | Ref<string | undefined>
+type StringRefProxy =
+  | RefProxy<string>
+  | RefProxy<string | null>
+  | RefProxy<string | undefined>
+type StringBasicExpression =
+  | BasicExpression<string>
+  | BasicExpression<string | null>
+  | BasicExpression<string | undefined>
+type StringLike =
+  | StringRef
+  | StringRefProxy
+  | StringBasicExpression
+  | string
+  | null
+  | undefined
+
+type ComparisonOperand<T> =
+  | RefProxy<T>
+  | Ref<T>
+  | T
+  | BasicExpression<T>
+  | undefined
+  | null
+type ComparisonOperandPrimitive<T extends string | number | boolean> =
+  | T
+  | BasicExpression<T>
+  | undefined
+  | null
+
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | RefProxy<any> | Ref<any> | any
 
@@ -97,12 +127,12 @@ type BinaryNumericReturnType<T1, T2> =
 // Operators
 
 export function eq<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
@@ -110,12 +140,12 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gt<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gt(left: any, right: any): BasicExpression<boolean> {
@@ -123,12 +153,12 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gte<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gte(left: any, right: any): BasicExpression<boolean> {
@@ -136,12 +166,12 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lt<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
@@ -149,12 +179,12 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lte<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lte(left: any, right: any): BasicExpression<boolean> {
@@ -236,64 +266,16 @@ export function inArray(
 }
 
 export function like(
-  left:
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | string
-    | null
-    | undefined
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>,
-  right:
-    | string
-    | null
-    | undefined
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
+  left: StringLike,
+  right: StringLike
 ): BasicExpression<boolean>
 export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
 }
 
 export function ilike(
-  left:
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | string
-    | null
-    | undefined
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>,
-  right:
-    | string
-    | null
-    | undefined
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
+  left: StringLike,
+  right: StringLike
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }
