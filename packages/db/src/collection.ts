@@ -72,6 +72,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
+ * @template TSchema - The schema type for validation and type inference
  * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
  */
 export interface Collection<
@@ -1613,9 +1614,14 @@ export class CollectionImpl<
           throw new SchemaValidationError(type, typedIssues)
         }
 
-        // Return the original update data, not the merged data
-        // We only used the merged data for validation
-        return data as T
+        // Extract only the modified keys from the validated result
+        const validatedMergedData = result.value as T
+        const modifiedKeys = Object.keys(data)
+        const extractedChanges = Object.fromEntries(
+          modifiedKeys.map((k) => [k, validatedMergedData[k as keyof T]])
+        ) as T
+
+        return extractedChanges
       }
     }
 
