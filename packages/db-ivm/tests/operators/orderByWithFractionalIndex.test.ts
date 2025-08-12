@@ -7,7 +7,7 @@ import {
 } from "../../src/operators/index.js"
 import { orderByWithFractionalIndexBTree } from "../../src/operators/orderByBTree.js"
 import { loadBTree } from "../../src/operators/topKWithFractionalIndexBTree.js"
-import { MessageTracker, assertOnlyKeysAffected } from "../test-utils.js"
+import { MessageTracker } from "../test-utils.js"
 import type { KeyValue } from "../../src/types.js"
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
@@ -15,6 +15,10 @@ const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   value,
   multiplicity,
 ]
+
+const stripFractionalIndexWithoutMultiplicity = (
+  r: [string, [{ id: number; value: string }, string]]
+) => [r[0], r[1][0]]
 
 beforeAll(async () => {
   await loadBTree()
@@ -384,10 +388,12 @@ describe(`Operators`, () => {
       expect(updateResult.messageCount).toBeLessThanOrEqual(4) // Should be incremental
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
-      // Check that only affected keys produce messages - should be key1 (removed) and key4 (added to top 3)
-      assertOnlyKeysAffected(`orderBy remove`, updateResult.messages, [
-        `key1`,
-        `key4`,
+      expect(
+        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+      ).toEqual([
+        [`key2`, { id: 2, value: `b` }],
+        [`key3`, { id: 3, value: `c` }],
+        [`key4`, { id: 4, value: `d` }],
       ])
     })
 
@@ -428,7 +434,13 @@ describe(`Operators`, () => {
 
       const initialResult = tracker.getResult()
       // Should have the top 3 items by value
-      expect(initialResult.sortedResults.length).toBe(3)
+      expect(
+        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+      ).toEqual([
+        [`key1`, { id: 1, value: `a` }],
+        [`key3`, { id: 3, value: `b` }],
+        [`key2`, { id: 2, value: `c` }],
+      ])
       expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
 
       tracker.reset()
@@ -447,10 +459,12 @@ describe(`Operators`, () => {
       expect(updateResult.messageCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
-      // Check that only affected keys produce messages - should be key2 (modified) and key4 (added to top 3)
-      assertOnlyKeysAffected(`orderBy modify`, updateResult.messages, [
-        `key2`,
-        `key4`,
+      expect(
+        updateResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+      ).toEqual([
+        [`key1`, { id: 1, value: `a` }],
+        [`key3`, { id: 3, value: `b` }],
+        [`key4`, { id: 4, value: `d` }],
       ])
     })
   })
