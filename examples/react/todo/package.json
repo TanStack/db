@@ -9,6 +9,7 @@
     "@tanstack/query-db-collection": "^0.2.0",
     "@tanstack/react-db": "^0.1.0",
     "@tanstack/react-db-devtools": "workspace:*",
+    "@tanstack/react-devtools": "^0.3.0",
     "@tanstack/react-router": "^1.125.6",
     "@tanstack/react-router-devtools": "^1.130.2",
     "@tanstack/react-start": "^1.126.1",

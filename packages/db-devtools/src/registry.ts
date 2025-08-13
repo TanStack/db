@@ -343,16 +343,16 @@ export function createDbDevtoolsRegistry(): DbDevtoolsRegistry {
 
 // Initialize the global registry if not already present
 export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
-  // SSR safety check
+  // SSR safety check - return a no-op registry for server-side rendering
   if (typeof window === `undefined`) {
-    // Return a no-op registry for server-side rendering
-    const [collectionsSignal] = createSignal<Array<CollectionMetadata>>([])
-    const [transactionsSignal] = createSignal<Array<TransactionDetails>>([])
-
+    // Create dummy signals that won't be used during SSR
+    const dummySignal = () => []
+    dummySignal.set = () => {}
+    
     return {
       collections: new Map(),
-      collectionsSignal,
-      transactionsSignal,
+      collectionsSignal: dummySignal as any,
+      transactionsSignal: dummySignal as any,
       registerCollection: () => undefined,
       unregisterCollection: () => {},
       getCollection: () => undefined,
@@ -372,6 +372,7 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
     } as DbDevtoolsRegistry
   }
 
+  // Only create real signals on the client side
   if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
     ;(window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
   }

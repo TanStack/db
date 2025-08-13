@@ -80,7 +80,8 @@
     "build:dev": "tsup --watch"
   },
   "dependencies": {
-    "@tanstack/db-devtools": "workspace:*"
+    "@tanstack/db-devtools": "workspace:*",
+    "solid-js": "^1.9.5"
   },
   "devDependencies": {
     "@tanstack/react-db": "workspace:*",

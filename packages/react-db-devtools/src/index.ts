@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+export { TanStackReactDbDevtoolsPanel } from "./ReactDbDevtoolsPanel"
+
 function DevtoolsWrapper(props: any) {
   const [isClient, setIsClient] = React.useState(false)
   const [DevtoolsComponent, setDevtoolsComponent] =

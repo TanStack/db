@@ -39,6 +39,11 @@ class TanstackDbDevtools {
       shadowDOMTarget,
     } = config
 
+    // Only initialize on the client side
+    if (typeof window === `undefined`) {
+      throw new Error('TanstackDbDevtools cannot be instantiated during SSR')
+    }
+
     this.#registry = initializeDevtoolsRegistry()
     this.#shadowDOMTarget = shadowDOMTarget
     this.#initialIsOpen = createSignal(initialIsOpen)

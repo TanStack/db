@@ -4,8 +4,10 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router"
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
-import { TanStackReactDbDevtools } from "@tanstack/react-db-devtools"
+import { TanstackDevtools } from "@tanstack/react-devtools"
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
+import { TanStackReactDbDevtoolsPanel } from "@tanstack/react-db-devtools"
+// import { TanStackReactDbDevtools } from "@tanstack/react-db-devtools"
 
 import appCss from "../styles.css?url"
 
@@ -34,8 +36,20 @@ export const Route = createRootRoute({
   component: () => (
     <RootDocument>
       <Outlet />
-      <TanStackRouterDevtools />
-      <TanStackReactDbDevtools position="bottom-right" />
+      <TanstackDevtools
+        plugins={[
+          {
+            name: "Tanstack Router",
+            render: <TanStackRouterDevtoolsPanel />,
+          },
+          {
+            name: "Tanstack DB",
+            render: <TanStackReactDbDevtoolsPanel />,
+          },
+        ]}
+      />
+      {/* Alternative standalone component */}
+      {/* <TanStackReactDbDevtools position="bottom-right" /> */}
     </RootDocument>
   ),
 })

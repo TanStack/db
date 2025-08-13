@@ -3,6 +3,7 @@ export * from "./types"
 export * from "./constants"
 export * from "./devtools"
 export * from "./registry"
+export * from "./BaseTanStackDbDevtoolsPanel"
 
 // Components
 export { Explorer } from "./components/Explorer"
