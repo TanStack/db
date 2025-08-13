@@ -476,6 +476,9 @@ importers:
       '@tanstack/db-ivm':
         specifier: workspace:*
         version: link:../db-ivm
+      type-fest:
+        specifier: ^4.41.0
+        version: 4.41.0
       typescript:
         specifier: '>=4.7'
         version: 5.8.3
