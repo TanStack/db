@@ -1,4 +1,4 @@
-import { untrack } from "svelte"
+import { flushSync, untrack } from "svelte"
 import { createLiveQueryCollection } from "@tanstack/db"
 import { SvelteMap } from "svelte/reactivity"
 import type {
@@ -246,7 +246,10 @@ export function useLiveQuery(
 
     if (isCollection) {
       // It's already a collection, ensure sync is started for Svelte helpers
-      unwrappedParam.startSyncImmediate()
+      // Only start sync if the collection is in idle state
+      if (unwrappedParam.status === `idle`) {
+        unwrappedParam.startSyncImmediate()
+      }
       return unwrappedParam
     }
 
@@ -311,6 +314,15 @@ export function useLiveQuery(
 
     // Initialize data array in correct order
     syncDataFromCollection(currentCollection)
+
+    // Listen for the first ready event to catch status transitions
+    // that might not trigger change events (fixes async status transition bug)
+    currentCollection.onFirstReady(() => {
+      // Use flushSync to ensure Svelte reactivity updates properly
+      flushSync(() => {
+        status = currentCollection.status
+      })
+    })
 
     // Subscribe to collection changes with granular updates
     currentUnsubscribe = currentCollection.subscribeChanges(

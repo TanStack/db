@@ -237,7 +237,7 @@ describe(`Query Index Optimization`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // Provide initial data through sync
           begin()
           for (const item of testData) {
@@ -247,6 +247,7 @@ describe(`Query Index Optimization`, () => {
             })
           }
           commit()
+          markReady()
 
           // Listen for mutations and sync them back (only register once)
           if (!emitter.all.has(`sync`)) {
@@ -534,7 +535,7 @@ describe(`Query Index Optimization`, () => {
           getKey: (item) => item.id,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               begin()
               write({
                 type: `insert`,
@@ -547,6 +548,7 @@ describe(`Query Index Optimization`, () => {
                 },
               })
               commit()
+              markReady()
             },
           },
         })
@@ -622,7 +624,7 @@ describe(`Query Index Optimization`, () => {
         getKey: (item) => item.id,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit }) => {
+          sync: ({ begin, write, commit, markReady }) => {
             begin()
             write({
               type: `insert`,
@@ -645,6 +647,7 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
+            markReady()
           },
         },
       })

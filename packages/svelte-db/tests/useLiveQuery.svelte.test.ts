@@ -751,6 +751,7 @@ describe(`Query Collections`, () => {
     it(`should be false initially and true after collection is ready`, () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
 
       // Create a collection that doesn't start sync immediately
       const collection = createCollection<Person>({
@@ -758,9 +759,10 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false, // Don't start sync immediately
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
             commitFn = commit
+            markReadyFn = markReady
             // Don't call begin/commit immediately
           },
         },
@@ -787,9 +789,10 @@ describe(`Query Collections`, () => {
         collection.preload()
 
         // Trigger the first commit to make collection ready
-        if (beginFn && commitFn) {
+        if (beginFn && commitFn && markReadyFn) {
           beginFn()
           commitFn()
+          markReadyFn()
         }
 
         // Insert data
@@ -874,15 +877,17 @@ describe(`Query Collections`, () => {
     it(`should update isReady when collection status changes`, () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
 
       const collection = createCollection<Person>({
         id: `status-change-is-ready-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
             commitFn = commit
+            markReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -904,9 +909,10 @@ describe(`Query Collections`, () => {
 
         expect(query.isReady).toBe(false)
         collection.preload()
-        if (beginFn && commitFn) {
+        if (beginFn && commitFn && markReadyFn) {
           beginFn()
           commitFn()
+          markReadyFn()
         }
         collection.insert({
           id: `1`,
@@ -918,6 +924,74 @@ describe(`Query Collections`, () => {
         })
         flushSync()
         expect(query.isReady).toBe(true)
+      })
+    })
+
+    it(`should update isLoading when collection status changes`, () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `status-change-is-loading-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            }))
+        )
+
+        // Initially should be true
+        expect(query.isLoading).toBe(true)
+
+        // Start sync manually
+        collection.preload()
+
+        // Trigger the first commit to make collection ready
+        if (beginFn && commitFn && markReadyFn) {
+          beginFn()
+          commitFn()
+          markReadyFn()
+        }
+
+        // Insert data
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+
+        flushSync()
+
+        expect(query.isLoading).toBe(false)
+        expect(query.isReady).toBe(true)
+
+        // Wait for collection to become ready
+        flushSync()
+        expect(query.isLoading).toBe(false)
+        expect(query.status).toBe(`ready`)
       })
     })
 
@@ -965,17 +1039,20 @@ describe(`Query Collections`, () => {
     it(`should handle isReady with complex queries including joins`, () => {
       let personBeginFn: (() => void) | undefined
       let personCommitFn: (() => void) | undefined
+      let personMarkReadyFn: (() => void) | undefined
       let issueBeginFn: (() => void) | undefined
       let issueCommitFn: (() => void) | undefined
+      let issueMarkReadyFn: (() => void) | undefined
 
       const personCollection = createCollection<Person>({
         id: `join-is-ready-persons`,
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             personBeginFn = begin
             personCommitFn = commit
+            personMarkReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -990,9 +1067,10 @@ describe(`Query Collections`, () => {
           getKey: (issue: Issue) => issue.id,
           startSync: false,
           sync: {
-            sync: ({ begin, commit }) => {
+            sync: ({ begin, commit, markReady }) => {
               issueBeginFn = begin
               issueCommitFn = commit
+              issueMarkReadyFn = markReady
               // Don't sync immediately
             },
           },
@@ -1017,13 +1095,15 @@ describe(`Query Collections`, () => {
         expect(query.isReady).toBe(false)
         personCollection.preload()
         issueCollection.preload()
-        if (personBeginFn && personCommitFn) {
+        if (personBeginFn && personCommitFn && personMarkReadyFn) {
           personBeginFn()
           personCommitFn()
+          personMarkReadyFn()
         }
-        if (issueBeginFn && issueCommitFn) {
+        if (issueBeginFn && issueCommitFn && issueMarkReadyFn) {
           issueBeginFn()
           issueCommitFn()
+          issueMarkReadyFn()
         }
         personCollection.insert({
           id: `1`,
@@ -1044,7 +1124,7 @@ describe(`Query Collections`, () => {
       })
     })
 
-    it(`should handle isReady with parameterized queries`, async () => {
+    it(`should handle isReady with parameterized queries`, () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
 
@@ -1053,9 +1133,12 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
-            commitFn = commit
+            commitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't sync immediately
           },
         },
@@ -1105,6 +1188,72 @@ describe(`Query Collections`, () => {
         minAge = 25
         flushSync()
         expect(query.isReady).toBe(true)
+      })
+    })
+
+    it(`should handle status transitions correctly with onFirstReady`, () => {
+      // This test verifies that the onFirstReady callback properly updates status
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `onfirstready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, 30))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+            }))
+        )
+
+        // Initially should be loading
+        expect(query.isLoading).toBe(true)
+        expect(query.isReady).toBe(false)
+
+        // Start sync manually
+        collection.preload()
+
+        // Trigger the first commit to make collection ready
+        if (beginFn && commitFn && markReadyFn) {
+          beginFn()
+          commitFn()
+          markReadyFn()
+        }
+
+        // Insert data
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+
+        // Wait for the status to transition correctly
+        flushSync()
+        expect(query.isLoading).toBe(false)
+        expect(query.isReady).toBe(true)
+        expect(query.status).toBe(`ready`)
       })
     })
   })
