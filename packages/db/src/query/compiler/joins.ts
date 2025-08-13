@@ -10,6 +10,7 @@ import {
   InvalidJoinConditionSameTableError,
   InvalidJoinConditionTableMismatchError,
   InvalidJoinConditionWrongTablesError,
+  JoinCollectionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from "../../errors.js"
@@ -119,15 +120,11 @@ function processJoin(
   const joinedCollection = collections[joinedCollectionId]
 
   if (!mainCollection) {
-    throw new Error(
-      `Internal error in join. Collection not found for ${mainTableId}`
-    )
+    throw new JoinCollectionNotFoundError(mainTableId)
   }
 
   if (!joinedCollection) {
-    throw new Error(
-      `Internal error in join. Collection not found for ${joinedCollectionId}`
-    )
+    throw new JoinCollectionNotFoundError(joinedCollectionId)
   }
 
   const { activeCollection, lazyCollection } = getActiveAndLazyCollections(
