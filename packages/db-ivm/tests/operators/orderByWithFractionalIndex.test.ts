@@ -366,12 +366,10 @@ describe(`Operators`, () => {
 
       graph.finalize()
 
-      const value1 = { id: 1, value: `a` }
-
       // Initial data
       input.sendData(
         new MultiSet([
-          [[`key1`, value1], 1],
+          [[`key1`, { id: 1, value: `a` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
@@ -397,7 +395,7 @@ describe(`Operators`, () => {
       // Remove a row that was in the top 3
       input.sendData(
         new MultiSet([
-          [[`key1`, value1], -1], // Remove the first item
+          [[`key1`, { id: 1, value: `a` }], -1], // Remove the first item
         ])
       )
       graph.run()
@@ -440,13 +438,11 @@ describe(`Operators`, () => {
 
       graph.finalize()
 
-      const value2 = { id: 2, value: `c` }
-
       // Initial data
       input.sendData(
         new MultiSet([
           [[`key1`, { id: 1, value: `a` }], 1],
-          [[`key2`, value2], 1],
+          [[`key2`, { id: 2, value: `c` }], 1],
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
         ])
@@ -469,7 +465,7 @@ describe(`Operators`, () => {
       // Modify an existing row by removing it and adding a new version
       input.sendData(
         new MultiSet([
-          [[`key2`, value2], -1], // Remove old version
+          [[`key2`, { id: 2, value: `c` }], -1], // Remove old version
           [[`key2`, { id: 2, value: `z` }], 1], // Add new version with different value
         ])
       )
