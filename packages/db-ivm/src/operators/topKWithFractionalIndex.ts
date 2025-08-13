@@ -2,10 +2,9 @@ import { generateKeyBetween } from "fractional-indexing"
 import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
 import { StreamBuilder } from "../d2.js"
 import { MultiSet } from "../multiset.js"
-import { Index } from "../indexes.js"
 import { binarySearch, globalObjectIdGenerator } from "../utils.js"
 import type { DifferenceStreamReader } from "../graph.js"
-import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
+import type { IStreamBuilder, PipedOperator } from "../types.js"
 
 export interface TopKWithFractionalIndexOptions {
   limit?: number
@@ -158,31 +157,34 @@ class TopKArray<V> implements TopK<V> {
  * This operator maintains fractional indices for sorted elements
  * and only updates indices when elements move position
  */
-export class TopKWithFractionalIndexOperator<K, V1> extends UnaryOperator<
-  [K, V1],
-  [K, IndexedValue<V1>]
+export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
+  [K, T],
+  [K, IndexedValue<T>]
 > {
-  #index = new Index<K, V1>()
+  #index: Map<K, number> = new Map() // maps keys to their multiplicity
 
   /**
    * topK data structure that supports insertions and deletions
    * and returns changes to the topK.
    */
-  #topK: TopK<TaggedValue<V1>>
+  #topK: TopK<TaggedValue<K, T>>
 
   constructor(
     id: number,
-    inputA: DifferenceStreamReader<[K, V1]>,
-    output: DifferenceStreamWriter<[K, [V1, string]]>,
-    comparator: (a: V1, b: V1) => number,
+    inputA: DifferenceStreamReader<[K, T]>,
+    output: DifferenceStreamWriter<[K, IndexedValue<T>]>,
+    comparator: (a: T, b: T) => number,
     options: TopKWithFractionalIndexOptions
   ) {
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
-    const compareTaggedValues = (a: TaggedValue<V1>, b: TaggedValue<V1>) => {
+    const compareTaggedValues = (
+      a: TaggedValue<K, T>,
+      b: TaggedValue<K, T>
+    ) => {
       // First compare on the value
-      const valueComparison = comparator(untagValue(a), untagValue(b))
+      const valueComparison = comparator(getVal(a), getVal(b))
       if (valueComparison !== 0) {
         return valueComparison
       }
@@ -197,13 +199,13 @@ export class TopKWithFractionalIndexOperator<K, V1> extends UnaryOperator<
   protected createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<V1>, b: TaggedValue<V1>) => number
-  ): TopK<TaggedValue<V1>> {
+    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number
+  ): TopK<TaggedValue<K, T>> {
     return new TopKArray(offset, limit, comparator)
   }
 
   run(): void {
-    const result: Array<[[K, [V1, string]], number]> = []
+    const result: Array<[[K, IndexedValue<T>], number]> = []
     for (const message of this.inputMessages()) {
       for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
@@ -218,27 +220,25 @@ export class TopKWithFractionalIndexOperator<K, V1> extends UnaryOperator<
 
   processElement(
     key: K,
-    value: V1,
+    value: T,
     multiplicity: number,
-    result: Array<[[K, [V1, string]], number]>
+    result: Array<[[K, IndexedValue<T>], number]>
   ): void {
-    const oldMultiplicity = this.#index.getMultiplicity(key, value)
-    this.#index.addValue(key, [value, multiplicity])
-    const newMultiplicity = this.#index.getMultiplicity(key, value)
+    const { oldMultiplicity, newMultiplicity } = this.addKey(key, multiplicity)
 
-    let res: TopKChanges<TaggedValue<V1>> = {
+    let res: TopKChanges<TaggedValue<K, T>> = {
       moveIn: null,
       moveOut: null,
     }
     if (oldMultiplicity <= 0 && newMultiplicity > 0) {
       // The value was invisible but should now be visible
       // Need to insert it into the array of sorted values
-      const taggedValue = tagValue(value)
+      const taggedValue = tagValue(key, value)
       res = this.#topK.insert(taggedValue)
     } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
       // The value was visible but should now be invisible
       // Need to remove it from the array of sorted values
-      const taggedValue = tagValue(value)
+      const taggedValue = tagValue(key, value)
       res = this.#topK.delete(taggedValue)
     } else {
       // The value was invisible and it remains invisible
@@ -247,26 +247,45 @@ export class TopKWithFractionalIndexOperator<K, V1> extends UnaryOperator<
     }
 
     if (res.moveIn) {
-      const valueWithoutTieBreaker = mapValue(res.moveIn, untagValue)
-      result.push([[key, valueWithoutTieBreaker], 1])
+      const index = getIndex(res.moveIn)
+      const taggedValue = getValue(res.moveIn)
+      const k = getKey(taggedValue)
+      const val = getVal(taggedValue)
+      result.push([[k, [val, index]], 1])
     }
 
     if (res.moveOut) {
-      const valueWithoutTieBreaker = mapValue(res.moveOut, untagValue)
-      result.push([[key, valueWithoutTieBreaker], -1])
+      const index = getIndex(res.moveOut)
+      const taggedValue = getValue(res.moveOut)
+      const k = getKey(taggedValue)
+      const val = getVal(taggedValue)
+      result.push([[k, [val, index]], -1])
     }
 
     return
+  }
+
+  private getMultiplicity(key: K): number {
+    return this.#index.get(key) ?? 0
+  }
+
+  private addKey(
+    key: K,
+    multiplicity: number
+  ): { oldMultiplicity: number; newMultiplicity: number } {
+    const oldMultiplicity = this.getMultiplicity(key)
+    const newMultiplicity = oldMultiplicity + multiplicity
+    if (newMultiplicity === 0) {
+      this.#index.delete(key)
+    } else {
+      this.#index.set(key, newMultiplicity)
+    }
+    return { oldMultiplicity, newMultiplicity }
   }
 }
 
 /**
  * Limits the number of results based on a comparator, with optional offset.
- * This works on a keyed stream, where the key is the first element of the tuple.
- * The ordering is within a key group, i.e. elements are sorted within a key group
- * and the limit + offset is applied to that sorted group.
- * To order the entire stream, key by the same value for all elements such as null.
- *
  * Uses fractional indexing to minimize the number of changes when elements move positions.
  * Each element is assigned a fractional index that is lexicographically sortable.
  * When elements move, only the indices of the moved elements are updated, not all elements.
@@ -275,26 +294,22 @@ export class TopKWithFractionalIndexOperator<K, V1> extends UnaryOperator<
  * @param options - An optional object containing limit and offset properties
  * @returns A piped operator that orders the elements and limits the number of results
  */
-export function topKWithFractionalIndex<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
-  T,
->(
-  comparator: (a: V1Type, b: V1Type) => number,
+export function topKWithFractionalIndex<KType, T>(
+  comparator: (a: T, b: T) => number,
   options?: TopKWithFractionalIndexOptions
-): PipedOperator<T, KeyValue<KType, [V1Type, string]>> {
+): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
   const opts = options || {}
 
   return (
-    stream: IStreamBuilder<T>
-  ): IStreamBuilder<KeyValue<KType, [V1Type, string]>> => {
-    const output = new StreamBuilder<KeyValue<KType, [V1Type, string]>>(
+    stream: IStreamBuilder<[KType, T]>
+  ): IStreamBuilder<[KType, IndexedValue<T>]> => {
+    const output = new StreamBuilder<[KType, IndexedValue<T>]>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<KType, [V1Type, string]>>()
+      new DifferenceStreamWriter<[KType, IndexedValue<T>]>()
     )
-    const operator = new TopKWithFractionalIndexOperator<KType, V1Type>(
+    const operator = new TopKWithFractionalIndexOperator<KType, T>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
+      stream.connectReader(),
       output.writer,
       comparator,
       opts
@@ -324,24 +339,21 @@ export function getIndex<V>(indexedVal: IndexedValue<V>): FractionalIndex {
   return indexedVal[1]
 }
 
-function mapValue<V, W>(
-  indexedVal: IndexedValue<V>,
-  f: (value: V) => W
-): IndexedValue<W> {
-  return [f(getValue(indexedVal)), getIndex(indexedVal)]
-}
-
 export type Tag = number
-export type TaggedValue<V> = [V, Tag]
+export type TaggedValue<K, V> = [K, V, Tag]
 
-function tagValue<V>(value: V): TaggedValue<V> {
-  return [value, globalObjectIdGenerator.getId(value)]
+function tagValue<K, V>(key: K, value: V): TaggedValue<K, V> {
+  return [key, value, globalObjectIdGenerator.getId(key)]
 }
 
-function untagValue<V>(tieBreakerTaggedValue: TaggedValue<V>): V {
+function getKey<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): K {
   return tieBreakerTaggedValue[0]
 }
 
-function getTag<V>(tieBreakerTaggedValue: TaggedValue<V>): Tag {
+function getVal<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): V {
   return tieBreakerTaggedValue[1]
+}
+
+function getTag<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): Tag {
+  return tieBreakerTaggedValue[2]
 }

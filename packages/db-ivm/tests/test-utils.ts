@@ -78,11 +78,17 @@ export function materializeKeyedResults<K, V>(
 /**
  * Convert a Map back to a sorted array for comparison
  */
-export function mapToSortedArray<T>(map: Map<string, T>): Array<T> {
-  return Array.from(map.values()).sort((a, b) => {
-    // Sort by JSON string representation for consistent ordering
-    return JSON.stringify(a).localeCompare(JSON.stringify(b))
-  })
+export function mapToSortedArray<T>(
+  map: Map<string, T>,
+  compare?: (a: T, b: T) => number
+): Array<T> {
+  const compareFn =
+    compare ??
+    ((a: T, b: T) => {
+      // Sort by JSON string representation for consistent ordering
+      return JSON.stringify(a).localeCompare(JSON.stringify(b))
+    })
+  return Array.from(map.values()).sort(compareFn)
 }
 
 /**
@@ -121,9 +127,9 @@ export class MessageTracker<T> {
     this.messages.push(...message.getInner())
   }
 
-  getResult(): TestResult<T> {
+  getResult(compare?: (a: T, b: T) => number): TestResult<T> {
     const materializedResults = materializeResults(this.messages)
-    const sortedResults = mapToSortedArray(materializedResults)
+    const sortedResults = mapToSortedArray(materializedResults, compare)
 
     return {
       messages: this.messages,

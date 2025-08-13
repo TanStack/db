@@ -603,12 +603,14 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         // as a result, Eve with salary 52k should move into the top 2 with offset 1
         const bobData = employeeData.find((e) => e.id === 2)!
 
+        console.log(`gonna delete bob`)
         employeesCollection.utils.begin()
         employeesCollection.utils.write({
           type: `delete`,
           value: bobData,
         })
         employeesCollection.utils.commit()
+        console.log(`deleted bob`)
 
         const newResults = Array.from(collection.values())
 
