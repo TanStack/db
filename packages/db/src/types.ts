@@ -398,6 +398,11 @@ export interface CollectionConfig<
    */
   compare?: (x: T, y: T) => number
   /**
+   * Collection type for devtools grouping and identification
+   * @internal
+   */
+  collectionType?: string
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value

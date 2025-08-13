@@ -383,6 +383,8 @@ export function liveQueryCollectionOptions<
     onUpdate: config.onUpdate,
     onDelete: config.onDelete,
     startSync: config.startSync,
+    // Mark as live query for devtools
+    collectionType: `live-query` as const,
   }
 }
 

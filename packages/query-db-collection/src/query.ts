@@ -333,6 +333,7 @@ export function queryCollectionOptions<
   config: QueryCollectionConfig<TItem, TError, TQueryKey>
 ): CollectionConfig<TItem> & {
   utils: QueryCollectionUtils<TItem, TKey, TInsertInput>
+  collectionType: `query`
 } {
   const {
     queryKey,
@@ -594,5 +595,6 @@ export function queryCollectionOptions<
       refetch,
       ...writeUtils,
     },
+    collectionType: `query` as const,
   }
 }
