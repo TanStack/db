@@ -2,7 +2,11 @@ import { assertType, describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection"
 import type { CollectionImpl } from "../src/collection"
-import type { OperationConfig, ResolveType } from "../src/types"
+import type {
+  OperationConfig,
+  ResolveInsertInput,
+  ResolveType,
+} from "../src/types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 describe(`Collection.update type tests`, () => {
@@ -193,5 +197,117 @@ describe(`Collection type resolution tests`, () => {
 
     // Should automatically infer nullable types correctly
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+})
+
+describe(`Schema Input/Output Type Distinction`, () => {
+  // Define schema with different input/output types
+  const userSchemaWithDefaults = z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().email(),
+    created_at: z.date().default(() => new Date()),
+    updated_at: z.date().default(() => new Date()),
+  })
+
+  // Define schema with transformations
+  const userSchemaTransform = z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().email(),
+    created_at: z.string().transform((val) => new Date(val)),
+    updated_at: z.string().transform((val) => new Date(val)),
+  })
+
+  it(`should handle schema with default values correctly`, () => {
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchemaWithDefaults,
+    })
+
+    type ExpectedOutputType = ResolveType<
+      unknown,
+      typeof userSchemaWithDefaults,
+      Record<string, unknown>
+    >
+    type ExpectedInputType = ResolveInsertInput<
+      unknown,
+      typeof userSchemaWithDefaults,
+      Record<string, unknown>
+    >
+    type InsertArg = Parameters<typeof collection.insert>[0]
+
+    // Input type should not include defaulted fields
+    expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at?: Date
+      updated_at?: Date
+    }>()
+
+    // Output type should include all fields
+    expectTypeOf<ExpectedOutputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: Date
+      updated_at: Date
+    }>()
+
+    // Insert should accept ExpectedInputType or array thereof
+    expectTypeOf<InsertArg>().toEqualTypeOf<
+      ExpectedInputType | Array<ExpectedInputType>
+    >()
+
+    // Collection items should be ExpectedOutputType
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+  })
+
+  it(`should handle schema with transformations correctly`, () => {
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchemaTransform,
+    })
+
+    type ExpectedInputType = ResolveInsertInput<
+      unknown,
+      typeof userSchemaTransform,
+      Record<string, unknown>
+    >
+    type ExpectedOutputType = ResolveType<
+      unknown,
+      typeof userSchemaTransform,
+      Record<string, unknown>
+    >
+    type InsertArg = Parameters<typeof collection.insert>[0]
+
+    // Input type should be the raw input (before transformation)
+    expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: string
+      updated_at: string
+    }>()
+
+    // Output type should be the transformed output
+    expectTypeOf<ExpectedOutputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: Date
+      updated_at: Date
+    }>()
+
+    // Insert should accept ExpectedInputType or array thereof
+    expectTypeOf<InsertArg>().toEqualTypeOf<
+      ExpectedInputType | Array<ExpectedInputType>
+    >()
+
+    // Collection items should be ExpectedOutputType
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
   })
 })

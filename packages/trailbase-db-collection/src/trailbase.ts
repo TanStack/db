@@ -84,11 +84,11 @@ function convertPartial<
  * Configuration interface for Trailbase Collection
  */
 export interface TrailBaseCollectionConfig<
-  TItem extends ShapeOf<TRecord>,
-  TRecord extends ShapeOf<TItem> = TItem,
+  TExplicit extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TExplicit> = TExplicit,
   TKey extends string | number = string | number,
 > extends Omit<
-    CollectionConfig<TItem, TKey>,
+    CollectionConfig<TExplicit, TKey>,
     `sync` | `onInsert` | `onUpdate` | `onDelete`
   > {
   /**
@@ -96,8 +96,8 @@ export interface TrailBaseCollectionConfig<
    */
   recordApi: RecordApi<TRecord>
 
-  parse: Conversions<TRecord, TItem>
-  serialize: Conversions<TItem, TRecord>
+  parse: Conversions<TRecord, TExplicit>
+  serialize: Conversions<TExplicit, TRecord>
 }
 
 export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
@@ -107,20 +107,20 @@ export interface TrailBaseCollectionUtils extends UtilsRecord {
 }
 
 export function trailBaseCollectionOptions<
-  TItem extends ShapeOf<TRecord>,
-  TRecord extends ShapeOf<TItem> = TItem,
+  TExplicit extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TExplicit> = TExplicit,
   TKey extends string | number = string | number,
 >(
-  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>
-): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
+  config: TrailBaseCollectionConfig<TExplicit, TRecord, TKey>
+): CollectionConfig<TExplicit, TKey> & { utils: TrailBaseCollectionUtils } {
   const getKey = config.getKey
 
   const parse = (record: TRecord) =>
-    convert<TRecord, TItem>(config.parse, record)
-  const serialUpd = (item: Partial<TItem>) =>
-    convertPartial<TItem, TRecord>(config.serialize, item)
-  const serialIns = (item: TItem) =>
-    convert<TItem, TRecord>(config.serialize, item)
+    convert<TRecord, TExplicit>(config.parse, record)
+  const serialUpd = (item: Partial<TExplicit>) =>
+    convertPartial<TExplicit, TRecord>(config.serialize, item)
+  const serialIns = (item: TExplicit) =>
+    convert<TExplicit, TRecord>(config.serialize, item)
 
   const seenIds = new Store(new Map<string, number>())
 
@@ -159,7 +159,7 @@ export function trailBaseCollectionOptions<
     }
   }
 
-  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
+  type SyncParams = Parameters<SyncConfig<TExplicit, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
@@ -216,7 +216,7 @@ export function trailBaseCollectionOptions<
           }
 
           begin()
-          let value: TItem | undefined
+          let value: TExplicit | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
             write({ type: `insert`, value })
@@ -294,7 +294,7 @@ export function trailBaseCollectionOptions<
     sync,
     getKey,
     onInsert: async (
-      params: InsertMutationFnParams<TItem, TKey>
+      params: InsertMutationFnParams<TExplicit, TKey>
     ): Promise<Array<number | string>> => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
@@ -313,7 +313,7 @@ export function trailBaseCollectionOptions<
 
       return ids
     },
-    onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
+    onUpdate: async (params: UpdateMutationFnParams<TExplicit, TKey>) => {
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, changes, key } = tx
@@ -332,7 +332,7 @@ export function trailBaseCollectionOptions<
       // DB by the subscription.
       await awaitIds(ids)
     },
-    onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
+    onDelete: async (params: DeleteMutationFnParams<TExplicit, TKey>) => {
       const ids: Array<string> = await Promise.all(
         params.transaction.mutations.map(async (tx) => {
           const { type, key } = tx

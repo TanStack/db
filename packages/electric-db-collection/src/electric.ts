@@ -286,7 +286,14 @@ export function electricCollectionOptions<
   TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
->(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
+>(
+  config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  string | number,
+  TSchema,
+  ResolveType<TExplicit, TSchema, TFallback>
+> & { utils: ElectricCollectionUtils } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
     config.shapeOptions,
