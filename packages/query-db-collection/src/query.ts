@@ -24,25 +24,68 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
+// Schema output type inference helper (matches electric.ts pattern)
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+// QueryFn return type inference helper
+type InferQueryFnOutput<TQueryFn> = TQueryFn extends (
+  context: QueryFunctionContext<any>
+) => Promise<Array<infer TItem>>
+  ? TItem extends object
+    ? TItem
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+// Type resolution system with priority order (matches electric.ts pattern)
+type ResolveType<
+  TExplicit extends object | unknown = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryFn = unknown,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? InferQueryFnOutput<TQueryFn>
+    : InferSchemaOutput<TSchema>
+  : TExplicit
+
 /**
  * Configuration options for creating a Query Collection
- * @template TItem - The type of items stored in the collection
+ * @template TExplicit - The explicit type of items stored in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TQueryFn - The queryFn type for inferring return type (third priority)
  * @template TError - The type of errors that can occur during queries
  * @template TQueryKey - The type of the query key
  */
 export interface QueryCollectionConfig<
-  TItem extends object,
+  TExplicit extends object = object,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryFn extends (
+    context: QueryFunctionContext<any>
+  ) => Promise<Array<any>> = (
+    context: QueryFunctionContext<any>
+  ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
 > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
   /** Function that fetches data from the server. Must return the complete collection state */
-  queryFn: (context: QueryFunctionContext<TQueryKey>) => Promise<Array<TItem>>
+  queryFn: TQueryFn extends (
+    context: QueryFunctionContext<TQueryKey>
+  ) => Promise<Array<any>>
+    ? TQueryFn
+    : (
+        context: QueryFunctionContext<TQueryKey>
+      ) => Promise<Array<ResolveType<TExplicit, TSchema, TQueryFn>>>
+
   /** The TanStack Query client instance */
   queryClient: QueryClient
 
@@ -50,31 +93,31 @@ export interface QueryCollectionConfig<
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
   refetchInterval?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`refetchInterval`]
   retry?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`retry`]
   retryDelay?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`retryDelay`]
   staleTime?: QueryObserverOptions<
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<TItem>,
-    Array<TItem>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`staleTime`]
 
@@ -82,11 +125,13 @@ export interface QueryCollectionConfig<
   /** Unique identifier for the collection */
   id?: string
   /** Function to extract the unique key from an item */
-  getKey: CollectionConfig<TItem>[`getKey`]
+  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`getKey`]
   /** Schema for validating items */
-  schema?: CollectionConfig<TItem>[`schema`]
-  sync?: CollectionConfig<TItem>[`sync`]
-  startSync?: CollectionConfig<TItem>[`startSync`]
+  schema?: TSchema
+  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
+  startSync?: CollectionConfig<
+    ResolveType<TExplicit, TSchema, TQueryFn>
+  >[`startSync`]
 
   // Direct persistence handlers
   /**
@@ -129,7 +174,7 @@ export interface QueryCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<TItem>
+  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -182,7 +227,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onUpdate?: UpdateMutationFn<TItem>
+  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -228,8 +273,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onDelete?: DeleteMutationFn<TItem>
-  // TODO type returning { refetch: boolean }
+  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
 
   /**
    * Metadata to pass to the query.
@@ -289,16 +333,55 @@ export interface QueryCollectionUtils<
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.
  *
+ * Supports automatic type inference following the same priority as electric-db-collection:
+ * 1. Explicit type (highest priority)
+ * 2. Schema inference (second priority)
+ * 3. QueryFn return type inference (third priority)
+ * 4. Fallback to Record<string, unknown>
+ *
+ * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TQueryFn - The queryFn type for inferring return type (third priority)
+ * @template TError - The type of errors that can occur during queries
+ * @template TQueryKey - The type of the query key
+ * @template TKey - The type of the item keys
+ * @template TInsertInput - The type accepted for insert operations
  * @param config - Configuration options for the Query collection
  * @returns Collection options with utilities for direct writes and manual operations
  *
  * @example
- * // Basic usage
+ * // Type inferred from queryFn return type (NEW!)
+ * const todosCollection = createCollection(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: async () => {
+ *       const response = await fetch('/api/todos')
+ *       return response.json() as Todo[] // Type automatically inferred!
+ *     },
+ *     queryClient,
+ *     getKey: (item) => item.id, // item is typed as Todo
+ *   })
+ * )
+ *
+ * @example
+ * // Explicit type (highest priority)
+ * const todosCollection = createCollection<Todo>(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: async () => fetch('/api/todos').then(r => r.json()),
+ *     queryClient,
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * @example
+ * // Schema inference (second priority)
  * const todosCollection = createCollection(
  *   queryCollectionOptions({
  *     queryKey: ['todos'],
  *     queryFn: async () => fetch('/api/todos').then(r => r.json()),
  *     queryClient,
+ *     schema: todoSchema, // Type inferred from schema
  *     getKey: (item) => item.id,
  *   })
  * )
@@ -324,16 +407,28 @@ export interface QueryCollectionUtils<
  * )
  */
 export function queryCollectionOptions<
-  TItem extends object,
+  TExplicit extends object = object,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryFn extends (
+    context: QueryFunctionContext<any>
+  ) => Promise<Array<any>> = (
+    context: QueryFunctionContext<any>
+  ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TItem,
+  TInsertInput extends object = ResolveType<TExplicit, TSchema, TQueryFn>,
 >(
-  config: QueryCollectionConfig<TItem, TError, TQueryKey>
-): CollectionConfig<TItem> & {
-  utils: QueryCollectionUtils<TItem, TKey, TInsertInput>
+  config: QueryCollectionConfig<TExplicit, TSchema, TQueryFn, TError, TQueryKey>
+): CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>> & {
+  utils: QueryCollectionUtils<
+    ResolveType<TExplicit, TSchema, TQueryFn>,
+    TKey,
+    TInsertInput
+  >
 } {
+  type TItem = ResolveType<TExplicit, TSchema, TQueryFn>
+
   const {
     queryKey,
     queryFn,
