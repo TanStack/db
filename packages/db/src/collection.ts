@@ -58,6 +58,7 @@ import type {
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
+  WritableDeep,
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
@@ -1810,32 +1811,34 @@ export class CollectionImpl<
   // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<WritableDeep<TItem>>) => void
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update<TItem extends object = T>(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<WritableDeep<TItem>>) => void
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
-    callback: (draft: TItem) => void
+    callback: (draft: WritableDeep<TItem>) => void
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: TItem) => void
+    callback: (draft: WritableDeep<TItem>) => void
   ): TransactionType
 
   update<TItem extends object = T>(
     keys: (TKey | unknown) | Array<TKey | unknown>,
-    configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
+    configOrCallback:
+      | ((draft: WritableDeep<TItem> | Array<WritableDeep<TItem>>) => void)
+      | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
     if (typeof keys === `undefined`) {
