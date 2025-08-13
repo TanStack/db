@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from "react"
 
 export interface ReactDbDevtoolsPanelOptions {
   // Additional React-specific props if needed
 }
 
-export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions> = (
-  props,
-): React.ReactElement | null => {
+export const TanStackReactDbDevtoolsPanel: React.FC<
+  ReactDbDevtoolsPanelOptions
+> = (props): React.ReactElement | null => {
   const { ...rest } = props
 
   // SSR safety check - return null during SSR
@@ -28,19 +28,23 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
       try {
         // Dynamically import the devtools to avoid SSR issues
         const { getDevtoolsRegistry } = await import(`@tanstack/db-devtools`)
-        
+
         // Get the existing registry (should already be initialized)
         const existingRegistry = getDevtoolsRegistry()
-        
+
         if (!existingRegistry) {
-          throw new Error('DB devtools registry not found. Make sure initializeDbDevtools() was called.')
+          throw new Error(
+            `DB devtools registry not found. Make sure initializeDbDevtools() was called.`
+          )
         }
-        
+
         setRegistry(existingRegistry)
         setIsInitialized(true)
-      } catch (error) {
-        console.error('Failed to initialize DB devtools:', error)
-        setError(error instanceof Error ? error.message : 'Unknown error')
+      } catch (initError) {
+        console.error(`Failed to initialize DB devtools:`, initError)
+        setError(
+          initError instanceof Error ? initError.message : `Unknown error`
+        )
       }
     }
 
@@ -53,9 +57,11 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
     async function mountSolidComponent() {
       try {
         // Import SolidJS render and the base panel component
-        const { render } = await import('solid-js/web')
-        const { BaseTanStackDbDevtoolsPanel } = await import('@tanstack/db-devtools')
-        
+        const { render } = await import(`solid-js/web`)
+        const { BaseTanStackDbDevtoolsPanel } = await import(
+          `@tanstack/db-devtools`
+        )
+
         // Clean up any existing component
         if (solidRootRef.current) {
           solidRootRef.current()
@@ -67,22 +73,24 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
           return BaseTanStackDbDevtoolsPanel({
             registry: () => registry,
             style: () => ({
-              height: '100%',
-              width: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden'
+              height: `100%`,
+              width: `100%`,
+              display: `flex`,
+              flexDirection: `column`,
+              overflow: `hidden`,
             }),
-            ...rest
+            ...rest,
           })
         }
 
         // Render the SolidJS component into the container
         const dispose = render(SolidComponent, containerRef.current!)
         solidRootRef.current = dispose
-      } catch (error) {
-        console.error('Failed to mount SolidJS component:', error)
-        setError(error instanceof Error ? error.message : 'Unknown error')
+      } catch (mountError) {
+        console.error(`Failed to mount SolidJS component:`, mountError)
+        setError(
+          mountError instanceof Error ? mountError.message : `Unknown error`
+        )
       }
     }
 
@@ -93,8 +101,8 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
       if (solidRootRef.current) {
         try {
           solidRootRef.current()
-        } catch (error) {
-          console.error('Error disposing SolidJS component:', error)
+        } catch (disposeError) {
+          console.error(`Error disposing SolidJS component:`, disposeError)
         }
         solidRootRef.current = null
       }
@@ -109,7 +117,7 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
   // Show error state if initialization failed
   if (error) {
     return (
-      <div style={{ padding: '1rem', color: 'red' }}>
+      <div style={{ padding: `1rem`, color: `red` }}>
         <h3>Failed to load DB Devtools</h3>
         <p>Error: {error}</p>
       </div>
@@ -119,7 +127,7 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
   // Show loading state while initializing
   if (!isInitialized || !registry) {
     return (
-      <div style={{ padding: '1rem' }}>
+      <div style={{ padding: `1rem` }}>
         <h3>Loading DB Devtools...</h3>
       </div>
     )
@@ -128,15 +136,15 @@ export const TanStackReactDbDevtoolsPanel: React.FC<ReactDbDevtoolsPanelOptions>
   // Render a container div that the SolidJS component will be mounted into
   // Use flexbox to ensure it takes up the full available height
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        height: '100%', 
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }} 
+    <div
+      ref={containerRef}
+      style={{
+        height: `100%`,
+        width: `100%`,
+        display: `flex`,
+        flexDirection: `column`,
+        overflow: `hidden`,
+      }}
     />
   )
 }

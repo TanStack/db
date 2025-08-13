@@ -41,7 +41,7 @@ class TanstackDbDevtools {
 
     // Only initialize on the client side
     if (typeof window === `undefined`) {
-      throw new Error('TanstackDbDevtools cannot be instantiated during SSR')
+      throw new Error(`TanstackDbDevtools cannot be instantiated during SSR`)
     }
 
     this.#registry = initializeDevtoolsRegistry()

@@ -348,7 +348,7 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
     // Create dummy signals that won't be used during SSR
     const dummySignal = () => []
     dummySignal.set = () => {}
-    
+
     return {
       collections: new Map(),
       collectionsSignal: dummySignal as any,
