@@ -472,8 +472,14 @@ export function liveQueryCollectionOptions<
         const subscribeToOrderedChanges = (
           whereExpression: BasicExpression<boolean> | undefined
         ) => {
-          const { offset, limit, direction, comparator, index, dataNeeded } =
-            optimizableOrderByCollections[collectionId]!
+          const {
+            offset,
+            limit,
+            comparator,
+            index,
+            dataNeeded,
+            valueExtractorForRawRow,
+          } = optimizableOrderByCollections[collectionId]!
 
           if (!dataNeeded) {
             // This should never happen because the topK operator should always set the size callback
@@ -497,45 +503,6 @@ export function liveQueryCollectionOptions<
             // Indicate that we're done loading data if we didn't need to load more data
             return n === 0
           }
-
-          // At runtime, if the orderBy operator notices that it doesn't have a range index on the orderBy key
-          // then it invokes this function
-          /*
-          const deoptimize = () => {
-            unsubscribe()
-            unsubscribeCallbacks.delete(unsubscribe)
-
-            // Send the entire current state through the pipeline
-            // except for the keys that we've already sent
-            const changes = collection.currentStateAsChanges({
-              whereExpression,
-            })
-            const filteredChanges = changes.filter(
-              (change) => !sentKeys.has(change.key)
-            )
-            sendChangesToPipeline(filteredChanges)
-
-            // Subscribe to all changes and always send them through the pipeline (no optimization)
-            const unsub = collection.subscribeChanges(sendChangesToPipeline, {
-              whereExpression,
-            })
-            unsubscribeCallbacks.add(unsub)
-          }
-          */
-
-          /*
-          const changes = collection.currentStateAsChanges({
-            whereExpression,
-          })
-          // TODO: make this more efficient later by not sorting all the changes but just keeping the `offset` + `limit` smallest changes
-          const sortedChanges = changes.sort(comparator)
-          const topKChanges = sortedChanges.slice(offset, offset + limit)
-          */
-
-          // TODO: implement the index method.
-          //       Don't implement take but rather lookup + next()
-          //       so take would be lookup(minimumValue) + n times next()
-          //       and loading more data at runtime would be lookup(maximumValue) + n times next()
 
           // Keep track of the keys we've sent
           // and also the biggest value we've sent so far
@@ -562,9 +529,12 @@ export function liveQueryCollectionOptions<
           // Loads the next `n` items from the collection
           // starting from the biggest item it has sent
           const loadNextItems = (n: number) => {
-            const biggestSentValue = sentValuesInfo.biggest
+            const biggestSentRow = sentValuesInfo.biggest
+            const biggestSentValue = biggestSentRow
+              ? valueExtractorForRawRow(biggestSentRow)
+              : biggestSentRow
             // Take the `n` items after the biggest sent value
-            const nextOrderedKeys = index.take(n, direction, biggestSentValue)
+            const nextOrderedKeys = index.take(n, biggestSentValue)
             const nextInserts: Array<ChangeMessage<any, string | number>> =
               nextOrderedKeys.map((key) => {
                 return { type: `insert`, key, value: collection.get(key) }
@@ -583,7 +553,7 @@ export function liveQueryCollectionOptions<
             // and filter out changes that are bigger than the biggest value we've sent so far
             // because they can't affect the topK
             const splittedChanges = splitUpdates(changes)
-            const filteredChanges = filterChangesSmallerThanMax(
+            const filteredChanges = filterChangesSmallerOrEqualToMax(
               splittedChanges,
               comparator,
               sentValuesInfo.biggest
@@ -610,19 +580,6 @@ export function liveQueryCollectionOptions<
             Object.hasOwn(optimizableOrderByCollections, collectionId)
           ) {
             unsubscribe = subscribeToOrderedChanges(whereExpression)
-
-            // We need to send at least `limit` elements from the collection into the pipeline
-            // if some of them are filtered out throughout the pipeline and the order by
-            // operator has not enough elements it will request us to send more elements
-
-            // I think we will need to do similar flipping of inserts/updates/deletes as in subscribeToMatchingChanges
-            // based on what we've sent into the pipeline
-            // but first need to do these two:
-            // + filter of inserts/deletes that are < maxValue
-            // + flipping of updates for move-ins/move-outs
-
-            // loadInitialState callback will need to send all the data > maxValue it has sent so far
-            // and stop filtering/flipping of inserts/updates/deletes
           } else {
             unsubscribe = subscribeToAllChanges(whereExpression)
           }
@@ -945,7 +902,7 @@ function* filterChanges<
  * @param maxValue - Range to filter changes within (range boundaries are exclusive)
  * @returns Iterable of changes that fall within the range
  */
-function* filterChangesSmallerThanMax<
+function* filterChangesSmallerOrEqualToMax<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(
@@ -954,6 +911,6 @@ function* filterChangesSmallerThanMax<
   maxValue: any
 ): Generator<ChangeMessage<T, TKey>> {
   yield* filterChanges(changes, (change) => {
-    return !maxValue || comparator(change.value, maxValue) < 0
+    return !maxValue || comparator(change.value, maxValue) <= 0
   })
 }

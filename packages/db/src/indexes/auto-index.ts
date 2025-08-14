@@ -29,7 +29,8 @@ export function ensureIndexForField<
 >(
   fieldName: string,
   fieldPath: Array<string>,
-  collection: CollectionImpl<T, TKey, any, any, any>
+  collection: CollectionImpl<T, TKey, any, any, any>,
+  compareFn?: (a: any, b: any) => number
 ) {
   if (!shouldAutoIndex(collection)) {
     return
@@ -49,6 +50,7 @@ export function ensureIndexForField<
     collection.createIndex((row) => (row as any)[fieldName], {
       name: `auto_${fieldName}`,
       indexType: BTreeIndex,
+      options: compareFn ? { compareFn } : {},
     })
   } catch (error) {
     console.warn(`Failed to create auto-index for field "${fieldName}":`, error)

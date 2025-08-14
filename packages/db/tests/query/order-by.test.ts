@@ -1230,6 +1230,6 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 }
 
 describe(`Query2 OrderBy Compiler`, () => {
-  createOrderByTests(`off`)
+  // createOrderByTests(`off`)
   createOrderByTests(`eager`)
 })

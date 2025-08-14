@@ -166,7 +166,9 @@ export function processGroupBy(
   const mapping = validateAndCreateMapping(groupByClause, selectClause)
 
   // Pre-compile groupBy expressions
-  const compiledGroupByExpressions = groupByClause.map(compileExpression)
+  const compiledGroupByExpressions = groupByClause.map((e) =>
+    compileExpression(e)
+  )
 
   // Create a key extractor function using simple __key_X format
   const keyExtractor = ([, row]: [
