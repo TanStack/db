@@ -134,6 +134,12 @@ class DevtoolsStoreImpl implements DevtoolsStore {
 
     // Insert into transactions collection
     this.transactions.insert(entry)
+    console.debug(`[devtools] transaction inserted`, {
+      id: entry.id,
+      collectionId: entry.collectionId,
+      state: entry.state,
+      mutations: entry.mutations.length,
+    })
     // Also bump the parent collection metadata to reflect transaction counts immediately
     const parent = this.collections.get(collectionId)
     if (parent) {
@@ -254,6 +260,12 @@ class DevtoolsStoreImpl implements DevtoolsStore {
           draft.isPersisted = newPersisted
           draft.updatedAt = newUpdatedAt
         })
+
+        // Optional: when a transaction completes, ensure parent metadata updates
+        if (newPersisted) {
+          const parent = this.collections.get(entry.collectionId)
+          if (parent) this.updateCollection(entry.collectionId)
+        }
       }
     }
   }

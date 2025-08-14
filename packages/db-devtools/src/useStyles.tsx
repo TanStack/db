@@ -295,6 +295,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       cursor: pointer;
       background-color: ${colors.darkGray[700]};
       transition: all 0.2s ease;
+      position: relative;
 
       &:hover {
         background-color: ${colors.darkGray[600]};
@@ -303,6 +304,15 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     collectionItemActive: css`
       background-color: ${colors.darkGray[600]};
       border-left: 3px solid ${colors.blue[500]};
+    `,
+    activeIndicator: css`
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background-color: ${colors.blue[500]};
+      pointer-events: none;
     `,
     collectionName: css`
       font-weight: ${font.weight.medium};

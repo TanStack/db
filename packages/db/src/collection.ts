@@ -1432,9 +1432,39 @@ export class CollectionImpl<
 
     // Register transaction with devtools (don't delete from devtools)
     if (typeof window !== `undefined`) {
-      const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
-      if (devtools?.registerTransaction) {
-        devtools.registerTransaction(transaction, this.id)
+      const w: any = window as any
+      const devtools = w.__TANSTACK_DB_DEVTOOLS__
+      try {
+        if (devtools?.store?.registerTransaction) {
+          devtools.store.registerTransaction(transaction, this.id)
+          console.log(`[db->devtools] registerTransaction`, {
+            collectionId: this.id,
+            txId: transaction.id,
+            state: transaction.state,
+          })
+        } else if (devtools?.registerTransaction) {
+          // Back-compat if global exposes method at root
+          devtools.registerTransaction(transaction, this.id)
+          console.log(`[db->devtools] registerTransaction (legacy)`, {
+            collectionId: this.id,
+            txId: transaction.id,
+            state: transaction.state,
+          })
+        } else {
+          // Devtools not ready yet – queue for later flush
+          w.__TANSTACK_DB_PENDING_TRANSACTIONS__ =
+            w.__TANSTACK_DB_PENDING_TRANSACTIONS__ || []
+          w.__TANSTACK_DB_PENDING_TRANSACTIONS__.push({
+            transaction,
+            collectionId: this.id,
+          })
+          console.log(`[db->devtools] queued transaction`, {
+            collectionId: this.id,
+            txId: transaction.id,
+          })
+        }
+      } catch (e) {
+        console.warn(`[db->devtools] registerTransaction failed`, e)
       }
     }
 
@@ -2455,5 +2485,13 @@ export class CollectionImpl<
 
     // Trigger devtools update after transaction state changes
     triggerDevtoolsUpdate(this)
+
+    // Also trigger transaction list/state refresh in devtools
+    if (typeof window !== `undefined`) {
+      const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+      try {
+        devtools?.updateTransactions?.(this.id)
+      } catch {}
+    }
   }
 }

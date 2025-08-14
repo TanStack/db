@@ -45,7 +45,7 @@ export function TransactionsPanel({
               {(transaction) => (
                 <TransactionItem
                   transaction={transaction}
-                  isActive={selectedTransaction() === transaction.id}
+                  isActive={() => selectedTransaction() === transaction.id}
                   onSelect={onSelectTransaction}
                 />
               )}

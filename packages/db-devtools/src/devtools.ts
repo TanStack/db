@@ -28,6 +28,32 @@ export function initializeDbDevtools(): void {
   ;(window as any).__TANSTACK_DB_DEVTOOLS__ = {
     ...registry,
     store: store,
+    // Expose helpers for debugging
+    _debug: {
+      logTransactions: () =>
+        console.debug(`[devtools] transactions`, Array.from(store.transactions.values())),
+      logCollections: () =>
+        console.debug(`[devtools] collections`, Array.from(store.collections.values())),
+    },
+  }
+
+  // Flush any transactions that were queued before devtools initialized
+  const w: any = window as any
+  const pending = w.__TANSTACK_DB_PENDING_TRANSACTIONS__ as
+    | Array<{ transaction: any; collectionId: string }>
+    | undefined
+  if (Array.isArray(pending) && pending.length) {
+    try {
+      for (const { transaction, collectionId } of pending) {
+        store.registerTransaction(transaction, collectionId)
+        console.log(`[devtools] flushed pending transaction`, {
+          id: transaction.id,
+          collectionId,
+        })
+      }
+    } finally {
+      w.__TANSTACK_DB_PENDING_TRANSACTIONS__ = []
+    }
   }
 }
 
