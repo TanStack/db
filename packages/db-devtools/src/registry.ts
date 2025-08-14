@@ -19,9 +19,7 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     return new Map() // Empty map since we're using collections now
   }
 
-  constructor() {
-    // No polling needed; updates are now immediate via signals
-  }
+  constructor() {}
 
   // Expose signals for reactive UI updates
   public get collectionsSignal() {
@@ -81,19 +79,9 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   getCollectionMetadata = (id: string): CollectionMetadata | undefined => {
     const entry = this.store.collections.get(id)
     if (!entry) return undefined
-
-    // Try to get fresh data from the collection if it's still alive
-    const collection = entry.weakRef.deref()
-    if (collection) {
-      // Update metadata with fresh data
-      entry.metadata.status = collection.status
-      entry.metadata.size = collection.size
-      entry.metadata.hasTransactions = collection.transactions.size > 0
-      entry.metadata.transactionCount = collection.transactions.size
-      entry.metadata.lastUpdated = new Date()
-    }
-
-    return { ...entry.metadata }
+    // Delegate to store snapshot logic to avoid mutating entry metadata here
+    const all = this.store.getAllCollectionMetadata()
+    return all.find((c) => c.id === id)
   }
 
   getAllCollectionMetadata = (): Array<CollectionMetadata> => {
@@ -201,7 +189,7 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
 
   // Only create real signals on the client side
   if (!getDevtools()) {
-    ;(window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
+    window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry() as any
   }
   return (getDevtools() as unknown) as DbDevtoolsRegistry
 }

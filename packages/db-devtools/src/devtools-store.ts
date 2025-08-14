@@ -149,12 +149,6 @@ class DevtoolsStoreImpl implements DevtoolsStore {
 
     // Insert into transactions collection
     this.transactions.insert(entry)
-    console.debug(`[devtools] transaction inserted`, {
-      id: entry.id,
-      collectionId: entry.collectionId,
-      state: entry.state,
-      mutations: entry.mutations.length,
-    })
     // Bump the parent collection metadata to reflect transaction counts immediately
     this.updateCollection(collectionId)
   }

@@ -25,16 +25,10 @@ export function initializeDbDevtools(): void {
   const store = initializeDevtoolsStore()
 
   // Store the registry globally with proper typing
-  ;(window as any).__TANSTACK_DB_DEVTOOLS__ = {
+  window.__TANSTACK_DB_DEVTOOLS__ = {
     ...registry,
-    store: store,
-    // Expose helpers for debugging
-    _debug: {
-      logTransactions: () =>
-        console.debug(`[devtools] transactions`, Array.from(store.transactions.values())),
-      logCollections: () =>
-        console.debug(`[devtools] collections`, Array.from(store.collections.values())),
-    },
+    // Keep store available for registerTransaction from core package
+    store,
   }
 
   // Flush any transactions that were queued before devtools initialized
@@ -43,17 +37,10 @@ export function initializeDbDevtools(): void {
     | Array<{ transaction: any; collectionId: string }>
     | undefined
   if (Array.isArray(pending) && pending.length) {
-    try {
-      for (const { transaction, collectionId } of pending) {
-        store.registerTransaction(transaction, collectionId)
-        console.log(`[devtools] flushed pending transaction`, {
-          id: transaction.id,
-          collectionId,
-        })
-      }
-    } finally {
-      w.__TANSTACK_DB_PENDING_TRANSACTIONS__ = []
+    for (const { transaction, collectionId } of pending) {
+      store.registerTransaction(transaction, collectionId)
     }
+    w.__TANSTACK_DB_PENDING_TRANSACTIONS__ = []
   }
 }
 
@@ -128,7 +115,8 @@ export function triggerTransactionUpdate(
   if (typeof window === `undefined`) return
 
   const devtools = getDevtools()
-  devtools?.updateTransactions(collection.id)
+  // Delegate to store/registry through the public API
+  devtools?.store.updateTransactions(collection.id)
 }
 
 /**
@@ -139,8 +127,8 @@ export function cleanupDevtools(): void {
   if (typeof window === `undefined`) return
 
   const devtools = getDevtools()
-  if (devtools?.cleanup) {
-    devtools.cleanup()
-    delete (window as any).__TANSTACK_DB_DEVTOOLS__
+  if (devtools) {
+    devtools.store.cleanup()
+    delete window.__TANSTACK_DB_DEVTOOLS__
   }
 }

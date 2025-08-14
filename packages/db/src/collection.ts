@@ -75,7 +75,7 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
   }
 
   if (typeof window !== `undefined`) {
-    const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+    const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
     if (devtools?.registerCollection) {
       const updateCallback = devtools.registerCollection(collection)
       if (updateCallback && collection) {
@@ -734,9 +734,9 @@ export class CollectionImpl<
     // Unregister from devtools if available
     if (
       typeof window !== `undefined` &&
-      (window as any).__TANSTACK_DB_DEVTOOLS__?.unregisterCollection
+      window.__TANSTACK_DB_DEVTOOLS__?.unregisterCollection
     ) {
-      ;(window as any).__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
+      window.__TANSTACK_DB_DEVTOOLS__!.unregisterCollection(this.id)
       this.isRegisteredWithDevtools = false
     }
 
@@ -1433,7 +1433,7 @@ export class CollectionImpl<
     // Register transaction with devtools (don't delete from devtools)
     if (typeof window !== `undefined`) {
       const w: any = window as any
-      const devtools = w.__TANSTACK_DB_DEVTOOLS__
+      const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
       try {
         if (devtools?.store?.registerTransaction) {
           devtools.store.registerTransaction(transaction, this.id)
@@ -2488,7 +2488,7 @@ export class CollectionImpl<
 
     // Also trigger transaction list/state refresh in devtools
     if (typeof window !== `undefined`) {
-      const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+      const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
       try {
         devtools?.updateTransactions?.(this.id)
       } catch {}
