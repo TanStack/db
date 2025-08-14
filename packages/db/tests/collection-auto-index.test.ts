@@ -10,7 +10,12 @@ import {
   or,
 } from "../src/query/builder/functions"
 import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
-import { expectIndexUsage, withIndexTracking } from "./utls"
+import { createLiveQueryCollection } from "../src"
+import {
+  createIndexUsageTracker,
+  expectIndexUsage,
+  withIndexTracking,
+} from "./utls"
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()
@@ -22,6 +27,10 @@ interface TestItem {
   status: `active` | `inactive` | `pending`
   score?: number
   createdAt: Date
+}
+
+type TestItem2 = Omit<TestItem, `id`> & {
+  id2: string
 }
 
 const testData: Array<TestItem> = [
@@ -203,6 +212,8 @@ describe(`Collection Auto-Indexing`, () => {
 
     unsubscribe()
   })
+
+  it(`should create auto-indexes for transformed fields of subqueries when autoIndex is "eager"`, async () => {})
 
   it(`should not create duplicate auto-indexes for the same field`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
@@ -418,6 +429,118 @@ describe(`Collection Auto-Indexing`, () => {
     expect(indexPaths).toContainEqual([`score`])
 
     unsubscribe1()
+  })
+
+  it(`should create auto-indexes for join key on lazy collection when joining`, async () => {
+    const leftCollection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of testData) {
+            write({
+              type: `insert`,
+              value: item,
+            })
+          }
+          commit()
+          markReady()
+        },
+      },
+      onInsert: async (_) => {},
+    })
+
+    const rightCollection = createCollection<TestItem2, string>({
+      getKey: (item) => item.id2,
+      autoIndex: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: {
+              id2: `1`,
+              name: `Other Active Item`,
+              age: 40,
+              status: `active`,
+              createdAt: new Date(),
+            },
+          })
+          write({
+            type: `insert`,
+            value: {
+              id2: `other2`,
+              name: `Other Inactive Item`,
+              age: 35,
+              status: `inactive`,
+              createdAt: new Date(),
+            },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await rightCollection.stateWhenReady()
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ item: leftCollection })
+          .join(
+            { other: rightCollection },
+            ({ item, other }: any) => eq(item.id, other.id2),
+            `left`
+          )
+          .select(({ item, other }: any) => ({
+            id: item.id,
+            name: item.name,
+            otherName: other.name,
+          })),
+      startSync: true,
+    })
+
+    await liveQuery.stateWhenReady()
+
+    expect(liveQuery.size).toBe(testData.length)
+
+    expect(rightCollection.indexes.size).toBe(1)
+
+    const index = rightCollection.indexes.values().next().value!
+    expect(index.expression).toEqual({
+      type: `ref`,
+      path: [`id2`],
+    })
+
+    const tracker = createIndexUsageTracker(rightCollection)
+
+    // Now send another item through the left collection
+    // and check that it used the index to join it to items of the right collection
+
+    leftCollection.insert({
+      id: `other2`,
+      name: `New Item`,
+      age: 25,
+      status: `active`,
+      createdAt: new Date(),
+    })
+
+    expect(tracker.stats.queriesExecuted).toEqual([
+      {
+        type: `index`,
+        operation: `eq`,
+        field: `id2`,
+        value: `other2`,
+      },
+    ])
+
+    expect(liveQuery.size).toBe(testData.length + 1)
+
+    tracker.restore()
   })
 
   it(`should not create auto-indexes for unsupported operations`, async () => {

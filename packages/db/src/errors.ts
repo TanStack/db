@@ -377,6 +377,12 @@ export class UnknownFunctionError extends QueryCompilationError {
   }
 }
 
+export class JoinCollectionNotFoundError extends QueryCompilationError {
+  constructor(collectionId: string) {
+    super(`Collection "${collectionId}" not found during compilation of join`)
+  }
+}
+
 // JOIN Operation Errors
 export class JoinError extends TanStackDBError {
   constructor(message: string) {

@@ -1397,8 +1397,8 @@ export class CollectionImpl<
 
   /**
    * Creates an index on a collection for faster queries.
-   * Indexes significantly improve query performance by allowing binary search
-   * and range queries instead of full scans.
+   * Indexes significantly improve query performance by allowing constant time lookups
+   * and logarithmic time range queries instead of full scans.
    *
    * @template TResolver - The type of the index resolver (constructor or async loader)
    * @param indexCallback - Function that extracts the indexed value from each item
