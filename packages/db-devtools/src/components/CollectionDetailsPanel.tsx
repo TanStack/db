@@ -25,13 +25,24 @@ export interface CollectionDetailsPanelProps {
   activeCollection: Accessor<CollectionMetadata | undefined>
 }
 
-type CollectionTab = `summary` | `config` | `state` | `transactions` | `data`
+type CollectionTab = `summary` | `config` | `state` | `transactions` | `data` | `query-ir`
 
 export function CollectionDetailsPanel({
   activeCollection,
 }: CollectionDetailsPanelProps) {
   const styles = useStyles()
   const [selectedTab, setSelectedTab] = createSignal<CollectionTab>(`summary`)
+  
+  // Reset selected tab if it's not available for the current collection
+  createEffect(() => {
+    const currentCollection = collection()
+    const availableTabs = tabs()
+    const currentTab = selectedTab()
+    
+    if (currentCollection && !availableTabs.find(tab => tab.id === currentTab)) {
+      setSelectedTab(`summary`)
+    }
+  })
   const [selectedTransaction, setSelectedTransaction] = createSignal<
     string | null
   >(null)
@@ -121,13 +132,23 @@ export function CollectionDetailsPanel({
     return txs.find((t) => t.id === selectedId)
   })
 
-  const tabs: Array<{ id: CollectionTab; label: string }> = [
-    { id: `summary`, label: `Summary` },
-    { id: `config`, label: `Config` },
-    { id: `state`, label: `State` },
-    { id: `transactions`, label: `Transactions` },
-    { id: `data`, label: `Data` },
-  ]
+  const tabs = createMemo(() => {
+    const currentCollection = collection()
+    const baseTabs: Array<{ id: CollectionTab; label: string }> = [
+      { id: `summary`, label: `Summary` },
+      { id: `config`, label: `Config` },
+      { id: `state`, label: `State` },
+      { id: `transactions`, label: `Transactions` },
+      { id: `data`, label: `Data` },
+    ]
+    
+    // Only add Query IR tab for live query collections
+    if (currentCollection?.metadata.type === `live-query`) {
+      baseTabs.push({ id: `query-ir`, label: `Query IR` })
+    }
+    
+    return baseTabs
+  })
 
   const renderTabContent = () => {
     const currentCollection = collection()
@@ -150,7 +171,13 @@ export function CollectionDetailsPanel({
         return instance ? (
           <Explorer
             label="Collection Config"
-            value={() => instance.config}
+            value={() => {
+              // Filter out devtools internal properties
+              const config = { ...instance.config }
+              delete config.__devtoolsInternal
+              delete config.__devtoolsQueryIR
+              return config
+            }}
             defaultExpanded={{}}
           />
         ) : (
@@ -215,6 +242,50 @@ export function CollectionDetailsPanel({
         )
       }
 
+      case `query-ir`: {
+        const currentCollection = collection()
+        if (!currentCollection?.instance) {
+          return (
+            <div class={styles().noDataMessage}>
+              Collection instance not available
+            </div>
+          )
+        }
+
+        // Only show for live query collections
+        if (currentCollection.metadata.type !== `live-query`) {
+          return (
+            <div class={styles().noDataMessage}>
+              Query IR is only available for live query collections
+            </div>
+          )
+        }
+
+        const queryIR = currentCollection.instance.config.__devtoolsQueryIR
+        if (!queryIR) {
+          return (
+            <div class={styles().noDataMessage}>
+              Query IR not available for this collection
+            </div>
+          )
+        }
+
+        return (
+          <div>
+            <Explorer
+              label="Unoptimized Query IR"
+              value={() => queryIR.unoptimized}
+              defaultExpanded={{}}
+            />
+            <Explorer
+              label="Optimized Query IR"
+              value={() => queryIR.optimized}
+              defaultExpanded={{}}
+            />
+          </div>
+        )
+      }
+
       default:
         return null
     }
@@ -236,7 +307,7 @@ export function CollectionDetailsPanel({
           <div class={styles().detailsHeaderRow}>
             <div class={styles().detailsHeader}>{collectionMetadata().id}</div>
             <div class={styles().collectionTabNav}>
-              {tabs.map((tab) => (
+              {tabs().map((tab) => (
                 <button
                   onClick={() => setSelectedTab(tab.id)}
                   class={cx(

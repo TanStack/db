@@ -181,6 +181,7 @@ export function liveQueryCollectionOptions<
   let collectionWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+  let optimizedQueryIRCache: any | undefined
 
   const compileBasePipeline = () => {
     graphCache = new D2()
@@ -195,6 +196,7 @@ export function liveQueryCollectionOptions<
     ;({
       pipeline: pipelineCache,
       collectionWhereClauses: collectionWhereClausesCache,
+      optimizedQueryIR: optimizedQueryIRCache,
     } = compileQuery(query, inputsCache as Record<string, KeyedStream>))
   }
 
@@ -393,6 +395,11 @@ export function liveQueryCollectionOptions<
     collectionType: `live-query` as const,
     // Propagate devtools-internal marker to avoid self-registration
     __devtoolsInternal: config.__devtoolsInternal,
+    // Store query IR for devtools access
+    __devtoolsQueryIR: {
+      unoptimized: query,
+      optimized: optimizedQueryIRCache,
+    },
   }
 }
 

@@ -408,6 +408,14 @@ export interface CollectionConfig<
    */
   __devtoolsInternal?: boolean
   /**
+   * Internal query IR storage for devtools access
+   * @internal
+   */
+  __devtoolsQueryIR?: {
+    unoptimized: any
+    optimized: any
+  }
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
