@@ -30,6 +30,21 @@ class DevtoolsStoreImpl implements DevtoolsStore {
   public collections = devtoolsCollectionsCollection as any
   public transactions = devtoolsTransactionsCollection as any
 
+  private countTransactionsForCollection = (collectionId: string): number => {
+    let count = 0
+    for (const entry of this.transactions.values()) {
+      if (entry.collectionId === collectionId) count++
+    }
+    return count
+  }
+
+  private hasTransactionsForCollection = (collectionId: string): boolean => {
+    for (const entry of this.transactions.values()) {
+      if (entry.collectionId === collectionId) return true
+    }
+    return false
+  }
+
   registerCollection = (collection: CollectionImpl<any, any, any>): (() => void) | undefined => {
     // Check if collection is already registered
     const existingEntry = this.collections.get(collection.id)
@@ -44,8 +59,8 @@ class DevtoolsStoreImpl implements DevtoolsStore {
       type: this.detectCollectionType(collection),
       status: collection.status,
       size: collection.size,
-      hasTransactions: collection.transactions.size > 0,
-      transactionCount: collection.transactions.size,
+      hasTransactions: this.hasTransactionsForCollection(collection.id),
+      transactionCount: this.countTransactionsForCollection(collection.id),
       createdAt: new Date(),
       lastUpdated: new Date(),
       gcTime: collection.config.gcTime,
@@ -140,11 +155,8 @@ class DevtoolsStoreImpl implements DevtoolsStore {
       state: entry.state,
       mutations: entry.mutations.length,
     })
-    // Also bump the parent collection metadata to reflect transaction counts immediately
-    const parent = this.collections.get(collectionId)
-    if (parent) {
-      this.updateCollection(collectionId)
-    }
+    // Bump the parent collection metadata to reflect transaction counts immediately
+    this.updateCollection(collectionId)
   }
 
   getCollection = (id: string): CollectionImpl<any, any, any> | undefined => {
@@ -181,8 +193,8 @@ class DevtoolsStoreImpl implements DevtoolsStore {
           ...entry.metadata,
           status: collection.status,
           size: collection.size,
-          hasTransactions: collection.transactions.size > 0,
-          transactionCount: collection.transactions.size,
+          hasTransactions: this.hasTransactionsForCollection(entry.id),
+          transactionCount: this.countTransactionsForCollection(entry.id),
           lastUpdated: new Date(),
         }
         results.push(snapshot)
@@ -233,8 +245,8 @@ class DevtoolsStoreImpl implements DevtoolsStore {
         ...entry.metadata,
         status: collection.status,
         size: collection.size,
-        hasTransactions: collection.transactions.size > 0,
-        transactionCount: collection.transactions.size,
+        hasTransactions: this.hasTransactionsForCollection(id),
+        transactionCount: this.countTransactionsForCollection(id),
         lastUpdated: new Date(),
       }
 
@@ -262,10 +274,7 @@ class DevtoolsStoreImpl implements DevtoolsStore {
         })
 
         // Optional: when a transaction completes, ensure parent metadata updates
-        if (newPersisted) {
-          const parent = this.collections.get(entry.collectionId)
-          if (parent) this.updateCollection(entry.collectionId)
-        }
+        this.updateCollection(entry.collectionId)
       }
     }
   }
