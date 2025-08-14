@@ -78,7 +78,7 @@ function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
     const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
     if (devtools?.registerCollection) {
       const updateCallback = devtools.registerCollection(collection)
-      if (updateCallback && collection) {
+      if (updateCallback) {
         ;(collection as any).__devtoolsUpdateCallback = updateCallback
         ;(collection as any).isRegisteredWithDevtools = true
       } else {
@@ -736,7 +736,7 @@ export class CollectionImpl<
       typeof window !== `undefined` &&
       window.__TANSTACK_DB_DEVTOOLS__?.unregisterCollection
     ) {
-      window.__TANSTACK_DB_DEVTOOLS__!.unregisterCollection(this.id)
+      window.__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
       this.isRegisteredWithDevtools = false
     }
 
@@ -1430,42 +1430,10 @@ export class CollectionImpl<
       return
     }
 
-    // Register transaction with devtools (don't delete from devtools)
+    // Register transaction with devtools
     if (typeof window !== `undefined`) {
-      const w: any = window as any
-      const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
-      try {
-        if (devtools?.store?.registerTransaction) {
-          devtools.store.registerTransaction(transaction, this.id)
-          console.log(`[db->devtools] registerTransaction`, {
-            collectionId: this.id,
-            txId: transaction.id,
-            state: transaction.state,
-          })
-        } else if (devtools?.registerTransaction) {
-          // Back-compat if global exposes method at root
-          devtools.registerTransaction(transaction, this.id)
-          console.log(`[db->devtools] registerTransaction (legacy)`, {
-            collectionId: this.id,
-            txId: transaction.id,
-            state: transaction.state,
-          })
-        } else {
-          // Devtools not ready yet – queue for later flush
-          w.__TANSTACK_DB_PENDING_TRANSACTIONS__ =
-            w.__TANSTACK_DB_PENDING_TRANSACTIONS__ || []
-          w.__TANSTACK_DB_PENDING_TRANSACTIONS__.push({
-            transaction,
-            collectionId: this.id,
-          })
-          console.log(`[db->devtools] queued transaction`, {
-            collectionId: this.id,
-            txId: transaction.id,
-          })
-        }
-      } catch (e) {
-        console.warn(`[db->devtools] registerTransaction failed`, e)
-      }
+      const devtools = window.__TANSTACK_DB_DEVTOOLS__
+      devtools?.store?.registerTransaction?.(transaction, this.id)
     }
 
     // Only schedule cleanup for transactions that aren't already completed

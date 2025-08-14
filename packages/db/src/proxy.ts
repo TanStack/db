@@ -182,8 +182,8 @@ function deepEqual<T>(
   // memoizing object pairs that have already been compared
   const objA = a as unknown as object
   const objB = b as unknown as object
-  const isObjA = typeof a === `object` && a !== null
-  const isObjB = typeof b === `object` && b !== null
+  const isObjA = typeof a === `object`
+  const isObjB = typeof b === `object`
 
   if (isObjA && isObjB) {
     const seenForA = visited.get(objA)

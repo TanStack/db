@@ -169,11 +169,6 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
       updateCollectionMetadata: () => {},
       updateTransactions: () => {},
       getTransactions: () => [],
-      getTransaction: () => undefined,
-      getTransactionDetails: () => undefined,
-      clearTransactionHistory: () => {},
-      onTransactionStart: () => {},
-      onTransactionEnd: () => {},
       cleanup: () => {},
       garbageCollect: () => {},
     } as DbDevtoolsRegistry
@@ -181,7 +176,7 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
 
   // Only create real signals on the client side
   if (!getDevtools()) {
-    window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry() as any
+    window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
   }
   return getDevtools() as unknown as DbDevtoolsRegistry
 }
