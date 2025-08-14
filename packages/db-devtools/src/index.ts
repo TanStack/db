@@ -7,7 +7,10 @@ export * from "./types"
 
 // Re-export components
 export { BaseTanStackDbDevtoolsPanel } from "./BaseTanStackDbDevtoolsPanel"
-export { TanstackDbDevtools, type TanstackDbDevtoolsConfig } from "./TanstackDbDevtools"
+export {
+  TanstackDbDevtools,
+  type TanstackDbDevtoolsConfig,
+} from "./TanstackDbDevtools"
 export { FloatingTanStackDbDevtools } from "./FloatingTanStackDbDevtools"
 
 // Re-export utilities

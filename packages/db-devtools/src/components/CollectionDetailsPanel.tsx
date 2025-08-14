@@ -1,6 +1,17 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import {
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+} from "solid-js"
 import { useLiveQuery } from "@tanstack/solid-db"
-import { createCollection, createLiveQueryCollection, localOnlyCollectionOptions, eq } from "@tanstack/db"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  localOnlyCollectionOptions,
+} from "@tanstack/db"
 import { clsx as cx } from "clsx"
 import { useStyles } from "../useStyles"
 import { getDevtoolsRegistry } from "../devtools"
@@ -45,7 +56,7 @@ export function CollectionDetailsPanel({
       setStateVersion((v) => v + 1)
     })
     onCleanup(() => {
-      unsubscribe?.()
+      unsubscribe()
     })
   })
 
@@ -63,7 +74,7 @@ export function CollectionDetailsPanel({
       )
     }
 
-    if (!registry || !registry.store || !registry.store.transactions || !metadata) {
+    if (!registry || !metadata) {
       return createLiveQueryCollection({
         __devtoolsInternal: true,
         id: `__devtools_view_transactions_for_collection_empty_local`,
@@ -81,8 +92,10 @@ export function CollectionDetailsPanel({
       query: (q: any) =>
         q
           .from({ transactions: registry.store.transactions })
-          .where(({ transactions }: any) => eq(transactions.collectionId, metadata.id))
-          .orderBy(({ transactions }: any) => transactions.createdAt, 'desc')
+          .where(({ transactions }: any) =>
+            eq(transactions.collectionId, metadata.id)
+          )
+          .orderBy(({ transactions }: any) => transactions.createdAt, `desc`)
           .select(({ transactions }: any) => ({
             id: transactions.id,
             collectionId: transactions.collectionId,
@@ -103,9 +116,9 @@ export function CollectionDetailsPanel({
   })
 
   const activeTransaction = createMemo(() => {
-    const transactions = collectionTransactions()
+    const txs = collectionTransactions()
     const selectedId = selectedTransaction()
-    return transactions.find((t) => t.id === selectedId)
+    return txs.find((t) => t.id === selectedId)
   })
 
   const tabs: Array<{ id: CollectionTab; label: string }> = [
@@ -232,10 +245,15 @@ export function CollectionDetailsPanel({
                   )}
                 >
                   {tab.label}
-                  {tab.id === `transactions` && Array.isArray(transactionsForCollectionQuery.data) &&
-                    (transactionsForCollectionQuery.data as any[]).length > 0 && (
+                  {tab.id === `transactions` &&
+                    Array.isArray(transactionsForCollectionQuery.data) &&
+                    (transactionsForCollectionQuery.data as Array<any>).length >
+                      0 && (
                       <span class={styles().tabBadge}>
-                        {(transactionsForCollectionQuery.data as any[]).length}
+                        {
+                          (transactionsForCollectionQuery.data as Array<any>)
+                            .length
+                        }
                       </span>
                     )}
                 </button>

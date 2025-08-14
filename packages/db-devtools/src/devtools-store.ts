@@ -1,17 +1,17 @@
 import { createCollection, localOnlyCollectionOptions } from "@tanstack/db"
 import type { CollectionImpl } from "../../db/src/collection"
 import type { Transaction } from "../../db/src/transactions"
-import type { 
-  DevtoolsCollectionEntry, 
-  DevtoolsTransactionEntry, 
+import type {
+  CollectionMetadata,
+  DevtoolsCollectionEntry,
   DevtoolsStore,
-  CollectionMetadata 
+  DevtoolsTransactionEntry,
 } from "./types"
 
 // Collections collection - stores devtools collection entries
 const devtoolsCollectionsCollection = createCollection(
   localOnlyCollectionOptions({
-    id: '__devtools_collections',
+    id: `__devtools_collections`,
     __devtoolsInternal: true, // Prevent self-registration
     getKey: (entry: DevtoolsCollectionEntry) => entry.id,
   })
@@ -20,7 +20,7 @@ const devtoolsCollectionsCollection = createCollection(
 // Transactions collection - stores devtools transaction entries
 const devtoolsTransactionsCollection = createCollection(
   localOnlyCollectionOptions({
-    id: '__devtools_transactions',
+    id: `__devtools_transactions`,
     __devtoolsInternal: true, // Prevent self-registration
     getKey: (entry: DevtoolsTransactionEntry) => entry.id,
   })
@@ -45,7 +45,9 @@ class DevtoolsStoreImpl implements DevtoolsStore {
     return false
   }
 
-  registerCollection = (collection: CollectionImpl<any, any, any>): (() => void) | undefined => {
+  registerCollection = (
+    collection: CollectionImpl<any, any, any>
+  ): (() => void) | undefined => {
     // Check if collection is already registered
     const existingEntry = this.collections.get(collection.id)
     if (existingEntry) {
@@ -115,7 +117,10 @@ class DevtoolsStoreImpl implements DevtoolsStore {
     }
   }
 
-  registerTransaction = (transaction: Transaction<any>, collectionId: string): void => {
+  registerTransaction = (
+    transaction: Transaction<any>,
+    collectionId: string
+  ): void => {
     // Check if transaction is already registered
     const existingEntry = this.transactions.get(transaction.id)
     if (existingEntry) {
@@ -206,7 +211,9 @@ class DevtoolsStoreImpl implements DevtoolsStore {
     return results
   }
 
-  getTransactions = (collectionId?: string): Array<DevtoolsTransactionEntry> => {
+  getTransactions = (
+    collectionId?: string
+  ): Array<DevtoolsTransactionEntry> => {
     const transactions: Array<DevtoolsTransactionEntry> = []
 
     for (const entry of this.transactions.values()) {
@@ -285,7 +292,7 @@ class DevtoolsStoreImpl implements DevtoolsStore {
 
   garbageCollect = (): void => {
     // Remove entries for collections that have been garbage collected
-    const collectionsToRemove: string[] = []
+    const collectionsToRemove: Array<string> = []
     for (const entry of this.collections.values()) {
       const collection = entry.weakRef.deref()
       if (!collection) {
@@ -299,7 +306,7 @@ class DevtoolsStoreImpl implements DevtoolsStore {
     }
 
     // Remove entries for transactions that have been garbage collected
-    const transactionsToRemove: string[] = []
+    const transactionsToRemove: Array<string> = []
     for (const entry of this.transactions.values()) {
       const transaction = entry.weakRef.deref()
       if (!transaction) {

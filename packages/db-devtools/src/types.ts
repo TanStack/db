@@ -1,6 +1,5 @@
-import type { CollectionImpl } from "../../db/src/collection"
+import type { Collection, CollectionImpl } from "../../db/src/collection"
 import type { CollectionStatus } from "../../db/src/types"
-import type { Collection } from "../../db/src/collection"
 
 export interface DbDevtoolsConfig {
   /**
@@ -105,24 +104,26 @@ export interface DevtoolsTransactionEntry {
 export interface DevtoolsStore {
   collections: Collection<DevtoolsCollectionEntry, string>
   transactions: Collection<DevtoolsTransactionEntry, string>
-  
+
   // Registration methods
-  registerCollection: (collection: CollectionImpl<any, any, any>) => (() => void) | undefined
+  registerCollection: (
+    collection: CollectionImpl<any, any, any>
+  ) => (() => void) | undefined
   unregisterCollection: (id: string) => void
   registerTransaction: (transaction: any, collectionId: string) => void
-  
+
   // Access methods
   getCollection: (id: string) => CollectionImpl<any, any, any> | undefined
   releaseCollection: (id: string) => void
-  
+
   // Metadata access
   getAllCollectionMetadata: () => Array<CollectionMetadata>
   getTransactions: (collectionId?: string) => Array<DevtoolsTransactionEntry>
-  
+
   // Update methods
   updateCollection: (id: string) => void
   updateTransactions: (collectionId?: string) => void
-  
+
   // Utility methods
   cleanup: () => void
   garbageCollect: () => void

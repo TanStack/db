@@ -17,7 +17,7 @@ declare global {
 }
 
 // Export the type for use in other files
-export type TanStackDbDevtools = NonNullable<Window['__TANSTACK_DB_DEVTOOLS__']>
+export type TanStackDbDevtools = NonNullable<Window[`__TANSTACK_DB_DEVTOOLS__`]>
 
 // Helper function for accessing devtools with proper typing
 export function getDevtools(): TanStackDbDevtools | undefined {

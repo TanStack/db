@@ -71,7 +71,7 @@ export const TanStackReactDbDevtoolsPanel: React.FC<
         // Create a SolidJS component that renders the base panel
         const SolidComponent = () => {
           // Filter out React-specific props that might not be compatible
-          const { children, ...solidProps } = rest as any
+          const { children: _children, ...solidProps } = rest as any
           return BaseTanStackDbDevtoolsPanel({
             registry: () => registry,
             style: () => ({

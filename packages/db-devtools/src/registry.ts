@@ -1,11 +1,11 @@
 import { createSignal } from "solid-js"
+import { initializeDevtoolsStore } from "./devtools-store"
+import { getDevtools } from "./global-types"
 import type {
   CollectionMetadata,
   DbDevtoolsRegistry,
   TransactionDetails,
 } from "./types"
-import { initializeDevtoolsStore } from "./devtools-store"
-import { getDevtools } from "./global-types"
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   public store = initializeDevtoolsStore()
@@ -44,7 +44,9 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     const updatedMetadata = this.getCollectionMetadata(id)
     if (!updatedMetadata) return
     const currentCollections = this._collectionsSignal[0]()
-    const next = currentCollections.map((c) => (c.id === id ? updatedMetadata : c))
+    const next = currentCollections.map((c) =>
+      c.id === id ? updatedMetadata : c
+    )
     this._collectionsSignal[1](next)
   }
 
@@ -56,12 +58,12 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   registerCollection = (collection: any): (() => void) | undefined => {
     const updateCallback = this.store.registerCollection(collection)
-    
+
     // Set the update callback on the collection for future updates
     if (updateCallback && collection) {
-      ;(collection as any).__devtoolsUpdateCallback = updateCallback
+      collection.__devtoolsUpdateCallback = updateCallback
     }
-    
+
     // Trigger reactive update for immediate UI refresh
     this.triggerUpdate()
 
@@ -113,9 +115,9 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   getTransactions = (collectionId?: string): Array<TransactionDetails> => {
     const devtoolsTransactions = this.store.getTransactions(collectionId)
-    
+
     // Convert DevtoolsTransactionEntry to TransactionDetails for backward compatibility
-    return devtoolsTransactions.map(entry => ({
+    return devtoolsTransactions.map((entry) => ({
       id: entry.id,
       collectionId: entry.collectionId,
       state: entry.state,
@@ -191,5 +193,5 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
   if (!getDevtools()) {
     window.__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry() as any
   }
-  return (getDevtools() as unknown) as DbDevtoolsRegistry
+  return getDevtools() as unknown as DbDevtoolsRegistry
 }

@@ -16,9 +16,11 @@ export function initializeDbDevtools(): void {
   }
 
   // Check if devtools are already initialized
-  if (getDevtools()) {
-    return
-  }
+  const hasGlobal = Object.prototype.hasOwnProperty.call(
+    window,
+    `__TANSTACK_DB_DEVTOOLS__`
+  )
+  if (hasGlobal) return
 
   // Initialize the registry and store
   const registry = initializeDevtoolsRegistry()
@@ -56,7 +58,7 @@ export function registerCollection(
   const devtools = getDevtools()
   if (devtools?.registerCollection && collection) {
     const updateCallback = devtools.registerCollection(collection)
-    if (updateCallback && collection) {
+    if (updateCallback) {
       ;(collection as any).__devtoolsUpdateCallback = updateCallback
     }
   }
