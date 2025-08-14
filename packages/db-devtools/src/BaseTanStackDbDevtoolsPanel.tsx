@@ -1,7 +1,7 @@
 import { clsx as cx } from "clsx"
 import { Show, createEffect, createMemo, createSignal } from "solid-js"
 import { useLiveQuery } from "@tanstack/solid-db"
-import { createLiveQueryCollection, createCollection, localOnlyCollectionOptions } from "@tanstack/db"
+import { createLiveQueryCollection, createCollection, localOnlyCollectionOptions, eq } from "@tanstack/db"
 import { useDevtoolsOnClose } from "./contexts"
 import { useStyles } from "./useStyles"
 import { useLocalStorage } from "./useLocalStorage"
@@ -80,24 +80,38 @@ export const BaseTanStackDbDevtoolsPanel =
     let transactionsQuery: any
     let collectionsLQ: any
     let transactionsLQ: any
+    let selectedCollectionLQ: any
+    let transactionsForCollectionLQ: any
+    let selectedTransactionLQ: any
     // Local-only empty placeholders for early-render fallbacks
     let emptyCollectionsCol: any
     let emptyTransactionsCol: any
     
     try {
+      // Ensure empty placeholder collections exist for any fallback paths
+      if (!emptyCollectionsCol) {
+        emptyCollectionsCol = createCollection(
+          localOnlyCollectionOptions({
+            id: `__devtools_empty_collections`,
+            __devtoolsInternal: true,
+            getKey: (entry: any) => entry.id ?? Math.random().toString(36),
+          })
+        )
+      }
+      if (!emptyTransactionsCol) {
+        emptyTransactionsCol = createCollection(
+          localOnlyCollectionOptions({
+            id: `__devtools_empty_transactions`,
+            __devtoolsInternal: true,
+            getKey: (entry: any) => entry.id ?? Math.random().toString(36),
+          })
+        )
+      }
+
       // Precreate a live query collection for collections, mark as devtools internal to avoid self-registration
       collectionsQuery = useLiveQuery(() => {
         const reg = registry()
         if (!reg || !reg.store || !reg.store.collections) {
-          if (!emptyCollectionsCol) {
-            emptyCollectionsCol = createCollection(
-              localOnlyCollectionOptions({
-                id: `__devtools_empty_collections`,
-                __devtoolsInternal: true,
-                getKey: (entry: any) => entry.id ?? Math.random().toString(36),
-              })
-            )
-          }
           return createLiveQueryCollection({
             __devtoolsInternal: true,
             id: `__devtools_view_collections_empty`,
@@ -135,15 +149,6 @@ export const BaseTanStackDbDevtoolsPanel =
       transactionsQuery = useLiveQuery(() => {
         const reg = registry()
         if (!reg || !reg.store || !reg.store.transactions) {
-          if (!emptyTransactionsCol) {
-            emptyTransactionsCol = createCollection(
-              localOnlyCollectionOptions({
-                id: `__devtools_empty_transactions`,
-                __devtoolsInternal: true,
-                getKey: (entry: any) => entry.id ?? Math.random().toString(36),
-              })
-            )
-          }
           return createLiveQueryCollection({
             __devtoolsInternal: true,
             id: `__devtools_view_transactions_empty`,
@@ -161,6 +166,7 @@ export const BaseTanStackDbDevtoolsPanel =
             query: (q: any) =>
               q
                 .from({ transactions: reg.store.transactions })
+                .orderBy(({ transactions }: any) => transactions.createdAt, 'desc')
                 .select(({ transactions }: any) => ({
                   id: transactions.id,
                   collectionId: transactions.collectionId,
@@ -173,6 +179,114 @@ export const BaseTanStackDbDevtoolsPanel =
           } as any)
         }
         return transactionsLQ
+      })
+
+      // Selected collection via live query with where clause
+      selectedCollectionLQ = useLiveQuery(() => {
+        const reg = registry()
+        const id = activeCollectionId()
+        if (!reg || !reg.store || !reg.store.collections || !id) {
+          return createLiveQueryCollection({
+            __devtoolsInternal: true,
+            id: `__devtools_view_selected_collection_empty`,
+            startSync: true,
+            gcTime: 3000,
+            query: (q: any) => q.from({ collections: emptyCollectionsCol }),
+          } as any)
+        }
+        return createLiveQueryCollection({
+          __devtoolsInternal: true,
+          id: `__devtools_view_selected_collection_${id}`,
+          startSync: true,
+          gcTime: 5000,
+          query: (q: any) =>
+            q
+              .from({ collections: reg.store.collections })
+              .where(({ collections }: any) => eq(collections.id, id))
+              .select(({ collections }: any) => ({
+                id: collections.id,
+                type: collections.metadata.type,
+                status: collections.metadata.status,
+                size: collections.metadata.size,
+                hasTransactions: collections.metadata.hasTransactions,
+                transactionCount: collections.metadata.transactionCount,
+                createdAt: collections.metadata.createdAt,
+                lastUpdated: collections.metadata.lastUpdated,
+                gcTime: collections.metadata.gcTime,
+                timings: collections.metadata.timings,
+              })),
+        } as any)
+      })
+
+      // Transactions filtered by selected collection id
+      transactionsForCollectionLQ = useLiveQuery(() => {
+        const reg = registry()
+        const id = activeCollectionId()
+        if (!reg || !reg.store || !reg.store.transactions || !id) {
+          return createLiveQueryCollection({
+            __devtoolsInternal: true,
+            id: `__devtools_view_transactions_for_collection_empty`,
+            startSync: true,
+            gcTime: 3000,
+            query: (q: any) => q.from({ transactions: emptyTransactionsCol }),
+          } as any)
+        }
+        return createLiveQueryCollection({
+          __devtoolsInternal: true,
+          id: `__devtools_view_transactions_for_collection_${id}`,
+          startSync: true,
+          gcTime: 5000,
+          query: (q: any) =>
+            q
+              .from({ transactions: reg.store.transactions })
+              .where(({ transactions }: any) =>
+                eq(transactions.collectionId, id)
+              )
+              .orderBy(({ transactions }: any) => transactions.createdAt, 'desc')
+              .select(({ transactions }: any) => ({
+                id: transactions.id,
+                collectionId: transactions.collectionId,
+                state: transactions.state,
+                mutations: transactions.mutations,
+                createdAt: transactions.createdAt,
+                updatedAt: transactions.updatedAt,
+                isPersisted: transactions.isPersisted,
+              })),
+        } as any)
+      })
+
+      // Selected transaction via live query with where by id
+      selectedTransactionLQ = useLiveQuery(() => {
+        const reg = registry()
+        const id = selectedTransaction()
+        if (!reg || !reg.store || !reg.store.transactions || !id) {
+          return createLiveQueryCollection({
+            __devtoolsInternal: true,
+            id: `__devtools_view_selected_transaction_empty`,
+            startSync: true,
+            gcTime: 3000,
+            query: (q: any) => q.from({ transactions: emptyTransactionsCol }),
+          } as any)
+        }
+        return createLiveQueryCollection({
+          __devtoolsInternal: true,
+          id: `__devtools_view_selected_transaction_${id}`,
+          startSync: true,
+          gcTime: 5000,
+          query: (q: any) =>
+            q
+              .from({ transactions: reg.store.transactions })
+              .where(({ transactions }: any) => eq(transactions.id, id))
+              .select(({ transactions }: any) => ({
+                id: transactions.id,
+                collectionId: transactions.collectionId,
+                state: transactions.state,
+                mutations: transactions.mutations,
+                createdAt: transactions.createdAt,
+                updatedAt: transactions.updatedAt,
+                isPersisted: transactions.isPersisted,
+              })),
+        } as any)
       })
 
       // No explicit effects needed; we'll read from queries directly in memos below
@@ -203,6 +317,21 @@ export const BaseTanStackDbDevtoolsPanel =
       }))
     })
 
+    const transactionsForActiveCollection = createMemo(() => {
+      const raw = Array.isArray(transactionsForCollectionLQ?.data)
+        ? ((transactionsForCollectionLQ.data as Array<any>).slice())
+        : []
+      return raw.map((entry: any) => ({
+        id: entry.id,
+        collectionId: entry.collectionId,
+        state: entry.state,
+        mutations: entry.mutations,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        isPersisted: entry.isPersisted,
+      }))
+    })
+
     // Computed values
     const activeCollection = createMemo(() => {
       try {
@@ -211,7 +340,7 @@ export const BaseTanStackDbDevtoolsPanel =
           return undefined
         }
         const found = data.find((c: any) => c.id === activeCollectionId())
-        return found
+      return found
       } catch (error) {
         console.error('Error in activeCollection memo:', error)
         return undefined
@@ -220,12 +349,11 @@ export const BaseTanStackDbDevtoolsPanel =
 
     const activeTransaction = createMemo(() => {
       try {
-        const transactionsData = transactions()
-        if (!transactionsData || !Array.isArray(transactionsData)) return undefined
-        const found = transactionsData.find((t: any) => t.id === selectedTransaction())
-        return found
+        const data = selectedTransactionLQ?.data as any[]
+        if (!data || !Array.isArray(data)) return undefined
+        return data[0]
       } catch (error) {
-        console.error('Error in activeTransaction memo:', error)
+        console.error('Error in activeTransaction memo (selected LQ):', error)
         return undefined
       }
     })
@@ -325,8 +453,9 @@ export const BaseTanStackDbDevtoolsPanel =
                 <TransactionsPanel
                   transactions={() => {
                     try {
-                      if (typeof transactions !== 'function') return []
-                      return transactions()
+                      const id = activeCollectionId()
+                      if (!id) return transactions()
+                      return transactionsForActiveCollection()
                     } catch (error) {
                       console.error('Error getting transactions for panel:', error)
                       return []

@@ -1,4 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { useLiveQuery } from "@tanstack/solid-db"
+import { createCollection, createLiveQueryCollection, localOnlyCollectionOptions, eq } from "@tanstack/db"
 import { clsx as cx } from "clsx"
 import { useStyles } from "../useStyles"
 import { getDevtoolsRegistry } from "../devtools"
@@ -47,11 +49,57 @@ export function CollectionDetailsPanel({
     })
   })
 
-  const collectionTransactions = createMemo(() => {
+  // Live query for transactions filtered to the active collection
+  let emptyTransactionsCol: any
+  const transactionsForCollectionQuery: any = useLiveQuery(() => {
     const metadata = activeCollection()
-    if (!metadata || !registry) return []
+    if (!emptyTransactionsCol) {
+      emptyTransactionsCol = createCollection(
+        localOnlyCollectionOptions({
+          id: `__devtools_empty_transactions_for_collection`,
+          __devtoolsInternal: true,
+          getKey: (entry: any) => entry.id ?? Math.random().toString(36),
+        })
+      )
+    }
 
-    return registry.getTransactions(metadata.id)
+    if (!registry || !registry.store || !registry.store.transactions || !metadata) {
+      return createLiveQueryCollection({
+        __devtoolsInternal: true,
+        id: `__devtools_view_transactions_for_collection_empty_local`,
+        startSync: true,
+        gcTime: 3000,
+        query: (q: any) => q.from({ transactions: emptyTransactionsCol }),
+      } as any)
+    }
+
+    return createLiveQueryCollection({
+      __devtoolsInternal: true,
+      id: `__devtools_view_transactions_for_collection_${metadata.id}`,
+      startSync: true,
+      gcTime: 5000,
+      query: (q: any) =>
+        q
+          .from({ transactions: registry.store.transactions })
+          .where(({ transactions }: any) => eq(transactions.collectionId, metadata.id))
+          .orderBy(({ transactions }: any) => transactions.createdAt, 'desc')
+          .select(({ transactions }: any) => ({
+            id: transactions.id,
+            collectionId: transactions.collectionId,
+            state: transactions.state,
+            mutations: transactions.mutations,
+            createdAt: transactions.createdAt,
+            updatedAt: transactions.updatedAt,
+            isPersisted: transactions.isPersisted,
+          })),
+    } as any)
+  })
+
+  const collectionTransactions = createMemo(() => {
+    const raw = Array.isArray(transactionsForCollectionQuery.data)
+      ? (transactionsForCollectionQuery.data as Array<any>).slice()
+      : []
+    return raw
   })
 
   const activeTransaction = createMemo(() => {
@@ -184,10 +232,10 @@ export function CollectionDetailsPanel({
                   )}
                 >
                   {tab.label}
-                  {tab.id === `transactions` &&
-                    collectionTransactions().length > 0 && (
+                  {tab.id === `transactions` && Array.isArray(transactionsForCollectionQuery.data) &&
+                    (transactionsForCollectionQuery.data as any[]).length > 0 && (
                       <span class={styles().tabBadge}>
-                        {collectionTransactions().length}
+                        {(transactionsForCollectionQuery.data as any[]).length}
                       </span>
                     )}
                 </button>
