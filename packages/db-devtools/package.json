@@ -74,6 +74,10 @@
     "build": "vite build",
     "build:dev": "tsup --watch"
   },
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/solid-db": "workspace:*"
+  },
   "devDependencies": {
     "@kobalte/core": "^0.13.4",
     "@solid-primitives/keyed": "^1.2.2",

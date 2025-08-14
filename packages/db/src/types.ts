@@ -403,6 +403,11 @@ export interface CollectionConfig<
    */
   collectionType?: string
   /**
+   * Internal flag to prevent devtools registration for devtools-owned collections
+   * @internal
+   */
+  __devtoolsInternal?: boolean
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value

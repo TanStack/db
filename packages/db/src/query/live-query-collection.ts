@@ -88,6 +88,12 @@ export interface LiveQueryCollectionConfig<
    * GC time for the collection
    */
   gcTime?: number
+
+  /**
+   * Marks this live query as internal to devtools so it won't register itself
+   * with the devtools registry (prevents circular references in the UI)
+   */
+  __devtoolsInternal?: boolean
 }
 
 /**
@@ -385,6 +391,8 @@ export function liveQueryCollectionOptions<
     startSync: config.startSync,
     // Mark as live query for devtools
     collectionType: `live-query` as const,
+    // Propagate devtools-internal marker to avoid self-registration
+    __devtoolsInternal: config.__devtoolsInternal,
   }
 }
 

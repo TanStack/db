@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { clsx as cx } from "clsx"
 import { useStyles } from "../useStyles"
 import { getDevtoolsRegistry } from "../devtools"
@@ -31,6 +31,20 @@ export function CollectionDetailsPanel({
     // Get the actual collection instance
     const collectionInstance = registry.getCollection(metadata.id)
     return { metadata, instance: collectionInstance }
+  })
+
+  // Bump a reactive tick when the underlying collection emits changes
+  const [stateVersion, setStateVersion] = createSignal(0)
+  createEffect(() => {
+    const current = collection()
+    if (!current || !current.instance) return
+    const unsubscribe = current.instance.subscribeChanges(() => {
+      // Any change to the collection should retrigger the state view
+      setStateVersion((v) => v + 1)
+    })
+    onCleanup(() => {
+      unsubscribe?.()
+    })
   })
 
   const collectionTransactions = createMemo(() => {
@@ -94,6 +108,8 @@ export function CollectionDetailsPanel({
           )
         }
 
+        // Depend on stateVersion so updates re-render this block
+        stateVersion()
         const stateData = {
           syncedData: instance.syncedData,
           optimisticUpserts: instance.optimisticUpserts,

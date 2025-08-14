@@ -1,5 +1,6 @@
 import type { CollectionImpl } from "../../db/src/collection"
 import type { CollectionStatus } from "../../db/src/types"
+import type { Collection } from "../../db/src/collection"
 
 export interface DbDevtoolsConfig {
   /**
@@ -70,6 +71,63 @@ export interface CollectionMetadata {
   syncConfig?: any
 }
 
+export interface DevtoolsCollectionEntry {
+  id: string
+  weakRef: WeakRef<CollectionImpl<any, any, any>>
+  metadata: CollectionMetadata
+  isActive: boolean // Whether we're currently viewing this collection (hard ref held)
+  hardRef?: CollectionImpl<any, any, any> // Only set when actively viewing
+  updateCallback?: () => void // Callback to trigger metadata update (doesn't hold strong refs)
+  updateTransactionsCallback?: () => void // Callback to trigger transaction update only (doesn't hold strong refs)
+}
+
+export interface DevtoolsTransactionEntry {
+  id: string
+  collectionId: string
+  state: string
+  mutations: Array<{
+    id: string
+    type: `insert` | `update` | `delete`
+    key: any
+    optimistic: boolean
+    createdAt: Date
+    original?: any
+    modified?: any
+    changes?: any
+  }>
+  createdAt: Date
+  updatedAt: Date
+  isPersisted: boolean
+  // Keep reference to actual transaction for real-time updates
+  weakRef: WeakRef<any> // Transaction<any>
+}
+
+export interface DevtoolsStore {
+  collections: Collection<DevtoolsCollectionEntry, string>
+  transactions: Collection<DevtoolsTransactionEntry, string>
+  
+  // Registration methods
+  registerCollection: (collection: CollectionImpl<any, any, any>) => (() => void) | undefined
+  unregisterCollection: (id: string) => void
+  registerTransaction: (transaction: any, collectionId: string) => void
+  
+  // Access methods
+  getCollection: (id: string) => CollectionImpl<any, any, any> | undefined
+  releaseCollection: (id: string) => void
+  
+  // Metadata access
+  getAllCollectionMetadata: () => Array<CollectionMetadata>
+  getTransactions: (collectionId?: string) => Array<DevtoolsTransactionEntry>
+  
+  // Update methods
+  updateCollection: (id: string) => void
+  updateTransactions: (collectionId?: string) => void
+  
+  // Utility methods
+  cleanup: () => void
+  garbageCollect: () => void
+}
+
 export interface CollectionRegistryEntry {
   weakRef: WeakRef<CollectionImpl<any, any, any>>
   metadata: CollectionMetadata
@@ -100,6 +158,9 @@ export interface TransactionDetails {
 
 export interface DbDevtoolsRegistry {
   collections: Map<string, CollectionRegistryEntry>
+
+  // Store for the new local-only collections implementation
+  store: DevtoolsStore
 
   // SolidJS signals for reactive UI updates
   collectionsSignal: () => Array<CollectionMetadata>

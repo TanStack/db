@@ -64,10 +64,26 @@ import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 
 // Check for devtools registry and register collection if available
 function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
+  // Skip registration if this is a devtools internal collection
+  if (collection.config.__devtoolsInternal) {
+    return
+  }
+
+  // Skip if already registered
+  if ((collection as any).isRegisteredWithDevtools) {
+    return
+  }
+
   if (typeof window !== `undefined`) {
-    if ((window as any).__TANSTACK_DB_DEVTOOLS__?.registerCollection) {
-      ;(window as any).__TANSTACK_DB_DEVTOOLS__.registerCollection(collection)
-      ;(collection as any).isRegisteredWithDevtools = true
+    const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+    if (devtools?.registerCollection) {
+      const updateCallback = devtools.registerCollection(collection)
+      if (updateCallback && collection) {
+        ;(collection as any).__devtoolsUpdateCallback = updateCallback
+        ;(collection as any).isRegisteredWithDevtools = true
+      } else {
+        ;(collection as any).isRegisteredWithDevtools = false
+      }
     } else {
       ;(collection as any).isRegisteredWithDevtools = false
     }
@@ -86,17 +102,8 @@ function triggerDevtoolsUpdate(
   }
 }
 
-// Declare the devtools registry on window
-declare global {
-  interface Window {
-    __TANSTACK_DB_DEVTOOLS__?: {
-      registerCollection: (
-        collection: CollectionImpl<any, any, any>
-      ) => (() => void) | undefined
-      unregisterCollection: (id: string) => void
-    }
-  }
-}
+// Import global devtools types (will be available when devtools are loaded)
+// The actual types are declared in @tanstack/db-devtools
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -1418,6 +1425,19 @@ export class CollectionImpl<
    * @private
    */
   private scheduleTransactionCleanup(transaction: Transaction<any>): void {
+    // Skip cleanup for devtools internal collections
+    if (this.config.__devtoolsInternal) {
+      return
+    }
+
+    // Register transaction with devtools (don't delete from devtools)
+    if (typeof window !== `undefined`) {
+      const devtools = (window as any).__TANSTACK_DB_DEVTOOLS__
+      if (devtools?.registerTransaction) {
+        devtools.registerTransaction(transaction, this.id)
+      }
+    }
+
     // Only schedule cleanup for transactions that aren't already completed
     if (transaction.state === `completed`) {
       this.transactions.delete(transaction.id)

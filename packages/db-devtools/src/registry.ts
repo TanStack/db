@@ -1,17 +1,23 @@
 import { createSignal } from "solid-js"
 import type {
   CollectionMetadata,
-  CollectionRegistryEntry,
   DbDevtoolsRegistry,
   TransactionDetails,
 } from "./types"
+import { initializeDevtoolsStore } from "./devtools-store"
+import { getDevtools } from "./global-types"
 
 class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
-  public collections = new Map<string, CollectionRegistryEntry>()
+  public store = initializeDevtoolsStore()
 
-  // SolidJS signals for reactive updates
+  // SolidJS signals for reactive updates (kept for backward compatibility)
   private _collectionsSignal = createSignal<Array<CollectionMetadata>>([])
   private _transactionsSignal = createSignal<Array<TransactionDetails>>([])
+
+  // Expose collections map for backward compatibility
+  public get collections() {
+    return new Map() // Empty map since we're using collections now
+  }
 
   constructor() {
     // No polling needed; updates are now immediate via signals
@@ -27,9 +33,9 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   private triggerUpdate = () => {
-    // Update collections signal
+    // Update collections signal with a fresh array reference
     const collectionsData = this.getAllCollectionMetadata()
-    this._collectionsSignal[1](collectionsData)
+    this._collectionsSignal[1]([...collectionsData])
 
     // Update transactions signal
     const transactionsData = this.getTransactions()
@@ -37,22 +43,11 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   private triggerCollectionUpdate = (id: string) => {
-    // Get the current collections array
+    const updatedMetadata = this.getCollectionMetadata(id)
+    if (!updatedMetadata) return
     const currentCollections = this._collectionsSignal[0]()
-
-    // Find the index of the collection to update
-    const index = currentCollections.findIndex((c) => c.id === id)
-
-    if (index !== -1) {
-      // Get updated metadata for this specific collection
-      const updatedMetadata = this.getCollectionMetadata(id)
-      if (updatedMetadata) {
-        // Create a new array with the updated collection
-        const newCollections = [...currentCollections]
-        newCollections[index] = updatedMetadata
-        this._collectionsSignal[1](newCollections)
-      }
-    }
+    const next = currentCollections.map((c) => (c.id === id ? updatedMetadata : c))
+    this._collectionsSignal[1](next)
   }
 
   private triggerTransactionUpdate = (collectionId?: string) => {
@@ -62,52 +57,13 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   registerCollection = (collection: any): (() => void) | undefined => {
-    const metadata: CollectionMetadata = {
-      id: collection.id,
-      type: this.detectCollectionType(collection),
-      status: collection.status,
-      size: collection.size,
-      hasTransactions: collection.transactions.size > 0,
-      transactionCount: collection.transactions.size,
-      createdAt: new Date(),
-      lastUpdated: new Date(),
-      gcTime: collection.config.gcTime,
-      timings: this.isLiveQuery(collection)
-        ? {
-            totalIncrementalRuns: 0,
-          }
-        : undefined,
+    const updateCallback = this.store.registerCollection(collection)
+    
+    // Set the update callback on the collection for future updates
+    if (updateCallback && collection) {
+      ;(collection as any).__devtoolsUpdateCallback = updateCallback
     }
-
-    // Create a callback that updates metadata for this specific collection
-    // This callback doesn't hold strong references to the collection
-    const updateCallback = () => {
-      this.updateCollectionMetadata(collection.id)
-    }
-
-    // Create a callback that updates only transactions for this collection
-    const updateTransactionsCallback = () => {
-      this.triggerTransactionUpdate(collection.id)
-    }
-
-    const entry: CollectionRegistryEntry = {
-      weakRef: new WeakRef(collection),
-      metadata,
-      isActive: false,
-      updateCallback,
-      updateTransactionsCallback,
-    }
-
-    this.collections.set(collection.id, entry)
-
-    // Track performance for live queries
-    if (this.isLiveQuery(collection)) {
-      this.instrumentLiveQuery(collection, entry)
-    }
-
-    // Call the update callback immediately so devtools UI updates right away
-    updateCallback()
-
+    
     // Trigger reactive update for immediate UI refresh
     this.triggerUpdate()
 
@@ -116,20 +72,14 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   unregisterCollection = (id: string): void => {
-    const entry = this.collections.get(id)
-    if (entry) {
-      // Release any hard reference
-      entry.hardRef = undefined
-      entry.isActive = false
-      this.collections.delete(id)
-    }
+    this.store.unregisterCollection(id)
 
     // Trigger reactive update for immediate UI refresh
     this.triggerUpdate()
   }
 
   getCollectionMetadata = (id: string): CollectionMetadata | undefined => {
-    const entry = this.collections.get(id)
+    const entry = this.store.collections.get(id)
     if (!entry) return undefined
 
     // Try to get fresh data from the collection if it's still alive
@@ -147,42 +97,11 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   getAllCollectionMetadata = (): Array<CollectionMetadata> => {
-    const results: Array<CollectionMetadata> = []
-
-    for (const [_id, entry] of this.collections) {
-      const collection = entry.weakRef.deref()
-      if (collection) {
-        // Collection is still alive, update metadata
-        entry.metadata.status = collection.status
-        entry.metadata.size = collection.size
-        entry.metadata.hasTransactions = collection.transactions.size > 0
-        entry.metadata.transactionCount = collection.transactions.size
-        entry.metadata.lastUpdated = new Date()
-        results.push({ ...entry.metadata })
-      } else {
-        // Collection was garbage collected, mark it
-        entry.metadata.status = `cleaned-up`
-        entry.metadata.lastUpdated = new Date()
-        results.push({ ...entry.metadata })
-      }
-    }
-
-    return results
+    return this.store.getAllCollectionMetadata()
   }
 
   updateCollectionMetadata = (id: string): void => {
-    const entry = this.collections.get(id)
-    if (!entry) return
-
-    const collection = entry.weakRef.deref()
-    if (collection) {
-      // Update metadata with fresh data from the collection
-      entry.metadata.status = collection.status
-      entry.metadata.size = collection.size
-      entry.metadata.hasTransactions = collection.transactions.size > 0
-      entry.metadata.transactionCount = collection.transactions.size
-      entry.metadata.lastUpdated = new Date()
-    }
+    this.store.updateCollection(id)
 
     // Use efficient update that only changes the specific collection
     this.triggerCollectionUpdate(id)
@@ -192,147 +111,54 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
   }
 
   updateTransactions = (collectionId?: string): void => {
+    this.store.updateTransactions(collectionId)
     this.triggerTransactionUpdate(collectionId)
   }
 
   getCollection = (id: string): any => {
-    const entry = this.collections.get(id)
-    if (!entry) return undefined
-
-    const collection = entry.weakRef.deref()
-    if (collection && !entry.isActive) {
-      // Create hard reference
-      entry.hardRef = collection
-      entry.isActive = true
-    }
-
-    return collection
+    return this.store.getCollection(id)
   }
 
   releaseCollection = (id: string): void => {
-    const entry = this.collections.get(id)
-    if (entry && entry.isActive) {
-      // Release hard reference
-      entry.hardRef = undefined
-      entry.isActive = false
-    }
+    this.store.releaseCollection(id)
   }
 
   getTransactions = (collectionId?: string): Array<TransactionDetails> => {
-    const transactions: Array<TransactionDetails> = []
-
-    for (const [_id, entry] of this.collections) {
-      if (collectionId && _id !== collectionId) continue
-
-      const collection = entry.weakRef.deref()
-      if (!collection) continue
-
-      for (const [txId, transaction] of collection.transactions) {
-        transactions.push({
-          id: txId,
-          collectionId: _id,
-          state: transaction.state,
-          mutations: transaction.mutations.map((m: any) => ({
-            id: m.mutationId,
-            type: m.type,
-            key: m.key,
-            optimistic: m.optimistic,
-            createdAt: m.createdAt,
-            original: m.original,
-            modified: m.modified,
-            changes: m.changes,
-          })),
-          createdAt: transaction.createdAt,
-          updatedAt: transaction.createdAt, // Transaction doesn't have updatedAt, using createdAt
-          isPersisted: transaction.state === `completed`,
-        })
-      }
-    }
-
-    return transactions.sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-    )
+    const devtoolsTransactions = this.store.getTransactions(collectionId)
+    
+    // Convert DevtoolsTransactionEntry to TransactionDetails for backward compatibility
+    return devtoolsTransactions.map(entry => ({
+      id: entry.id,
+      collectionId: entry.collectionId,
+      state: entry.state,
+      mutations: entry.mutations,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      isPersisted: entry.isPersisted,
+    }))
   }
 
   getTransaction = (id: string): TransactionDetails | undefined => {
-    for (const [_collectionId, entry] of this.collections) {
-      const collection = entry.weakRef.deref()
-      if (!collection) continue
+    const entry = this.store.transactions.get(id)
+    if (!entry) return undefined
 
-      const transaction = collection.transactions.get(id)
-      if (transaction) {
-        return {
-          id,
-          collectionId: _collectionId,
-          state: transaction.state,
-          mutations: transaction.mutations.map((m: any) => ({
-            id: m.mutationId,
-            type: m.type,
-            key: m.key,
-            optimistic: m.optimistic,
-            createdAt: m.createdAt,
-            original: m.original,
-            modified: m.modified,
-            changes: m.changes,
-          })),
-          createdAt: transaction.createdAt,
-          updatedAt: transaction.createdAt, // Transaction doesn't have updatedAt, using createdAt
-          isPersisted: transaction.state === `completed`,
-        }
-      }
+    return {
+      id: entry.id,
+      collectionId: entry.collectionId,
+      state: entry.state,
+      mutations: entry.mutations,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      isPersisted: entry.isPersisted,
     }
-    return undefined
   }
 
   cleanup = (): void => {
-    // Stop polling
-    // No polling to stop
-
-    // Release all hard references
-    for (const [_id, entry] of this.collections) {
-      if (entry.isActive) {
-        entry.hardRef = undefined
-        entry.isActive = false
-      }
-    }
+    this.store.cleanup()
   }
 
   garbageCollect = (): void => {
-    // Remove entries for collections that have been garbage collected
-    for (const [id, entry] of this.collections) {
-      const collection = entry.weakRef.deref()
-      if (!collection) {
-        this.collections.delete(id)
-      }
-    }
-  }
-
-  private detectCollectionType = (collection: any): string => {
-    // Check the new collection type marker first
-    if (collection.config.collectionType) {
-      return collection.config.collectionType
-    }
-
-    // Default to generic collection
-    return `generic`
-  }
-
-  private isLiveQuery = (collection: any): boolean => {
-    return this.detectCollectionType(collection) === `live-query`
-  }
-
-  private instrumentLiveQuery = (
-    collection: any,
-    entry: CollectionRegistryEntry
-  ): void => {
-    // This is where we would add performance tracking for live queries
-    // We'll need to hook into the query execution pipeline to track timings
-    // For now, this is a placeholder
-    if (!entry.metadata.timings) {
-      entry.metadata.timings = {
-        totalIncrementalRuns: 0,
-      }
-    }
+    this.store.garbageCollect()
   }
 }
 
@@ -351,6 +177,7 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
 
     return {
       collections: new Map(),
+      store: initializeDevtoolsStore(),
       collectionsSignal: dummySignal as any,
       transactionsSignal: dummySignal as any,
       registerCollection: () => undefined,
@@ -373,8 +200,8 @@ export function initializeDevtoolsRegistry(): DbDevtoolsRegistry {
   }
 
   // Only create real signals on the client side
-  if (!(window as any).__TANSTACK_DB_DEVTOOLS__) {
+  if (!getDevtools()) {
     ;(window as any).__TANSTACK_DB_DEVTOOLS__ = createDbDevtoolsRegistry()
   }
-  return (window as any).__TANSTACK_DB_DEVTOOLS__ as DbDevtoolsRegistry
+  return (getDevtools() as unknown) as DbDevtoolsRegistry
 }

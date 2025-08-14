@@ -500,6 +500,13 @@ importers:
         version: 2.1.20
 
   packages/db-devtools:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tanstack/solid-db':
+        specifier: workspace:*
+        version: link:../solid-db
     devDependencies:
       '@kobalte/core':
         specifier: ^0.13.4
