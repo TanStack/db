@@ -12,6 +12,10 @@ export interface OrderByOptions<Ve> {
   offset?: number
 }
 
+type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
+  setSizeCallback?: (getSize: () => number) => void
+}
+
 /**
  * Orders the elements and limits the number of results, with optional offset
  * This requires a keyed stream, and uses the `topK` operator to order all the elements.
@@ -136,13 +140,14 @@ export function orderByWithFractionalIndexBase<
   valueExtractor: (
     value: T extends KeyValue<unknown, infer V> ? V : never
   ) => Ve,
-  options?: OrderByOptions<Ve>
+  options?: OrderByWithFractionalIndexOptions<Ve>
 ) {
   type KeyType = T extends KeyValue<infer K, unknown> ? K : never
   type ValueType = T extends KeyValue<unknown, infer V> ? V : never
 
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
+  const setSizeCallback = options?.setSizeCallback
   const comparator =
     options?.comparator ??
     ((a, b) => {
@@ -162,6 +167,7 @@ export function orderByWithFractionalIndexBase<
         {
           limit,
           offset,
+          setSizeCallback,
         }
       ),
       consolidate()
@@ -185,7 +191,7 @@ export function orderByWithFractionalIndex<
   valueExtractor: (
     value: T extends KeyValue<unknown, infer V> ? V : never
   ) => Ve,
-  options?: OrderByOptions<Ve>
+  options?: OrderByWithFractionalIndexOptions<Ve>
 ) {
   return orderByWithFractionalIndexBase(
     topKWithFractionalIndex,

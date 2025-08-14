@@ -231,6 +231,35 @@ export class BTreeIndex<
   }
 
   /**
+   * Returns the next n items after the provided item or the first n items if no from item is provided.
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
+   * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
+   */
+  take(n: number, from?: any): Array<TKey> {
+    const keysInResult: Set<TKey> = new Set()
+    const result: Array<TKey> = []
+    const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
+    let key = from
+
+    while ((key = nextKey(key)) && result.length < n) {
+      const keys = this.valueMap.get(key)
+      if (keys) {
+        const it = keys.values()
+        let ks: TKey | undefined
+        while (result.length < n && (ks = it.next().value)) {
+          if (!keysInResult.has(ks)) {
+            result.push(ks)
+            keysInResult.add(ks)
+          }
+        }
+      }
+    }
+
+    return result
+  }
+
+  /**
    * Performs an IN array lookup
    */
   inArrayLookup(values: Array<any>): Set<TKey> {
