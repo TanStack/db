@@ -74,18 +74,8 @@ export function CollectionsPanel({
     switch (type) {
       case `live-query`:
         return [`Items`, `/`, `GC`, `/`, `Status`]
-      case `electric`:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
-      case `query`:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
-      case `local-only`:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
-      case `local-storage`:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
-      case `generic`:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
       default:
-        return [`Items`, `/`, `Txn`, `/`, `GC`, `/`, `Status`]
+        return [`Items`, `/`, `GC`, `/`, `Status`]
     }
   }
 

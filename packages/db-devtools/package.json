@@ -76,7 +76,11 @@
   },
   "dependencies": {
     "@tanstack/db": "workspace:*",
+    "@tanstack/react-table": "^8.13.2",
+    "@tanstack/react-virtual": "^3.0.0",
     "@tanstack/solid-db": "workspace:*",
+    "@tanstack/solid-table": "^8.21.3",
+    "@tanstack/solid-virtual": "^3.13.12",
     "@types/prismjs": "^1.26.5",
     "prismjs": "^1.30.0"
   },

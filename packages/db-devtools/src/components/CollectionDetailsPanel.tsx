@@ -20,6 +20,7 @@ import { Explorer } from "./Explorer"
 import { TransactionsPanel } from "./TransactionsPanel"
 import { GenericDetailsPanel } from "./DetailsPanel"
 import { SyntaxHighlighter } from "./SyntaxHighlighter"
+import { CollectionDataView } from "./CollectionDataView"
 import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
 
@@ -269,8 +270,19 @@ export function CollectionDetailsPanel({
       }
 
       case `data`: {
+        const collectionInstance = collection()
+        if (!collectionInstance?.metadata) {
+          return (
+            <div class={styles().noDataMessage}>
+              Collection metadata not available
+            </div>
+          )
+        }
+
         return (
-          <div class={styles().noDataMessage}>Grid view coming soon...</div>
+          <CollectionDataView
+            collectionMetadata={collectionInstance.metadata}
+          />
         )
       }
 
@@ -367,7 +379,7 @@ export function CollectionDetailsPanel({
           {/* Tab Content */}
           <div
             class={
-              selectedTab() === `transactions`
+              selectedTab() === `data`
                 ? styles().detailsContentNoPadding
                 : styles().detailsContent
             }

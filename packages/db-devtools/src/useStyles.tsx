@@ -100,6 +100,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       font-family: ${fontFamily.sans};
       background-color: ${colors.darkGray[700]};
       color: ${colors.gray[300]};
+      flex-grow: 0;
 
       @media (max-width: 700px) {
         flex-direction: column;
@@ -132,6 +133,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       border-right: 1px solid ${colors.gray[700]};
       display: flex;
       flex-direction: column;
+      min-width: 0; /* prevent content from forcing panel expansion */
     `,
     secondContainer: css`
       flex: 1 1 500px;
@@ -140,6 +142,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       overflow: auto;
       display: flex;
       flex-direction: column;
+      min-width: 0; /* allow shrinking inside parent */
     `,
     collectionsList: css`
       overflow-y: auto;
@@ -357,7 +360,8 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       color: ${colors.gray[300]};
       width: 100%;
       height: 100%;
-      overflow-y: auto;
+      overflow: hidden; /* prevent children from expanding container */
+      min-width: 0; /* allow shrink inside flex parent */
     `,
     detailsHeader: css`
       display: flex;
@@ -401,11 +405,18 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     detailsContent: css`
       flex: 1;
       padding: ${size[2]};
-      overflow-y: auto;
+      overflow: hidden;
+      min-width: 0;
     `,
     detailsContentNoPadding: css`
       flex: 1;
-      overflow-y: auto;
+      overflow: hidden; /* Let inner table manage scrolling */
+      padding: 0;
+      margin: 0;
+      min-width: 0;
+      position: relative;
+      width: 100%;
+      height: 100%;
     `,
     explorerContainer: css`
       font-family: ${fontFamily.mono};
@@ -430,7 +441,7 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
     `,
     collectionsExplorerContainer: css`
       overflow-y: auto;
-      flex: 1;
+      flex: 1 0;
     `,
     collectionsExplorer: css`
       /* Removed padding to use full width and height */
@@ -682,6 +693,76 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       margin-bottom: ${size[1]};
       padding-bottom: ${size[1]};
       border-bottom: 1px solid ${colors.gray[700]};
+    `,
+    dataTableContainer: css`
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      min-width: 0; /* allow shrink within flex parent */
+      background-color: ${colors.darkGray[700]};
+      overflow: hidden;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    `,
+    tableHeaderContainer: css`
+      height: 32px;
+      background-color: ${colors.darkGray[600]};
+      border-bottom: 1px solid ${colors.gray[700]};
+      overflow-x: hidden; /* hide header scrollbar, sync with body */
+      overflow-y: hidden;
+      flex-shrink: 0;
+      padding: 0;
+      margin: 0;
+      width: 100%;
+      min-width: 0;
+    `,
+    tableHeaderCell: css`
+      display: flex;
+      align-items: center;
+      padding: ${size[1]} ${size[2]};
+      font-size: ${fontSize.xs};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[200]};
+      background-color: ${colors.darkGray[600]};
+      border-right: 1px solid ${colors.gray[700]};
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      user-select: none;
+    `,
+    tableBodyContainer: css`
+      flex: 1 1 auto;
+      overflow-x: auto;
+      overflow-y: auto;
+      /* Enable horizontal scroll for wide tables */
+      white-space: nowrap;
+      position: relative;
+      width: 100%;
+      min-width: 0; /* prevent flex overflow expanding parent */
+      max-height: 100%; /* ensure the body can scroll vertically */
+    `,
+    tableRow: css`
+      position: relative;
+      border-bottom: 1px solid ${colors.gray[700]};
+    `,
+    tableCell: css`
+      display: flex;
+      align-items: center;
+      padding: ${size[1]} ${size[2]};
+      font-size: ${fontSize.xs};
+      font-family: ${fontFamily.mono};
+      color: ${colors.gray[300]};
+      border-right: 1px solid ${colors.gray[700]};
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-height: 32px;
+      box-sizing: border-box;
+      background: transparent;
     `,
   }
 }
