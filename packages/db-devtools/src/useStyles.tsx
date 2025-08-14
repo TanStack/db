@@ -569,6 +569,32 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       height: 100%;
       overflow-y: auto;
     `,
+    queryStringContainer: css`
+      padding: ${size[2]};
+      background-color: ${colors.darkGray[800]};
+      border-radius: ${border.radius.sm};
+      border: 1px solid ${colors.gray[700]};
+      margin: ${size[2]};
+    `,
+    queryString: css`
+      font-family: ${fontFamily.mono};
+      font-size: ${fontSize.xs};
+      color: ${colors.gray[300]};
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: ${font.lineHeight.md};
+      margin: 0 0 ${size[3]} 0;
+      padding: 0 0 ${size[2]} 0;
+      border-bottom: 1px solid ${colors.gray[700]};
+    `,
+    queryStringHeader: css`
+      font-size: ${fontSize.sm};
+      font-weight: ${font.weight.semibold};
+      color: ${colors.gray[200]};
+      margin-bottom: ${size[1]};
+      padding-bottom: ${size[1]};
+      border-bottom: 1px solid ${colors.gray[700]};
+    `,
   }
 }
 

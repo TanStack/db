@@ -15,6 +15,7 @@ import {
 import { clsx as cx } from "clsx"
 import { useStyles } from "../useStyles"
 import { getDevtoolsRegistry } from "../devtools"
+import { convertQueryIRToString } from "../utils/queryToString"
 import { Explorer } from "./Explorer"
 import { TransactionsPanel } from "./TransactionsPanel"
 import { GenericDetailsPanel } from "./DetailsPanel"
@@ -25,21 +26,30 @@ export interface CollectionDetailsPanelProps {
   activeCollection: Accessor<CollectionMetadata | undefined>
 }
 
-type CollectionTab = `summary` | `config` | `state` | `transactions` | `data` | `query-ir`
+type CollectionTab =
+  | `summary`
+  | `config`
+  | `state`
+  | `transactions`
+  | `data`
+  | `query-ir`
 
 export function CollectionDetailsPanel({
   activeCollection,
 }: CollectionDetailsPanelProps) {
   const styles = useStyles()
   const [selectedTab, setSelectedTab] = createSignal<CollectionTab>(`summary`)
-  
+
   // Reset selected tab if it's not available for the current collection
   createEffect(() => {
     const currentCollection = collection()
     const availableTabs = tabs()
     const currentTab = selectedTab()
-    
-    if (currentCollection && !availableTabs.find(tab => tab.id === currentTab)) {
+
+    if (
+      currentCollection &&
+      !availableTabs.find((tab) => tab.id === currentTab)
+    ) {
       setSelectedTab(`summary`)
     }
   })
@@ -141,12 +151,12 @@ export function CollectionDetailsPanel({
       { id: `transactions`, label: `Transactions` },
       { id: `data`, label: `Data` },
     ]
-    
+
     // Only add Query IR tab for live query collections
     if (currentCollection?.metadata.type === `live-query`) {
       baseTabs.push({ id: `query-ir`, label: `Query IR` })
     }
-    
+
     return baseTabs
   })
 
@@ -159,11 +169,28 @@ export function CollectionDetailsPanel({
     switch (selectedTab()) {
       case `summary`: {
         return (
-          <Explorer
-            label="Collection Metadata"
-            value={() => metadata}
-            defaultExpanded={{}}
-          />
+          <div>
+            {/* Show query string for live query collections */}
+            {metadata.type === `live-query` &&
+              (() => {
+                const queryIR = instance?.config.__devtoolsQueryIR
+                if (queryIR) {
+                  const queryString = convertQueryIRToString(
+                    queryIR.unoptimized
+                  )
+                  return (
+                    <pre class={styles().queryString}>{queryString}</pre>
+                  )
+                }
+                return null
+              })()}
+
+            <Explorer
+              label="Collection Metadata"
+              value={() => metadata}
+              defaultExpanded={{}}
+            />
+          </div>
         )
       }
 
@@ -243,8 +270,8 @@ export function CollectionDetailsPanel({
       }
 
       case `query-ir`: {
-        const currentCollection = collection()
-        if (!currentCollection?.instance) {
+        const collectionInstance = collection()
+        if (!collectionInstance?.instance) {
           return (
             <div class={styles().noDataMessage}>
               Collection instance not available
@@ -253,7 +280,7 @@ export function CollectionDetailsPanel({
         }
 
         // Only show for live query collections
-        if (currentCollection.metadata.type !== `live-query`) {
+        if (collectionInstance.metadata.type !== `live-query`) {
           return (
             <div class={styles().noDataMessage}>
               Query IR is only available for live query collections
@@ -261,7 +288,7 @@ export function CollectionDetailsPanel({
           )
         }
 
-        const queryIR = currentCollection.instance.config.__devtoolsQueryIR
+        const queryIR = collectionInstance.instance.config.__devtoolsQueryIR
         if (!queryIR) {
           return (
             <div class={styles().noDataMessage}>
