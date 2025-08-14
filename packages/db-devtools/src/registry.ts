@@ -36,8 +36,18 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
     this._collectionsSignal[1]([...collectionsData])
 
     // Update transactions signal
-    const transactionsData = this.getTransactions()
-    this._transactionsSignal[1](transactionsData)
+    const transactionsData = this.store.getTransactions()
+    this._transactionsSignal[1](
+      transactionsData.map((entry) => ({
+        id: entry.id,
+        collectionId: entry.collectionId,
+        state: entry.state,
+        mutations: entry.mutations,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        isPersisted: entry.isPersisted,
+      }))
+    )
   }
 
   private triggerCollectionUpdate = (id: string) => {
@@ -52,8 +62,18 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   private triggerTransactionUpdate = (collectionId?: string) => {
     // Get updated transactions data
-    const updatedTransactions = this.getTransactions(collectionId)
-    this._transactionsSignal[1](updatedTransactions)
+    const updatedTransactions = this.store.getTransactions(collectionId)
+    this._transactionsSignal[1](
+      updatedTransactions.map((entry) => ({
+        id: entry.id,
+        collectionId: entry.collectionId,
+        state: entry.state,
+        mutations: entry.mutations,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        isPersisted: entry.isPersisted,
+      }))
+    )
   }
 
   registerCollection = (collection: any): (() => void) | undefined => {
@@ -111,36 +131,6 @@ class DbDevtoolsRegistryImpl implements DbDevtoolsRegistry {
 
   releaseCollection = (id: string): void => {
     this.store.releaseCollection(id)
-  }
-
-  getTransactions = (collectionId?: string): Array<TransactionDetails> => {
-    const devtoolsTransactions = this.store.getTransactions(collectionId)
-
-    // Convert DevtoolsTransactionEntry to TransactionDetails for backward compatibility
-    return devtoolsTransactions.map((entry) => ({
-      id: entry.id,
-      collectionId: entry.collectionId,
-      state: entry.state,
-      mutations: entry.mutations,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-      isPersisted: entry.isPersisted,
-    }))
-  }
-
-  getTransaction = (id: string): TransactionDetails | undefined => {
-    const entry = this.store.transactions.get(id)
-    if (!entry) return undefined
-
-    return {
-      id: entry.id,
-      collectionId: entry.collectionId,
-      state: entry.state,
-      mutations: entry.mutations,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-      isPersisted: entry.isPersisted,
-    }
   }
 
   cleanup = (): void => {

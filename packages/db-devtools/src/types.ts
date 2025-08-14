@@ -183,10 +183,6 @@ export interface DbDevtoolsRegistry {
   getCollection: (id: string) => CollectionImpl<any, any, any> | undefined
   releaseCollection: (id: string) => void
 
-  // Transaction access
-  getTransactions: (collectionId?: string) => Array<TransactionDetails>
-  getTransaction: (id: string) => TransactionDetails | undefined
-
   // Cleanup utilities
   cleanup: () => void
   garbageCollect: () => void
