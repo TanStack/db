@@ -76,7 +76,9 @@
   },
   "dependencies": {
     "@tanstack/db": "workspace:*",
-    "@tanstack/solid-db": "workspace:*"
+    "@tanstack/solid-db": "workspace:*",
+    "@types/prismjs": "^1.26.5",
+    "prismjs": "^1.30.0"
   },
   "devDependencies": {
     "@kobalte/core": "^0.13.4",

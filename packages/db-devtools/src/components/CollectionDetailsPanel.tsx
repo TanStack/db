@@ -19,6 +19,7 @@ import { convertQueryIRToString } from "../utils/queryToString"
 import { Explorer } from "./Explorer"
 import { TransactionsPanel } from "./TransactionsPanel"
 import { GenericDetailsPanel } from "./DetailsPanel"
+import { SyntaxHighlighter } from "./SyntaxHighlighter"
 import type { CollectionMetadata } from "../types"
 import type { Accessor } from "solid-js"
 
@@ -179,7 +180,11 @@ export function CollectionDetailsPanel({
                     queryIR.unoptimized
                   )
                   return (
-                    <pre class={styles().queryString}>{queryString}</pre>
+                    <SyntaxHighlighter
+                      code={queryString}
+                      language="javascript"
+                      class={styles().queryString}
+                    />
                   )
                 }
                 return null

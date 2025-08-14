@@ -577,15 +577,103 @@ const stylesFactory = (shadowDOMTarget?: ShadowRoot) => {
       margin: ${size[2]};
     `,
     queryString: css`
-      font-family: ${fontFamily.mono};
       font-size: ${fontSize.xs};
-      color: ${colors.gray[300]};
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: ${font.lineHeight.md};
       margin: 0 0 ${size[3]} 0;
       padding: 0 0 ${size[2]} 0;
       border-bottom: 1px solid ${colors.gray[700]};
+      background: transparent !important;
+
+      /* Prism.js syntax highlighting styles for dark theme */
+      & .token.comment,
+      & .token.prolog,
+      & .token.doctype,
+      & .token.cdata {
+        color: ${colors.gray[500]};
+      }
+
+      & .token.punctuation {
+        color: ${colors.gray[400]};
+      }
+
+      & .token.namespace {
+        opacity: 0.7;
+      }
+
+      & .token.property,
+      & .token.tag,
+      & .token.boolean,
+      & .token.number,
+      & .token.constant,
+      & .token.symbol,
+      & .token.deleted {
+        color: ${colors.blue[400]};
+      }
+
+      & .token.selector,
+      & .token.attr-name,
+      & .token.string,
+      & .token.char,
+      & .token.builtin,
+      & .token.inserted {
+        color: ${colors.green[400]};
+      }
+
+      & .token.operator,
+      & .token.entity,
+      & .token.url,
+      & .language-css .token.string,
+      & .style .token.string {
+        color: ${colors.yellow[400]};
+      }
+
+      & .token.atrule,
+      & .token.attr-value,
+      & .token.keyword {
+        color: ${colors.purple[400]};
+      }
+
+      & .token.function,
+      & .token.class-name {
+        color: ${colors.orange[400]};
+      }
+
+      & .token.regex,
+      & .token.important,
+      & .token.variable {
+        color: ${colors.red[400]};
+      }
+
+      & .token.important,
+      & .token.bold {
+        font-weight: ${font.weight.bold};
+      }
+
+      & .token.italic {
+        font-style: italic;
+      }
+
+      & .token.entity {
+        cursor: help;
+      }
+
+      /* Override Prism.js default styles to match our theme */
+      & .token {
+        font-family: ${fontFamily.mono};
+      }
+
+      & pre {
+        background: transparent !important;
+        margin: 0;
+        padding: 0;
+      }
+
+      & code {
+        font-family: ${fontFamily.mono};
+        font-size: ${fontSize.xs};
+        line-height: ${font.lineHeight.md};
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
     `,
     queryStringHeader: css`
       font-size: ${fontSize.sm};
