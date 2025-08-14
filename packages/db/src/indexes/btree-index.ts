@@ -1,7 +1,7 @@
 import { BTree } from "../utils/btree.js"
 import { defaultComparator } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
-import type { BasicExpression, OrderByDirection } from "../query/ir.js"
+import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
 
 /**
@@ -236,17 +236,10 @@ export class BTreeIndex<
    * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
    * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
    */
-  take(
-    n: number,
-    direction: OrderByDirection = `asc`,
-    from?: any
-  ): Array<TKey> {
+  take(n: number, from?: any): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    const nextKey =
-      direction === `asc`
-        ? (k?: any) => this.orderedEntries.nextHigherKey(k)
-        : (k?: any) => this.orderedEntries.nextLowerKey(k)
+    const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
     let key = from
 
     while ((key = nextKey(key)) && result.length < n) {

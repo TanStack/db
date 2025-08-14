@@ -1,20 +1,25 @@
 import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
 import { defaultComparator, makeComparator } from "../../utils/comparison.js"
+import { PropRef } from "../ir.js"
+import { ensureIndexForField } from "../../indexes/auto-index.js"
+import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
-import type { OrderByClause, OrderByDirection, QueryIR } from "../ir.js"
+import { followRef } from "./index.js"
+import type { CompiledSingleRowExpression } from "./evaluators.js"
+import type { OrderByClause, QueryIR } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 import type { BaseIndex } from "../../indexes/base-index.js"
 import type { Collection } from "../../collection.js"
-import { followRef } from "./index.js"
-import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { findIndexForField } from "../../utils/index-optimization.js"
 
 export type OrderByOptimizationInfo = {
   offset: number
   limit: number
-  direction: OrderByDirection
-  comparator: (a: any, b: any) => number
+  comparator: (
+    a: Record<string, unknown> | null | undefined,
+    b: Record<string, unknown> | null | undefined
+  ) => number
+  valueExtractorForRawRow: (row: Record<string, unknown>) => any
   index: BaseIndex<string | number>
   dataNeeded?: () => number
 }
@@ -70,7 +75,7 @@ export function processOrderBy(
   }
 
   // Create a multi-property comparator that respects the order and direction of each property
-  const comparator = (a: unknown, b: unknown) => {
+  const compare = (a: unknown, b: unknown) => {
     // If we're comparing arrays (multiple properties), compare each property in order
     if (orderByClause.length > 1) {
       const arrayA = a as Array<unknown>
@@ -95,7 +100,6 @@ export function processOrderBy(
 
     return defaultComparator(a, b)
   }
-  
 
   let setSizeCallback: ((getSize: () => number) => void) | undefined
 
@@ -119,8 +123,23 @@ export function processOrderBy(
         ensureIndexForField(
           fieldName,
           followRefResult.path,
-          followRefCollection
+          followRefCollection,
+          compare
         )
+      }
+
+      const valueExtractorForRawRow = compileExpression(
+        new PropRef(followRefResult.path),
+        true
+      ) as CompiledSingleRowExpression
+
+      const comparator = (
+        a: Record<string, unknown> | null | undefined,
+        b: Record<string, unknown> | null | undefined
+      ) => {
+        const extractedA = a ? valueExtractorForRawRow(a) : a
+        const extractedB = b ? valueExtractorForRawRow(b) : b
+        return compare(extractedA, extractedB)
       }
 
       const index: BaseIndex<string | number> | undefined = findIndexForField(
@@ -133,8 +152,8 @@ export function processOrderBy(
         const orderByOptimizationInfo = {
           offset: offset ?? 0,
           limit,
-          direction: clause.compareOptions.direction,
           comparator,
+          valueExtractorForRawRow,
           index,
         }
 
@@ -159,7 +178,7 @@ export function processOrderBy(
     orderByWithFractionalIndex(valueExtractor, {
       limit,
       offset,
-      comparator,
+      comparator: compare,
       setSizeCallback,
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
