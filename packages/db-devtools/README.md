@@ -34,7 +34,7 @@ function App() {
 ### Standalone Component
 
 ```tsx
-import { ReactDbDevtools } from '@tanstack/react-db-devtools'
+import { ReactDbDevtools } from "@tanstack/react-db-devtools"
 
 function App() {
   return (
@@ -49,7 +49,7 @@ function App() {
 ## Features
 
 - **Collection Monitoring**: View all active collections with real-time status updates
-- **Live Query Insights**: Special handling for live queries with performance metrics  
+- **Live Query Insights**: Special handling for live queries with performance metrics
 - **Transaction Tracking**: Monitor all database transactions and their states
 - **Development Only**: Automatically tree-shaken in production builds
 
