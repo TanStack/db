@@ -334,6 +334,36 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       }
     }
 
+    // Null/undefined checking functions
+    case `isUndefined`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value === undefined
+      }
+    }
+    case `isNotUndefined`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value !== undefined
+      }
+    }
+    case `isNull`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value === null
+      }
+    }
+    case `isNotNull`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value !== null
+      }
+    }
+
     default:
       throw new UnknownFunctionError(func.name)
   }
