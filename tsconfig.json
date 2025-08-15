@@ -35,7 +35,8 @@
     "examples/**/*.ts",
     "examples/**/*.tsx",
     "eslint.config.mjs",
-    "scripts/verify-links.ts"
+    "scripts/verify-links.ts",
+    "shared/**/*.d.ts"
   ],
   "exclude": ["node_modules"]
 }

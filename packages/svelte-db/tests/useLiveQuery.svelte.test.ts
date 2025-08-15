@@ -1044,7 +1044,7 @@ describe(`Query Collections`, () => {
       })
     })
 
-    it(`should handle isReady with parameterized queries`, async () => {
+    it(`should handle isReady with parameterized queries`, () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
 

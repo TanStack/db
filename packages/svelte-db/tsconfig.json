@@ -16,6 +16,6 @@
       "@tanstack/db-ivm": ["../db-ivm/src"]
     }
   },
-  "include": ["src/**/*", "tests", "vite.config.ts", "svelte.config.js"],
+  "include": ["src/**/*", "tests", "vite.config.ts", "svelte.config.js", "../../shared/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

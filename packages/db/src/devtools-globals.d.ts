@@ -1,4 +1,4 @@
-// Ambient declaration to provide the global devtools type inside the core db package
+// Ambient declaration to provide the global devtools type for the db package
 // This avoids depending on the db-devtools package while allowing typed access
 
 export {}
