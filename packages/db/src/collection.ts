@@ -401,6 +401,30 @@ export class CollectionImpl<
     }
   }
 
+  /**
+   * Set the collection back to loading state
+   * This is called by sync implementations when they need to reset the collection state
+   * (e.g., when receiving a must-refetch message from Electric)
+   * @private - Should only be called by sync implementations
+   */
+  private setLoading(): void {
+    // Can transition to loading from ready or initialCommit states
+    if (this._status === `ready` || this._status === `initialCommit`) {
+      this.setStatus(`loading`)
+    }
+  }
+
+  /**
+   * Clear the synced data and metadata
+   * This is called by sync implementations when they need to clear the collection state
+   * (e.g., when receiving a must-refetch message from Electric)
+   * @private - Should only be called by sync implementations
+   */
+  private clearSyncedState(): void {
+    this.syncedData.clear()
+    this.syncedMetadata.clear()
+  }
+
   public id = ``
 
   /**
@@ -444,7 +468,7 @@ export class CollectionImpl<
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
       initialCommit: [`ready`, `error`, `cleaned-up`],
-      ready: [`cleaned-up`, `error`],
+      ready: [`cleaned-up`, `error`, `loading`],
       error: [`cleaned-up`, `idle`],
       "cleaned-up": [`loading`, `error`],
     }
@@ -599,6 +623,12 @@ export class CollectionImpl<
         },
         markReady: () => {
           this.markReady()
+        },
+        setLoading: () => {
+          this.setLoading()
+        },
+        clearSyncedState: () => {
+          this.clearSyncedState()
         },
       })
 

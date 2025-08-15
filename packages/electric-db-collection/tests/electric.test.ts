@@ -225,6 +225,57 @@ describe(`Electric Integration`, () => {
     expect(collection.state).toEqual(new Map())
   })
 
+  it(`should handle must-refetch by clearing synced data and resetting to loading state`, () => {
+    // First, populate the collection with some data
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Test User` },
+        headers: { operation: `insert` },
+      },
+      {
+        key: `2`,
+        value: { id: 2, name: `Another User` },
+        headers: { operation: `insert` },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Verify the data is in the collection
+    expect(collection.state.size).toBe(2)
+    expect(collection.status).toBe(`ready`)
+
+    // Send must-refetch control message
+    subscriber([
+      {
+        headers: { control: `must-refetch` },
+      },
+    ])
+
+    // The collection should be cleared and reset to loading state
+    expect(collection.state.size).toBe(0)
+    expect(collection.status).toBe(`loading`)
+
+    // Send new data after must-refetch
+    subscriber([
+      {
+        key: `3`,
+        value: { id: 3, name: `New User` },
+        headers: { operation: `insert` },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // The collection should now have the new data
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(3)).toEqual({ id: 3, name: `New User` })
+    expect(collection.status).toBe(`ready`)
+  })
+
   // Tests for txid tracking functionality
   describe(`txid tracking`, () => {
     it(`should track txids from incoming messages`, async () => {
