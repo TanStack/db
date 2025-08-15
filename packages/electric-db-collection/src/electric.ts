@@ -476,8 +476,7 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, clearSyncedState, setLoading } =
-        params
+      const { begin, write, commit, markReady, truncate } = params
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
@@ -530,14 +529,19 @@ function createElectricSync<T extends Row<unknown>>(
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
             debug(
-              `Received must-refetch message, clearing synced data and restarting sync`
+              `Received must-refetch message, starting transaction with truncate`
             )
 
-            // Clear synced data and reset to loading state using the new methods
-            clearSyncedState()
-            setLoading()
+            // Start a transaction and truncate the collection
+            if (!transactionStarted) {
+              begin()
+              transactionStarted = true
+            }
 
-            // Reset transaction state to allow new transactions after must-refetch
+            truncate()
+
+            // Commit the truncate transaction immediately
+            commit()
             transactionStarted = false
           }
         }

@@ -254,9 +254,9 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    // The collection should be cleared and reset to loading state
+    // The collection should be cleared but remain in ready state
     expect(collection.state.size).toBe(0)
-    expect(collection.status).toBe(`loading`)
+    expect(collection.status).toBe(`ready`)
 
     // Send new data after must-refetch
     subscriber([

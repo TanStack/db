@@ -65,6 +65,7 @@ import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
+  truncate?: boolean
 }
 
 /**
@@ -401,30 +402,6 @@ export class CollectionImpl<
     }
   }
 
-  /**
-   * Set the collection back to loading state
-   * This is called by sync implementations when they need to reset the collection state
-   * (e.g., when receiving a must-refetch message from Electric)
-   * @private - Should only be called by sync implementations
-   */
-  private setLoading(): void {
-    // Can transition to loading from ready or initialCommit states
-    if (this._status === `ready` || this._status === `initialCommit`) {
-      this.setStatus(`loading`)
-    }
-  }
-
-  /**
-   * Clear the synced data and metadata
-   * This is called by sync implementations when they need to clear the collection state
-   * (e.g., when receiving a must-refetch message from Electric)
-   * @private - Should only be called by sync implementations
-   */
-  private clearSyncedState(): void {
-    this.syncedData.clear()
-    this.syncedMetadata.clear()
-  }
-
   public id = ``
 
   /**
@@ -468,7 +445,7 @@ export class CollectionImpl<
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
       initialCommit: [`ready`, `error`, `cleaned-up`],
-      ready: [`cleaned-up`, `error`, `loading`],
+      ready: [`cleaned-up`, `error`],
       error: [`cleaned-up`, `idle`],
       "cleaned-up": [`loading`, `error`],
     }
@@ -624,11 +601,23 @@ export class CollectionImpl<
         markReady: () => {
           this.markReady()
         },
-        setLoading: () => {
-          this.setLoading()
-        },
-        clearSyncedState: () => {
-          this.clearSyncedState()
+        truncate: () => {
+          const pendingTransaction =
+            this.pendingSyncedTransactions[
+              this.pendingSyncedTransactions.length - 1
+            ]
+          if (!pendingTransaction) {
+            throw new NoPendingSyncTransactionWriteError()
+          }
+          if (pendingTransaction.committed) {
+            throw new SyncTransactionAlreadyCommittedWriteError()
+          }
+
+          // Clear all operations from the current transaction
+          pendingTransaction.operations = []
+
+          // Mark the transaction as a truncate operation
+          pendingTransaction.truncate = true
         },
       })
 
@@ -1209,6 +1198,40 @@ export class CollectionImpl<
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
       for (const transaction of this.pendingSyncedTransactions) {
+        // Handle truncate operations first
+        if (transaction.truncate) {
+          // Collect all existing keys (both synced and optimistic) before clearing
+          const existingKeys = new Set<TKey>()
+
+          // Add all synced keys
+          for (const key of this.syncedKeys) {
+            existingKeys.add(key)
+          }
+
+          // Add all optimistic upsert keys
+          for (const key of this.optimisticUpserts.keys()) {
+            existingKeys.add(key)
+          }
+
+          // Generate delete events for all existing keys
+          for (const key of existingKeys) {
+            const previousValue =
+              this.optimisticUpserts.get(key) || this.syncedData.get(key)
+            if (previousValue !== undefined) {
+              events.push({
+                type: `delete`,
+                key,
+                value: previousValue,
+              })
+            }
+          }
+
+          // Clear all synced data and metadata
+          this.syncedData.clear()
+          this.syncedMetadata.clear()
+          this.syncedKeys.clear()
+        }
+
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
           this.syncedKeys.add(key)
