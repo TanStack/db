@@ -370,9 +370,9 @@ describe(`Collection Error Handling`, () => {
 
       expect(collection.status).toBe(`idle`)
 
-      // Test invalid transition
+      // Test invalid transition (ready to idle is not allowed)
       expect(() => {
-        collectionImpl.validateStatusTransition(`ready`, `loading`)
+        collectionImpl.validateStatusTransition(`ready`, `idle`)
       }).toThrow(InvalidCollectionStatusTransitionError)
 
       // Test valid transition
@@ -434,6 +434,9 @@ describe(`Collection Error Handling`, () => {
       ).not.toThrow()
       expect(() =>
         collectionImpl.validateStatusTransition(`ready`, `error`)
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl.validateStatusTransition(`ready`, `loading`)
       ).not.toThrow()
 
       // Valid transitions from error (allow recovery)
