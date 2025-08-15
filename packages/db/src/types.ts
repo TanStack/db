@@ -398,6 +398,24 @@ export interface CollectionConfig<
    */
   compare?: (x: T, y: T) => number
   /**
+   * Collection type for devtools grouping and identification
+   * @internal
+   */
+  collectionType?: string
+  /**
+   * Internal flag to prevent devtools registration for devtools-owned collections
+   * @internal
+   */
+  __devtoolsInternal?: boolean
+  /**
+   * Internal query IR storage for devtools access
+   * @internal
+   */
+  __devtoolsQueryIR?: {
+    unoptimized: any
+    optimized: any
+  }
+  /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value

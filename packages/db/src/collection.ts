@@ -62,6 +62,49 @@ import type {
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
 
+// Check for devtools registry and register collection if available
+function registerWithDevtools(collection: CollectionImpl<any, any, any>): void {
+  // Skip registration if this is a devtools internal collection
+  if (collection.config.__devtoolsInternal) {
+    return
+  }
+
+  // Skip if already registered
+  if ((collection as any).isRegisteredWithDevtools) {
+    return
+  }
+
+  if (typeof window !== `undefined`) {
+    const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
+    if (devtools?.registerCollection) {
+      const updateCallback = devtools.registerCollection(collection)
+      if (updateCallback) {
+        ;(collection as any).__devtoolsUpdateCallback = updateCallback
+        ;(collection as any).isRegisteredWithDevtools = true
+      } else {
+        ;(collection as any).isRegisteredWithDevtools = false
+      }
+    } else {
+      ;(collection as any).isRegisteredWithDevtools = false
+    }
+  }
+}
+
+// Helper function to trigger devtools updates
+function triggerDevtoolsUpdate(
+  collection: CollectionImpl<any, any, any>
+): void {
+  if (typeof window !== `undefined`) {
+    const updateCallback = (collection as any).__devtoolsUpdateCallback
+    if (typeof updateCallback === `function`) {
+      updateCallback()
+    }
+  }
+}
+
+// Import global devtools types (will be available when devtools are loaded)
+// The actual types are declared in @tanstack/db-devtools
+
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
@@ -331,6 +374,7 @@ export class CollectionImpl<
   private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private preloadPromise: Promise<void> | null = null
   private syncCleanupFn: (() => void) | null = null
+  private isRegisteredWithDevtools = false
 
   /**
    * Register a callback to be executed when the collection first becomes ready
@@ -462,6 +506,9 @@ export class CollectionImpl<
     this.validateStatusTransition(this._status, newStatus)
     this._status = newStatus
 
+    // Trigger devtools update when status changes
+    triggerDevtoolsUpdate(this)
+
     // Resolve indexes when collection becomes ready
     if (newStatus === `ready` && !this.isIndexesResolved) {
       // Resolve indexes asynchronously without blocking
@@ -509,6 +556,9 @@ export class CollectionImpl<
     } else {
       this.syncedData = new Map<TKey, T>()
     }
+
+    // Register with devtools if available
+    registerWithDevtools(this)
 
     // Only start sync immediately if explicitly enabled
     if (config.startSync === true) {
@@ -681,6 +731,15 @@ export class CollectionImpl<
       })
     }
 
+    // Unregister from devtools if available
+    if (
+      typeof window !== `undefined` &&
+      window.__TANSTACK_DB_DEVTOOLS__?.unregisterCollection
+    ) {
+      window.__TANSTACK_DB_DEVTOOLS__.unregisterCollection(this.id)
+      this.isRegisteredWithDevtools = false
+    }
+
     // Clear data
     this.syncedData.clear()
     this.syncedMetadata.clear()
@@ -736,6 +795,11 @@ export class CollectionImpl<
   private addSubscriber(): void {
     this.activeSubscribersCount++
     this.cancelGCTimer()
+
+    // Re-register with devtools if not already registered (handles timing issues)
+    if (!this.isRegisteredWithDevtools) {
+      registerWithDevtools(this)
+    }
 
     // Start sync if collection was cleaned up
     if (this._status === `cleaned-up` || this._status === `idle`) {
@@ -872,6 +936,9 @@ export class CollectionImpl<
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
+
+    // Trigger devtools update after optimistic state changes
+    triggerDevtoolsUpdate(this)
   }
 
   /**
@@ -1347,6 +1414,9 @@ export class CollectionImpl<
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
       }
+
+      // Trigger devtools update after sync operations
+      triggerDevtoolsUpdate(this)
     }
   }
 
@@ -1355,6 +1425,17 @@ export class CollectionImpl<
    * @private
    */
   private scheduleTransactionCleanup(transaction: Transaction<any>): void {
+    // Skip cleanup for devtools internal collections
+    if (this.config.__devtoolsInternal) {
+      return
+    }
+
+    // Register transaction with devtools
+    if (typeof window !== `undefined`) {
+      const devtools = window.__TANSTACK_DB_DEVTOOLS__
+      devtools?.store?.registerTransaction?.(transaction, this.id)
+    }
+
     // Only schedule cleanup for transactions that aren't already completed
     if (transaction.state === `completed`) {
       this.transactions.delete(transaction.id)
@@ -2369,5 +2450,16 @@ export class CollectionImpl<
     this.capturePreSyncVisibleState()
 
     this.recomputeOptimisticState(false)
+
+    // Trigger devtools update after transaction state changes
+    triggerDevtoolsUpdate(this)
+
+    // Also trigger transaction list/state refresh in devtools
+    if (typeof window !== `undefined`) {
+      const devtools = window.__TANSTACK_DB_DEVTOOLS__ as any
+      try {
+        devtools?.updateTransactions?.(this.id)
+      } catch {}
+    }
   }
 }

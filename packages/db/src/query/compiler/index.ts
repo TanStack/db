@@ -33,6 +33,8 @@ export interface CompilationResult {
   pipeline: ResultStream
   /** Map of collection aliases to their WHERE clauses for index optimization */
   collectionWhereClauses: Map<string, BasicExpression<boolean>>
+  /** The optimized query IR (for devtools) */
+  optimizedQueryIR: QueryIR
 }
 
 /**
@@ -251,6 +253,7 @@ export function compileQuery(
     const compilationResult = {
       pipeline: result,
       collectionWhereClauses,
+      optimizedQueryIR: query,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -277,6 +280,7 @@ export function compileQuery(
   const compilationResult = {
     pipeline: result,
     collectionWhereClauses,
+    optimizedQueryIR: query,
   }
   cache.set(rawQuery, compilationResult)
 

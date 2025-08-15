@@ -440,6 +440,7 @@ export function localStorageCollectionOptions<
       clearStorage,
       getStorageSize,
     },
+    collectionType: `local-storage` as const,
   }
 }
 

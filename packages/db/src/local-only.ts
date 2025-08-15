@@ -39,6 +39,12 @@ export interface LocalOnlyCollectionConfig<
   getKey: (item: ResolveType<TExplicit, TSchema, TFallback>) => TKey
 
   /**
+   * Internal flag to prevent devtools registration for devtools-owned collections
+   * @internal
+   */
+  __devtoolsInternal?: boolean
+
+  /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
    */
@@ -216,6 +222,7 @@ export function localOnlyCollectionOptions<
     utils: {} as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,
+    collectionType: `local-only` as const,
   }
 }
 

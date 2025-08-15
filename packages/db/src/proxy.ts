@@ -159,7 +159,12 @@ function deepClone<T extends unknown>(
 /**
  * Deep equality check that handles special types like Date, RegExp, Map, and Set
  */
-function deepEqual<T>(a: T, b: T): boolean {
+function deepEqual<T>(
+  a: T,
+  b: T,
+  // Track visited object pairs to avoid infinite recursion on cyclic structures
+  visited: WeakMap<object, Set<object>> = new WeakMap()
+): boolean {
   // Handle primitive types
   if (a === b) return true
 
@@ -171,6 +176,25 @@ function deepEqual<T>(a: T, b: T): boolean {
     typeof b !== `object`
   ) {
     return false
+  }
+
+  // Before descending into object comparisons, guard against cycles by
+  // memoizing object pairs that have already been compared
+  const objA = a as unknown as object
+  const objB = b as unknown as object
+  const isObjA = typeof a === `object`
+  const isObjB = typeof b === `object`
+
+  if (isObjA && isObjB) {
+    const seenForA = visited.get(objA)
+    if (seenForA && seenForA.has(objB)) {
+      return true
+    }
+    const setForA = seenForA ?? new Set<object>()
+    setForA.add(objB)
+    if (!seenForA) {
+      visited.set(objA, setForA)
+    }
   }
 
   // Handle Date objects
@@ -189,7 +213,7 @@ function deepEqual<T>(a: T, b: T): boolean {
 
     const entries = Array.from(a.entries())
     for (const [key, val] of entries) {
-      if (!b.has(key) || !deepEqual(val, b.get(key))) {
+      if (!b.has(key) || !deepEqual(val, b.get(key), visited)) {
         return false
       }
     }
@@ -220,7 +244,7 @@ function deepEqual<T>(a: T, b: T): boolean {
     if (a.length !== b.length) return false
 
     for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false
+      if (!deepEqual(a[i], b[i], visited)) return false
     }
 
     return true
@@ -253,7 +277,7 @@ function deepEqual<T>(a: T, b: T): boolean {
   return keysA.every(
     (key) =>
       Object.prototype.hasOwnProperty.call(b, key) &&
-      deepEqual((a as any)[key], (b as any)[key])
+      deepEqual((a as any)[key], (b as any)[key], visited)
   )
 }
 

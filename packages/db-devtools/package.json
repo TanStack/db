@@ -1,0 +1,103 @@
+{
+  "name": "@tanstack/db-devtools",
+  "version": "0.0.1",
+  "description": "Developer tools for TanStack DB",
+  "author": "tanstack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/db-devtools"
+  },
+  "homepage": "https://tanstack.com/db",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/tannerlinsley"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "browser": {},
+  "exports": {
+    ".": {
+      "@tanstack/custom-condition": "./src/index.ts",
+      "solid": {
+        "development": "./dist/index.js",
+        "import": "./dist/index.js"
+      },
+      "development": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.cjs"
+        }
+      },
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src",
+    "!src/__tests__"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "clean": "premove ./build ./coverage ./dist-ts",
+    "compile": "tsc --build",
+    "test:eslint": "eslint ./src",
+    "test:types": "npm-run-all --serial test:types:*",
+    "test:types:ts53": "node ../../node_modules/typescript53/lib/tsc.js --build",
+    "test:types:ts54": "node ../../node_modules/typescript54/lib/tsc.js --build",
+    "test:types:ts55": "node ../../node_modules/typescript55/lib/tsc.js --build",
+    "test:types:ts56": "node ../../node_modules/typescript56/lib/tsc.js --build",
+    "test:types:ts57": "node ../../node_modules/typescript57/lib/tsc.js --build",
+    "test:types:tscurrent": "tsc --build",
+    "test:lib": "vitest",
+    "test:lib:dev": "pnpm run test:lib --watch",
+    "test:build": "publint --strict && attw --pack",
+    "lint": "eslint . --fix",
+    "build": "vite build",
+    "build:dev": "tsup --watch"
+  },
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/react-table": "^8.13.2",
+    "@tanstack/react-virtual": "^3.0.0",
+    "@tanstack/solid-db": "workspace:*",
+    "@tanstack/solid-table": "^8.21.3",
+    "@tanstack/solid-virtual": "^3.13.12",
+    "@types/prismjs": "^1.26.5",
+    "prismjs": "^1.30.0"
+  },
+  "devDependencies": {
+    "@kobalte/core": "^0.13.4",
+    "@solid-primitives/keyed": "^1.2.2",
+    "@solid-primitives/resize-observer": "^2.0.26",
+    "@solid-primitives/storage": "^1.3.11",
+    "@tanstack/match-sorter-utils": "^8.19.4",
+    "clsx": "^2.1.1",
+    "goober": "^2.1.16",
+    "npm-run-all2": "^5.0.0",
+    "solid-js": "^1.9.5",
+    "solid-transition-group": "^0.2.3",
+    "superjson": "^2.2.1",
+    "tsup-preset-solid": "^2.2.0",
+    "vite-plugin-dts": "^4.5.4",
+    "vite-plugin-solid": "^2.11.6"
+  }
+}
