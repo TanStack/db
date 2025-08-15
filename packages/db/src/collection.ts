@@ -560,11 +560,16 @@ export class CollectionImpl<
 
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
+            const insertingIntoExistingSynced = this.syncedData.has(key)
+            const hasPendingDeleteForKey = pendingTransaction.operations.some(
+              (op) => op.key === key && op.type === `delete`
+            )
+            const isTruncateTransaction = pendingTransaction.truncate === true
+            // Allow insert after truncate in the same transaction even if it existed in syncedData
             if (
-              this.syncedData.has(key) &&
-              !pendingTransaction.operations.some(
-                (op) => op.key === key && op.type === `delete`
-              )
+              insertingIntoExistingSynced &&
+              !hasPendingDeleteForKey &&
+              !isTruncateTransaction
             ) {
               throw new DuplicateKeySyncError(key, this.id)
             }
@@ -1168,7 +1173,11 @@ export class CollectionImpl<
       }
     }
 
-    if (!hasPersistingTransaction) {
+    const hasTruncateSync = this.pendingSyncedTransactions.some(
+      (t) => t.truncate === true
+    )
+
+    if (!hasPersistingTransaction || hasTruncateSync) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -1197,14 +1206,17 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
+      // Preserve current optimistic inserts so we can re-emit them after truncate
+      const preservedOptimisticInserts = new Map(this.optimisticUpserts)
+
       for (const transaction of this.pendingSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
           // Collect all existing keys (both synced and optimistic) before clearing
           const existingKeys = new Set<TKey>()
 
-          // Add all synced keys
-          for (const key of this.syncedKeys) {
+          // Add all current synced data keys
+          for (const key of this.syncedData.keys()) {
             existingKeys.add(key)
           }
 
@@ -1281,9 +1293,63 @@ export class CollectionImpl<
         }
       }
 
-      // Clear optimistic state since sync operations will now provide the authoritative data
-      this.optimisticUpserts.clear()
-      this.optimisticDeletes.clear()
+      // After applying synced operations, if this cycle included a truncate,
+      // re-emit optimistic inserts as inserts after deletes to restore optimistic view
+      // and maintain required event ordering (deletes first, then inserts).
+      const hadTruncate = this.pendingSyncedTransactions.some(
+        (t) => t.truncate === true
+      )
+      if (hadTruncate) {
+        // Avoid duplicating keys that were inserted by synced operations in this commit
+        const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+        for (const t of this.pendingSyncedTransactions) {
+          for (const op of t.operations) {
+            if (op.type === `insert` || op.type === `update`) {
+              syncedInsertedOrUpdatedKeys.add(op.key as TKey)
+            }
+          }
+        }
+
+        for (const [key, value] of preservedOptimisticInserts) {
+          if (this.optimisticDeletes.has(key)) continue
+          if (syncedInsertedOrUpdatedKeys.has(key)) {
+            // Override the server insert/update value with optimistic value for minimal changes.
+            // If no server insert event exists in our batch yet, add an insert with optimistic value.
+            let foundInsert = false
+            for (let i = events.length - 1; i >= 0; i--) {
+              const evt = events[i]!
+              if (evt.key === key && evt.type === `insert`) {
+                evt.value = value
+                foundInsert = true
+                break
+              }
+            }
+            if (!foundInsert) {
+              events.push({ type: `insert`, key, value })
+            }
+          } else {
+            events.push({ type: `insert`, key, value })
+          }
+        }
+
+        // Ensure listeners are active before emitting this critical batch by
+        // transitioning to ready if not already
+        if (!this.isReady()) {
+          this.setStatus(`ready`)
+        }
+      }
+
+      // Maintain optimistic state appropriately
+      if (hadTruncate) {
+        // Preserve optimistic inserts across truncate
+        this.optimisticUpserts = new Map(preservedOptimisticInserts)
+        this.optimisticDeletes.clear()
+      } else {
+        // Clear optimistic state since sync operations will now provide the authoritative data.
+        // Any still-active user transactions will be re-applied below in recompute.
+        this.optimisticUpserts.clear()
+        this.optimisticDeletes.clear()
+      }
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
@@ -1380,7 +1446,8 @@ export class CollectionImpl<
         this.updateIndexes(events)
       }
 
-      // End batching and emit all events (combines any batched events with sync events)
+      // Emit all events in one batch. Any previously batched optimistic events
+      // will be combined inside emitEvents when forceEmit=true.
       this.emitEvents(events, true)
 
       this.pendingSyncedTransactions = []
