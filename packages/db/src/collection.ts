@@ -621,7 +621,11 @@ export class CollectionImpl<
           // Clear all operations from the current transaction
           pendingTransaction.operations = []
 
-          // Mark the transaction as a truncate operation
+          // Mark the transaction as a truncate operation. During commit, this triggers:
+          // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
+          // - Clearing of syncedData/syncedMetadata
+          // - Subsequent synced ops applied on the fresh base
+          // - Finally, optimistic mutations re-applied on top (single batch)
           pendingTransaction.truncate = true
         },
       })
@@ -1189,14 +1193,6 @@ export class CollectionImpl<
         }
       }
 
-      // If this commit includes a truncate control, also include optimistic upsert keys
-      // so the generic diff machinery can emit inserts/overrides for them
-      if (this.pendingSyncedTransactions.some((t) => t.truncate === true)) {
-        for (const key of this.optimisticUpserts.keys()) {
-          changedKeys.add(key)
-        }
-      }
-
       // Use pre-captured state if available (from optimistic scenarios),
       // otherwise capture current state (for pure sync scenarios)
       let currentVisibleState = this.preSyncVisibleState
@@ -1219,8 +1215,10 @@ export class CollectionImpl<
       for (const transaction of this.pendingSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
-          // Emit deletes only for currently synced keys, skipping keys already
-          // optimistically deleted (their delete was already emitted)
+          // TRUNCATE PHASE
+          // 1) Emit a delete for every currently-synced key so downstream listeners/indexes
+          //    observe a clear-before-rebuild. We intentionally skip keys already in
+          //    optimisticDeletes because their delete was previously emitted by the user.
           for (const key of this.syncedData.keys()) {
             if (this.optimisticDeletes.has(key)) continue
             const previousValue =
@@ -1230,7 +1228,8 @@ export class CollectionImpl<
             }
           }
 
-          // Clear all synced data and metadata
+          // 2) Clear the authoritative synced base. Subsequent server ops in this
+          //    same commit will rebuild the base atomically.
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
@@ -1285,14 +1284,15 @@ export class CollectionImpl<
         }
       }
 
-      // After applying synced operations, if this cycle included a truncate,
-      // re-emit optimistic inserts as inserts after deletes to restore optimistic view
-      // and maintain required event ordering (deletes first, then inserts).
+      // After applying synced operations, if this commit included a truncate,
+      // re-apply optimistic mutations on top of the fresh synced base. This ensures
+      // the UI preserves local intent while respecting server rebuild semantics.
+      // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
       const hadTruncate = this.pendingSyncedTransactions.some(
         (t) => t.truncate === true
       )
       if (hadTruncate) {
-        // Avoid duplicating keys that were inserted by synced operations in this commit
+        // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
         for (const t of this.pendingSyncedTransactions) {
           for (const op of t.operations) {
@@ -1302,7 +1302,8 @@ export class CollectionImpl<
           }
         }
 
-        // Build re-apply sets from active optimistic transactions against the new synced base
+        // Build re-apply sets from ACTIVE optimistic transactions against the new synced base
+        // We do not copy maps; we compute intent directly from transactions to avoid drift.
         const reapplyUpserts = new Map<TKey, T>()
         const reapplyDeletes = new Set<TKey>()
 
@@ -1333,7 +1334,9 @@ export class CollectionImpl<
           }
         }
 
-        // Emit/override inserts for re-applied upserts, skipping any deleted keys
+        // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
+        // If the server also inserted/updated the same key in this batch, override that value
+        // with the optimistic value to preserve local intent.
         for (const [key, value] of reapplyUpserts) {
           if (reapplyDeletes.has(key)) continue
           if (syncedInsertedOrUpdatedKeys.has(key)) {
@@ -1354,7 +1357,7 @@ export class CollectionImpl<
           }
         }
 
-        // Filter out any insert events for keys that are optimistically deleted
+        // Finally, ensure we do NOT insert keys that have an outstanding optimistic delete.
         if (events.length > 0 && reapplyDeletes.size > 0) {
           const filtered: Array<ChangeMessage<T, TKey>> = []
           for (const evt of events) {
@@ -1474,8 +1477,7 @@ export class CollectionImpl<
         this.updateIndexes(events)
       }
 
-      // Emit all events in one batch. Any previously batched optimistic events
-      // will be combined inside emitEvents when forceEmit=true.
+      // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
       this.pendingSyncedTransactions = []
