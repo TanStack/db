@@ -950,35 +950,25 @@ describe(`Collection.subscribeChanges`, () => {
       value: `optimistic insert`,
     })
 
-    // Verify events are a single batch: deletes for all existing keys, then inserts for preserved optimistic
-    expect(changeEvents).toHaveLength(5)
-    // First 3 should be deletes for keys 1,2,3 (order by key not guaranteed, so sort for assertions)
-    const deletes = changeEvents.slice(0, 3)
-    const inserts = changeEvents.slice(3)
-    expect(deletes.every((e) => e.type === `delete`)).toBe(true)
-    expect(inserts.every((e) => e.type === `insert`)).toBe(true)
+    // Verify events are a single batch: deletes for synced keys (1,2), then inserts for preserved optimistic (1,3)
+    expect(changeEvents.length).toBe(4)
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    const inserts = changeEvents.filter((e) => e.type === `insert`)
+    expect(deletes.length).toBe(2)
+    expect(inserts.length).toBe(2)
 
     const deleteByKey = new Map(deletes.map((e) => [e.key, e]))
     const insertByKey = new Map(inserts.map((e) => [e.key, e]))
 
-    const deleteEvent1 = deleteByKey.get(1)
-    const deleteEvent2 = deleteByKey.get(2)
-    const deleteEvent3 = deleteByKey.get(3)
-
-    expect(deleteEvent1).toEqual({
+    expect(deleteByKey.get(1)).toEqual({
       type: `delete`,
       key: 1,
-      value: { id: 1, value: `optimistic update 1` }, // Should use optimistic value
+      value: { id: 1, value: `optimistic update 1` },
     })
-    expect(deleteEvent2).toEqual({
+    expect(deleteByKey.get(2)).toEqual({
       type: `delete`,
       key: 2,
       value: { id: 2, value: `initial value 2` },
-    })
-    expect(deleteEvent3).toEqual({
-      type: `delete`,
-      key: 3,
-      value: { id: 3, value: `optimistic insert` },
     })
 
     // Insert events for preserved optimistic entries (1 and 3)
@@ -1196,7 +1186,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
   })
 
-  it(`truncate + optimistic delete: server reinserted key -> remains deleted`, async () => {
+  it(`truncate + optimistic delete: server reinserted key -> remains deleted (no duplicate delete event)`, async () => {
     const changeEvents: Array<any> = []
     let f: any = null
 
@@ -1230,13 +1220,9 @@ describe(`Collection.subscribeChanges`, () => {
     f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
     f.commit()
 
-    // Expect only delete; no insert due to optimistic delete precedence
-    expect(changeEvents.length).toBe(1)
-    expect(changeEvents[0]).toEqual({
-      type: `delete`,
-      key: 1,
-      value: { id: 1, value: `server-initial` },
-    })
+    // We already emitted the optimistic delete earlier; do not emit it again.
+    // Also, do not emit an insert for the re-introduced key.
+    expect(changeEvents.length).toBe(0)
     expect(collection.state.has(1)).toBe(false)
   })
 
@@ -1336,7 +1322,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
   })
 
-  it(`truncate + optimistic delete: server did NOT reinsert key -> remains deleted`, async () => {
+  it(`truncate + optimistic delete: server did NOT reinsert key -> remains deleted (no extra event)`, async () => {
     const changeEvents: Array<any> = []
     let f: any = null
 
@@ -1369,10 +1355,8 @@ describe(`Collection.subscribeChanges`, () => {
     f.truncate()
     f.commit()
 
-    // Expect only delete
-    expect(changeEvents.length).toBe(1)
-    expect(changeEvents[0].type).toBe(`delete`)
-    expect(changeEvents[0].key).toBe(1)
+    // No new events since the optimistic delete event already fired earlier
+    expect(changeEvents.length).toBe(0)
     expect(collection.state.has(1)).toBe(false)
   })
 })

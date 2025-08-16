@@ -1189,6 +1189,14 @@ export class CollectionImpl<
         }
       }
 
+      // If this commit includes a truncate control, also include optimistic upsert keys
+      // so the generic diff machinery can emit inserts/overrides for them
+      if (this.pendingSyncedTransactions.some((t) => t.truncate === true)) {
+        for (const key of this.optimisticUpserts.keys()) {
+          changedKeys.add(key)
+        }
+      }
+
       // Use pre-captured state if available (from optimistic scenarios),
       // otherwise capture current state (for pure sync scenarios)
       let currentVisibleState = this.preSyncVisibleState
@@ -1206,35 +1214,19 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      // Preserve current optimistic inserts so we can re-emit them after truncate
-      const preservedOptimisticInserts = new Map(this.optimisticUpserts)
+      // Use current optimistic state directly; no copies required
 
       for (const transaction of this.pendingSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
-          // Collect all existing keys (both synced and optimistic) before clearing
-          const existingKeys = new Set<TKey>()
-
-          // Add all current synced data keys
+          // Emit deletes only for currently synced keys, skipping keys already
+          // optimistically deleted (their delete was already emitted)
           for (const key of this.syncedData.keys()) {
-            existingKeys.add(key)
-          }
-
-          // Add all optimistic upsert keys
-          for (const key of this.optimisticUpserts.keys()) {
-            existingKeys.add(key)
-          }
-
-          // Generate delete events for all existing keys
-          for (const key of existingKeys) {
+            if (this.optimisticDeletes.has(key)) continue
             const previousValue =
               this.optimisticUpserts.get(key) || this.syncedData.get(key)
             if (previousValue !== undefined) {
-              events.push({
-                type: `delete`,
-                key,
-                value: previousValue,
-              })
+              events.push({ type: `delete`, key, value: previousValue })
             }
           }
 
@@ -1310,11 +1302,41 @@ export class CollectionImpl<
           }
         }
 
-        for (const [key, value] of preservedOptimisticInserts) {
-          if (this.optimisticDeletes.has(key)) continue
+        // Build re-apply sets from active optimistic transactions against the new synced base
+        const reapplyUpserts = new Map<TKey, T>()
+        const reapplyDeletes = new Set<TKey>()
+
+        for (const tx of this.transactions.values()) {
+          if ([`completed`, `failed`].includes(tx.state)) continue
+          for (const mutation of tx.mutations) {
+            if (mutation.collection !== this || !mutation.optimistic) continue
+            const key = mutation.key as TKey
+            switch (mutation.type) {
+              case `insert`:
+                reapplyUpserts.set(key, mutation.modified as T)
+                reapplyDeletes.delete(key)
+                break
+              case `update`: {
+                const base = this.syncedData.get(key)
+                const next = base
+                  ? (Object.assign({}, base, mutation.changes) as T)
+                  : (mutation.modified as T)
+                reapplyUpserts.set(key, next)
+                reapplyDeletes.delete(key)
+                break
+              }
+              case `delete`:
+                reapplyUpserts.delete(key)
+                reapplyDeletes.add(key)
+                break
+            }
+          }
+        }
+
+        // Emit/override inserts for re-applied upserts, skipping any deleted keys
+        for (const [key, value] of reapplyUpserts) {
+          if (reapplyDeletes.has(key)) continue
           if (syncedInsertedOrUpdatedKeys.has(key)) {
-            // Override the server insert/update value with optimistic value for minimal changes.
-            // If no server insert event exists in our batch yet, add an insert with optimistic value.
             let foundInsert = false
             for (let i = events.length - 1; i >= 0; i--) {
               const evt = events[i]!
@@ -1332,24 +1354,30 @@ export class CollectionImpl<
           }
         }
 
-        // Ensure listeners are active before emitting this critical batch by
-        // transitioning to ready if not already
+        // Filter out any insert events for keys that are optimistically deleted
+        if (events.length > 0 && reapplyDeletes.size > 0) {
+          const filtered: Array<ChangeMessage<T, TKey>> = []
+          for (const evt of events) {
+            if (evt.type === `insert` && reapplyDeletes.has(evt.key)) {
+              continue
+            }
+            filtered.push(evt)
+          }
+          events.length = 0
+          events.push(...filtered)
+        }
+
+        // Ensure listeners are active before emitting this critical batch
         if (!this.isReady()) {
           this.setStatus(`ready`)
         }
       }
 
       // Maintain optimistic state appropriately
-      if (hadTruncate) {
-        // Preserve optimistic inserts across truncate
-        this.optimisticUpserts = new Map(preservedOptimisticInserts)
-        this.optimisticDeletes.clear()
-      } else {
-        // Clear optimistic state since sync operations will now provide the authoritative data.
-        // Any still-active user transactions will be re-applied below in recompute.
-        this.optimisticUpserts.clear()
-        this.optimisticDeletes.clear()
-      }
+      // Clear optimistic state since sync operations will now provide the authoritative data.
+      // Any still-active user transactions will be re-applied below in recompute.
+      this.optimisticUpserts.clear()
+      this.optimisticDeletes.clear()
 
       // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
