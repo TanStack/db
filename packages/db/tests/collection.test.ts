@@ -1358,4 +1358,154 @@ describe(`Collection with schema validation`, () => {
       tx5.isPersisted.promise,
     ])
   })
+
+  it(`should handle basic truncate operations`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-basic-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value 1` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `initial value 2` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value 1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `initial value 2` })
+
+    // Test truncate operation
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection is cleared
+    expect(collection.state.size).toBe(0)
+    expect(collection.syncedData.size).toBe(0)
+    expect(collection.syncedMetadata.size).toBe(0)
+  })
+
+  it(`should keep operations written after truncate in the same transaction`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-operations-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value` })
+
+    // Test truncate operation with additional operations in the same transaction
+    const { begin, write, truncate, commit } = testSyncFunctions
+
+    begin()
+
+    // Add some operations to the transaction
+    write({
+      type: `insert`,
+      value: { id: 2, value: `should be cleared` },
+    })
+    write({
+      type: `update`,
+      value: { id: 1, value: `should be cleared` },
+    })
+
+    // Call truncate - this should clear the operations and mark as truncate
+    truncate()
+
+    // Add more operations after truncate (these should not be cleared)
+    write({
+      type: `insert`,
+      value: { id: 3, value: `should not be cleared` },
+    })
+
+    commit()
+
+    // Verify only post-truncate operations are kept
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `should not be cleared`,
+    })
+    expect(collection.syncedData.size).toBe(1)
+    expect(collection.syncedMetadata.size).toBe(1)
+  })
+
+  it(`should handle truncate with empty collection`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-empty-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, truncate, markReady }) => {
+          // Initialize with empty collection
+          begin()
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state is empty
+    expect(collection.state.size).toBe(0)
+
+    // Test truncate operation on empty collection
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection remains empty
+    expect(collection.state.size).toBe(0)
+    expect(collection.syncedData.size).toBe(0)
+    expect(collection.syncedMetadata.size).toBe(0)
+  })
 })
