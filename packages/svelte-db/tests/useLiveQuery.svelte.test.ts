@@ -1190,6 +1190,72 @@ describe(`Query Collections`, () => {
         expect(query.isReady).toBe(true)
       })
     })
+
+    it(`should handle status transitions correctly with onFirstReady`, () => {
+      // This test verifies that the onFirstReady callback properly updates status
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `onfirstready-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, 30))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+            }))
+        )
+
+        // Initially should be loading
+        expect(query.isLoading).toBe(true)
+        expect(query.isReady).toBe(false)
+
+        // Start sync manually
+        collection.preload()
+
+        // Trigger the first commit to make collection ready
+        if (beginFn && commitFn && markReadyFn) {
+          beginFn()
+          commitFn()
+          markReadyFn()
+        }
+
+        // Insert data
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+
+        // Wait for the status to transition correctly
+        flushSync()
+        expect(query.isLoading).toBe(false)
+        expect(query.isReady).toBe(true)
+        expect(query.status).toBe(`ready`)
+      })
+    })
   })
 
   it(`should accept config object with pre-built QueryBuilder instance`, async () => {

@@ -254,6 +254,12 @@ function isUpToDateMessage<T extends Row<unknown>>(
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
+function isMustRefetchMessage<T extends Row<unknown>>(
+  message: Message<T>
+): message is ControlMessage & { headers: { control: `must-refetch` } } {
+  return isControlMessage(message) && message.headers.control === `must-refetch`
+}
+
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
   message: Message<T>
@@ -470,7 +476,7 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, truncate } = params
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
@@ -521,6 +527,22 @@ function createElectricSync<T extends Row<unknown>>(
             })
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
+          } else if (isMustRefetchMessage(message)) {
+            debug(
+              `Received must-refetch message, starting transaction with truncate`
+            )
+
+            // Start a transaction and truncate the collection
+            if (!transactionStarted) {
+              begin()
+              transactionStarted = true
+            }
+
+            truncate()
+
+            // Commit the truncate transaction immediately
+            commit()
+            transactionStarted = false
           }
         }
 

@@ -1,5 +1,6 @@
 import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { createCollection } from "../collection.js"
+import { createFilterFunctionFromExpression } from "../change-events.js"
 import { compileQuery } from "./compiler/index.js"
 import { buildQuery, getQueryIR } from "./builder/index.js"
 import { convertToBasicExpression } from "./compiler/expressions.js"
@@ -16,6 +17,7 @@ import type {
 import type { Context, GetResult } from "./builder/types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { BasicExpression } from "./ir.js"
+import type { LazyCollectionCallbacks } from "./compiler/joins.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -163,8 +165,8 @@ export function liveQueryCollectionOptions<
   const collections = extractCollectionsFromQuery(query)
 
   const allCollectionsReady = () => {
-    return Object.values(collections).every(
-      (collection) => collection.status === `ready`
+    return Object.values(collections).every((collection) =>
+      collection.isReady()
     )
   }
 
@@ -182,6 +184,11 @@ export function liveQueryCollectionOptions<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
+  // Map of collection IDs to functions that load keys for that lazy collection
+  const lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  // Set of collection IDs that are lazy collections
+  const lazyCollections = new Set<string>()
+
   const compileBasePipeline = () => {
     graphCache = new D2()
     inputsCache = Object.fromEntries(
@@ -195,7 +202,13 @@ export function liveQueryCollectionOptions<
     ;({
       pipeline: pipelineCache,
       collectionWhereClauses: collectionWhereClausesCache,
-    } = compileQuery(query, inputsCache as Record<string, KeyedStream>))
+    } = compileQuery(
+      query,
+      inputsCache as Record<string, KeyedStream>,
+      collections,
+      lazyCollectionsCallbacks,
+      lazyCollections
+    ))
   }
 
   const maybeCompileBasePipeline = () => {
@@ -298,9 +311,14 @@ export function liveQueryCollectionOptions<
 
       graph.finalize()
 
+      let subscribedToAllCollections = false
+
       const maybeRunGraph = () => {
         // We only run the graph if all the collections are ready
-        if (allCollectionsReadyOrInitialCommit()) {
+        if (
+          allCollectionsReadyOrInitialCommit() &&
+          subscribedToAllCollections
+        ) {
           graph.run()
           // On the initial run, we may need to do an empty commit to ensure that
           // the collection is initialized
@@ -327,6 +345,121 @@ export function liveQueryCollectionOptions<
             ? collectionWhereClausesCache.get(collectionAlias)
             : undefined
 
+        const sendChangesToPipeline = (
+          changes: Array<ChangeMessage<any, string | number>>
+        ) => {
+          sendChangesToInput(input, changes, collection.config.getKey)
+          maybeRunGraph()
+        }
+
+        const subscribeToAllChanges = (
+          whereExpression: BasicExpression<boolean> | undefined
+        ) => {
+          const unsubscribe = collection.subscribeChanges(
+            sendChangesToPipeline,
+            {
+              includeInitialState: true,
+              ...(whereExpression ? { whereExpression } : undefined),
+            }
+          )
+          return unsubscribe
+        }
+
+        // Subscribes to all changes but without the initial state
+        // such that we can load keys from the initial state on demand
+        // based on the matching keys from the main collection in the join
+        const subscribeToMatchingChanges = (
+          whereExpression: BasicExpression<boolean> | undefined
+        ) => {
+          const sentKeys = new Set<string | number>()
+
+          // Wraps the sendChangesToPipeline function
+          // in order to turn `update`s into `insert`s
+          // for keys that have not been sent to the pipeline yet
+          // and filter out deletes for keys that have not been sent
+          const sendVisibleChangesToPipeline = (
+            changes: Array<ChangeMessage<any, string | number>>
+          ) => {
+            if (loadedInitialState) {
+              // There was no index for the join key
+              // so we loaded the initial state
+              // so we can safely assume that the pipeline has seen all keys
+              return sendChangesToPipeline(changes)
+            }
+
+            const newChanges = []
+            for (const change of changes) {
+              let newChange = change
+              if (!sentKeys.has(change.key)) {
+                if (change.type === `update`) {
+                  newChange = { ...change, type: `insert` }
+                } else if (change.type === `delete`) {
+                  // filter out deletes for keys that have not been sent
+                  continue
+                }
+              }
+              newChanges.push(newChange)
+            }
+
+            return sendChangesToPipeline(newChanges)
+          }
+
+          const unsubscribe = collection.subscribeChanges(
+            sendVisibleChangesToPipeline,
+            { whereExpression }
+          )
+
+          // Create a function that loads keys from the collection
+          // into the query pipeline on demand
+          const filterFn = whereExpression
+            ? createFilterFunctionFromExpression(whereExpression)
+            : () => true
+          const loadKeys = (keys: Set<string | number>) => {
+            for (const key of keys) {
+              // Only load the key once
+              if (sentKeys.has(key)) continue
+
+              const value = collection.get(key)
+              if (value !== undefined && filterFn(value)) {
+                sentKeys.add(key)
+                sendChangesToPipeline([{ type: `insert`, key, value }])
+              }
+            }
+          }
+
+          let loadedInitialState = false
+
+          // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
+          // This is used by the join operator to dynamically load matching keys from the lazy collection
+          // or to get the full initial state of the collection if there's no index for the join key
+          lazyCollectionsCallbacks[collectionId] = {
+            loadKeys,
+            loadInitialState: () => {
+              // Make sure we only load the initial state once
+              if (loadedInitialState) return
+              loadedInitialState = true
+
+              const changes = collection.currentStateAsChanges({
+                whereExpression,
+              })
+              sendChangesToPipeline(changes)
+            },
+          }
+          return unsubscribe
+        }
+
+        const subscribeToChanges = (
+          whereExpression?: BasicExpression<boolean>
+        ) => {
+          let unsubscribe: () => void
+          if (lazyCollections.has(collectionId)) {
+            unsubscribe = subscribeToMatchingChanges(whereExpression)
+          } else {
+            unsubscribe = subscribeToAllChanges(whereExpression)
+          }
+          unsubscribeCallbacks.add(unsubscribe)
+        }
+
         if (whereClause) {
           // Convert WHERE clause to BasicExpression format for collection subscription
           const whereExpression = convertToBasicExpression(
@@ -336,17 +469,7 @@ export function liveQueryCollectionOptions<
 
           if (whereExpression) {
             // Use index optimization for this collection
-            const subscription = collection.subscribeChanges(
-              (changes) => {
-                sendChangesToInput(input, changes, collection.config.getKey)
-                maybeRunGraph()
-              },
-              {
-                includeInitialState: true,
-                whereExpression: whereExpression,
-              }
-            )
-            unsubscribeCallbacks.add(subscription)
+            subscribeToChanges(whereExpression)
           } else {
             // This should not happen - if we have a whereClause but can't create whereExpression,
             // it indicates a bug in our optimization logic
@@ -357,16 +480,11 @@ export function liveQueryCollectionOptions<
           }
         } else {
           // No WHERE clause for this collection, use regular subscription
-          const subscription = collection.subscribeChanges(
-            (changes) => {
-              sendChangesToInput(input, changes, collection.config.getKey)
-              maybeRunGraph()
-            },
-            { includeInitialState: true }
-          )
-          unsubscribeCallbacks.add(subscription)
+          subscribeToChanges()
         }
       })
+
+      subscribedToAllCollections = true
 
       // Initial run
       maybeRunGraph()

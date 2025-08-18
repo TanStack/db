@@ -5,7 +5,14 @@ import { tanstackConfig } from "@tanstack/config/eslint"
 
 export default [
   ...tanstackConfig,
-  { ignores: [`dist/`] },
+  {
+    ignores: [
+      `**/dist/**`,
+      `**/.output/**`,
+      `**/.nitro/**`,
+      `**/traildepot/**`,
+    ],
+  },
   {
     plugins: {
       stylistic: stylisticPlugin,

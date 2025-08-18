@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.1
+
+### Patch Changes
+
+- Fix bug with orderBy that resulted in query results having less rows than the configured limit. ([#405](https://github.com/TanStack/db/pull/405))
+
 ## 0.1.0
 
 ### Minor Changes
