@@ -342,8 +342,6 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(results.map((r) => r.salary)).toEqual([65000, 60000, 55000])
       })
 
-      // TODO: also test live updates with lazy loaded orderBy
-
       it(`applies offset correctly with ordering`, async () => {
         const collection = createLiveQueryCollection((q) =>
           q
