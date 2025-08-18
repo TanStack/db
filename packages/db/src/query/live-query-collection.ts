@@ -318,6 +318,14 @@ export function liveQueryCollectionOptions<
 
       let subscribedToAllCollections = false
 
+      // The callback function is called after the graph has run.
+      // This gives the callback a chance to load more data if needed,
+      // that's used to optimize orderBy operators that set a limit,
+      // in order to load some more data if we still don't have enough rows after the pipeline has run.
+      // That can happend because even though we load N rows, the pipeline might filter some of these rows out
+      // causing the orderBy operator to receive less than N rows or even no rows at all.
+      // So this callback would notice that it doesn't have enough rows and load some more.
+      // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
       const maybeRunGraph = (callback?: () => boolean) => {
         // We only run the graph if all the collections are ready
         if (
