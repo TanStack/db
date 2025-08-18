@@ -16,5 +16,8 @@ export * from "./indexes/btree-index.js"
 export * from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"
 
+// Re-export BTree from utils
+export { BTree } from "./utils/btree.js"
+
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from "./collection"
