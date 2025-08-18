@@ -7,8 +7,7 @@ import {
   getValue,
   indexedValue,
 } from "./topKWithFractionalIndex.js"
-import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
-import type { DifferenceStreamReader } from "../graph.js"
+import type { IStreamBuilder, PipedOperator } from "../types.js"
 import type {
   IndexedValue,
   TaggedValue,
@@ -238,13 +237,13 @@ class TopKTree<V> implements TopK<V> {
  */
 export class TopKWithFractionalIndexBTreeOperator<
   K,
-  V1,
-> extends TopKWithFractionalIndexOperator<K, V1> {
+  T,
+> extends TopKWithFractionalIndexOperator<K, T> {
   protected override createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<V1>, b: TaggedValue<V1>) => number
-  ): TopK<TaggedValue<V1>> {
+    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number
+  ): TopK<TaggedValue<K, T>> {
     if (BTree === undefined) {
       throw new Error(
         `B+ tree not loaded. You need to call loadBTree() before using TopKWithFractionalIndexBTreeOperator.`
@@ -269,14 +268,10 @@ export class TopKWithFractionalIndexBTreeOperator<
  * @param options - An optional object containing limit and offset properties
  * @returns A piped operator that orders the elements and limits the number of results
  */
-export function topKWithFractionalIndexBTree<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
-  T,
->(
-  comparator: (a: V1Type, b: V1Type) => number,
+export function topKWithFractionalIndexBTree<KType, T>(
+  comparator: (a: T, b: T) => number,
   options?: TopKWithFractionalIndexOptions
-): PipedOperator<T, KeyValue<KType, [V1Type, string]>> {
+): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
   const opts = options || {}
 
   if (BTree === undefined) {
@@ -286,15 +281,15 @@ export function topKWithFractionalIndexBTree<
   }
 
   return (
-    stream: IStreamBuilder<T>
-  ): IStreamBuilder<KeyValue<KType, [V1Type, string]>> => {
-    const output = new StreamBuilder<KeyValue<KType, [V1Type, string]>>(
+    stream: IStreamBuilder<[KType, T]>
+  ): IStreamBuilder<[KType, IndexedValue<T>]> => {
+    const output = new StreamBuilder<[KType, IndexedValue<T>]>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<KType, [V1Type, string]>>()
+      new DifferenceStreamWriter<[KType, IndexedValue<T>]>()
     )
-    const operator = new TopKWithFractionalIndexOperator<KType, V1Type>(
+    const operator = new TopKWithFractionalIndexBTreeOperator<KType, T>(
       stream.graph.getNextOperatorId(),
-      stream.connectReader() as DifferenceStreamReader<KeyValue<KType, V1Type>>,
+      stream.connectReader(),
       output.writer,
       comparator,
       opts

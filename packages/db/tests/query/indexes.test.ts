@@ -25,6 +25,10 @@ interface TestItem {
   createdAt: Date
 }
 
+type TestItem2 = Omit<TestItem, `id`> & {
+  id2: string
+}
+
 // Index usage tracking utilities (copied from collection-indexes.test.ts)
 interface IndexUsageStats {
   rangeQueryCalls: number
@@ -237,7 +241,7 @@ describe(`Query Index Optimization`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit, markReady }) => {
+        sync: ({ begin, write, commit }) => {
           // Provide initial data through sync
           begin()
           for (const item of testData) {
@@ -247,7 +251,6 @@ describe(`Query Index Optimization`, () => {
             })
           }
           commit()
-          markReady()
 
           // Listen for mutations and sync them back (only register once)
           if (!emitter.all.has(`sync`)) {
@@ -535,7 +538,7 @@ describe(`Query Index Optimization`, () => {
           getKey: (item) => item.id,
           startSync: true,
           sync: {
-            sync: ({ begin, write, commit, markReady }) => {
+            sync: ({ begin, write, commit }) => {
               begin()
               write({
                 type: `insert`,
@@ -548,7 +551,6 @@ describe(`Query Index Optimization`, () => {
                 },
               })
               commit()
-              markReady()
             },
           },
         })
@@ -624,7 +626,7 @@ describe(`Query Index Optimization`, () => {
         getKey: (item) => item.id,
         startSync: true,
         sync: {
-          sync: ({ begin, write, commit, markReady }) => {
+          sync: ({ begin, write, commit }) => {
             begin()
             write({
               type: `insert`,
@@ -647,7 +649,6 @@ describe(`Query Index Optimization`, () => {
               },
             })
             commit()
-            markReady()
           },
         },
       })
@@ -710,6 +711,603 @@ describe(`Query Index Optimization`, () => {
           indexCallCount: 2, // Both item.status='active' and other.status='active' can use indexes
           fullScanCallCount: 0,
         })
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should use index of biggest collection when inner-joining collections`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      // Since we're using an inner join, it will iterate over the smallest collection
+      // and join in matching keys from the bigger collection
+      // so it will iterate over the second collection and use the index for the status to find active items
+      // then for each such item (there is only 1), it will do an index lookup into the first collection to find matching items
+      // So we need an index on the status for the second collection
+      // and an index on the id for the first collection
+      collection.createIndex((row) => row.id)
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `inner`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should have found results where both items are active
+        expect(liveQuery.toArray).toEqual([
+          { id: `1`, name: `Alice`, otherName: `Other Active Item` },
+        ])
+
+        // We should have done an index lookup on the 2nd collection to find active items
+        // There should only be 1 active item in the second collection and it has id "1"
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `fullScan`,
+          },
+        ])
+
+        // We should have done an index lookup on the 1st collection to find matching items
+        // i.e. items with id "1"
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `id`,
+            value: `1`,
+          },
+        ])
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should not optimize inner join if biggest collection has no index on the join key`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `inner`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should have found results where both items are active
+        expect(liveQuery.size).toBe(1)
+
+        // We should have done an index lookup on the 2nd collection to find active items
+        // There should only be 1 active item in the second collection and it has id "1"
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `fullScan`,
+          },
+        ])
+
+        // We should have done an index lookup on the 1st collection to find active items
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
+        ])
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should use index of right collection when left-joining collections`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      // Since we're using a left join, it will iterate over the left collection
+      // and join in matching keys from the right collection
+      secondCollection.createIndex((row) => row.id2)
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `left`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should include all results from the first collection
+        expect(liveQuery.toArray).toEqual([
+          { id: `1`, name: `Alice`, otherName: `Other Active Item` },
+          { id: `3`, name: `Charlie` },
+          { id: `5`, name: `Eve` },
+        ])
+
+        // Combine stats from both collections
+        const combinedStats: IndexUsageStats = {
+          rangeQueryCalls:
+            tracker1.stats.rangeQueryCalls + tracker2.stats.rangeQueryCalls,
+          fullScanCalls:
+            tracker1.stats.fullScanCalls + tracker2.stats.fullScanCalls,
+          indexesUsed: [
+            ...tracker1.stats.indexesUsed,
+            ...tracker2.stats.indexesUsed,
+          ],
+          queriesExecuted: [
+            ...tracker1.stats.queriesExecuted,
+            ...tracker2.stats.queriesExecuted,
+          ],
+        }
+
+        // We should have done an index lookup on the 1st collection to find active items
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
+        ])
+
+        // For each active item from the first collection
+        // we must have done an index lookup on the 2nd collection to find matching items
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `id2`,
+            value: `1`,
+          },
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `id2`,
+            value: `3`,
+          },
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `id2`,
+            value: `5`,
+          },
+        ])
+
+        expectIndexUsage(combinedStats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+          indexCallCount: 4,
+          fullScanCallCount: 0,
+        })
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should not optimize left join if right collection has no index on the join key`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `left`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should have found results where both items are active
+        expect(liveQuery.toArray).toEqual([
+          { id: `1`, name: `Alice`, otherName: `Other Active Item` },
+          { id: `3`, name: `Charlie` },
+          { id: `5`, name: `Eve` },
+        ])
+
+        // We should have done an index lookup on the left collection to find active items
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
+        ])
+
+        // We should have done a full scanof the right collection
+        // because it doesn't have any indexes
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `fullScan`,
+          },
+        ])
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should use index of left collection when right-joining collections`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      // Since we're using a right join, it will iterate over the right collection
+      // and join in matching keys from the left collection
+      collection.createIndex((row) => row.id)
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `right`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should include all results from the first collection
+        expect(liveQuery.toArray).toEqual([
+          { id: `1`, name: `Alice`, otherName: `Other Active Item` },
+        ])
+
+        // We should have done a full scan of the right collection
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `fullScan`,
+          },
+        ])
+
+        // We should have done an index lookup on the 1st collection to find active items
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `id`,
+            value: `1`,
+          },
+        ])
+      } finally {
+        tracker1.restore()
+        tracker2.restore()
+      }
+    })
+
+    it(`should not optimize right join if left collection has no index on the join key`, async () => {
+      // Create a second collection for the join with its own index
+      const secondCollection = createCollection<TestItem2, string>({
+        getKey: (item) => item.id2,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: {
+                id2: `1`,
+                name: `Other Active Item`,
+                age: 40,
+                status: `active`,
+                createdAt: new Date(),
+              },
+            })
+            write({
+              type: `insert`,
+              value: {
+                id2: `other2`,
+                name: `Other Inactive Item`,
+                age: 35,
+                status: `inactive`,
+                createdAt: new Date(),
+              },
+            })
+            commit()
+          },
+        },
+      })
+
+      await secondCollection.stateWhenReady()
+
+      // Track both collections
+      const tracker1 = createIndexUsageTracker(collection)
+      const tracker2 = createIndexUsageTracker(secondCollection)
+
+      try {
+        const liveQuery = createLiveQueryCollection({
+          query: (q: any) =>
+            q
+              .from({ item: collection })
+              .join(
+                { other: secondCollection },
+                ({ item, other }: any) => eq(item.id, other.id2),
+                `right`
+              )
+              .where(({ item, other }: any) =>
+                and(eq(item.status, `active`), eq(other.status, `active`))
+              )
+              .select(({ item, other }: any) => ({
+                id: item.id,
+                name: item.name,
+                otherName: other.name,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+
+        // Should have found results where both items are active
+        expect(liveQuery.toArray).toEqual([
+          { id: `1`, name: `Alice`, otherName: `Other Active Item` },
+        ])
+
+        // We should have done a full scan of the right collection
+        // because it has no indexes
+        expect(tracker2.stats.queriesExecuted).toEqual([
+          {
+            type: `fullScan`,
+          },
+        ])
+
+        // We should have done an index lookup on the left collection to find active items
+        // because it has an index on the join key
+        expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
+        ])
       } finally {
         tracker1.restore()
         tracker2.restore()

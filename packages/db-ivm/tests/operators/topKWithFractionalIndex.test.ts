@@ -74,9 +74,9 @@ describe(`Operators`, () => {
   ])(`TopKWithFractionalIndex operator %s`, (_name, { topK }) => {
     it(`should assign fractional indices to sorted elements`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -91,11 +91,11 @@ describe(`Operators`, () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -118,8 +118,8 @@ describe(`Operators`, () => {
       // Now let's move 'c' to the beginning by changing its value
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: `a-` }], 1], // This should now be first
-          [[null, { id: 3, value: `c` }], -1], // Remove the old value
+          [[3, { id: 3, value: `c` }], -1], // Remove the old value
+          [[3, { id: 3, value: `a-` }], 1], // This should now be first
         ])
       )
       graph.run()
@@ -132,7 +132,7 @@ describe(`Operators`, () => {
 
       // Check that only the affected key (null) produces messages
       assertOnlyKeysAffected(`topKFractional update`, updateResult.messages, [
-        null,
+        3,
       ])
 
       // Check that the update messages maintain lexicographic order on their own
@@ -147,9 +147,9 @@ describe(`Operators`, () => {
 
     it(`should support duplicate ordering keys`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -164,11 +164,11 @@ describe(`Operators`, () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -185,7 +185,7 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Now let's add a new element with a value that is already in there
-      input.sendData(new MultiSet([[[null, { id: 6, value: `c` }], 1]]))
+      input.sendData(new MultiSet([[[6, { id: 6, value: `c` }], 1]]))
       graph.run()
 
       // Check the incremental changes
@@ -198,7 +198,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topKFractional duplicate keys`,
         updateResult.messages,
-        [null]
+        [6]
       )
 
       // Check that the update messages maintain lexicographic order on their own
@@ -216,7 +216,7 @@ describe(`Operators`, () => {
 
     it(`should ignore duplicate values`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
 
       input.pipe(
@@ -229,17 +229,13 @@ describe(`Operators`, () => {
       graph.finalize()
 
       // Initial data - a, b, c, d, e
-      const entryForC = [[null, { id: 3, value: `c` }], 1] as [
-        [null, { id: number; value: string }],
-        number,
-      ]
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          entryForC,
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -249,7 +245,7 @@ describe(`Operators`, () => {
       expect(initialResult.length).toBe(5)
 
       // Now add entryForC again
-      input.sendData(new MultiSet([entryForC]))
+      input.sendData(new MultiSet([[[3, { id: 3, value: `c` }], 1]]))
       graph.run()
 
       // Check that no message was emitted
@@ -259,9 +255,9 @@ describe(`Operators`, () => {
 
     it(`should handle limit and offset correctly`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -279,11 +275,11 @@ describe(`Operators`, () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -312,7 +308,7 @@ describe(`Operators`, () => {
       // Add element that should be included (between c and d)
       input.sendData(
         new MultiSet([
-          [[null, { id: 6, value: `c+` }], 1], // This should be between c and d
+          [[6, { id: 6, value: `c+` }], 1], // This should be between c and d
         ])
       )
       graph.run()
@@ -326,14 +322,16 @@ describe(`Operators`, () => {
       expect(updateResult.sortedResults.length).toBeLessThanOrEqual(3) // Should respect limit
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected(`topK limit+offset`, updateResult.messages, [null])
+      // 4 is affected because it is pushed out of the topK
+      // by 6 which enters the topK
+      assertOnlyKeysAffected(`topK limit+offset`, updateResult.messages, [4, 6])
     })
 
     it(`should handle elements moving positions correctly`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -348,11 +346,11 @@ describe(`Operators`, () => {
       // Initial data - a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -378,10 +376,10 @@ describe(`Operators`, () => {
       // Now let's swap 'b' and 'd' by changing their values
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: `d+` }], 1], // 'b' becomes 'd+'
-          [[null, { id: 2, value: `b` }], -1], // Remove old 'b'
-          [[null, { id: 4, value: `b+` }], 1], // 'd' becomes 'b+'
-          [[null, { id: 4, value: `d` }], -1], // Remove old 'd'
+          [[2, { id: 2, value: `b` }], -1], // Remove old 'b'
+          [[2, { id: 2, value: `d+` }], 1], // 'b' becomes 'd+'
+          [[4, { id: 4, value: `d` }], -1], // Remove old 'd'
+          [[4, { id: 4, value: `b+` }], 1], // 'd' becomes 'b+'
         ])
       )
       graph.run()
@@ -392,9 +390,11 @@ describe(`Operators`, () => {
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected(`topK move positions`, updateResult.messages, [
-        null,
-      ])
+      assertOnlyKeysAffected(
+        `topK move positions`,
+        updateResult.messages,
+        [2, 4]
+      )
 
       // For position swaps, we mainly care that the operation is incremental
       // The exact final state depends on the implementation details of fractional indexing
@@ -403,9 +403,9 @@ describe(`Operators`, () => {
 
     it(`should maintain lexicographic order through multiple updates`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -420,11 +420,11 @@ describe(`Operators`, () => {
       // Initial data - a, c, e, g, i
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
-          [[null, { id: 7, value: `g` }], 1],
-          [[null, { id: 9, value: `i` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[7, { id: 7, value: `g` }], 1],
+          [[9, { id: 9, value: `i` }], 1],
         ])
       )
       graph.run()
@@ -438,10 +438,10 @@ describe(`Operators`, () => {
       // Update 1: Insert elements between existing ones - b, d, f, h
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 6, value: `f` }], 1],
-          [[null, { id: 8, value: `h` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+          [[8, { id: 8, value: `h` }], 1],
         ])
       )
       graph.run()
@@ -456,10 +456,10 @@ describe(`Operators`, () => {
       // Update 2: Move some elements around
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: `j` }], 1], // Move 'c' to after 'i'
-          [[null, { id: 3, value: `c` }], -1], // Remove old 'c'
-          [[null, { id: 7, value: `a-` }], 1], // Move 'g' to before 'a'
-          [[null, { id: 7, value: `g` }], -1], // Remove old 'g'
+          [[3, { id: 3, value: `c` }], -1], // Remove old 'c'
+          [[3, { id: 3, value: `j` }], 1], // Move 'c' to after 'i'
+          [[7, { id: 7, value: `g` }], -1], // Remove old 'g'
+          [[7, { id: 7, value: `a-` }], 1], // Move 'g' to before 'a'
         ])
       )
       graph.run()
@@ -473,15 +473,15 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topK lexicographic update2`,
         update2Result.messages,
-        [null]
+        [3, 7]
       )
     })
 
     it(`should maintain correct order when cycling through multiple changes`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, string]]
+        [number, [{ id: number; value: string }, string]]
       >()
 
       input.pipe(
@@ -496,11 +496,11 @@ describe(`Operators`, () => {
       // Initial data with 5 items: a, b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1],
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -526,8 +526,8 @@ describe(`Operators`, () => {
       // Cycle 1: Move 'a' to position after 'b' by changing it to 'bb'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `bb` }], 1], // Move 'a' to after 'b'
-          [[null, { id: 1, value: `a` }], -1], // Remove old 'a'
+          [[1, { id: 1, value: `a` }], -1], // Remove old 'a'
+          [[1, { id: 1, value: `bb` }], 1], // Move 'a' to after 'b'
         ])
       )
       graph.run()
@@ -542,8 +542,8 @@ describe(`Operators`, () => {
       // Cycle 2: Move 'bb' to position after 'd' by changing it to 'dd'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `dd` }], 1], // Move to after 'd'
-          [[null, { id: 1, value: `bb` }], -1], // Remove old 'bb'
+          [[1, { id: 1, value: `bb` }], -1], // Remove old 'bb'
+          [[1, { id: 1, value: `dd` }], 1], // Move to after 'd'
         ])
       )
       graph.run()
@@ -554,9 +554,7 @@ describe(`Operators`, () => {
       expect(cycle2Result.messageCount).toBeGreaterThan(0) // Should have changes
 
       // Check that only the affected key produces messages
-      assertOnlyKeysAffected(`topK cycling update2`, cycle2Result.messages, [
-        null,
-      ])
+      assertOnlyKeysAffected(`topK cycling update2`, cycle2Result.messages, [1])
 
       // The key point is that the fractional indexing system can handle
       // multiple repositioning operations efficiently
@@ -565,7 +563,7 @@ describe(`Operators`, () => {
 
     it(`should handle insertion at the start of the sorted collection`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
 
       input.pipe(
@@ -580,10 +578,10 @@ describe(`Operators`, () => {
       // Initial data - b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 2, value: `b` }], 1],
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
         ])
       )
       graph.run()
@@ -604,7 +602,7 @@ describe(`Operators`, () => {
       // Update: Insert element at the start - 'a'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1], // This should be inserted at the start
+          [[1, { id: 1, value: `a` }], 1], // This should be inserted at the start
         ])
       )
       graph.run()
@@ -649,7 +647,7 @@ describe(`Operators`, () => {
 
     it(`should handle multiple insertion at the start of the sorted collection`, () => {
       const graph = new D2()
-      const input = graph.newInput<[null, { id: number; value: string }]>()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
 
       input.pipe(
@@ -664,10 +662,10 @@ describe(`Operators`, () => {
       // Initial data - b, c, d, e
       input.sendData(
         new MultiSet([
-          [[null, { id: 3, value: `c` }], 1],
-          [[null, { id: 4, value: `d` }], 1],
-          [[null, { id: 5, value: `e` }], 1],
-          [[null, { id: 6, value: `f` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
         ])
       )
       graph.run()
@@ -688,8 +686,8 @@ describe(`Operators`, () => {
       // Update: Insert element at the start - 'a'
       input.sendData(
         new MultiSet([
-          [[null, { id: 1, value: `a` }], 1], // This should be inserted at the start
-          [[null, { id: 2, value: `b` }], 1], // This should be inserted at the start
+          [[1, { id: 1, value: `a` }], 1], // This should be inserted at the start
+          [[2, { id: 2, value: `b` }], 1], // This should be inserted at the start
         ])
       )
       graph.run()
