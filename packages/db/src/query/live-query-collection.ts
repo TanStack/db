@@ -163,8 +163,8 @@ export function liveQueryCollectionOptions<
   const collections = extractCollectionsFromQuery(query)
 
   const allCollectionsReady = () => {
-    return Object.values(collections).every(
-      (collection) => collection.status === `ready`
+    return Object.values(collections).every((collection) =>
+      collection.isReady()
     )
   }
 
