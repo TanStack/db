@@ -514,7 +514,6 @@ export function liveQueryCollectionOptions<
 
           // Keep track of the keys we've sent
           // and also the biggest value we've sent so far
-          // and the smallest value we've sent so far
           const sentValuesInfo: {
             sentKeys: Set<string | number>
             biggest: any
