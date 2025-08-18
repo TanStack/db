@@ -191,7 +191,7 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.isReady()).toBe(false)
   })
 
-  it(`should update after source collection is loaded even when not preloaded before rendering - REPRODUCES BUG`, async () => {
+  it(`should update after source collection is loaded even when not preloaded before rendering`, async () => {
     // Create a source collection that doesn't start sync immediately
     let beginCallback: (() => void) | undefined
     let writeCallback:
