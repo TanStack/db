@@ -1,5 +1,13 @@
 # @tanstack/db-ivm
 
+## 0.1.2
+
+### Patch Changes
+
+- Optimize order by to lazily load ordered data if a range index is available on the field that is being ordered on. ([#410](https://github.com/TanStack/db/pull/410))
+
+- Optimize joins to use index on the join key when available. ([#335](https://github.com/TanStack/db/pull/335))
+
 ## 0.1.1
 
 ### Patch Changes

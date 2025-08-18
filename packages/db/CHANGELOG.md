@@ -1,5 +1,22 @@
 # @tanstack/db
 
+## 0.1.4
+
+### Patch Changes
+
+- Ensure that the ready status is correctly returned from a live query ([#390](https://github.com/TanStack/db/pull/390))
+
+- Optimize order by to lazily load ordered data if a range index is available on the field that is being ordered on. ([#410](https://github.com/TanStack/db/pull/410))
+
+- Add a new truncate method to the sync handler to enable a collections state to be reset from a sync transaction. ([#412](https://github.com/TanStack/db/pull/412))
+
+- Ensure LiveQueryCollections are properly transitioning to ready state when source collections are preloaded after creation of the live query collection ([#395](https://github.com/TanStack/db/pull/395))
+
+- Optimize joins to use index on the join key when available. ([#335](https://github.com/TanStack/db/pull/335))
+
+- Updated dependencies [[`6c1c19c`](https://github.com/TanStack/db/commit/6c1c19cedbc1d9d98396948e8e43fa0515bb8919), [`68538b4`](https://github.com/TanStack/db/commit/68538b4c446abeb992e24964f811c8900749f141)]:
+  - @tanstack/db-ivm@0.1.2
+
 ## 0.1.3
 
 ### Patch Changes
