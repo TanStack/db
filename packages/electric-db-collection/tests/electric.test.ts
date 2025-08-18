@@ -225,7 +225,7 @@ describe(`Electric Integration`, () => {
     expect(collection.state).toEqual(new Map())
   })
 
-  it(`should handle must-refetch by clearing synced data and resetting to loading state`, () => {
+  it(`should handle must-refetch by clearing synced data and re-syncing`, () => {
     // First, populate the collection with some data
     subscriber([
       {

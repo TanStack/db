@@ -1210,8 +1210,6 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      // Use current optimistic state directly; no copies required
-
       for (const transaction of this.pendingSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
