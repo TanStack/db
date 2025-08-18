@@ -16,8 +16,8 @@ class MockElectricClient {
 
   async sync(url: string): Promise<void> {
     const urlObj = new URL(url)
-    // Only set offset if not already provided in URL and we have a default
-    if (!urlObj.searchParams.has('offset') && this.offset !== '-1') {
+    // Only set offset if not already provided in URL
+    if (!urlObj.searchParams.has('offset')) {
       urlObj.searchParams.set('offset', this.offset)
     }
     if (this.handle && !urlObj.searchParams.has('handle')) {
@@ -368,7 +368,12 @@ describe('E2E Sync Tests', () => {
       
       // Try to sync without handle
       const invalidUrl = `${serverUrl}?offset=${client.getOffset()}`
-      await expect(client.sync(invalidUrl)).rejects.toThrow('Sync failed: 400')
+      try {
+        await client.sync(invalidUrl)
+        throw new Error('Expected sync to fail but it succeeded')
+      } catch (error) {
+        expect(error.message).toBe('Sync failed: 400')
+      }
       
       // Restore the handle
       client.setHandle(originalHandle)
