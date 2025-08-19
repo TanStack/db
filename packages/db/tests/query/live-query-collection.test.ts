@@ -288,4 +288,29 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.size).toBe(3) // Alice, Charlie, and David are active
     expect(liveQuery.get(4)).toEqual({ id: 4, name: `David`, active: true })
   })
+
+  it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {
+    const liveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
+      gcTime: 1,
+    })
+
+    const unsubscribe = liveQuery.subscribeChanges(() => {})
+    await liveQuery.preload()
+    expect(liveQuery.status).toBe(`ready`)
+
+    // Unsubscribe and wait for GC to run and cleanup to complete
+    unsubscribe()
+    const deadline = Date.now() + 500
+    while (liveQuery.status !== `cleaned-up` && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    expect(liveQuery.status).toBe(`cleaned-up`)
+
+    // Resubscribe should not throw (would throw "Graph already finalized" without the fix)
+    expect(() => liveQuery.subscribeChanges(() => {})).not.toThrow()
+  })
 })

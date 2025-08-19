@@ -631,6 +631,7 @@ export function liveQueryCollectionOptions<
         graphCache = undefined
         inputsCache = undefined
         pipelineCache = undefined
+        collectionWhereClausesCache = undefined
       }
     },
   }
