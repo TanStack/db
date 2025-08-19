@@ -333,7 +333,7 @@ export interface QueryCollectionUtils<
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.
  *
- * Supports automatic type inference following the same priority as electric-db-collection:
+ * Supports automatic type inference following the priority order:
  * 1. Explicit type (highest priority)
  * 2. Schema inference (second priority)
  * 3. QueryFn return type inference (third priority)
