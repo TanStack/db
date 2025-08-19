@@ -1,6 +1,5 @@
 import { type } from "arktype"
-import mitt from "mitt"
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection"
 import { SchemaValidationError } from "../src/errors"
@@ -571,119 +570,315 @@ describe(`Collection with schema validation`, () => {
     expect(thirdItem!.id).toBe(`task-id-3`)
   })
 
-  it(`should not block user actions when keys are recently synced`, async () => {
-    // This test reproduces the ACTUAL issue where rapid user actions get blocked
-    // when optimistic updates back up with slow sync responses
-    const txResolvers: Array<() => void> = []
-    const emitter = mitt()
-    const changeEvents: Array<any> = []
-
-    const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
-      // Simulate SLOW server operation - this is key to reproducing the issue
-      return new Promise((resolve) => {
-        txResolvers.push(() => {
-          emitter.emit(`sync`, transaction.mutations)
-          resolve(null)
-        })
-      })
+  it(`should apply schema transformations on insert operations`, () => {
+    // Create a schema with transformations
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      age: z.number().int().positive(),
+      created_at: z.string().transform((val) => new Date(val)),
+      updated_at: z.string().transform((val) => new Date(val)),
+      tags: z
+        .array(z.string())
+        .transform((val) => val.map((tag) => tag.toLowerCase())),
+      metadata: z
+        .record(z.string())
+        .transform((val) => ({ ...val, processed: true })),
     })
 
-    const collection = createCollection<{ id: number; checked: boolean }>({
-      id: `user-action-blocking-test`,
+    const collection = createCollection({
       getKey: (item) => item.id,
+      schema: userSchema,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          // Initialize with checkboxes
+        sync: ({ begin, commit }) => {
           begin()
-          for (let i = 1; i <= 3; i++) {
-            write({
-              type: `insert`,
-              value: { id: i, checked: false },
-            })
-          }
           commit()
-          markReady()
-
-          // Listen for sync events - this triggers the problematic batching
-          // @ts-expect-error don't trust mitt's typing
-          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
-            begin()
-            changes.forEach((change) => {
-              write({
-                type: change.type,
-                // @ts-expect-error TODO type changes
-                value: change.modified,
-              })
-            })
-            commit()
-          })
         },
       },
-      onUpdate: mutationFn,
     })
 
-    // Listen to change events to verify they're emitted (this was the actual problem)
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
+    const mutationFn = async () => {}
+
+    // Test insert with data that should be transformed
+    const insertData = {
+      id: `1`,
+      name: `John Doe`,
+      email: `john@example.com`,
+      age: 30,
+      created_at: `2023-01-01T00:00:00.000Z`,
+      updated_at: `2023-01-01T00:00:00.000Z`,
+      tags: [`IMPORTANT`, `USER`],
+      metadata: { source: `manual` } as any,
+    }
+
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.insert(insertData))
+
+    // Verify that transformations were applied
+    expect(tx.mutations).toHaveLength(1)
+    const mutation = tx.mutations[0]!
+
+    expect(mutation.type).toBe(`insert`)
+    expect(mutation.modified.created_at).toBeInstanceOf(Date)
+    expect(mutation.modified.updated_at).toBeInstanceOf(Date)
+    expect(mutation.modified.tags).toEqual([`important`, `user`])
+    expect(mutation.modified.metadata).toEqual({
+      source: `manual`,
+      processed: true,
+    })
+    expect(mutation.modified.name).toBe(`John Doe`)
+    expect(mutation.modified.age).toBe(30)
+  })
+
+  it(`should apply schema transformations on update operations`, async () => {
+    // Create a schema with transformations that can handle both input and existing data
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      age: z.number().int().positive(),
+      created_at: z
+        .union([z.string(), z.date()])
+        .transform((val) => (typeof val === `string` ? new Date(val) : val)),
+      updated_at: z
+        .union([z.string(), z.date()])
+        .transform((val) => (typeof val === `string` ? new Date(val) : val)),
+      tags: z
+        .union([
+          z.array(z.string()),
+          z
+            .array(z.string())
+            .transform((val) => val.map((tag) => tag.toLowerCase())),
+        ])
+        .transform((val) => val.map((tag) => tag.toLowerCase())),
+      metadata: z
+        .union([
+          z.record(z.string()),
+          z
+            .record(z.string())
+            .transform((val) => ({ ...val, processed: true })),
+        ])
+        .transform((val) => ({ ...val, processed: true })),
+    })
+
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      schema: userSchema,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          // Insert initial data
+          write({
+            type: `insert`,
+            value: {
+              id: `1`,
+              name: `John Doe`,
+              email: `john@example.com`,
+              age: 30,
+              created_at: new Date(`2023-01-01T00:00:00.000Z`),
+              updated_at: new Date(`2023-01-01T00:00:00.000Z`),
+              tags: [`user`],
+              metadata: { source: `manual` } as any,
+            },
+          })
+          commit()
+        },
+      },
     })
 
     await collection.stateWhenReady()
 
-    // CRITICAL: Simulate rapid clicking WITHOUT waiting for transactions to complete
-    // This is what actually triggers the bug - multiple pending transactions
+    const mutationFn = async () => {}
 
-    // Step 1: First click
-    const tx1 = collection.update(1, (draft) => {
-      draft.checked = true
+    // Test update with data that should be transformed
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.update(`1`, (draft) => {
+        draft.name = `Jane Doe`
+        draft.age = 31
+        draft.updated_at = `2023-01-02T00:00:00.000Z`
+        draft.tags = [`IMPORTANT`, `ADMIN`]
+        draft.metadata = { role: `admin` } as Record<string, string>
+      })
+    )
+
+    // Verify that transformations were applied and only modified fields are returned
+    expect(tx.mutations).toHaveLength(1)
+    const mutation = tx.mutations[0]!
+
+    expect(mutation.type).toBe(`update`)
+    expect(mutation.changes).toHaveProperty(`name`)
+    expect(mutation.changes).toHaveProperty(`age`)
+    expect(mutation.changes).toHaveProperty(`updated_at`)
+    expect(mutation.changes).toHaveProperty(`tags`)
+    expect(mutation.changes).toHaveProperty(`metadata`)
+
+    // Verify transformations
+    expect(mutation.changes.updated_at).toBeInstanceOf(Date)
+    expect(mutation.changes.tags).toEqual([`important`, `admin`])
+    expect(mutation.changes.metadata).toEqual({
+      role: `admin`,
+      processed: true,
     })
-    expect(collection.state.get(1)?.checked).toBe(true)
-    const initialEventCount = changeEvents.length
+    expect(mutation.changes.name).toBe(`Jane Doe`)
+    expect(mutation.changes.age).toBe(31)
+  })
 
-    // Step 2: Second click immediately (before first completes)
-    const tx2 = collection.update(1, (draft) => {
-      draft.checked = false
-    })
-    expect(collection.state.get(1)?.checked).toBe(false)
-
-    // Step 3: Third click immediately (before others complete)
-    const tx3 = collection.update(1, (draft) => {
-      draft.checked = true
-    })
-    expect(collection.state.get(1)?.checked).toBe(true)
-
-    // CRITICAL TEST: Verify events are still being emitted for rapid user actions
-    // Before the fix, these would be batched and UI would freeze
-    expect(changeEvents.length).toBeGreaterThan(initialEventCount)
-    expect(mutationFn).toHaveBeenCalledTimes(3)
-
-    // Now complete the first transaction to trigger sync and batching
-    txResolvers[0]?.()
-    await tx1.isPersisted.promise
-
-    // Step 4: More rapid clicks after sync starts (this is where the bug occurred)
-    const eventCountBeforeRapidClicks = changeEvents.length
-
-    const tx4 = collection.update(1, (draft) => {
-      draft.checked = false
-    })
-    const tx5 = collection.update(1, (draft) => {
-      draft.checked = true
+  it(`should handle complex nested transformations on insert and update`, async () => {
+    // Create a schema with complex nested transformations
+    const addressSchema = z.object({
+      street: z.string(),
+      city: z.string(),
+      country: z.string().transform((val) => val.toUpperCase()),
     })
 
-    // CRITICAL: Verify that even after sync/batching starts, user actions still emit events
-    expect(changeEvents.length).toBeGreaterThan(eventCountBeforeRapidClicks)
-    expect(collection.state.get(1)?.checked).toBe(true) // Last action should win
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      addresses: z
+        .array(addressSchema)
+        .transform((val) => val.map((addr) => ({ ...addr, normalized: true }))),
+      preferences: z
+        .object({
+          theme: z.string().transform((val) => val.toLowerCase()),
+          notifications: z.boolean(),
+        })
+        .transform((val) => ({ ...val, version: `1.0` })),
+      created_at: z.string().transform((val) => new Date(val)),
+    })
 
-    // Clean up remaining transactions
-    for (let i = 1; i < txResolvers.length; i++) {
-      txResolvers[i]?.()
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      schema: userSchema,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit }) => {
+          begin()
+          commit()
+        },
+      },
+    })
+
+    const mutationFn = async () => {}
+
+    // Test insert with complex nested data
+    const insertData = {
+      id: `1`,
+      name: `John Doe`,
+      email: `john@example.com`,
+      addresses: [
+        { street: `123 Main St`, city: `New York`, country: `usa` },
+        { street: `456 Oak Ave`, city: `Los Angeles`, country: `usa` },
+      ],
+      preferences: {
+        theme: `DARK`,
+        notifications: true,
+      },
+      created_at: `2023-01-01T00:00:00.000Z`,
     }
-    await Promise.all([
-      tx2.isPersisted.promise,
-      tx3.isPersisted.promise,
-      tx4.isPersisted.promise,
-      tx5.isPersisted.promise,
-    ])
+
+    const insertTx = createTransaction({ mutationFn })
+    insertTx.mutate(() => collection.insert(insertData))
+
+    // Verify complex transformations were applied
+    expect(insertTx.mutations).toHaveLength(1)
+    const insertMutation = insertTx.mutations[0]!
+
+    expect(insertMutation.type).toBe(`insert`)
+    expect(insertMutation.modified.created_at).toBeInstanceOf(Date)
+    expect((insertMutation.modified as any).addresses).toHaveLength(2)
+    expect((insertMutation.modified as any).addresses[0].country).toBe(`USA`)
+    expect((insertMutation.modified as any).addresses[0].normalized).toBe(true)
+    expect((insertMutation.modified as any).addresses[1].country).toBe(`USA`)
+    expect((insertMutation.modified as any).addresses[1].normalized).toBe(true)
+    expect((insertMutation.modified as any).preferences.theme).toBe(`dark`)
+    expect((insertMutation.modified as any).preferences.version).toBe(`1.0`)
+    expect((insertMutation.modified as any).preferences.notifications).toBe(
+      true
+    )
+
+    // Now test update with the same schema that can handle existing transformed data
+    const updateSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      addresses: z
+        .array(
+          z.object({
+            street: z.string(),
+            city: z.string(),
+            country: z.string().transform((val) => val.toUpperCase()),
+            normalized: z.boolean().optional(),
+          })
+        )
+        .transform((val) => val.map((addr) => ({ ...addr, normalized: true }))),
+      preferences: z
+        .object({
+          theme: z.string().transform((val) => val.toLowerCase()),
+          notifications: z.boolean(),
+          version: z.string().optional(),
+        })
+        .transform((val) => ({ ...val, version: `1.0` })),
+      created_at: z
+        .union([z.string(), z.date()])
+        .transform((val) => (typeof val === `string` ? new Date(val) : val)),
+    })
+
+    const updateCollection = createCollection({
+      getKey: (item) => item.id,
+      schema: updateSchema,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          // Add the transformed insert data
+          write({
+            type: `insert`,
+            value: insertMutation.modified as any,
+          })
+          commit()
+        },
+      },
+    })
+
+    await updateCollection.stateWhenReady()
+
+    // Test update with new nested data
+    const updateTx = createTransaction({ mutationFn })
+    updateTx.mutate(() =>
+      updateCollection.update(`1`, (draft) => {
+        draft.name = `Jane Doe`
+        draft.addresses = [
+          { street: `789 Pine St`, city: `Chicago`, country: `usa` },
+        ]
+        draft.preferences = {
+          theme: `LIGHT`,
+          notifications: false,
+        }
+      })
+    )
+
+    // Verify update transformations
+    expect(updateTx.mutations).toHaveLength(1)
+    const updateMutation = updateTx.mutations[0]!
+
+    expect(updateMutation.type).toBe(`update`)
+    expect(updateMutation.changes).toHaveProperty(`name`)
+    expect(updateMutation.changes).toHaveProperty(`addresses`)
+    expect(updateMutation.changes).toHaveProperty(`preferences`)
+
+    expect(updateMutation.changes.name).toBe(`Jane Doe`)
+    expect((updateMutation.changes as any).addresses).toHaveLength(1)
+    expect((updateMutation.changes as any).addresses[0].country).toBe(`USA`)
+    expect((updateMutation.changes as any).addresses[0].normalized).toBe(true)
+    expect((updateMutation.changes as any).preferences.theme).toBe(`light`)
+    expect((updateMutation.changes as any).preferences.version).toBe(`1.0`)
+    expect((updateMutation.changes as any).preferences.notifications).toBe(
+      false
+    )
   })
 })

@@ -19,7 +19,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFn,
   InsertMutationFnParams,
-  ResolveInsertInput,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFn,
@@ -142,10 +142,7 @@ export interface QueryCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<
-    ResolveInsertInput<TExplicit, TSchema, TFallback>,
-    TKey
-  >
+  onInsert?: InsertMutationFn<ResolveInput<TExplicit, TSchema, TFallback>, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -359,16 +356,16 @@ export function queryCollectionOptions<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 > & {
   utils: QueryCollectionUtils<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>
-  type TInsertInput = ResolveInsertInput<TExplicit, TSchema, TFallback>
+  type TInsertInput = ResolveInput<TExplicit, TSchema, TFallback>
   const {
     queryKey,
     queryFn,

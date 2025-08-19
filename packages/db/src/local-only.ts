@@ -3,7 +3,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
-  ResolveInsertInput,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
@@ -52,7 +52,7 @@ export interface LocalOnlyCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<
-      ResolveInsertInput<TExplicit, TSchema, TFallback>,
+      ResolveInput<TExplicit, TSchema, TFallback>,
       TKey,
       LocalOnlyCollectionUtils
     >
@@ -147,12 +147,12 @@ export function localOnlyCollectionOptions<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 > & {
   utils: LocalOnlyCollectionUtils
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>
-  type TInsertInput = ResolveInsertInput<TExplicit, TSchema, TFallback>
+  type TInsertInput = ResolveInput<TExplicit, TSchema, TFallback>
 
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 

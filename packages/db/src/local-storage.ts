@@ -11,7 +11,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFn,
   InsertMutationFnParams,
-  ResolveInsertInput,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
@@ -92,13 +92,13 @@ export interface LocalStorageCollectionConfig<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >[`getKey`]
   sync?: CollectionConfig<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >[`sync`]
 
   /**
@@ -108,7 +108,7 @@ export interface LocalStorageCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<
-      ResolveInsertInput<TExplicit, TSchema, TFallback>,
+      ResolveInput<TExplicit, TSchema, TFallback>,
       TKey
     >
   ) => Promise<any>
@@ -236,7 +236,7 @@ export function localStorageCollectionOptions<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >,
   `id`
 > & {
@@ -244,7 +244,7 @@ export function localStorageCollectionOptions<
   utils: LocalStorageCollectionUtils
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>
-  type TInsertInput = ResolveInsertInput<TExplicit, TSchema, TFallback>
+  type TInsertInput = ResolveInput<TExplicit, TSchema, TFallback>
 
   // Validate required parameters
   if (!config.storageKey) {

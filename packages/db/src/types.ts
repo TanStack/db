@@ -29,7 +29,7 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
- * Helper type to determine the insert input type
+ * Helper type to determine the input type for insert and update operations
  * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
  *
  * Priority:
@@ -37,9 +37,9 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
  * 2. Schema input type (if schema provided)
  * 3. Fallback type TFallback
  *
- * @internal This is used for collection insert type inference
+ * @internal This is used for collection insert and update type inference
  */
-export type ResolveInsertInput<
+export type ResolveInput<
   TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
@@ -350,7 +350,7 @@ export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+  _TInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -438,7 +438,7 @@ export interface CollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<TInsertInput, TKey>
+  onInsert?: InsertMutationFn<T, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation

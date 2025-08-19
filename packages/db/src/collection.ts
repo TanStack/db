@@ -51,7 +51,7 @@ import type {
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
-  ResolveInsertInput,
+  ResolveInput,
   ResolveType,
   StandardSchema,
   SubscribeChangesOptions,
@@ -73,15 +73,15 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
  * @template TSchema - The schema type for validation and type inference
- * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
+ * @template TInput - The type for insert and update operations (can be different from T for schemas with defaults)
  */
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
-> extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
+  TInput extends object = T,
+> extends CollectionImpl<T, TKey, TUtils, TSchema, TInput> {
   readonly utils: TUtils
 }
 
@@ -170,7 +170,7 @@ export function createCollection<
     ResolveType<unknown, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<unknown, TSchema, TFallback>
+    ResolveInput<unknown, TSchema, TFallback>
   > & {
     schema: TSchema
     utils?: TUtils
@@ -180,7 +180,7 @@ export function createCollection<
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<unknown, TSchema, TFallback>
+  ResolveInput<unknown, TSchema, TFallback>
 >
 
 // Overload for when explicit type is provided with schema - explicit type takes precedence
@@ -195,7 +195,7 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & {
     schema: TSchema
     utils?: TUtils
@@ -205,7 +205,7 @@ export function createCollection<
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 >
 
 // Overload for when explicit type is provided or no schema
@@ -220,14 +220,14 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 >
 
 // Implementation
@@ -242,21 +242,21 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 > {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TUtils,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >(options)
 
   // Copy utils to both top level and .utils namespace
@@ -271,7 +271,7 @@ export function createCollection<
     TKey,
     TUtils,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >
 }
 
@@ -280,9 +280,9 @@ export class CollectionImpl<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+  TInput extends object = T,
 > {
-  public config: CollectionConfig<T, TKey, TSchema, TInsertInput>
+  public config: CollectionConfig<T, TKey, TSchema, TInput>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -478,7 +478,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
+  constructor(config: CollectionConfig<T, TKey, TSchema, TInput>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
@@ -1681,10 +1681,7 @@ export class CollectionImpl<
    *   console.log('Insert failed:', error)
    * }
    */
-  insert = (
-    data: TInsertInput | Array<TInsertInput>,
-    config?: InsertConfig
-  ) => {
+  insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
     this.validateCollectionUsable(`insert`)
     const ambientTransaction = getActiveTransaction()
 
@@ -1713,14 +1710,15 @@ export class CollectionImpl<
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
-        // where a schema has default values. The validated data has the extra default
-        // values but for changes, we just want to show the data that was actually passed in.
+        // where a schema has default values or transforms. The validated data has the extra
+        // default or transformed values but for changes, we just want to show the data that
+        // was actually passed in.
         changes: Object.fromEntries(
           Object.keys(item).map((k) => [
             k,
             validatedData[k as keyof typeof validatedData],
           ])
-        ) as TInsertInput,
+        ) as TInput,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
@@ -1752,7 +1750,7 @@ export class CollectionImpl<
           return await this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
-                TInsertInput,
+                T,
                 `insert`
               >,
             collection: this as unknown as Collection<T, TKey, TUtils>,
@@ -1814,35 +1812,37 @@ export class CollectionImpl<
    */
 
   // Overload 1: Update multiple items with a callback
-  update<TItem extends object = T>(
+  update<TDraft extends object = TInput>(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<TDraft>) => void
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
-  update<TItem extends object = T>(
+  update<TDraft extends object = TInput>(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<TDraft>) => void
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
-  update<TItem extends object = T>(
+  update<TDraft extends object = TInput>(
     id: TKey | unknown,
-    callback: (draft: TItem) => void
+    callback: (draft: TDraft) => void
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
-  update<TItem extends object = T>(
+  update<TDraft extends object = TInput>(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: TItem) => void
+    callback: (draft: TDraft) => void
   ): TransactionType
 
-  update<TItem extends object = T>(
+  update<TDraft extends object = TInput>(
     keys: (TKey | unknown) | Array<TKey | unknown>,
-    configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
-    maybeCallback?: (draft: TItem | Array<TItem>) => void
+    configOrCallback:
+      | ((draft: TDraft | Array<TDraft>) => void)
+      | OperationConfig,
+    maybeCallback?: (draft: TDraft | Array<TDraft>) => void
   ) {
     if (typeof keys === `undefined`) {
       throw new MissingUpdateArgumentError()
@@ -1877,19 +1877,19 @@ export class CollectionImpl<
       }
 
       return item
-    }) as unknown as Array<TItem>
+    }) as unknown as Array<TDraft>
 
     let changesArray
     if (isArray) {
       // Use the proxy to track changes for all objects
       changesArray = withArrayChangeTracking(
         currentObjects,
-        callback as (draft: Array<TItem>) => void
+        callback as (draft: Array<TDraft>) => void
       )
     } else {
       const result = withChangeTracking(
         currentObjects[0]!,
-        callback as (draft: TItem) => void
+        callback as (draft: TDraft) => void
       )
       changesArray = [result]
     }
@@ -1933,7 +1933,16 @@ export class CollectionImpl<
           mutationId: crypto.randomUUID(),
           original: originalItem,
           modified: modifiedItem,
-          changes: validatedUpdatePayload as Partial<T>,
+          // Pick the values from modifiedItem based on what's passed in - this is for cases
+          // where a schema has default values or transforms. The modified data has the extra
+          // default or transformed values but for changes, we just want to show the data that
+          // was actually passed in.
+          changes: Object.fromEntries(
+            Object.keys(itemChanges).map((k) => [
+              k,
+              modifiedItem[k as keyof typeof modifiedItem],
+            ])
+          ) as TInput,
           globalKey,
           key,
           metadata: config.metadata as unknown,

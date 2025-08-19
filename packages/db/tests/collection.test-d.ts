@@ -2,11 +2,7 @@ import { assertType, describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection"
 import type { CollectionImpl } from "../src/collection"
-import type {
-  OperationConfig,
-  ResolveInsertInput,
-  ResolveType,
-} from "../src/types"
+import type { OperationConfig, ResolveInput, ResolveType } from "../src/types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 describe(`Collection.update type tests`, () => {
@@ -219,7 +215,7 @@ describe(`Schema Input/Output Type Distinction`, () => {
     updated_at: z.string().transform((val) => new Date(val)),
   })
 
-  it(`should handle schema with default values correctly`, () => {
+  it(`should handle schema with default values correctly for insert`, () => {
     const collection = createCollection({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
@@ -231,7 +227,7 @@ describe(`Schema Input/Output Type Distinction`, () => {
       typeof userSchemaWithDefaults,
       Record<string, unknown>
     >
-    type ExpectedInputType = ResolveInsertInput<
+    type ExpectedInputType = ResolveInput<
       unknown,
       typeof userSchemaWithDefaults,
       Record<string, unknown>
@@ -265,14 +261,14 @@ describe(`Schema Input/Output Type Distinction`, () => {
     expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
   })
 
-  it(`should handle schema with transformations correctly`, () => {
+  it(`should handle schema with transformations correctly for insert`, () => {
     const collection = createCollection({
       getKey: (item) => item.id,
       sync: { sync: () => {} },
       schema: userSchemaTransform,
     })
 
-    type ExpectedInputType = ResolveInsertInput<
+    type ExpectedInputType = ResolveInput<
       unknown,
       typeof userSchemaTransform,
       Record<string, unknown>
@@ -306,6 +302,106 @@ describe(`Schema Input/Output Type Distinction`, () => {
     expectTypeOf<InsertArg>().toEqualTypeOf<
       ExpectedInputType | Array<ExpectedInputType>
     >()
+
+    // Collection items should be ExpectedOutputType
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+  })
+
+  it(`should handle schema with default values correctly for update method`, () => {
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchemaWithDefaults,
+    })
+
+    type ExpectedOutputType = ResolveType<
+      unknown,
+      typeof userSchemaWithDefaults,
+      Record<string, unknown>
+    >
+    type ExpectedInputType = ResolveInput<
+      unknown,
+      typeof userSchemaWithDefaults,
+      Record<string, unknown>
+    >
+
+    // Input type should not include defaulted fields
+    expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at?: Date
+      updated_at?: Date
+    }>()
+
+    // Output type should include all fields
+    expectTypeOf<ExpectedOutputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: Date
+      updated_at: Date
+    }>()
+
+    // Test update method with schema types
+    const updateMethod: typeof collection.update = (() => {}) as any
+    updateMethod(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInputType>()
+    })
+
+    updateMethod([`test-id1`, `test-id2`], (drafts) => {
+      expectTypeOf(drafts).toEqualTypeOf<Array<ExpectedInputType>>()
+    })
+
+    // Collection items should be ExpectedOutputType
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+  })
+
+  it(`should handle schema with transformations correctly for update method`, () => {
+    const collection = createCollection({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      schema: userSchemaTransform,
+    })
+
+    type ExpectedInputType = ResolveInput<
+      unknown,
+      typeof userSchemaTransform,
+      Record<string, unknown>
+    >
+    type ExpectedOutputType = ResolveType<
+      unknown,
+      typeof userSchemaTransform,
+      Record<string, unknown>
+    >
+
+    // Input type should be the raw input (before transformation)
+    expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: string
+      updated_at: string
+    }>()
+
+    // Output type should be the transformed output
+    expectTypeOf<ExpectedOutputType>().toEqualTypeOf<{
+      id: string
+      name: string
+      email: string
+      created_at: Date
+      updated_at: Date
+    }>()
+
+    // Test update method with schema types
+    const updateMethod: typeof collection.update = (() => {}) as any
+    updateMethod(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInputType>()
+    })
+
+    updateMethod([`test-id1`, `test-id2`], (drafts) => {
+      expectTypeOf(drafts).toEqualTypeOf<Array<ExpectedInputType>>()
+    })
 
     // Collection items should be ExpectedOutputType
     expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
