@@ -454,6 +454,7 @@ describe(`Operators`, () => {
       const input = graph.newInput<{
         category: string
         amount: number
+        date: Date
       }>()
       let latestMessage: any = null
 
@@ -461,6 +462,8 @@ describe(`Operators`, () => {
         groupBy((data) => ({ category: data.category }), {
           minimum: min((data) => data.amount),
           maximum: max((data) => data.amount),
+          min_date: min((data) => data.date),
+          max_date: max((data) => data.date),
         }),
         output((message) => {
           latestMessage = message
@@ -472,11 +475,11 @@ describe(`Operators`, () => {
       // Initial data
       input.sendData(
         new MultiSet([
-          [{ category: `A`, amount: 10 }, 1],
-          [{ category: `A`, amount: 20 }, 1],
-          [{ category: `A`, amount: 5 }, 1],
-          [{ category: `B`, amount: 30 }, 1],
-          [{ category: `B`, amount: 15 }, 1],
+          [{ category: `A`, amount: 10, date: new Date(`2025/12/13`) }, 1],
+          [{ category: `A`, amount: 20, date: new Date(`2025/12/15`) }, 1],
+          [{ category: `A`, amount: 5, date: new Date(`2025/12/12`) }, 1],
+          [{ category: `B`, amount: 30, date: new Date(`2025/12/12`) }, 1],
+          [{ category: `B`, amount: 15, date: new Date(`2025/12/13`) }, 1],
         ])
       )
 
@@ -493,6 +496,8 @@ describe(`Operators`, () => {
               category: `A`,
               minimum: 5,
               maximum: 20,
+              min_date: new Date(`2025/12/12`),
+              max_date: new Date(`2025/12/15`),
             },
           ],
           1,
@@ -504,6 +509,8 @@ describe(`Operators`, () => {
               category: `B`,
               minimum: 15,
               maximum: 30,
+              min_date: new Date(`2025/12/12`),
+              max_date: new Date(`2025/12/13`),
             },
           ],
           1,
