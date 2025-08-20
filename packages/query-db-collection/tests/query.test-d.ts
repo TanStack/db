@@ -197,16 +197,16 @@ describe(`Query collection type resolution tests`, () => {
     type Output = z.output<typeof schema>
     type Input = z.input<typeof schema>
 
-    const queryClient = new QueryClient()
+    const testQueryClient = new QueryClient()
 
     const options = queryCollectionOptions({
-      queryClient,
+      queryClient: testQueryClient,
       queryKey: [`users`],
       queryFn: () => Promise.resolve([] as Array<any>),
       schema,
       getKey: (item) => item.id,
-      onInsert: async () => {},
-      onUpdate: async () => {},
+      onInsert: () => Promise.resolve(),
+      onUpdate: () => Promise.resolve(),
     })
 
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[Output]>()
@@ -228,8 +228,8 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions({
         queryClient,
         queryKey: [`queryfn-inference`],
-        queryFn: async (): Promise<Array<TodoType>> => {
-          return [] as Array<TodoType>
+        queryFn: (): Promise<Array<TodoType>> => {
+          return Promise.resolve([] as Array<TodoType>)
         },
         getKey: (item) => item.id,
       })
@@ -247,8 +247,8 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions<UserType>({
         queryClient,
         queryKey: [`explicit-priority`],
-        queryFn: async (): Promise<Array<TodoType>> => {
-          return [] as Array<TodoType>
+        queryFn: (): Promise<Array<TodoType>> => {
+          return Promise.resolve([] as Array<TodoType>)
         },
         getKey: (item) => item.id,
       })
@@ -267,8 +267,8 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions({
         queryClient,
         queryKey: [`schema-priority`],
-        queryFn: async (): Promise<Array<z.infer<typeof userSchema>>> => {
-          return [] as Array<z.infer<typeof userSchema>>
+        queryFn: (): Promise<Array<z.infer<typeof userSchema>>> => {
+          return Promise.resolve([] as Array<z.infer<typeof userSchema>>)
         },
         schema: userSchema,
         getKey: (item) => item.id,
@@ -283,7 +283,7 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions<TodoType>({
         queryClient,
         queryKey: [`backward-compat`],
-        queryFn: async () => [] as Array<TodoType>,
+        queryFn: () => Promise.resolve([] as Array<TodoType>),
         getKey: (item) => item.id,
       })
 
@@ -294,8 +294,8 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions({
         queryClient,
         queryKey: [`collection-test`],
-        queryFn: async (): Promise<Array<TodoType>> => {
-          return [] as Array<TodoType>
+        queryFn: (): Promise<Array<TodoType>> => {
+          return Promise.resolve([] as Array<TodoType>)
         },
         getKey: (item) => item.id,
       })

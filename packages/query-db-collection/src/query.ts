@@ -17,10 +17,10 @@ import type {
   CollectionConfig,
   DeleteMutationFn,
   DeleteMutationFnParams,
+  InferSchemaInput,
+  InferSchemaOutput,
   InsertMutationFn,
   InsertMutationFnParams,
-  ResolveInput,
-  // ResolveType,
   SyncConfig,
   UpdateMutationFn,
   UpdateMutationFnParams,
@@ -31,21 +31,24 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
-// Schema output type inference helper (matches electric.ts pattern)
-type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T> extends object
-    ? StandardSchemaV1.InferOutput<T>
-    : Record<string, unknown>
-  : Record<string, unknown>
-
 // QueryFn return type inference helper
-type InferQueryFnOutput<TQueryFn> = TQueryFn extends (
+type InferQueryFn<TQueryFn> = TQueryFn extends (
   context: QueryFunctionContext<any>
 ) => Promise<Array<infer TItem>>
   ? TItem extends object
     ? TItem
     : Record<string, unknown>
   : Record<string, unknown>
+
+type ResolveInput<
+  TExplicit extends object | unknown = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryFn = unknown,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? InferQueryFn<TQueryFn>
+    : InferSchemaInput<TSchema>
+  : TExplicit
 
 // Type resolution system with priority order (matches electric.ts pattern)
 type ResolveType<
@@ -54,7 +57,7 @@ type ResolveType<
   TQueryFn = unknown,
 > = unknown extends TExplicit
   ? [TSchema] extends [never]
-    ? InferQueryFnOutput<TQueryFn>
+    ? InferQueryFn<TQueryFn>
     : InferSchemaOutput<TSchema>
   : TExplicit
 
@@ -128,7 +131,7 @@ export interface QueryCollectionConfig<
   /** Unique identifier for the collection */
   id?: string
   /** Function to extract the unique key from an item */
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`getKey`]
+  getKey: (item: ResolveType<TExplicit, TSchema, TQueryFn>) => TKey
   /** Schema for validating items */
   schema?: TSchema
   sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
@@ -177,7 +180,7 @@ export interface QueryCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -230,7 +233,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -276,7 +279,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Metadata to pass to the query.
@@ -422,8 +425,20 @@ export function queryCollectionOptions<
   TKey extends string | number = string | number,
   TInput extends object = ResolveInput<TExplicit, TSchema, TQueryFn>,
 >(
-  config: QueryCollectionConfig<TExplicit, TSchema, TQueryFn, TError, TQueryKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>> & {
+  config: QueryCollectionConfig<
+    TExplicit,
+    TSchema,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey
+  >
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TQueryFn>,
+  TKey,
+  TSchema,
+  TInput
+> & {
   utils: QueryCollectionUtils<
     ResolveType<TExplicit, TSchema, TQueryFn>,
     TKey,
@@ -518,7 +533,7 @@ export function queryCollectionOptions<
         const currentSyncedItems = new Map(collection.syncedData)
         const newItemsMap = new Map<TKey, TItem>()
         newItemsArray.forEach((item) => {
-          const key = getKey(item) as TKey
+          const key = getKey(item)
           newItemsMap.set(key, item)
         })
 
@@ -634,13 +649,11 @@ export function queryCollectionOptions<
   }
 
   // Create write utils using the manual-sync module
-  const writeUtils = createWriteUtils<TItem, TKey, TInput>(
-    () => writeContext
-  )
+  const writeUtils = createWriteUtils<TItem, TKey, TInput>(() => writeContext)
 
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<TInput, TKey>) => {
+    ? async (params: InsertMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onInsert(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false

@@ -52,7 +52,7 @@ export interface LocalOnlyCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<
-      ResolveInput<TExplicit, TSchema, TFallback>,
+      ResolveType<TExplicit, TSchema, TFallback>,
       TKey,
       LocalOnlyCollectionUtils
     >
@@ -152,7 +152,6 @@ export function localOnlyCollectionOptions<
   utils: LocalOnlyCollectionUtils
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>
-  type TInsertInput = ResolveInput<TExplicit, TSchema, TFallback>
 
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
@@ -171,22 +170,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onInsert) {
-      handlerResult =
-        (await (
-          onInsert as (
-            p: InsertMutationFnParams<
-              TInsertInput,
-              TKey,
-              LocalOnlyCollectionUtils
-            >
-          ) => Promise<any>
-        )(
-          params as unknown as InsertMutationFnParams<
-            TInsertInput,
-            TKey,
-            LocalOnlyCollectionUtils
-          >
-        )) ?? {}
+      handlerResult = (await onInsert(params)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations

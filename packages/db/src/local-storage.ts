@@ -9,7 +9,6 @@ import {
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
-  InsertMutationFn,
   InsertMutationFnParams,
   ResolveInput,
   ResolveType,
@@ -244,7 +243,6 @@ export function localStorageCollectionOptions<
   utils: LocalStorageCollectionUtils
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>
-  type TInsertInput = ResolveInput<TExplicit, TSchema, TFallback>
 
   // Validate required parameters
   if (!config.storageKey) {
@@ -345,10 +343,7 @@ export function localStorageCollectionOptions<
     // Call the user handler BEFORE persisting changes (if provided)
     let handlerResult: any = {}
     if (config.onInsert) {
-      handlerResult =
-        (await (config.onInsert as InsertMutationFn<TInsertInput, TKey>)(
-          params as unknown as InsertMutationFnParams<TInsertInput, TKey>
-        )) ?? {}
+      handlerResult = (await config.onInsert(params)) ?? {}
     }
 
     // Always persist to storage
@@ -461,10 +456,7 @@ export function localStorageCollectionOptions<
     ...restConfig,
     id: collectionId,
     sync,
-    onInsert: wrappedOnInsert as unknown as InsertMutationFn<
-      TInsertInput,
-      TKey
-    >,
+    onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
     utils: {

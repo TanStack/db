@@ -20,9 +20,9 @@ const activeBatchContexts = new WeakMap<
 export type SyncOperation<
   TRow extends object,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TRow,
+  TInput extends object = TRow,
 > =
-  | { type: `insert`; data: TInsertInput | Array<TInsertInput> }
+  | { type: `insert`; data: TInput | Array<TInput> }
   | { type: `update`; data: Partial<TRow> | Array<Partial<TRow>> }
   | { type: `delete`; key: TKey | Array<TKey> }
   | { type: `upsert`; data: Partial<TRow> | Array<Partial<TRow>> }
@@ -53,11 +53,11 @@ interface NormalizedOperation<
 function normalizeOperations<
   TRow extends object,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TRow,
+  TInput extends object = TRow,
 >(
   ops:
-    | SyncOperation<TRow, TKey, TInsertInput>
-    | Array<SyncOperation<TRow, TKey, TInsertInput>>,
+    | SyncOperation<TRow, TKey, TInput>
+    | Array<SyncOperation<TRow, TKey, TInput>>,
   ctx: SyncContext<TRow, TKey>
 ): Array<NormalizedOperation<TRow, TKey>> {
   const operations = Array.isArray(ops) ? ops : [ops]
@@ -126,11 +126,11 @@ function validateOperations<
 export function performWriteOperations<
   TRow extends object,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TRow,
+  TInput extends object = TRow,
 >(
   operations:
-    | SyncOperation<TRow, TKey, TInsertInput>
-    | Array<SyncOperation<TRow, TKey, TInsertInput>>,
+    | SyncOperation<TRow, TKey, TInput>
+    | Array<SyncOperation<TRow, TKey, TInput>>,
   ctx: SyncContext<TRow, TKey>
 ): void {
   const normalized = normalizeOperations(operations, ctx)
@@ -206,7 +206,7 @@ export function performWriteOperations<
 export function createWriteUtils<
   TRow extends object,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TRow,
+  TInput extends object = TRow,
 >(getContext: () => SyncContext<TRow, TKey> | null) {
   function ensureContext(): SyncContext<TRow, TKey> {
     const context = getContext()
@@ -217,8 +217,8 @@ export function createWriteUtils<
   }
 
   return {
-    writeInsert(data: TInsertInput | Array<TInsertInput>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+    writeInsert(data: TInput | Array<TInput>) {
+      const operation: SyncOperation<TRow, TKey, TInput> = {
         type: `insert`,
         data,
       }
@@ -237,7 +237,7 @@ export function createWriteUtils<
     },
 
     writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+      const operation: SyncOperation<TRow, TKey, TInput> = {
         type: `update`,
         data,
       }
@@ -254,7 +254,7 @@ export function createWriteUtils<
     },
 
     writeDelete(key: TKey | Array<TKey>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+      const operation: SyncOperation<TRow, TKey, TInput> = {
         type: `delete`,
         key,
       }
@@ -271,7 +271,7 @@ export function createWriteUtils<
     },
 
     writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
+      const operation: SyncOperation<TRow, TKey, TInput> = {
         type: `upsert`,
         data,
       }
@@ -300,7 +300,7 @@ export function createWriteUtils<
 
       // Set up the batch context for this specific collection
       const batchContext = {
-        operations: [] as Array<SyncOperation<TRow, TKey, TInsertInput>>,
+        operations: [] as Array<SyncOperation<TRow, TKey, TInput>>,
         isActive: true,
       }
       activeBatchContexts.set(ctx, batchContext)

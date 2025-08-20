@@ -36,14 +36,33 @@ const debug = DebugModule.debug(`ts/db:electric`)
  */
 export type Txid = number
 
-// The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
-// but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
-// This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
+// The `InferSchemaOutput`, `InferSchemaInput`, `ResolveType` and `ResolveInput` are
+// copied from the `@tanstack/db` package but we modified `InferSchemaOutput`
+// and `InferSchemaInput` slightly to restrict the schema output to `Row<unknown>`
+// This is needed in order for `GetExtensions` to be able to infer the parser
+// extensions type from the schema.
+
 type InferSchemaOutput<T> = T extends StandardSchemaV1
   ? StandardSchemaV1.InferOutput<T> extends Row<unknown>
     ? StandardSchemaV1.InferOutput<T>
     : Record<string, unknown>
   : Record<string, unknown>
+
+type InferSchemaInput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends Row<unknown>
+    ? StandardSchemaV1.InferInput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
+
+type ResolveInput<
+  TExplicit extends Row<unknown> = Row<unknown>,
+  TSchema extends StandardSchemaV1 = never,
+  TFallback extends object = Record<string, unknown>,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaInput<TSchema>
+  : TExplicit
 
 type ResolveType<
   TExplicit extends Row<unknown> = Row<unknown>,
@@ -298,7 +317,7 @@ export function electricCollectionOptions<
   ResolveType<TExplicit, TSchema, TFallback>,
   string | number,
   TSchema,
-  ResolveType<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 > & { utils: ElectricCollectionUtils } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
