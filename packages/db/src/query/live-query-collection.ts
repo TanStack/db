@@ -17,7 +17,7 @@ import type {
 } from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
-import type { BasicExpression } from "./ir.js"
+import type { BasicExpression, QueryIR } from "./ir.js"
 import type { LazyCollectionCallbacks } from "./compiler/joins.js"
 
 // Global counter for auto-generated collection IDs
@@ -93,6 +93,592 @@ export interface LiveQueryCollectionConfig<
   gcTime?: number
 }
 
+type Changes<T> = {
+  deletes: number
+  inserts: number
+  value: T
+  orderByIndex: string | undefined
+}
+
+type SyncState = {
+  messagesCount: number
+  subscribedToAllCollections: boolean
+  unsubscribeCallbacks: Set<() => void>
+
+  graph?: D2
+  inputs?: Record<string, RootStreamBuilder<unknown>>
+  pipeline?: ResultStream
+}
+
+type FullSyncState = Required<SyncState>
+
+class CollectionConfigBuilder<
+  TContext extends Context,
+  TResult extends object = GetResult<TContext>,
+> {
+  private readonly id: string
+  private readonly query: QueryIR
+  private readonly collections: Record<string, Collection<any, any, any>>
+
+  // WeakMap to store the keys of the results
+  // so that we can retrieve them in the getKey function
+  private readonly resultKeys = new WeakMap<object, unknown>()
+
+  // WeakMap to store the orderBy index for each result
+  private readonly orderByIndices = new WeakMap<object, string>()
+
+  private readonly compare?: (val1: TResult, val2: TResult) => number
+
+  private graphCache: D2 | undefined
+  private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
+  private pipelineCache: ResultStream | undefined
+  private collectionWhereClausesCache:
+    | Map<string, BasicExpression<boolean>>
+    | undefined
+
+  // Map of collection IDs to functions that load keys for that lazy collection
+  private readonly lazyCollectionsCallbacks: Record<
+    string,
+    LazyCollectionCallbacks
+  > = {}
+  // Set of collection IDs that are lazy collections
+  private readonly lazyCollections = new Set<string>()
+  // Set of collection IDs that include an optimizable ORDER BY clause
+  private readonly optimizableOrderByCollections: Record<
+    string,
+    OrderByOptimizationInfo
+  > = {}
+
+  constructor(
+    private readonly config: LiveQueryCollectionConfig<TContext, TResult>
+  ) {
+    // Generate a unique ID if not provided
+    this.id = config.id || `live-query-${++liveQueryCollectionCounter}`
+
+    this.query = buildQueryFromConfig(config)
+    this.collections = extractCollectionsFromQuery(this.query)
+
+    // Create compare function for ordering if the query has orderBy
+    if (this.query.orderBy && this.query.orderBy.length > 0) {
+      this.compare = createOrderByComparator<TResult>(this.orderByIndices)
+    }
+
+    // Compile the base pipeline once initially
+    // This is done to ensure that any errors are thrown immediately and synchronously
+    this.compileBasePipeline()
+  }
+
+  getConfig(): CollectionConfig<TResult> {
+    return {
+      id: this.id,
+      getKey:
+        this.config.getKey ||
+        ((item) => this.resultKeys.get(item) as string | number),
+      sync: this.getSyncConfig(),
+      compare: this.compare,
+      gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
+      schema: this.config.schema,
+      onInsert: this.config.onInsert,
+      onUpdate: this.config.onUpdate,
+      onDelete: this.config.onDelete,
+      startSync: this.config.startSync,
+    }
+  }
+
+  private getSyncConfig(): SyncConfig<TResult> {
+    return {
+      rowUpdateMode: `full`,
+      sync: this.syncFn.bind(this),
+    }
+  }
+
+  private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
+    const syncState: SyncState = {
+      messagesCount: 0,
+      subscribedToAllCollections: false,
+      unsubscribeCallbacks: new Set<() => void>(),
+    }
+
+    // Extend the pipeline such that it applies the incoming changes to the collection
+    const fullSyncState = this.extendPipelineWithChangeProcessing(
+      config,
+      syncState
+    )
+
+    this.subscribeToAllCollections(config, fullSyncState)
+
+    // TODO: move this into the subscribeToAllCollections method
+    syncState.subscribedToAllCollections = true
+
+    // Initial run
+    this.maybeRunGraph(config, fullSyncState)
+
+    // Return the unsubscribe function
+    return () => {
+      syncState.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
+
+      // Reset caches so a fresh graph/pipeline is compiled on next start
+      // This avoids reusing a finalized D2 graph across GC restarts
+      this.graphCache = undefined
+      this.inputsCache = undefined
+      this.pipelineCache = undefined
+      this.collectionWhereClausesCache = undefined
+    }
+  }
+
+  private subscribeToAllCollections(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState
+  ) {
+    Object.entries(this.collections).forEach(([collectionId, collection]) =>
+      this.subscribeToCollection(collectionId, collection, config, syncState)
+    )
+  }
+
+  // TODO: refactor this method into a few smaller methods
+  private subscribeToCollection(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState
+  ) {
+    const input = syncState.inputs[collectionId]!
+    const collectionAlias = findCollectionAlias(collectionId, this.query)
+    const whereClause = this.getWhereClauseFromAlias(collectionAlias)
+
+    const sendChangesToPipeline = (
+      changes: Iterable<ChangeMessage<any, string | number>>,
+      callback?: () => boolean
+    ) => {
+      sendChangesToInput(input, changes, collection.config.getKey)
+      this.maybeRunGraph(config, syncState, callback)
+    }
+
+    // Wraps the sendChangesToPipeline function
+    // in order to turn `update`s into `insert`s
+    // for keys that have not been sent to the pipeline yet
+    // and filter out deletes for keys that have not been sent
+    const sendVisibleChangesToPipeline = (
+      changes: Array<ChangeMessage<any, string | number>>,
+      loadedInitialState: boolean,
+      sentKeys: Set<string | number>
+    ) => {
+      if (loadedInitialState) {
+        // There was no index for the join key
+        // so we loaded the initial state
+        // so we can safely assume that the pipeline has seen all keys
+        return sendChangesToPipeline(changes)
+      }
+
+      const newChanges = []
+      for (const change of changes) {
+        let newChange = change
+        if (!sentKeys.has(change.key)) {
+          if (change.type === `update`) {
+            newChange = { ...change, type: `insert` }
+          } else if (change.type === `delete`) {
+            // filter out deletes for keys that have not been sent
+            continue
+          }
+        }
+        newChanges.push(newChange)
+      }
+
+      return sendChangesToPipeline(newChanges)
+    }
+
+    const loadKeys = (
+      keys: Iterable<string | number>,
+      sentKeys: Set<string | number>,
+      filterFn: (item: object) => boolean
+    ) => {
+      for (const key of keys) {
+        // Only load the key once
+        if (sentKeys.has(key)) continue
+
+        const value = collection.get(key)
+        if (value !== undefined && filterFn(value)) {
+          sentKeys.add(key)
+          sendChangesToPipeline([{ type: `insert`, key, value }])
+        }
+      }
+    }
+
+    const subscribeToAllChanges = (
+      whereExpression: BasicExpression<boolean> | undefined
+    ) => {
+      const unsubscribe = collection.subscribeChanges(sendChangesToPipeline, {
+        includeInitialState: true,
+        ...(whereExpression ? { whereExpression } : undefined),
+      })
+      return unsubscribe
+    }
+
+    // Subscribes to all changes but without the initial state
+    // such that we can load keys from the initial state on demand
+    // based on the matching keys from the main collection in the join
+    const subscribeToMatchingChanges = (
+      whereExpression: BasicExpression<boolean> | undefined
+    ) => {
+      let loadedInitialState = false
+      const sentKeys = new Set<string | number>()
+
+      const sendVisibleChanges = (
+        changes: Array<ChangeMessage<any, string | number>>
+      ) => {
+        sendVisibleChangesToPipeline(changes, loadedInitialState, sentKeys)
+      }
+
+      const unsubscribe = collection.subscribeChanges(sendVisibleChanges, {
+        whereExpression,
+      })
+
+      // Create a function that loads keys from the collection
+      // into the query pipeline on demand
+      const filterFn = whereExpression
+        ? createFilterFunctionFromExpression(whereExpression)
+        : () => true
+      const loadKs = (keys: Set<string | number>) => {
+        return loadKeys(keys, sentKeys, filterFn)
+      }
+
+      // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
+      // This is used by the join operator to dynamically load matching keys from the lazy collection
+      // or to get the full initial state of the collection if there's no index for the join key
+      this.lazyCollectionsCallbacks[collectionId] = {
+        loadKeys: loadKs,
+        loadInitialState: () => {
+          // Make sure we only load the initial state once
+          if (loadedInitialState) return
+          loadedInitialState = true
+
+          const changes = collection.currentStateAsChanges({
+            whereExpression,
+          })
+          sendChangesToPipeline(changes)
+        },
+      }
+      return unsubscribe
+    }
+
+    const subscribeToOrderedChanges = (
+      whereExpression: BasicExpression<boolean> | undefined
+    ) => {
+      const {
+        offset,
+        limit,
+        comparator,
+        index,
+        dataNeeded,
+        valueExtractorForRawRow,
+      } = this.optimizableOrderByCollections[collectionId]!
+
+      if (!dataNeeded) {
+        // This should never happen because the topK operator should always set the size callback
+        // which in turn should lead to the orderBy operator setting the dataNeeded callback
+        throw new Error(
+          `Missing dataNeeded callback for collection ${collectionId}`
+        )
+      }
+
+      // This function is called by maybeRunGraph
+      // after each iteration of the query pipeline
+      // to ensure that the orderBy operator has enough data to work with
+      const loadMoreIfNeeded = () => {
+        // `dataNeeded` probes the orderBy operator to see if it needs more data
+        // if it needs more data, it returns the number of items it needs
+        const n = dataNeeded()
+        if (n > 0) {
+          loadNextItems(n)
+        }
+
+        // Indicate that we're done loading data if we didn't need to load more data
+        return n === 0
+      }
+
+      // Keep track of the keys we've sent
+      // and also the biggest value we've sent so far
+      const sentValuesInfo: {
+        sentKeys: Set<string | number>
+        biggest: any
+      } = {
+        sentKeys: new Set<string | number>(),
+        biggest: undefined,
+      }
+
+      const sendChangesToPipelineWithTracking = (
+        changes: Iterable<ChangeMessage<any, string | number>>
+      ) => {
+        const trackedChanges = trackSentValues(
+          changes,
+          comparator,
+          sentValuesInfo
+        )
+        sendChangesToPipeline(trackedChanges, loadMoreIfNeeded)
+      }
+
+      // Loads the next `n` items from the collection
+      // starting from the biggest item it has sent
+      const loadNextItems = (n: number) => {
+        const biggestSentRow = sentValuesInfo.biggest
+        const biggestSentValue = biggestSentRow
+          ? valueExtractorForRawRow(biggestSentRow)
+          : biggestSentRow
+        // Take the `n` items after the biggest sent value
+        const nextOrderedKeys = index.take(n, biggestSentValue)
+        const nextInserts: Array<ChangeMessage<any, string | number>> =
+          nextOrderedKeys.map((key) => {
+            return { type: `insert`, key, value: collection.get(key) }
+          })
+        sendChangesToPipelineWithTracking(nextInserts)
+      }
+
+      // Load the first `offset + limit` values from the index
+      // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+      loadNextItems(offset + limit)
+
+      const sendChangesInRange = (
+        changes: Iterable<ChangeMessage<any, string | number>>
+      ) => {
+        // Split live updates into a delete of the old value and an insert of the new value
+        // and filter out changes that are bigger than the biggest value we've sent so far
+        // because they can't affect the topK
+        const splittedChanges = splitUpdates(changes)
+        const filteredChanges = filterChangesSmallerOrEqualToMax(
+          splittedChanges,
+          comparator,
+          sentValuesInfo.biggest
+        )
+        sendChangesToPipeline(filteredChanges, loadMoreIfNeeded)
+      }
+
+      // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
+      // values that are bigger don't need to be sent because they can't affect the topK
+      const unsubscribe = collection.subscribeChanges(sendChangesInRange, {
+        whereExpression,
+      })
+
+      return unsubscribe
+    }
+
+    const subscribeToChanges = (whereExpression?: BasicExpression<boolean>) => {
+      let unsubscribe: () => void
+      if (this.lazyCollections.has(collectionId)) {
+        unsubscribe = subscribeToMatchingChanges(whereExpression)
+      } else if (
+        Object.hasOwn(this.optimizableOrderByCollections, collectionId)
+      ) {
+        unsubscribe = subscribeToOrderedChanges(whereExpression)
+      } else {
+        unsubscribe = subscribeToAllChanges(whereExpression)
+      }
+      syncState.unsubscribeCallbacks.add(unsubscribe)
+    }
+
+    if (whereClause) {
+      // Convert WHERE clause to BasicExpression format for collection subscription
+      const whereExpression = convertToBasicExpression(
+        whereClause,
+        collectionAlias!
+      )
+
+      if (whereExpression) {
+        // Use index optimization for this collection
+        subscribeToChanges(whereExpression)
+      } else {
+        // This should not happen - if we have a whereClause but can't create whereExpression,
+        // it indicates a bug in our optimization logic
+        throw new Error(
+          `Failed to convert WHERE clause to collection filter for collection '${collectionId}'. ` +
+            `This indicates a bug in the query optimization logic.`
+        )
+      }
+    } else {
+      // No WHERE clause for this collection, use regular subscription
+      subscribeToChanges()
+    }
+  }
+
+  private compileBasePipeline() {
+    this.graphCache = new D2()
+    this.inputsCache = Object.fromEntries(
+      Object.entries(this.collections).map(([key]) => [
+        key,
+        this.graphCache!.newInput<any>(),
+      ])
+    )
+
+    // Compile the query and get both pipeline and collection WHERE clauses
+    const {
+      pipeline: pipelineCache,
+      collectionWhereClauses: collectionWhereClausesCache,
+    } = compileQuery(
+      this.query,
+      this.inputsCache as Record<string, KeyedStream>,
+      this.collections,
+      this.lazyCollectionsCallbacks,
+      this.lazyCollections,
+      this.optimizableOrderByCollections
+    )
+
+    this.pipelineCache = pipelineCache
+    this.collectionWhereClausesCache = collectionWhereClausesCache
+  }
+
+  private maybeCompileBasePipeline() {
+    if (!this.graphCache || !this.inputsCache || !this.pipelineCache) {
+      this.compileBasePipeline()
+    }
+    return {
+      graph: this.graphCache!,
+      inputs: this.inputsCache!,
+      pipeline: this.pipelineCache!,
+    }
+  }
+
+  private extendPipelineWithChangeProcessing(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: SyncState
+  ): FullSyncState {
+    const { begin, commit } = config
+    const { graph, inputs, pipeline } = this.maybeCompileBasePipeline()
+
+    pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner()
+        syncState.messagesCount += messages.length
+
+        begin()
+        messages
+          .reduce(
+            accumulateChanges<TResult>,
+            new Map<unknown, Changes<TResult>>()
+          )
+          .forEach(this.applyChanges.bind(this, config))
+        commit()
+      })
+    )
+
+    graph.finalize()
+
+    // Extend the sync state with the graph, inputs, and pipeline
+    syncState.graph = graph
+    syncState.inputs = inputs
+    syncState.pipeline = pipeline
+
+    return syncState as FullSyncState
+  }
+
+  private applyChanges(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    changes: {
+      deletes: number
+      inserts: number
+      value: TResult
+      orderByIndex: string | undefined
+    },
+    key: unknown
+  ) {
+    const { write, collection } = config
+    const { deletes, inserts, value, orderByIndex } = changes
+
+    // Store the key of the result so that we can retrieve it in the
+    // getKey function
+    this.resultKeys.set(value, key)
+
+    // Store the orderBy index if it exists
+    if (orderByIndex !== undefined) {
+      this.orderByIndices.set(value, orderByIndex)
+    }
+
+    // Simple singular insert.
+    if (inserts && deletes === 0) {
+      write({
+        value,
+        type: `insert`,
+      })
+    } else if (
+      // Insert & update(s) (updates are a delete & insert)
+      inserts > deletes ||
+      // Just update(s) but the item is already in the collection (so
+      // was inserted previously).
+      (inserts === deletes && collection.has(key as string | number))
+    ) {
+      write({
+        value,
+        type: `update`,
+      })
+      // Only delete is left as an option
+    } else if (deletes > 0) {
+      write({
+        value,
+        type: `delete`,
+      })
+    } else {
+      throw new Error(
+        `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`
+      )
+    }
+  }
+
+  // The callback function is called after the graph has run.
+  // This gives the callback a chance to load more data if needed,
+  // that's used to optimize orderBy operators that set a limit,
+  // in order to load some more data if we still don't have enough rows after the pipeline has run.
+  // That can happend because even though we load N rows, the pipeline might filter some of these rows out
+  // causing the orderBy operator to receive less than N rows or even no rows at all.
+  // So this callback would notice that it doesn't have enough rows and load some more.
+  // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
+  private maybeRunGraph(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    callback?: () => boolean
+  ) {
+    const { begin, commit, markReady } = config
+
+    // We only run the graph if all the collections are ready
+    if (
+      this.allCollectionsReadyOrInitialCommit() &&
+      syncState.subscribedToAllCollections
+    ) {
+      syncState.graph.run()
+      const ready = callback?.() ?? true
+      // On the initial run, we may need to do an empty commit to ensure that
+      // the collection is initialized
+      if (syncState.messagesCount === 0) {
+        begin()
+        commit()
+      }
+      // Mark the collection as ready after the first successful run
+      if (ready && this.allCollectionsReady()) {
+        markReady()
+      }
+    }
+  }
+
+  private allCollectionsReady() {
+    return Object.values(this.collections).every((collection) =>
+      collection.isReady()
+    )
+  }
+
+  private allCollectionsReadyOrInitialCommit() {
+    return Object.values(this.collections).every(
+      (collection) =>
+        collection.status === `ready` || collection.status === `initialCommit`
+    )
+  }
+
+  private getWhereClauseFromAlias(
+    collectionAlias: string | undefined
+  ): BasicExpression<boolean> | undefined {
+    if (collectionAlias && this.collectionWhereClausesCache) {
+      return this.collectionWhereClausesCache.get(collectionAlias)
+    }
+    return undefined
+  }
+}
+
 /**
  * Creates live query collection options for use with createCollection
  *
@@ -123,17 +709,15 @@ export function liveQueryCollectionOptions<
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
 ): CollectionConfig<TResult> {
+  /*
   // Generate a unique ID if not provided
   const id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
-  // Build the query using the provided query builder function or instance
-  const query =
-    typeof config.query === `function`
-      ? buildQuery<TContext>(config.query)
-      : getQueryIR(config.query)
+  // Build the query
+  const query = buildQueryFromConfig(config)
 
-  // WeakMap to store the keys of the results so that we can retreve them in the
-  // getKey function
+  // WeakMap to store the keys of the results
+  // so that we can retrieve them in the getKey function
   const resultKeys = new WeakMap<object, unknown>()
 
   // WeakMap to store the orderBy index for each result
@@ -142,25 +726,7 @@ export function liveQueryCollectionOptions<
   // Create compare function for ordering if the query has orderBy
   const compare =
     query.orderBy && query.orderBy.length > 0
-      ? (val1: TResult, val2: TResult): number => {
-          // Use the orderBy index stored in the WeakMap
-          const index1 = orderByIndices.get(val1)
-          const index2 = orderByIndices.get(val2)
-
-          // Compare fractional indices lexicographically
-          if (index1 && index2) {
-            if (index1 < index2) {
-              return -1
-            } else if (index1 > index2) {
-              return 1
-            } else {
-              return 0
-            }
-          }
-
-          // Fallback to no ordering if indices are missing
-          return 0
-        }
+      ? createOrderByComparator<TResult>(orderByIndices)
       : undefined
 
   const collections = extractCollectionsFromQuery(query)
@@ -650,6 +1216,12 @@ export function liveQueryCollectionOptions<
     onDelete: config.onDelete,
     startSync: config.startSync,
   }
+  */
+  const collectionConfigBuilder = new CollectionConfigBuilder<
+    TContext,
+    TResult
+  >(config)
+  return collectionConfigBuilder.getConfig()
 }
 
 /**
@@ -779,6 +1351,40 @@ function sendChangesToInput(
   input.sendData(new MultiSet(multiSetArray))
 }
 
+function buildQueryFromConfig<TContext extends Context>(
+  config: LiveQueryCollectionConfig<any, any>
+) {
+  // Build the query using the provided query builder function or instance
+  if (typeof config.query === `function`) {
+    return buildQuery<TContext>(config.query)
+  }
+  return getQueryIR(config.query)
+}
+
+function createOrderByComparator<T extends object>(
+  orderByIndices: WeakMap<object, string>
+) {
+  return (val1: T, val2: T): number => {
+    // Use the orderBy index stored in the WeakMap
+    const index1 = orderByIndices.get(val1)
+    const index2 = orderByIndices.get(val2)
+
+    // Compare fractional indices lexicographically
+    if (index1 && index2) {
+      if (index1 < index2) {
+        return -1
+      } else if (index1 > index2) {
+        return 1
+      } else {
+        return 0
+      }
+    }
+
+    // Fallback to no ordering if indices are missing
+    return 0
+  }
+}
+
 /**
  * Helper function to extract collections from a compiled query
  * Traverses the query IR to find all collection references
@@ -858,6 +1464,34 @@ function findCollectionAlias(
   }
 
   return undefined
+}
+
+function accumulateChanges<T>(
+  acc: Map<unknown, Changes<T>>,
+  [[key, tupleData], multiplicity]: [
+    [unknown, [any, string | undefined]],
+    number,
+  ]
+) {
+  // All queries now consistently return [value, orderByIndex] format
+  // where orderByIndex is undefined for queries without ORDER BY
+  const [value, orderByIndex] = tupleData as [T, string | undefined]
+
+  const changes = acc.get(key) || {
+    deletes: 0,
+    inserts: 0,
+    value,
+    orderByIndex,
+  }
+  if (multiplicity < 0) {
+    changes.deletes += Math.abs(multiplicity)
+  } else if (multiplicity > 0) {
+    changes.inserts += multiplicity
+    changes.value = value
+    changes.orderByIndex = orderByIndex
+  }
+  acc.set(key, changes)
+  return acc
 }
 
 function* trackSentValues(
