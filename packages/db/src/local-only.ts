@@ -27,7 +27,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalOnlyCollectionConfig<
-  TExplicit extends object = Record<string, unknown>,
+  TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -137,18 +137,25 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * )
  */
 export function localOnlyCollectionOptions<
-  TExplicit extends object = Record<string, unknown>,
+  TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(
   config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
-): CollectionConfig<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
-> & {
+): (TSchema extends never
+  ? CollectionConfig<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      TSchema,
+      ResolveInput<TExplicit, TSchema, TFallback>
+    >
+  : CollectionConfig<
+      ResolveType<TExplicit, TSchema, TFallback>,
+      TKey,
+      TSchema,
+      ResolveInput<TExplicit, TSchema, TFallback>
+    > & { schema: TSchema }) & {
   utils: LocalOnlyCollectionUtils
 } {
   type TItem = ResolveType<TExplicit, TSchema, TFallback>

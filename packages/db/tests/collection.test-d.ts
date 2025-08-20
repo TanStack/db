@@ -59,10 +59,18 @@ describe(`Collection type resolution tests`, () => {
   type ItemOf<T> = T extends Array<infer U> ? U : T
 
   it(`should use explicit type when provided without schema`, () => {
-    const _collection = createCollection<ExplicitType>({
-      getKey: (item) => item.id,
+    const _collection = createCollection<ExplicitType, string>({
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<ExplicitType>()
+        return item.id
+      },
       sync: { sync: () => {} },
     })
+
+    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<ExplicitType>>()
+
+    type Key = Parameters<typeof _collection.get>[0]
+    expectTypeOf<Key>().toEqualTypeOf<string>()
 
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
@@ -75,14 +83,23 @@ describe(`Collection type resolution tests`, () => {
       {},
       typeof testSchema
     >({
-      getKey: (item) => item.id,
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<SchemaType>()
+        return item.id
+      },
       sync: { sync: () => {} },
       schema: testSchema,
     })
 
-    type ExpectedType = ResolveType<unknown, typeof testSchema, FallbackType>
+    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<SchemaType>>()
+
+    type Key = Parameters<typeof _collection.get>[0]
+    expectTypeOf<Key>().toEqualTypeOf<string>()
+
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
+
+    type ExpectedType = ResolveType<unknown, typeof testSchema, FallbackType>
     expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
   })
 
@@ -94,13 +111,22 @@ describe(`Collection type resolution tests`, () => {
       never,
       FallbackType
     >({
-      getKey: (item) => item.id,
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<FallbackType>()
+        return item.id
+      },
       sync: { sync: () => {} },
     })
 
-    type ExpectedType = ResolveType<unknown, never, FallbackType>
+    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<FallbackType>>()
+
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<FallbackType>()
+
+    type Key = Parameters<typeof _collection.get>[0]
+    expectTypeOf<Key>().toEqualTypeOf<string>()
+
+    type ExpectedType = ResolveType<unknown, never, FallbackType>
     expectTypeOf<ExpectedType>().toEqualTypeOf<FallbackType>()
   })
 
@@ -113,31 +139,45 @@ describe(`Collection type resolution tests`, () => {
       typeof testSchema,
       FallbackType
     >({
-      getKey: (item) => item.id,
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<ExplicitType>()
+        return item.id
+      },
       sync: { sync: () => {} },
       schema: testSchema,
     })
+
+    type Param = Parameters<typeof _collection.insert>[0]
+    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
+
+    type Key = Parameters<typeof _collection.get>[0]
+    expectTypeOf<Key>().toEqualTypeOf<string>()
 
     type ExpectedType = ResolveType<
       ExplicitType,
       typeof testSchema,
       FallbackType
     >
-    type Param = Parameters<typeof _collection.insert>[0]
-    expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExplicitType>()
     expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
 
   it(`should automatically infer type from schema without generic arguments`, () => {
     // This is the key test case that was missing - no generic arguments at all
     const _collection = createCollection({
-      getKey: (item) => item.id,
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<SchemaType>()
+        return item.id
+      },
       sync: { sync: () => {} },
       schema: testSchema,
     })
 
+    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<SchemaType>>()
+
+    type Key = Parameters<typeof _collection.get>[0]
+    expectTypeOf<Key>().toEqualTypeOf<string>()
+
     type Param = Parameters<typeof _collection.insert>[0]
-    // Should infer the schema type automatically
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
   })
 
@@ -216,12 +256,6 @@ describe(`Schema Input/Output Type Distinction`, () => {
   })
 
   it(`should handle schema with default values correctly for insert`, () => {
-    const collection = createCollection({
-      getKey: (item) => item.id,
-      sync: { sync: () => {} },
-      schema: userSchemaWithDefaults,
-    })
-
     type ExpectedOutputType = ResolveType<
       unknown,
       typeof userSchemaWithDefaults,
@@ -232,6 +266,16 @@ describe(`Schema Input/Output Type Distinction`, () => {
       typeof userSchemaWithDefaults,
       Record<string, unknown>
     >
+
+    const collection = createCollection({
+      getKey: (item) => {
+        expectTypeOf(item).toEqualTypeOf<ExpectedOutputType>()
+        return item.id
+      },
+      sync: { sync: () => {} },
+      schema: userSchemaWithDefaults,
+    })
+
     type InsertArg = Parameters<typeof collection.insert>[0]
 
     // Input type should not include defaulted fields
