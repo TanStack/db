@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.1.5
+
+### Patch Changes
+
+- ensure that useLiveQuery returns a stable ref when there are no changes ([#388](https://github.com/TanStack/db/pull/388))
+
+- Updated dependencies [[`9a5a20c`](https://github.com/TanStack/db/commit/9a5a20c21fbf8286ab90e1db6d6f3315f8344a4e)]:
+  - @tanstack/db@0.1.5
+
 ## 0.1.4
 
 ### Patch Changes

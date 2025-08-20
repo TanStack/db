@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 0.2.4
+
+### Patch Changes
+
+- Add type inference of the collection type from the query collection config `queryFn` return type ([#403](https://github.com/TanStack/db/pull/403))
+
+- Updated dependencies [[`9a5a20c`](https://github.com/TanStack/db/commit/9a5a20c21fbf8286ab90e1db6d6f3315f8344a4e)]:
+  - @tanstack/db@0.1.5
+
 ## 0.2.3
 
 ### Patch Changes
