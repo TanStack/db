@@ -1,0 +1,61 @@
+{
+  "name": "@tanstack/angular-db",
+  "description": "Angular integration for @tanstack/db",
+  "version": "0.1.0",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/angular-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "angular",
+    "typescript"
+  ],
+  "packageManager": "pnpm@10.6.3",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@angular/common": "^19.0.0",
+    "@angular/core": "^19.0.0",
+    "@vitest/coverage-istanbul": "^3.0.9",
+    "rxjs": "^7.8.0",
+    "zone.js": "^0.14.0"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "peerDependencies": {
+    "@angular/core": ">=14.0.0",
+    "rxjs": ">=6.0.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "npx vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

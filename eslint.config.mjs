@@ -11,6 +11,7 @@ export default [
       `**/.output/**`,
       `**/.nitro/**`,
       `**/traildepot/**`,
+      `examples/angular/**`,
     ],
   },
   {
