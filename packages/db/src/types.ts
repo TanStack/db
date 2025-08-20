@@ -207,6 +207,7 @@ export interface SyncConfig<
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
     markReady: () => void
+    truncate: () => void
   }) => void
 
   /**

@@ -20,9 +20,12 @@ export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
  * Compiles an expression into an optimized evaluator function.
  * This eliminates branching during evaluation by pre-compiling the expression structure.
  */
-export function compileExpression(expr: BasicExpression): CompiledExpression {
-  const compiledFn = compileExpressionInternal(expr, false)
-  return compiledFn as CompiledExpression
+export function compileExpression(
+  expr: BasicExpression,
+  isSingleRow: boolean = false
+): CompiledExpression | CompiledSingleRowExpression {
+  const compiledFn = compileExpressionInternal(expr, isSingleRow)
+  return compiledFn
 }
 
 /**

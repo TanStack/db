@@ -186,6 +186,7 @@ describe(`Query collection type resolution tests`, () => {
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
   })
+
   it(`types getKey param as schema OUTPUT and onInsert as schema INPUT`, () => {
     const schema = z.object({
       id: z.string(),
@@ -214,5 +215,93 @@ describe(`Query collection type resolution tests`, () => {
       (typeof options.utils)[`writeInsert`]
     >[0]
     expectTypeOf<WriteInsertParam0>().toEqualTypeOf<Input | Array<Input>>()
+  })
+
+  describe(`QueryFn type inference`, () => {
+    interface TodoType {
+      id: string
+      title: string
+      completed: boolean
+    }
+
+    it(`should infer types from queryFn return type`, () => {
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`queryfn-inference`],
+        queryFn: async (): Promise<Array<TodoType>> => {
+          return [] as Array<TodoType>
+        },
+        getKey: (item) => item.id,
+      })
+
+      // Should infer TodoType from queryFn
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[TodoType]>()
+    })
+
+    it(`should prioritize explicit type over queryFn`, () => {
+      interface UserType {
+        id: string
+        name: string
+      }
+
+      const options = queryCollectionOptions<UserType>({
+        queryClient,
+        queryKey: [`explicit-priority`],
+        queryFn: async (): Promise<Array<TodoType>> => {
+          return [] as Array<TodoType>
+        },
+        getKey: (item) => item.id,
+      })
+
+      // Should use explicit UserType, not TodoType from queryFn
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[UserType]>()
+    })
+
+    it(`should prioritize schema over queryFn`, () => {
+      const userSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`schema-priority`],
+        queryFn: async (): Promise<Array<z.infer<typeof userSchema>>> => {
+          return [] as Array<z.infer<typeof userSchema>>
+        },
+        schema: userSchema,
+        getKey: (item) => item.id,
+      })
+
+      // Should use schema type, not TodoType from queryFn
+      type ExpectedType = z.infer<typeof userSchema>
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
+    })
+
+    it(`should maintain backward compatibility with explicit types`, () => {
+      const options = queryCollectionOptions<TodoType>({
+        queryClient,
+        queryKey: [`backward-compat`],
+        queryFn: async () => [] as Array<TodoType>,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[TodoType]>()
+    })
+
+    it(`should work with collection creation`, () => {
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`collection-test`],
+        queryFn: async (): Promise<Array<TodoType>> => {
+          return [] as Array<TodoType>
+        },
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+      expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+    })
   })
 })

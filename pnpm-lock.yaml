@@ -271,8 +271,8 @@ importers:
         specifier: ^0.40.1
         version: 0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
-        specifier: ^0.7.0
-        version: 0.7.1(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.13)
+        specifier: ^0.8.3
+        version: 0.8.3(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.17)
       express:
         specifier: ^4.19.2
         version: 4.21.2
@@ -294,6 +294,9 @@ importers:
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.8.3)(vite@6.3.5(@types/node@22.17.0)(jiti@2.5.1)(lightningcss@1.30.1)(terser@5.43.1)(tsx@4.20.3)(yaml@2.8.0))
+      zod:
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       '@eslint/js':
         specifier: ^9.22.0
@@ -390,7 +393,7 @@ importers:
         version: 0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.7.0
-        version: 0.7.1(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.13)
+        version: 0.7.1(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.17)
       express:
         specifier: ^4.19.2
         version: 4.21.2
@@ -4083,6 +4086,12 @@ packages:
       drizzle-orm: '>=0.36.0'
       zod: '>=3.0.0'
 
+  drizzle-zod@0.8.3:
+    resolution: {integrity: sha512-66yVOuvGhKJnTdiqj1/Xaaz9/qzOdRJADpDa68enqS6g3t0kpNkwNYjUuaeXgZfO/UWuIM9HIhSlJ6C5ZraMww==}
+    peerDependencies:
+      drizzle-orm: '>=0.36.0'
+      zod: ^3.25.0 || ^4.0.0
+
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
     engines: {node: '>= 0.4'}
@@ -6528,6 +6537,7 @@ packages:
   source-map@0.8.0-beta.0:
     resolution: {integrity: sha512-2ymg6oRBpebeZi9UUNsgQ89bhx01TcTkmNTGnNO88imTmbSgy4nfujrgVEFKWpMTEGA11EDkTt7mqObTPdigIA==}
     engines: {node: '>= 8'}
+    deprecated: The work that was done in this beta branch won't be included in future versions
 
   spawndamnit@3.0.1:
     resolution: {integrity: sha512-MmnduQUuHCoFckZoWnXsTg7JaiLBJrKFj9UI2MbRPGaJeVpsLcVBu6P/IGZovziM/YBsellCmsprgNA+w0CzVg==}
@@ -7469,6 +7479,9 @@ packages:
 
   zod@4.0.13:
     resolution: {integrity: sha512-jv+zRxuZQxTrFHzxZ46ezL2FtnE+M4HIJHJEwLsZ7UjrXHltdG6HrxvqM0twoVCWxJiYf8WqKjAcjztegpkB+Q==}
+
+  zod@4.0.17:
+    resolution: {integrity: sha512-1PHjlYRevNxxdy2JZ8JcNAw7rX8V9P1AKkP+x/xZfxB0K5FYfuV+Ug6P/6NVSR2jHQ+FzDDoDHS04nYUsOIyLQ==}
 
 snapshots:
 
@@ -11255,15 +11268,20 @@ snapshots:
       pg: 8.16.3
       postgres: 3.4.7
 
-  drizzle-zod@0.7.1(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.13):
+  drizzle-zod@0.7.1(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.17):
     dependencies:
       drizzle-orm: 0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7)
-      zod: 4.0.13
+      zod: 4.0.17
 
   drizzle-zod@0.7.1(drizzle-orm@0.44.4(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
     dependencies:
       drizzle-orm: 0.44.4(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7)
       zod: 3.25.76
+
+  drizzle-zod@0.8.3(drizzle-orm@0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7))(zod@4.0.17):
+    dependencies:
+      drizzle-orm: 0.40.1(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.3)(pg@8.16.3)(postgres@3.4.7)
+      zod: 4.0.17
 
   dunder-proto@1.0.1:
     dependencies:
@@ -15215,3 +15233,5 @@ snapshots:
   zod@3.25.76: {}
 
   zod@4.0.13: {}
+
+  zod@4.0.17: {}
