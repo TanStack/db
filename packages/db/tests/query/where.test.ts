@@ -139,6 +139,22 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
       })
 
       test(`eq operator - equality comparison`, () => {
+        const hireDateEmployee = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                eq(emp.hire_date_instance, new Date(`2020-01-15`))
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                active: emp.active,
+              })),
+        })
+        expect(hireDateEmployee.size).toBe(2)
+
         const activeEmployees = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
