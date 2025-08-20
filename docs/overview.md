@@ -784,7 +784,7 @@ The steps are to:
 
 ```tsx
 import { useLiveQuery, createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/electric-db-collection"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
