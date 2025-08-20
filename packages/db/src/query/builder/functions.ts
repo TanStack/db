@@ -246,23 +246,15 @@ export function sum(
   return new Aggregate(`sum`, [toExpression(arg)])
 }
 
-export function min(
-  arg:
-    | RefProxy<number>
-    | RefProxy<number | undefined>
-    | number
-    | BasicExpression<number>
-): Aggregate<number> {
+export function min<T>(
+  arg: RefProxy<T> | RefProxy<T | undefined> | T | BasicExpression<T>
+): Aggregate<T> {
   return new Aggregate(`min`, [toExpression(arg)])
 }
 
-export function max(
-  arg:
-    | RefProxy<number>
-    | RefProxy<number | undefined>
-    | number
-    | BasicExpression<number>
-): Aggregate<number> {
+export function max<T>(
+  arg: RefProxy<T> | RefProxy<T | undefined> | T | BasicExpression<T>
+): Aggregate<T> {
   return new Aggregate(`max`, [toExpression(arg)])
 }
 
