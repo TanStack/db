@@ -2,7 +2,7 @@
   "name": "@tanstack/angular-db",
   "description": "Angular integration for @tanstack/db",
   "version": "0.1.0",
-  "author": "Kyle Mathews",
+  "author": "Ethan McDaniel",
   "license": "MIT",
   "repository": {
     "type": "git",
