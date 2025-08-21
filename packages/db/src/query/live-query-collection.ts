@@ -653,11 +653,3 @@ function bridgeToCreateCollection<
     TUtils
   >
 }
-
-/**
- * Converts WHERE expressions from the query IR into a BasicExpression for subscribeChanges
- *
- * @param whereExpressions Array of WHERE expressions to convert
- * @param tableAlias The table alias used in the expressions
- * @returns A BasicExpression that can be used with the collection's index system
- */
