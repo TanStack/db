@@ -116,6 +116,16 @@ class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
+  // Keep track of the keys we've sent
+  // and also the biggest value we've sent so far
+  private sentValuesInfo: {
+    sentKeys: Set<string | number>
+    biggest: any
+  } = {
+    sentKeys: new Set<string | number>(),
+    biggest: undefined,
+  }
+
   constructor(
     private collectionId: string,
     private collection: Collection,
@@ -301,19 +311,9 @@ class CollectionSubscriber<
         this.collectionId
       ]!
 
-    // Keep track of the keys we've sent
-    // and also the biggest value we've sent so far
-    const sentValuesInfo: {
-      sentKeys: Set<string | number>
-      biggest: any
-    } = {
-      sentKeys: new Set<string | number>(),
-      biggest: undefined,
-    }
-
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-    this.loadNextItems(sentValuesInfo, offset + limit)
+    this.loadNextItems(offset + limit)
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
@@ -325,11 +325,11 @@ class CollectionSubscriber<
       const filteredChanges = filterChangesSmallerOrEqualToMax(
         splittedChanges,
         comparator,
-        sentValuesInfo.biggest
+        this.sentValuesInfo.biggest
       )
       this.sendChangesToPipeline(
         filteredChanges,
-        this.loadMoreIfNeeded.bind(this, sentValuesInfo)
+        this.loadMoreIfNeeded.bind(this)
       )
     }
 
@@ -345,10 +345,7 @@ class CollectionSubscriber<
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  private loadMoreIfNeeded(sentValuesInfo: {
-    sentKeys: Set<string | number>
-    biggest: any
-  }) {
+  private loadMoreIfNeeded() {
     const { dataNeeded } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
@@ -366,7 +363,7 @@ class CollectionSubscriber<
     // if it needs more data, it returns the number of items it needs
     const n = dataNeeded()
     if (n > 0) {
-      this.loadNextItems(sentValuesInfo, n)
+      this.loadNextItems(n)
     }
 
     // Indicate that we're done loading data if we didn't need to load more data
@@ -374,37 +371,28 @@ class CollectionSubscriber<
   }
 
   private sendChangesToPipelineWithTracking(
-    sentValuesInfo: {
-      sentKeys: Set<string | number>
-      biggest: any
-    },
     changes: Iterable<ChangeMessage<any, string | number>>
   ) {
     const { comparator } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
-    const trackedChanges = trackSentValues(changes, comparator, sentValuesInfo)
-    this.sendChangesToPipeline(
-      trackedChanges,
-      this.loadMoreIfNeeded.bind(this, sentValuesInfo)
+    const trackedChanges = trackSentValues(
+      changes,
+      comparator,
+      this.sentValuesInfo
     )
+    this.sendChangesToPipeline(trackedChanges, this.loadMoreIfNeeded.bind(this))
   }
 
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
-  private loadNextItems(
-    sentValuesInfo: {
-      sentKeys: Set<string | number>
-      biggest: any
-    },
-    n: number
-  ) {
+  private loadNextItems(n: number) {
     const { valueExtractorForRawRow, index } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
-    const biggestSentRow = sentValuesInfo.biggest
+    const biggestSentRow = this.sentValuesInfo.biggest
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
@@ -414,7 +402,7 @@ class CollectionSubscriber<
       nextOrderedKeys.map((key) => {
         return { type: `insert`, key, value: this.collection.get(key) }
       })
-    this.sendChangesToPipelineWithTracking(sentValuesInfo, nextInserts)
+    this.sendChangesToPipelineWithTracking(nextInserts)
   }
 
   private getWhereClauseFromAlias(
