@@ -33,7 +33,7 @@ export function processOrderBy(
   rawQuery: QueryIR,
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
-  collection: Collection,
+  collection: Collection<any, any, any, any, any>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   limit?: number,
   offset?: number

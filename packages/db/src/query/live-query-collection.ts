@@ -73,14 +73,38 @@ export interface LiveQueryCollectionConfig<
   /**
    * Optional schema for validation
    */
-  schema?: CollectionConfig<TResult>[`schema`]
+  schema?: CollectionConfig<
+    TResult,
+    string | number,
+    never,
+    TResult,
+    TResult
+  >[`schema`]
 
   /**
    * Optional mutation handlers
    */
-  onInsert?: CollectionConfig<TResult>[`onInsert`]
-  onUpdate?: CollectionConfig<TResult>[`onUpdate`]
-  onDelete?: CollectionConfig<TResult>[`onDelete`]
+  onInsert?: CollectionConfig<
+    TResult,
+    string | number,
+    never,
+    TResult,
+    TResult
+  >[`onInsert`]
+  onUpdate?: CollectionConfig<
+    TResult,
+    string | number,
+    never,
+    TResult,
+    TResult
+  >[`onUpdate`]
+  onDelete?: CollectionConfig<
+    TResult,
+    string | number,
+    never,
+    TResult,
+    TResult
+  >[`onDelete`]
 
   /**
    * Start sync / the query immediately
@@ -122,7 +146,7 @@ export function liveQueryCollectionOptions<
   TResult extends object = GetResult<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
-): CollectionConfig<TResult> {
+): CollectionConfig<TResult, string | number, never, TResult, TResult> {
   // Generate a unique ID if not provided
   const id = config.id || `live-query-${++liveQueryCollectionCounter}`
 
@@ -232,7 +256,7 @@ export function liveQueryCollectionOptions<
   compileBasePipeline()
 
   // Create the sync configuration
-  const sync: SyncConfig<TResult> = {
+  const sync: SyncConfig<TResult, string | number> = {
     rowUpdateMode: `full`,
     sync: ({ begin, write, commit, markReady, collection: theCollection }) => {
       const { graph, inputs, pipeline } = maybeCompileBasePipeline()
@@ -745,7 +769,13 @@ function bridgeToCreateCollection<
   TResult extends object,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<TResult> & { utils?: TUtils }
+  options: CollectionConfig<
+    TResult,
+    string | number,
+    never,
+    TResult,
+    TResult
+  > & { utils?: TUtils }
 ): Collection<TResult, string | number, TUtils> {
   // This is the only place we need a type assertion, hidden from user API
   return createCollection(options as any) as unknown as Collection<

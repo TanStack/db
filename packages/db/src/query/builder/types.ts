@@ -24,14 +24,16 @@ export interface Context {
 export type ContextSchema = Record<string, unknown>
 
 export type Source = {
-  [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
+  [alias: string]:
+    | CollectionImpl<any, any, any, any, any>
+    | QueryBuilder<Context>
 }
 
 // Helper type to infer collection type from CollectionImpl
 // This uses ResolveType directly to ensure consistency with collection creation logic
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? ResolveType<U, TSchema, U>
+    ? ResolveType<U, TSchema>
     : never
 
 // Helper type to create schema from source

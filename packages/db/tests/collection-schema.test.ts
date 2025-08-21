@@ -280,7 +280,7 @@ describe(`Collection with schema validation`, () => {
     })
 
     // Create a collection with the schema
-    const collection = createCollection<typeof userSchema.infer>({
+    const collection = createCollection({
       id: `test`,
       getKey: (item) => item.name,
       startSync: true,
@@ -373,7 +373,7 @@ describe(`Collection with schema validation`, () => {
     })
 
     // Create a collection with the schema
-    const collection = createCollection<z.infer<typeof userSchema>>({
+    const collection = createCollection({
       id: `test`,
       getKey: (item) => item.name,
       startSync: true,
