@@ -127,7 +127,7 @@ onInsert: async ({ transaction }) => {
 }
 ```
 
-## Using a proxy with Electric
+### Electric Proxy Example
 
 Electric is typically deployed behind a proxy server that handles shape configuration, authentication and authorization. This provides better security and allows you to control what data users can access without exposing Electric to the client.
 
@@ -182,19 +182,6 @@ export const ServerRoute = createServerFileRoute("/api/todos").methods({
 })
 ```
 
-
-## Utility Methods
-
-The collection provides these utility methods via `collection.utils`:
-
-- `awaitTxId(txid, timeout?)`: Manually wait for a specific transaction ID to be synchronized
-
-```typescript
-todosCollection.utils.awaitTxId(12345)
-```
-
-This is useful when you need to ensure a mutation has been synchronized before proceeding with other operations.
-
 ## Optimistic Updates with Explicit Transactions
 
 For more advanced use cases, you can create custom actions that can do multiple mutations across collections transactionally. In this case, you need to explicitly await for the transaction ID using `utils.awaitTxId()`.
@@ -224,3 +211,15 @@ const addTodoAction = createOptimisticAction({
   }
 })
 ```
+
+## Utility Methods
+
+The collection provides these utility methods via `collection.utils`:
+
+- `awaitTxId(txid, timeout?)`: Manually wait for a specific transaction ID to be synchronized
+
+```typescript
+todosCollection.utils.awaitTxId(12345)
+```
+
+This is useful when you need to ensure a mutation has been synchronized before proceeding with other operations.
