@@ -10,28 +10,25 @@ Electric collections provide seamless integration between TanStack DB and Electr
 
 The `@tanstack/electric-db-collection` package allows you to create collections that:
 - Automatically sync data from Postgres via Electric shapes
-- Support optimistic updates with transaction confirmation and automatic rollback on errors
+- Support optimistic updates with transaction matching and automatic rollback on errors
 - Handle persistence through customizable mutation handlers
 
 ## Installation
 
 ```bash
-npm install @tanstack/electric-db-collection @tanstack/db
+npm install @tanstack/electric-db-collection @tanstack/react-db
 ```
 
 ## Basic Usage
 
 ```typescript
-import { createCollection } from '@tanstack/db'	
+import { createCollection } from '@tanstack/react-db'	
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 const todosCollection = createCollection(
   electricCollectionOptions({
     shapeOptions: {
-      url: 'https://example.com/v1/shape',
-      params: {
-        table: 'todos',
-      },
+      url: '/api/todos',
     },
     getKey: (item) => item.id,
   })
@@ -45,21 +42,15 @@ The `electricCollectionOptions` function accepts the following options:
 ### Required Options
 
 - `shapeOptions`: Configuration for the ElectricSQL ShapeStream
+  - `url`: The URL of your proxy to Electric
+
 - `getKey`: Function to extract the unique key from an item
-
-### Shape Options
-
-- `url`: The URL to your Electric sync service
-- `params`: Shape parameters including:
-  - `table`: The database table to sync
-  - `where`: Optional WHERE clause for filtering (e.g., `"status = 'active'"`)
-  - `columns`: Optional array of columns to sync
 
 ### Collection Options
 
-- `id`: Unique identifier for the collection
-- `schema`: Schema for validating items (any Standard Schema compatible schema)
-- `sync`: Custom sync configuration
+- `id`: Unique identifier for the collection  (optional)
+- `schema`: Schema for validating items. Any Standard Schema compatible schema (optional)
+- `sync`: Custom sync configuration (optional)
 
 ### Persistence Handlers
 
@@ -69,7 +60,9 @@ The `electricCollectionOptions` function accepts the following options:
 
 ## Persistence Handlers
 
-You can define handlers that are called when mutations occur, for instance to persist changes to your backend. Such handlers **must return a transaction ID** (`txid`) to track when the mutation has been synchronized back from Electric:
+Handlers can be defined to run on mutations. They are useful to send mutations to the backend and confirming them once Electric delivers the corresponding transactions. Until confirmation, TanStack DB blocks sync data for the collection to prevent race conditions. To avoid any delays, it’s important to use a matching strategy.
+
+The most reliable strategy is for the backend to include the transaction ID (txid) in its response, allowing the client to match each mutation with Electric’s transaction identifiers for precise confirmation. If no strategy is provided, client mutations are automatically confirmed after three seconds.
 
 ```typescript
 const todosCollection = createCollection(
@@ -79,7 +72,7 @@ const todosCollection = createCollection(
     getKey: (item) => item.id,
 
 	  shapeOptions: {
-      url: 'https://api.electric-sql.cloud/v1/shape',
+      url: '/api/todos',
       params: { table: 'todos' },
     },
     
@@ -95,11 +88,7 @@ const todosCollection = createCollection(
 )
 ```
 
-### Understanding Transaction IDs
-
-When you commit a transaction in Postgres, it gets assigned a transaction ID. Your API should return this transaction ID in the HTTP response so that the collection can automatically wait for this transaction ID to confirm the optimistic update.
-
-Here is an example of a function to extract the transaction Id from Postgres:
+On the backend, you can extract the `txid` for a transaction by querying Postgres directly.
 
 ```ts
 async function generateTxId(tx) {
@@ -119,6 +108,80 @@ async function generateTxId(tx) {
   return parseInt(txid as string, 10)
 }
 ```
+
+It might not always be feasible to return transactions identifiers from your API. In that case, you can use a custom match function.
+
+```js
+onInsert: async ({ transaction }) => {
+  const item = transaction.mutations[0].modified
+  await api.todos.create(item) // API doesn't return txid
+  
+  return {
+    matchStream: (stream) => matchStream(
+      stream,
+      ['insert'],
+      (msg) => msg.value.id === item.id,
+      3000 // timeout fallback
+    )
+  }
+}
+```
+
+## Using a proxy with Electric
+
+Electric is typically deployed behind a proxy server that handles shape configuration, authentication and authorization. This provides better security and allows you to control what data users can access without exposing Electric to the client.
+
+
+Here is an example proxy implementation using TanStack Starter:
+
+```js
+import { createServerFileRoute } from "@tanstack/react-start/server"
+
+// Electric URL
+const baseUrl = 'http://.../v1/shape'
+
+const serve = async ({ request }: { request: Request }) => {
+	// ...check user authorization
+  
+	const url = new URL(request.url)
+  const originUrl = new URL(baseUrl)
+
+  // passthrough parameters from electric client
+  url.searchParams.forEach((value, key) => {
+    if (
+      [
+        "live",
+        "handle",
+        "offset",
+        "cursor",
+      ].includes(key)
+    ) {
+      originUrl.searchParams.set(key, value)
+    }
+  })
+
+  // the shape parameters
+  originUrl.searchParams.set("table", "todos")
+  // originUrl.searchParams.set("where", "completed = true")
+  // originUrl.searchParams.set("columns", "id,text,completed")
+
+  const response = await fetch(originUrl)
+  const headers = new Headers(response.headers)
+  headers.delete("content-encoding")
+  headers.delete("content-length")
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
+export const ServerRoute = createServerFileRoute("/api/todos").methods({
+  GET: serve,
+})
+```
+
 
 ## Utility Methods
 
@@ -160,58 +223,4 @@ const addTodoAction = createOptimisticAction({
     
   }
 })
-```
-
-## Shape Configuration
-
-Electric shapes allow you to filter and control what data syncs to your collection:
-
-### Basic Table Sync
-
-```typescript
-const todosCollection = createCollection(
-  electricCollectionOptions({
-    shapeOptions: {
-      url: 'https://example.com/v1/shape',
-      params: {
-        table: 'todos',
-      },
-    },
-    getKey: (item) => item.id,
-  })
-)
-```
-
-### Filtered Sync with WHERE Clause
-
-```typescript
-const activeTodosCollection = createCollection(
-  electricCollectionOptions({
-    shapeOptions: {
-      url: 'https://example.com/v1/shape',
-      params: {
-        table: 'todos',
-        where: "status = 'active' AND deleted_at IS NULL",
-      },
-    },
-    getKey: (item) => item.id,
-  })
-)
-```
-
-### Column Selection
-
-```typescript
-const todoSummaryCollection = createCollection(
-  electricCollectionOptions({
-    shapeOptions: {
-      url: 'https://example.com/v1/shape',
-      params: {
-        table: 'todos',
-        columns: ['id', 'title', 'status'], // Only sync these columns
-      },
-    },
-    getKey: (item) => item.id,
-  })
-)
 ```
