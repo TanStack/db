@@ -66,6 +66,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
+  deletedKeys: Set<string | number>
 }
 
 /**
@@ -542,6 +543,7 @@ export class CollectionImpl<
           this.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
+            deletedKeys: new Set(),
           })
         },
         write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
@@ -560,9 +562,8 @@ export class CollectionImpl<
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
             const insertingIntoExistingSynced = this.syncedData.has(key)
-            const hasPendingDeleteForKey = pendingTransaction.operations.some(
-              (op) => op.key === key && op.type === `delete`
-            )
+            const hasPendingDeleteForKey =
+              pendingTransaction.deletedKeys.has(key)
             const isTruncateTransaction = pendingTransaction.truncate === true
             // Allow insert after truncate in the same transaction even if it existed in syncedData
             if (
@@ -579,6 +580,10 @@ export class CollectionImpl<
             key,
           }
           pendingTransaction.operations.push(message)
+
+          if (messageWithoutKey.type === `delete`) {
+            pendingTransaction.deletedKeys.add(key)
+          }
         },
         commit: () => {
           const pendingTransaction =
@@ -619,6 +624,7 @@ export class CollectionImpl<
 
           // Clear all operations from the current transaction
           pendingTransaction.operations = []
+          pendingTransaction.deletedKeys.clear()
 
           // Mark the transaction as a truncate operation. During commit, this triggers:
           // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
