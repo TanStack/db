@@ -38,7 +38,7 @@ import {
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type {
   ChangeListener,
@@ -80,7 +80,7 @@ export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TSchema = never,
   TInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInput> {
   readonly utils: TUtils
@@ -160,105 +160,33 @@ export interface Collection<
  * // Note: You can provide an explicit type, a schema, or both. When both are provided, the explicit type takes precedence.
  */
 
-// Overload for when schema is provided - infers schema type
 export function createCollection<
-  TSchema extends StandardSchemaV1,
+  TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TFallback extends object = Record<string, unknown>,
+  TSchema = never,
 >(
   options: CollectionConfig<
-    ResolveType<unknown, TSchema, TFallback>,
+    TExplicit,
     TKey,
     TSchema,
-    ResolveInput<unknown, TSchema, TFallback>
-  > & {
-    schema: TSchema
-    utils?: TUtils
-  }
-): Collection<
-  ResolveType<unknown, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<unknown, TSchema, TFallback>
->
-
-// Overload for when explicit type is provided with schema - explicit type takes precedence
-export function createCollection<
-  TExplicit extends object,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
->(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  > & {
-    schema: TSchema
-    utils?: TUtils
-  }
-): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
->
-
-// Overload for when explicit type is provided or no schema
-export function createCollection<
-  TExplicit = unknown,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
->(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema>,
+    ResolveType<TExplicit, TSchema>
   > & { utils?: TUtils }
 ): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
+  ResolveType<TExplicit, TSchema>,
   TKey,
   TUtils,
   TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
->
-
-// Implementation
-export function createCollection<
-  TExplicit = unknown,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
->(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  > & { utils?: TUtils }
-): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema>
 > {
   const collection = new CollectionImpl<
-    ResolveType<TExplicit, TSchema, TFallback>,
+    ResolveType<TExplicit, TSchema>,
     TKey,
     TUtils,
     TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >(options)
+    ResolveInput<TExplicit, TSchema>
+  >(options as any)
 
   // Copy utils to both top level and .utils namespace
   if (options.utils) {
@@ -268,11 +196,11 @@ export function createCollection<
   }
 
   return collection as Collection<
-    ResolveType<TExplicit, TSchema, TFallback>,
+    ResolveType<TExplicit, TSchema>,
     TKey,
     TUtils,
     TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema>
   >
 }
 
@@ -280,10 +208,10 @@ export class CollectionImpl<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInput extends object = T,
+  TSchema = never,
+  TInput extends object = Record<string, unknown>,
 > {
-  public config: CollectionConfig<T, TKey, TSchema, TInput>
+  public config: CollectionConfig<any, TKey, TSchema, TInput, T>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -502,7 +430,7 @@ export class CollectionImpl<
     this.config = {
       ...config,
       autoIndex: config.autoIndex ?? `eager`,
-    }
+    } as unknown as CollectionConfig<any, TKey, TSchema, TInput, T>
 
     // Set up data storage with optional comparison function
     if (this.config.compare) {
@@ -1965,38 +1893,41 @@ export class CollectionImpl<
    */
 
   // Overload 1: Update multiple items with a callback
-  update<TDraft extends object = TInput>(
-    key: Array<TKey | unknown>,
-    callback: (drafts: Array<TDraft>) => void
-  ): TransactionType
+  update(
+    keys: Array<TKey | unknown>,
+    callback: (drafts: Array<TInput>) => void
+  ): TransactionType<T>
 
   // Overload 2: Update multiple items with config and a callback
-  update<TDraft extends object = TInput>(
+  update(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<TDraft>) => void
-  ): TransactionType
+    callback: (drafts: Array<TInput>) => void
+  ): TransactionType<T>
 
   // Overload 3: Update a single item with a callback
-  update<TDraft extends object = TInput>(
-    id: TKey | unknown,
-    callback: (draft: TDraft) => void
-  ): TransactionType
+  update(
+    keys: TKey | unknown,
+    callback: (draft: TInput) => void
+  ): TransactionType<T>
 
   // Overload 4: Update a single item with config and a callback
-  update<TDraft extends object = TInput>(
-    id: TKey | unknown,
+  update(
+    keys: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: TDraft) => void
-  ): TransactionType
+    callback: (draft: TInput) => void
+  ): TransactionType<T>
 
-  update<TDraft extends object = TInput>(
+  update(
     keys: (TKey | unknown) | Array<TKey | unknown>,
     configOrCallback:
-      | ((draft: TDraft | Array<TDraft>) => void)
+      | ((draft: TInput) => void)
+      | ((drafts: Array<TInput>) => void)
       | OperationConfig,
-    maybeCallback?: (draft: TDraft | Array<TDraft>) => void
-  ) {
+    maybeCallback?:
+      | ((draft: TInput) => void)
+      | ((drafts: Array<TInput>) => void)
+  ): TransactionType<T> {
     if (typeof keys === `undefined`) {
       throw new MissingUpdateArgumentError()
     }
@@ -2030,19 +1961,19 @@ export class CollectionImpl<
       }
 
       return item
-    }) as unknown as Array<TDraft>
+    }) as unknown as Array<TInput>
 
     let changesArray
     if (isArray) {
       // Use the proxy to track changes for all objects
       changesArray = withArrayChangeTracking(
         currentObjects,
-        callback as (draft: Array<TDraft>) => void
+        callback as (draft: Array<TInput>) => void
       )
     } else {
       const result = withChangeTracking(
         currentObjects[0]!,
-        callback as (draft: TDraft) => void
+        callback as (draft: TInput) => void
       )
       changesArray = [result]
     }
@@ -2114,7 +2045,7 @@ export class CollectionImpl<
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      const emptyTransaction = createTransaction({
+      const emptyTransaction = createTransaction<T>({
         mutationFn: async () => {},
       })
       emptyTransaction.commit()
@@ -2131,7 +2062,7 @@ export class CollectionImpl<
       this.scheduleTransactionCleanup(ambientTransaction)
       this.recomputeOptimisticState(true)
 
-      return ambientTransaction
+      return ambientTransaction as TransactionType<T>
     }
 
     // No need to check for onUpdate handler here as we've already checked at the beginning

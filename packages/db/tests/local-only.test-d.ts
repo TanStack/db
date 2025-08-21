@@ -4,7 +4,6 @@ import { createCollection } from "../src/index"
 import { localOnlyCollectionOptions } from "../src/local-only"
 import type { LocalOnlyCollectionUtils } from "../src/local-only"
 import type { Collection } from "../src/index"
-import type { Query } from "../src/query/builder"
 import type { InsertConfig } from "../src/types"
 
 interface TestItem extends Record<string, unknown> {
@@ -34,23 +33,12 @@ describe(`LocalOnly Collection Types`, () => {
   })
 
   it(`should be compatible with createCollection`, () => {
-    const config = {
+    const options = localOnlyCollectionOptions<TestItem, number>({
       id: `test-local-only`,
-      getKey: (item: TestItem) => item.id,
-    }
+      getKey: (item) => item.id,
+    })
 
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      TestItem,
-      number
-    >(config)
-
-    const collection = createCollection<
-      TestItem,
-      number,
-      LocalOnlyCollectionUtils
-    >(options)
+    const collection = createCollection(options)
 
     // Test that the collection has the expected type
     expectTypeOf(collection).toExtend<
@@ -67,12 +55,7 @@ describe(`LocalOnly Collection Types`, () => {
       onDelete: () => Promise.resolve({}),
     }
 
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      TestItem,
-      number
-    >(configWithCallbacks)
+    const options = localOnlyCollectionOptions(configWithCallbacks)
     const collection = createCollection<
       TestItem,
       number,
@@ -91,17 +74,8 @@ describe(`LocalOnly Collection Types`, () => {
       initialData: [{ id: 1, name: `Test` }] as Array<TestItem>,
     }
 
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      TestItem,
-      number
-    >(configWithInitialData)
-    const collection = createCollection<
-      TestItem,
-      number,
-      LocalOnlyCollectionUtils
-    >(options)
+    const options = localOnlyCollectionOptions(configWithInitialData)
+    const collection = createCollection(options)
 
     expectTypeOf(collection).toExtend<
       Collection<TestItem, number, LocalOnlyCollectionUtils>
@@ -114,17 +88,8 @@ describe(`LocalOnly Collection Types`, () => {
       getKey: (item: TestItem) => `item-${item.id}`,
     }
 
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      TestItem,
-      string
-    >(config)
-    const collection = createCollection<
-      TestItem,
-      string,
-      LocalOnlyCollectionUtils
-    >(options)
+    const options = localOnlyCollectionOptions(config)
+    const collection = createCollection(options)
 
     expectTypeOf(collection).toExtend<
       Collection<TestItem, string, LocalOnlyCollectionUtils>
@@ -171,9 +136,9 @@ describe(`LocalOnly Collection Types`, () => {
     )
 
     collection.insert({
-      id: '1',
-      entityId: '1',
-      value: '1',
+      id: `1`,
+      entityId: `1`,
+      value: `1`,
     })
 
     // Check that the insert method accepts the expected input type
@@ -182,7 +147,7 @@ describe(`LocalOnly Collection Types`, () => {
     >()
 
     // Check that the update method accepts the expected input type
-    collection.update('1' ,(draft) => {
+    collection.update(`1`, (draft) => {
       expectTypeOf(draft).toExtend<ExpectedInput>()
     })
 
