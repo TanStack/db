@@ -10,16 +10,191 @@ npm install @tanstack/angular-db @tanstack/db
 
 ## Usage
 
-```typescript
-import { injectCollection } from "@tanstack/angular-db"
+### Basic Setup
 
-// TODO: Add usage examples
+First, create a collection:
+
+```typescript
+import { createCollection, localOnlyCollectionOptions } from "@tanstack/db"
+
+interface Todo {
+  id: number
+  text: string
+  completed: boolean
+  created_at: Date
+}
+
+export const todosCollection = createCollection(
+  localOnlyCollectionOptions<Todo>({
+    getKey: (todo: Todo) => todo.id,
+    initialData: [
+      {
+        id: 1,
+        text: "Learn Angular",
+        completed: false,
+        created_at: new Date(),
+      },
+    ],
+  })
+)
+```
+
+### Using `injectLiveQuery` in Components
+
+```typescript
+import { Component } from "@angular/core"
+import { injectLiveQuery } from "@tanstack/angular-db"
+import { eq } from "@tanstack/db"
+import { todosCollection } from "./collections/todos-collection"
+
+@Component({
+  selector: "app-todos",
+  standalone: true,
+  template: `
+    @if (todoQuery.isReady()) {
+      @for (todo of todoQuery.data(); track todo.id) {
+        <div class="todo-item">
+          {{ todo.text }}
+          <button (click)="toggleTodo(todo.id)">
+            {{ todo.completed ? "Undo" : "Complete" }}
+          </button>
+        </div>
+      }
+    } @else {
+      <div>Loading todos...</div>
+    }
+  `,
+})
+export class TodosComponent {
+  // Query todos with a filter
+  todoQuery = injectLiveQuery((q) =>
+    q
+      .from({ todo: todosCollection })
+      .where(({ todo }) => eq(todo.completed, false))
+  )
+
+  toggleTodo(id: number) {
+    todosCollection.update(id, (draft) => {
+      draft.completed = !draft.completed
+    })
+  }
+}
+```
+
+### Direct Collection Usage
+
+You can also pass a collection directly to `injectLiveQuery`:
+
+```typescript
+import { Component } from "@angular/core"
+import { injectLiveQuery } from "@tanstack/angular-db"
+import { todosCollection } from "./collections/todos-collection"
+
+@Component({
+  selector: "app-all-todos",
+  template: `
+    <div>Total todos: {{ allTodos.data().length }}</div>
+    @for (todo of allTodos.data(); track todo.id) {
+      <div>{{ todo.text }}</div>
+    }
+  `,
+})
+export class AllTodosComponent {
+  // Direct collection usage - gets all items
+  allTodos = injectLiveQuery(todosCollection)
+}
+```
+
+### Reactive Queries with Dependencies
+
+Use the second parameter to make queries reactive to component state:
+
+```typescript
+import { Component, signal } from "@angular/core"
+import { injectLiveQuery } from "@tanstack/angular-db"
+import { eq } from "@tanstack/db"
+import { todosCollection } from "./collections/todos-collection"
+
+@Component({
+  selector: "app-filtered-todos",
+  template: `
+    <label>
+      <input
+        type="checkbox"
+        [(ngModel)]="showCompleted"
+        (change)="onFilterChange()"
+      />
+      Show completed
+    </label>
+
+    @for (todo of filteredTodos.data(); track todo.id) {
+      <div>{{ todo.text }}</div>
+    }
+  `,
+})
+export class FilteredTodosComponent {
+  showCompleted = false
+  private filterSignal = signal(false)
+
+  // Query reacts to dependency changes
+  filteredTodos = injectLiveQuery(
+    (q) =>
+      q
+        .from({ todo: todosCollection })
+        .where(({ todo }) => eq(todo.completed, this.filterSignal())),
+    [this.filterSignal()]
+  )
+
+  onFilterChange() {
+    this.filterSignal.set(this.showCompleted)
+  }
+}
 ```
 
 ## API
 
-### `injectCollection()`
+### `injectLiveQuery()`
 
-Angular injection function for TanStack DB collections.
+Angular injection function for TanStack DB live queries. Must be called within an injection context (e.g., component constructor, `inject()`, or field initializer).
 
-_Implementation coming soon_
+#### Overloads
+
+```typescript
+// Query function
+function injectLiveQuery<TContext>(
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
+  deps?: Array<unknown>
+): LiveQueryResult<TContext>
+
+// Collection config
+function injectLiveQuery<TContext>(
+  config: LiveQueryCollectionConfig<TContext>,
+  deps?: Array<unknown>
+): LiveQueryResult<TContext>
+
+// Direct collection
+function injectLiveQuery<TResult, TKey, TUtils>(
+  collection: Collection<TResult, TKey, TUtils>
+): LiveQueryResult<TResult>
+```
+
+#### Returns
+
+An object with Angular signals:
+
+- `data: Signal<Array<T>>` - Array of query results
+- `state: Signal<Map<Key, T>>` - Map of results by key
+- `collection: Signal<Collection>` - The underlying collection
+- `status: Signal<CollectionStatus>` - Current status (`loading`, `ready`, `error`, etc.)
+- `isLoading: Signal<boolean>` - True when loading or initializing
+- `isReady: Signal<boolean>` - True when data is ready
+- `isIdle: Signal<boolean>` - True when idle
+- `isError: Signal<boolean>` - True when in error state
+- `isCleanedUp: Signal<boolean>` - True when cleaned up
+
+#### Parameters
+
+- `queryFn` - Function that builds a query using the query builder
+- `config` - Configuration object for the live query collection
+- `collection` - Existing collection to observe
+- `deps` - Optional array of dependencies that trigger query recreation when changed
