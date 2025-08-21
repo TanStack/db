@@ -207,9 +207,6 @@ class CollectionConfigBuilder<
 
     this.subscribeToAllCollections(config, fullSyncState)
 
-    // TODO: move this into the subscribeToAllCollections method
-    syncState.subscribedToAllCollections = true
-
     // Initial run
     this.maybeRunGraph(config, fullSyncState)
 
@@ -223,279 +220,6 @@ class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.collectionWhereClausesCache = undefined
-    }
-  }
-
-  private subscribeToAllCollections(
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
-    syncState: FullSyncState
-  ) {
-    Object.entries(this.collections).forEach(([collectionId, collection]) =>
-      this.subscribeToCollection(collectionId, collection, config, syncState)
-    )
-  }
-
-  // TODO: refactor this method into a few smaller methods
-  private subscribeToCollection(
-    collectionId: string,
-    collection: Collection,
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
-    syncState: FullSyncState
-  ) {
-    const input = syncState.inputs[collectionId]!
-    const collectionAlias = findCollectionAlias(collectionId, this.query)
-    const whereClause = this.getWhereClauseFromAlias(collectionAlias)
-
-    const sendChangesToPipeline = (
-      changes: Iterable<ChangeMessage<any, string | number>>,
-      callback?: () => boolean
-    ) => {
-      sendChangesToInput(input, changes, collection.config.getKey)
-      this.maybeRunGraph(config, syncState, callback)
-    }
-
-    // Wraps the sendChangesToPipeline function
-    // in order to turn `update`s into `insert`s
-    // for keys that have not been sent to the pipeline yet
-    // and filter out deletes for keys that have not been sent
-    const sendVisibleChangesToPipeline = (
-      changes: Array<ChangeMessage<any, string | number>>,
-      loadedInitialState: boolean,
-      sentKeys: Set<string | number>
-    ) => {
-      if (loadedInitialState) {
-        // There was no index for the join key
-        // so we loaded the initial state
-        // so we can safely assume that the pipeline has seen all keys
-        return sendChangesToPipeline(changes)
-      }
-
-      const newChanges = []
-      for (const change of changes) {
-        let newChange = change
-        if (!sentKeys.has(change.key)) {
-          if (change.type === `update`) {
-            newChange = { ...change, type: `insert` }
-          } else if (change.type === `delete`) {
-            // filter out deletes for keys that have not been sent
-            continue
-          }
-        }
-        newChanges.push(newChange)
-      }
-
-      return sendChangesToPipeline(newChanges)
-    }
-
-    const loadKeys = (
-      keys: Iterable<string | number>,
-      sentKeys: Set<string | number>,
-      filterFn: (item: object) => boolean
-    ) => {
-      for (const key of keys) {
-        // Only load the key once
-        if (sentKeys.has(key)) continue
-
-        const value = collection.get(key)
-        if (value !== undefined && filterFn(value)) {
-          sentKeys.add(key)
-          sendChangesToPipeline([{ type: `insert`, key, value }])
-        }
-      }
-    }
-
-    const subscribeToAllChanges = (
-      whereExpression: BasicExpression<boolean> | undefined
-    ) => {
-      const unsubscribe = collection.subscribeChanges(sendChangesToPipeline, {
-        includeInitialState: true,
-        ...(whereExpression ? { whereExpression } : undefined),
-      })
-      return unsubscribe
-    }
-
-    // Subscribes to all changes but without the initial state
-    // such that we can load keys from the initial state on demand
-    // based on the matching keys from the main collection in the join
-    const subscribeToMatchingChanges = (
-      whereExpression: BasicExpression<boolean> | undefined
-    ) => {
-      let loadedInitialState = false
-      const sentKeys = new Set<string | number>()
-
-      const sendVisibleChanges = (
-        changes: Array<ChangeMessage<any, string | number>>
-      ) => {
-        sendVisibleChangesToPipeline(changes, loadedInitialState, sentKeys)
-      }
-
-      const unsubscribe = collection.subscribeChanges(sendVisibleChanges, {
-        whereExpression,
-      })
-
-      // Create a function that loads keys from the collection
-      // into the query pipeline on demand
-      const filterFn = whereExpression
-        ? createFilterFunctionFromExpression(whereExpression)
-        : () => true
-      const loadKs = (keys: Set<string | number>) => {
-        return loadKeys(keys, sentKeys, filterFn)
-      }
-
-      // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
-      // This is used by the join operator to dynamically load matching keys from the lazy collection
-      // or to get the full initial state of the collection if there's no index for the join key
-      this.lazyCollectionsCallbacks[collectionId] = {
-        loadKeys: loadKs,
-        loadInitialState: () => {
-          // Make sure we only load the initial state once
-          if (loadedInitialState) return
-          loadedInitialState = true
-
-          const changes = collection.currentStateAsChanges({
-            whereExpression,
-          })
-          sendChangesToPipeline(changes)
-        },
-      }
-      return unsubscribe
-    }
-
-    const subscribeToOrderedChanges = (
-      whereExpression: BasicExpression<boolean> | undefined
-    ) => {
-      const {
-        offset,
-        limit,
-        comparator,
-        index,
-        dataNeeded,
-        valueExtractorForRawRow,
-      } = this.optimizableOrderByCollections[collectionId]!
-
-      if (!dataNeeded) {
-        // This should never happen because the topK operator should always set the size callback
-        // which in turn should lead to the orderBy operator setting the dataNeeded callback
-        throw new Error(
-          `Missing dataNeeded callback for collection ${collectionId}`
-        )
-      }
-
-      // This function is called by maybeRunGraph
-      // after each iteration of the query pipeline
-      // to ensure that the orderBy operator has enough data to work with
-      const loadMoreIfNeeded = () => {
-        // `dataNeeded` probes the orderBy operator to see if it needs more data
-        // if it needs more data, it returns the number of items it needs
-        const n = dataNeeded()
-        if (n > 0) {
-          loadNextItems(n)
-        }
-
-        // Indicate that we're done loading data if we didn't need to load more data
-        return n === 0
-      }
-
-      // Keep track of the keys we've sent
-      // and also the biggest value we've sent so far
-      const sentValuesInfo: {
-        sentKeys: Set<string | number>
-        biggest: any
-      } = {
-        sentKeys: new Set<string | number>(),
-        biggest: undefined,
-      }
-
-      const sendChangesToPipelineWithTracking = (
-        changes: Iterable<ChangeMessage<any, string | number>>
-      ) => {
-        const trackedChanges = trackSentValues(
-          changes,
-          comparator,
-          sentValuesInfo
-        )
-        sendChangesToPipeline(trackedChanges, loadMoreIfNeeded)
-      }
-
-      // Loads the next `n` items from the collection
-      // starting from the biggest item it has sent
-      const loadNextItems = (n: number) => {
-        const biggestSentRow = sentValuesInfo.biggest
-        const biggestSentValue = biggestSentRow
-          ? valueExtractorForRawRow(biggestSentRow)
-          : biggestSentRow
-        // Take the `n` items after the biggest sent value
-        const nextOrderedKeys = index.take(n, biggestSentValue)
-        const nextInserts: Array<ChangeMessage<any, string | number>> =
-          nextOrderedKeys.map((key) => {
-            return { type: `insert`, key, value: collection.get(key) }
-          })
-        sendChangesToPipelineWithTracking(nextInserts)
-      }
-
-      // Load the first `offset + limit` values from the index
-      // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-      loadNextItems(offset + limit)
-
-      const sendChangesInRange = (
-        changes: Iterable<ChangeMessage<any, string | number>>
-      ) => {
-        // Split live updates into a delete of the old value and an insert of the new value
-        // and filter out changes that are bigger than the biggest value we've sent so far
-        // because they can't affect the topK
-        const splittedChanges = splitUpdates(changes)
-        const filteredChanges = filterChangesSmallerOrEqualToMax(
-          splittedChanges,
-          comparator,
-          sentValuesInfo.biggest
-        )
-        sendChangesToPipeline(filteredChanges, loadMoreIfNeeded)
-      }
-
-      // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
-      // values that are bigger don't need to be sent because they can't affect the topK
-      const unsubscribe = collection.subscribeChanges(sendChangesInRange, {
-        whereExpression,
-      })
-
-      return unsubscribe
-    }
-
-    const subscribeToChanges = (whereExpression?: BasicExpression<boolean>) => {
-      let unsubscribe: () => void
-      if (this.lazyCollections.has(collectionId)) {
-        unsubscribe = subscribeToMatchingChanges(whereExpression)
-      } else if (
-        Object.hasOwn(this.optimizableOrderByCollections, collectionId)
-      ) {
-        unsubscribe = subscribeToOrderedChanges(whereExpression)
-      } else {
-        unsubscribe = subscribeToAllChanges(whereExpression)
-      }
-      syncState.unsubscribeCallbacks.add(unsubscribe)
-    }
-
-    if (whereClause) {
-      // Convert WHERE clause to BasicExpression format for collection subscription
-      const whereExpression = convertToBasicExpression(
-        whereClause,
-        collectionAlias!
-      )
-
-      if (whereExpression) {
-        // Use index optimization for this collection
-        subscribeToChanges(whereExpression)
-      } else {
-        // This should not happen - if we have a whereClause but can't create whereExpression,
-        // it indicates a bug in our optimization logic
-        throw new Error(
-          `Failed to convert WHERE clause to collection filter for collection '${collectionId}'. ` +
-            `This indicates a bug in the query optimization logic.`
-        )
-      }
-    } else {
-      // No WHERE clause for this collection, use regular subscription
-      subscribeToChanges()
     }
   }
 
@@ -676,6 +400,450 @@ class CollectionConfigBuilder<
       return this.collectionWhereClausesCache.get(collectionAlias)
     }
     return undefined
+  }
+
+  private subscribeToAllCollections(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState
+  ) {
+    Object.entries(this.collections).forEach(([collectionId, collection]) =>
+      this.subscribeToCollection(collectionId, collection, config, syncState)
+    )
+
+    // Mark the collections as subscribed in the sync state
+    syncState.subscribedToAllCollections = true
+  }
+
+  private subscribeToCollection(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState
+  ) {
+    const collectionAlias = findCollectionAlias(collectionId, this.query)
+    const whereClause = this.getWhereClauseFromAlias(collectionAlias)
+
+    if (whereClause) {
+      // Convert WHERE clause to BasicExpression format for collection subscription
+      const whereExpression = convertToBasicExpression(
+        whereClause,
+        collectionAlias!
+      )
+
+      if (whereExpression) {
+        // Use index optimization for this collection
+        this.subscribeToChanges(
+          collectionId,
+          collection,
+          config,
+          syncState,
+          whereExpression
+        )
+      } else {
+        // This should not happen - if we have a whereClause but can't create whereExpression,
+        // it indicates a bug in our optimization logic
+        throw new Error(
+          `Failed to convert WHERE clause to collection filter for collection '${collectionId}'. ` +
+            `This indicates a bug in the query optimization logic.`
+        )
+      }
+    } else {
+      // No WHERE clause for this collection, use regular subscription
+      this.subscribeToChanges(collectionId, collection, config, syncState)
+    }
+  }
+
+  private subscribeToChanges(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    whereExpression?: BasicExpression<boolean>
+  ) {
+    let unsubscribe: () => void
+    if (this.lazyCollections.has(collectionId)) {
+      unsubscribe = this.subscribeToMatchingChanges(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        whereExpression
+      )
+    } else if (
+      Object.hasOwn(this.optimizableOrderByCollections, collectionId)
+    ) {
+      unsubscribe = this.subscribeToOrderedChanges(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        whereExpression
+      )
+    } else {
+      unsubscribe = this.subscribeToAllChanges(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        whereExpression
+      )
+    }
+    syncState.unsubscribeCallbacks.add(unsubscribe)
+  }
+
+  private sendChangesToPipeline(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    changes: Iterable<ChangeMessage<any, string | number>>,
+    callback?: () => boolean
+  ) {
+    const input = syncState.inputs[collectionId]!
+    sendChangesToInput(input, changes, collection.config.getKey)
+    this.maybeRunGraph(config, syncState, callback)
+  }
+
+  // Wraps the sendChangesToPipeline function
+  // in order to turn `update`s into `insert`s
+  // for keys that have not been sent to the pipeline yet
+  // and filter out deletes for keys that have not been sent
+  private sendVisibleChangesToPipeline = (
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    changes: Array<ChangeMessage<any, string | number>>,
+    loadedInitialState: boolean,
+    sentKeys: Set<string | number>
+  ) => {
+    if (loadedInitialState) {
+      // There was no index for the join key
+      // so we loaded the initial state
+      // so we can safely assume that the pipeline has seen all keys
+      return this.sendChangesToPipeline(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        changes
+      )
+    }
+
+    const newChanges = []
+    for (const change of changes) {
+      let newChange = change
+      if (!sentKeys.has(change.key)) {
+        if (change.type === `update`) {
+          newChange = { ...change, type: `insert` }
+        } else if (change.type === `delete`) {
+          // filter out deletes for keys that have not been sent
+          continue
+        }
+      }
+      newChanges.push(newChange)
+    }
+
+    return this.sendChangesToPipeline(
+      collectionId,
+      collection,
+      config,
+      syncState,
+      newChanges
+    )
+  }
+
+  private loadKeys(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    keys: Iterable<string | number>,
+    sentKeys: Set<string | number>,
+    filterFn: (item: object) => boolean
+  ) {
+    for (const key of keys) {
+      // Only load the key once
+      if (sentKeys.has(key)) continue
+
+      const value = collection.get(key)
+      if (value !== undefined && filterFn(value)) {
+        sentKeys.add(key)
+        this.sendChangesToPipeline(
+          collectionId,
+          collection,
+          config,
+          syncState,
+          [{ type: `insert`, key, value }]
+        )
+      }
+    }
+  }
+
+  private subscribeToAllChanges(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    whereExpression: BasicExpression<boolean> | undefined
+  ) {
+    const sendChangesToPipeline = this.sendChangesToPipeline.bind(
+      this,
+      collectionId,
+      collection,
+      config,
+      syncState
+    )
+    const unsubscribe = collection.subscribeChanges(sendChangesToPipeline, {
+      includeInitialState: true,
+      ...(whereExpression ? { whereExpression } : undefined),
+    })
+    return unsubscribe
+  }
+
+  private subscribeToMatchingChanges(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    whereExpression: BasicExpression<boolean> | undefined
+  ) {
+    let loadedInitialState = false
+    const sentKeys = new Set<string | number>()
+
+    const sendVisibleChanges = (
+      changes: Array<ChangeMessage<any, string | number>>
+    ) => {
+      this.sendVisibleChangesToPipeline(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        changes,
+        loadedInitialState,
+        sentKeys
+      )
+    }
+
+    const unsubscribe = collection.subscribeChanges(sendVisibleChanges, {
+      whereExpression,
+    })
+
+    // Create a function that loads keys from the collection
+    // into the query pipeline on demand
+    const filterFn = whereExpression
+      ? createFilterFunctionFromExpression(whereExpression)
+      : () => true
+    const loadKs = (keys: Set<string | number>) => {
+      return this.loadKeys(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        keys,
+        sentKeys,
+        filterFn
+      )
+    }
+
+    // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
+    // This is used by the join operator to dynamically load matching keys from the lazy collection
+    // or to get the full initial state of the collection if there's no index for the join key
+    this.lazyCollectionsCallbacks[collectionId] = {
+      loadKeys: loadKs,
+      loadInitialState: () => {
+        // Make sure we only load the initial state once
+        if (loadedInitialState) return
+        loadedInitialState = true
+
+        const changes = collection.currentStateAsChanges({
+          whereExpression,
+        })
+        this.sendChangesToPipeline(
+          collectionId,
+          collection,
+          config,
+          syncState,
+          changes
+        )
+      },
+    }
+    return unsubscribe
+  }
+
+  private subscribeToOrderedChanges(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    whereExpression: BasicExpression<boolean> | undefined
+  ) {
+    const { offset, limit, comparator } =
+      this.optimizableOrderByCollections[collectionId]!
+
+    // Keep track of the keys we've sent
+    // and also the biggest value we've sent so far
+    const sentValuesInfo: {
+      sentKeys: Set<string | number>
+      biggest: any
+    } = {
+      sentKeys: new Set<string | number>(),
+      biggest: undefined,
+    }
+
+    // Load the first `offset + limit` values from the index
+    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+    this.loadNextItems(
+      collectionId,
+      collection,
+      config,
+      syncState,
+      sentValuesInfo,
+      offset + limit
+    )
+
+    const sendChangesInRange = (
+      changes: Iterable<ChangeMessage<any, string | number>>
+    ) => {
+      // Split live updates into a delete of the old value and an insert of the new value
+      // and filter out changes that are bigger than the biggest value we've sent so far
+      // because they can't affect the topK
+      const splittedChanges = splitUpdates(changes)
+      const filteredChanges = filterChangesSmallerOrEqualToMax(
+        splittedChanges,
+        comparator,
+        sentValuesInfo.biggest
+      )
+      this.sendChangesToPipeline(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        filteredChanges,
+        this.loadMoreIfNeeded.bind(
+          this,
+          collectionId,
+          collection,
+          config,
+          syncState,
+          sentValuesInfo
+        )
+      )
+    }
+
+    // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
+    // values that are bigger don't need to be sent because they can't affect the topK
+    const unsubscribe = collection.subscribeChanges(sendChangesInRange, {
+      whereExpression,
+    })
+
+    return unsubscribe
+  }
+
+  // This function is called by maybeRunGraph
+  // after each iteration of the query pipeline
+  // to ensure that the orderBy operator has enough data to work with
+  private loadMoreIfNeeded(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    sentValuesInfo: {
+      sentKeys: Set<string | number>
+      biggest: any
+    }
+  ) {
+    const { dataNeeded } = this.optimizableOrderByCollections[collectionId]!
+
+    if (!dataNeeded) {
+      // This should never happen because the topK operator should always set the size callback
+      // which in turn should lead to the orderBy operator setting the dataNeeded callback
+      throw new Error(
+        `Missing dataNeeded callback for collection ${collectionId}`
+      )
+    }
+
+    // `dataNeeded` probes the orderBy operator to see if it needs more data
+    // if it needs more data, it returns the number of items it needs
+    const n = dataNeeded()
+    if (n > 0) {
+      this.loadNextItems(
+        collectionId,
+        collection,
+        config,
+        syncState,
+        sentValuesInfo,
+        n
+      )
+    }
+
+    // Indicate that we're done loading data if we didn't need to load more data
+    return n === 0
+  }
+
+  private sendChangesToPipelineWithTracking(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    sentValuesInfo: {
+      sentKeys: Set<string | number>
+      biggest: any
+    },
+    changes: Iterable<ChangeMessage<any, string | number>>
+  ) {
+    const { comparator } = this.optimizableOrderByCollections[collectionId]!
+    const trackedChanges = trackSentValues(changes, comparator, sentValuesInfo)
+    this.sendChangesToPipeline(
+      collectionId,
+      collection,
+      config,
+      syncState,
+      trackedChanges,
+      this.loadMoreIfNeeded.bind(
+        this,
+        collectionId,
+        collection,
+        config,
+        syncState,
+        sentValuesInfo
+      )
+    )
+  }
+
+  // Loads the next `n` items from the collection
+  // starting from the biggest item it has sent
+  private loadNextItems(
+    collectionId: string,
+    collection: Collection,
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    sentValuesInfo: {
+      sentKeys: Set<string | number>
+      biggest: any
+    },
+    n: number
+  ) {
+    const { valueExtractorForRawRow, index } =
+      this.optimizableOrderByCollections[collectionId]!
+    const biggestSentRow = sentValuesInfo.biggest
+    const biggestSentValue = biggestSentRow
+      ? valueExtractorForRawRow(biggestSentRow)
+      : biggestSentRow
+    // Take the `n` items after the biggest sent value
+    const nextOrderedKeys = index.take(n, biggestSentValue)
+    const nextInserts: Array<ChangeMessage<any, string | number>> =
+      nextOrderedKeys.map((key) => {
+        return { type: `insert`, key, value: collection.get(key) }
+      })
+    this.sendChangesToPipelineWithTracking(
+      collectionId,
+      collection,
+      config,
+      syncState,
+      sentValuesInfo,
+      nextInserts
+    )
   }
 }
 
