@@ -116,15 +116,11 @@ class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
-  // Keep track of the keys we've sent
-  // and also the biggest value we've sent so far
-  private sentValuesInfo: {
-    sentKeys: Set<string | number>
-    biggest: any
-  } = {
-    sentKeys: new Set<string | number>(),
-    biggest: undefined,
-  }
+  // Keep track of the keys we've sent (needed for join and orderBy optimizations)
+  private sentKeys = new Set<string | number>()
+
+  // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
+  private biggest: any = undefined
 
   constructor(
     private collectionId: string,
@@ -325,7 +321,7 @@ class CollectionSubscriber<
       const filteredChanges = filterChangesSmallerOrEqualToMax(
         splittedChanges,
         comparator,
-        this.sentValuesInfo.biggest
+        this.biggest
       )
       this.sendChangesToPipeline(
         filteredChanges,
@@ -377,11 +373,7 @@ class CollectionSubscriber<
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
-    const trackedChanges = trackSentValues(
-      changes,
-      comparator,
-      this.sentValuesInfo
-    )
+    const trackedChanges = this.trackSentValues(changes, comparator)
     this.sendChangesToPipeline(trackedChanges, this.loadMoreIfNeeded.bind(this))
   }
 
@@ -392,7 +384,7 @@ class CollectionSubscriber<
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
-    const biggestSentRow = this.sentValuesInfo.biggest
+    const biggestSentRow = this.biggest
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
@@ -414,6 +406,23 @@ class CollectionSubscriber<
       return collectionWhereClausesCache.get(collectionAlias)
     }
     return undefined
+  }
+
+  private *trackSentValues(
+    changes: Iterable<ChangeMessage<any, string | number>>,
+    comparator: (a: any, b: any) => number
+  ) {
+    for (const change of changes) {
+      this.sentKeys.add(change.key)
+
+      if (!this.biggest) {
+        this.biggest = change.value
+      } else if (comparator(this.biggest, change.value) < 0) {
+        this.biggest = change.value
+      }
+
+      yield change
+    }
   }
 }
 
@@ -1529,24 +1538,6 @@ function accumulateChanges<T>(
   }
   acc.set(key, changes)
   return acc
-}
-
-function* trackSentValues(
-  changes: Iterable<ChangeMessage<any, string | number>>,
-  comparator: (a: any, b: any) => number,
-  tracker: { sentKeys: Set<string | number>; biggest: any }
-) {
-  for (const change of changes) {
-    tracker.sentKeys.add(change.key)
-
-    if (!tracker.biggest) {
-      tracker.biggest = change.value
-    } else if (comparator(tracker.biggest, change.value) < 0) {
-      tracker.biggest = change.value
-    }
-
-    yield change
-  }
 }
 
 /** Splits updates into a delete of the old value and an insert of the new value */
