@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.1.6
+
+### Patch Changes
+
+- fix for a performance regression when syncing large collections due to a look up of previously deleted keys ([#430](https://github.com/TanStack/db/pull/430))
+
 ## 0.1.5
 
 ### Patch Changes
