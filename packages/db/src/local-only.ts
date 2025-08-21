@@ -10,7 +10,7 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 
 /**
  * Configuration interface for Local-only collection options
@@ -30,13 +30,13 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 export interface LocalOnlyCollectionConfig<
   TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TSchema = never,
 > extends BaseCollectionConfig<TExplicit, TKey, TSchema> {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
    */
-  initialData?: Array<TExplicit>
+  initialData?: Array<ResolveType<TExplicit, TSchema>>
 }
 
 /**
@@ -93,18 +93,15 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
 export function localOnlyCollectionOptions<
   TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TSchema = never,
 >(
-  config: LocalOnlyCollectionConfig<
-    ResolveType<TExplicit, TSchema>,
-    TKey,
-    TSchema
-  >
+  config: LocalOnlyCollectionConfig<TExplicit, TKey, TSchema>
 ): CollectionConfig<
-  ResolveType<TExplicit, TSchema>,
+  TExplicit,
   TKey,
   TSchema,
-  ResolveInput<TExplicit, TSchema>
+  ResolveInput<TExplicit, TSchema>,
+  ResolveType<TExplicit, TSchema>
 > & {
   utils: LocalOnlyCollectionUtils
 } {
@@ -113,9 +110,7 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<ResolvedType, TKey>(
-    initialData as Array<ResolvedType>
-  )
+  const syncResult = createLocalOnlySync<ResolvedType, TKey>(initialData)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
@@ -127,7 +122,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onInsert) {
-      handlerResult = (await onInsert(params)) ?? {}
+      handlerResult = (await onInsert(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -145,7 +140,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onUpdate) {
-      handlerResult = (await onUpdate(params)) ?? {}
+      handlerResult = (await onUpdate(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -163,7 +158,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onDelete) {
-      handlerResult = (await onDelete(params)) ?? {}
+      handlerResult = (await onDelete(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -174,10 +169,10 @@ export function localOnlyCollectionOptions<
 
   return {
     ...restConfig,
-    sync: syncResult.sync,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    sync: syncResult.sync as any,
+    onInsert: wrappedOnInsert as any,
+    onUpdate: wrappedOnUpdate as any,
+    onDelete: wrappedOnDelete as any,
     utils: {} as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,

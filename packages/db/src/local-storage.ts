@@ -7,6 +7,7 @@ import {
   StorageKeyRequiredError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -16,7 +17,7 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 
 /**
  * Storage API interface - subset of DOM Storage that we need
@@ -60,11 +61,10 @@ interface StoredItem<T> {
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalStorageCollectionConfig<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
+  TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> {
+  TSchema = never,
+> extends BaseCollectionConfig<TExplicit, TKey, TSchema> {
   /**
    * The key to use for storing the collection data in localStorage/sessionStorage
    */
@@ -81,60 +81,6 @@ export interface LocalStorageCollectionConfig<
    * Can be any object that implements addEventListener/removeEventListener for storage events
    */
   storageEventApi?: StorageEventApi
-
-  /**
-   * Collection identifier (defaults to "local-collection:{storageKey}" if not provided)
-   */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >[`getKey`]
-  sync?: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >[`sync`]
-
-  /**
-   * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onInsert?: (
-    params: InsertMutationFnParams<
-      ResolveInput<TExplicit, TSchema, TFallback>,
-      TKey
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onUpdate?: (
-    params: UpdateMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onDelete?: (
-    params: DeleteMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey
-    >
-  ) => Promise<any>
 }
 
 /**
@@ -224,25 +170,25 @@ function generateUuid(): string {
  * )
  */
 export function localStorageCollectionOptions<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
+  TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TSchema = never,
 >(
-  config: LocalStorageCollectionConfig<TExplicit, TSchema, TFallback, TKey>
+  config: LocalStorageCollectionConfig<TExplicit, TKey, TSchema>
 ): Omit<
   CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
+    TExplicit,
     TKey,
     TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema>,
+    ResolveType<TExplicit, TSchema>
   >,
   `id`
 > & {
   id: string
   utils: LocalStorageCollectionUtils
 } {
-  type TItem = ResolveType<TExplicit, TSchema, TFallback>
+  type TItem = ResolveType<TExplicit, TSchema>
 
   // Validate required parameters
   if (!config.storageKey) {
@@ -343,7 +289,7 @@ export function localStorageCollectionOptions<
     // Call the user handler BEFORE persisting changes (if provided)
     let handlerResult: any = {}
     if (config.onInsert) {
-      handlerResult = (await config.onInsert(params)) ?? {}
+      handlerResult = (await config.onInsert(params as any)) ?? {}
     }
 
     // Always persist to storage
@@ -380,7 +326,7 @@ export function localStorageCollectionOptions<
     // Call the user handler BEFORE persisting changes (if provided)
     let handlerResult: any = {}
     if (config.onUpdate) {
-      handlerResult = (await config.onUpdate(params)) ?? {}
+      handlerResult = (await config.onUpdate(params as any)) ?? {}
     }
 
     // Always persist to storage
@@ -412,7 +358,7 @@ export function localStorageCollectionOptions<
     // Call the user handler BEFORE persisting changes (if provided)
     let handlerResult: any = {}
     if (config.onDelete) {
-      handlerResult = (await config.onDelete(params)) ?? {}
+      handlerResult = (await config.onDelete(params as any)) ?? {}
     }
 
     // Always persist to storage
@@ -455,10 +401,10 @@ export function localStorageCollectionOptions<
   return {
     ...restConfig,
     id: collectionId,
-    sync,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    sync: sync as any,
+    onInsert: wrappedOnInsert as any,
+    onUpdate: wrappedOnUpdate as any,
+    onDelete: wrappedOnDelete as any,
     utils: {
       clearStorage,
       getStorageSize,

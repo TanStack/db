@@ -535,7 +535,7 @@ export interface CollectionConfig<
 export type BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  TSchema = never,
 > = Omit<CollectionConfig<T, TKey, TSchema>, `sync`>
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
