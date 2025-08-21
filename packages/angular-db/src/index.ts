@@ -16,23 +16,10 @@ import type {
   LiveQueryCollectionConfig,
   QueryBuilder,
 } from "@tanstack/db"
-import type { Signal, WritableSignal } from "@angular/core"
-
-type LiveQuerySignals = {
-  state: Signal<Map<any, any>>
-  data: Signal<Array<any>>
-  collection: Signal<Collection<any, any, any>>
-  status: Signal<CollectionStatus>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+import type { Signal } from "@angular/core"
 
 export function injectLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<unknown>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): {
   state: Signal<Map<string | number, GetResult<TContext>>>
   data: Signal<Array<GetResult<TContext>>>
@@ -47,8 +34,7 @@ export function injectLiveQuery<TContext extends Context>(
   isCleanedUp: Signal<boolean>
 }
 export function injectLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<unknown>
+  config: LiveQueryCollectionConfig<TContext>
 ): {
   state: Signal<Map<string | number, GetResult<TContext>>>
   data: Signal<Array<GetResult<TContext>>>
@@ -79,21 +65,14 @@ export function injectLiveQuery<
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
 }
-export function injectLiveQuery(
-  configOrQueryOrCollection: any,
-  deps: Array<unknown> = []
-): LiveQuerySignals {
+export function injectLiveQuery(configOrQueryOrCollection: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
 
-  const collectionSig: WritableSignal<Collection<any, any, any> | null> =
-    signal(null)
-  const state: WritableSignal<Map<any, any>> = signal(new Map())
-  const data: WritableSignal<Array<any>> = signal([])
+  const state = signal<Map<any, any>>(new Map())
+  const data = signal<Array<any>>([])
 
-  const lastDepsSig: WritableSignal<Array<unknown> | null> = signal(null)
-  const lastConfigSig: WritableSignal<any> = signal(undefined)
-
+  // Check if it's an existing collection
   const isExistingCollection =
     configOrQueryOrCollection &&
     typeof configOrQueryOrCollection === `object` &&
@@ -101,64 +80,37 @@ export function injectLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
-  const needNew = (() => {
-    const current = collectionSig()
-    if (!current) return true
-    if (isExistingCollection)
-      return lastConfigSig() !== configOrQueryOrCollection
-    const prevDeps = lastDepsSig()
-    if (!prevDeps) return true
-    if (prevDeps.length !== deps.length) return true
-    for (let i = 0; i < deps.length; i++) {
-      if (prevDeps[i] !== deps[i]) return true
-    }
-    return false
-  })()
-
-  if (needNew) {
-    if (isExistingCollection) {
-      const col = configOrQueryOrCollection as Collection<any, any, any>
-      col.startSyncImmediate()
-      collectionSig.set(col)
-      lastConfigSig.set(configOrQueryOrCollection)
-    } else {
-      const col =
-        typeof configOrQueryOrCollection === `function`
-          ? createLiveQueryCollection({
-              query: configOrQueryOrCollection,
-              startSync: true,
-              gcTime: 0,
-            })
-          : createLiveQueryCollection({
-              startSync: true,
-              gcTime: 0,
-              ...configOrQueryOrCollection,
-            })
-      collectionSig.set(col)
-      lastDepsSig.set([...deps])
-      lastConfigSig.set(undefined)
-    }
-  }
+  // Create or use existing collection
+  const collection = isExistingCollection
+    ? configOrQueryOrCollection
+    : typeof configOrQueryOrCollection === `function`
+      ? createLiveQueryCollection({
+          query: configOrQueryOrCollection,
+          startSync: true,
+          gcTime: 0,
+        })
+      : createLiveQueryCollection({
+          startSync: true,
+          gcTime: 0,
+          ...configOrQueryOrCollection,
+        })
 
   let unsub: (() => void) | null = null
 
-  const setupEffect = effect((onCleanup) => {
-    const col = collectionSig()
-    if (!col) return
+  effect((onCleanup) => {
+    // Initialize state
+    state.set(new Map(collection.entries()))
+    data.set(Array.from(collection.values()))
 
-    // initialize snapshot
-    state.set(new Map(col.entries()))
-    data.set(Array.from(col.values()))
-
-    // subscribe to changes
+    // Subscribe to changes
     unsub?.()
-    unsub = col.subscribeChanges(() => {
-      state.set(new Map(col.entries()))
-      data.set(Array.from(col.values()))
+    unsub = collection.subscribeChanges(() => {
+      state.set(new Map(collection.entries()))
+      data.set(Array.from(collection.values()))
     })
 
-    // ensure sync started (idempotent)
-    col.startSyncImmediate()
+    // Ensure sync started
+    collection.startSyncImmediate()
 
     onCleanup(() => {
       unsub?.()
@@ -167,18 +119,10 @@ export function injectLiveQuery(
   })
 
   destroyRef.onDestroy(() => {
-    setupEffect.destroy()
     unsub?.()
-    unsub = null
   })
 
-  const collection = computed(() => {
-    const c = collectionSig()
-    if (!c) throw new Error(`injectLiveQuery: collection not initialized`)
-    return c
-  })
-
-  const status = computed<CollectionStatus>(() => collection().status)
+  const status = computed<CollectionStatus>(() => collection.status)
   const isLoading = computed(
     () => status() === `loading` || status() === `initialCommit`
   )
@@ -188,9 +132,9 @@ export function injectLiveQuery(
   const isCleanedUp = computed(() => status() === `cleaned-up`)
 
   return {
-    state: computed(() => state()),
-    data: computed(() => data()),
-    collection,
+    state,
+    data,
+    collection: signal(collection).asReadonly(),
     status,
     isLoading,
     isReady,
