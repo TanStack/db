@@ -46,11 +46,11 @@ The `electricCollectionOptions` function accepts the following options:
 
 - `getKey`: Function to extract the unique key from an item
 
-### Collection Options
+### Optional
 
-- `id`: Unique identifier for the collection  (optional)
-- `schema`: Schema for validating items. Any Standard Schema compatible schema (optional)
-- `sync`: Custom sync configuration (optional)
+- `id`: Unique identifier for the collection
+- `schema`: Schema for validating items. Any Standard Schema compatible schema
+- `sync`: Custom sync configuration
 
 ### Persistence Handlers
 
