@@ -17,6 +17,8 @@ import type {
   CollectionConfig,
   DeleteMutationFn,
   DeleteMutationFnParams,
+  InferSchemaInput,
+  InferSchemaOutput,
   InsertMutationFn,
   InsertMutationFnParams,
   SyncConfig,
@@ -29,21 +31,24 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
-// Schema output type inference helper (matches electric.ts pattern)
-type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T> extends object
-    ? StandardSchemaV1.InferOutput<T>
-    : Record<string, unknown>
-  : Record<string, unknown>
-
 // QueryFn return type inference helper
-type InferQueryFnOutput<TQueryFn> = TQueryFn extends (
+type InferQueryFn<TQueryFn> = TQueryFn extends (
   context: QueryFunctionContext<any>
 ) => Promise<Array<infer TItem>>
   ? TItem extends object
     ? TItem
     : Record<string, unknown>
   : Record<string, unknown>
+
+type ResolveInput<
+  TExplicit extends object | unknown = unknown,
+  TSchema extends StandardSchemaV1 = never,
+  TQueryFn = unknown,
+> = unknown extends TExplicit
+  ? [TSchema] extends [never]
+    ? InferQueryFn<TQueryFn>
+    : InferSchemaInput<TSchema>
+  : TExplicit
 
 // Type resolution system with priority order (matches electric.ts pattern)
 type ResolveType<
@@ -52,7 +57,7 @@ type ResolveType<
   TQueryFn = unknown,
 > = unknown extends TExplicit
   ? [TSchema] extends [never]
-    ? InferQueryFnOutput<TQueryFn>
+    ? InferQueryFn<TQueryFn>
     : InferSchemaOutput<TSchema>
   : TExplicit
 
@@ -74,6 +79,7 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
 > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
@@ -125,7 +131,7 @@ export interface QueryCollectionConfig<
   /** Unique identifier for the collection */
   id?: string
   /** Function to extract the unique key from an item */
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`getKey`]
+  getKey: (item: ResolveType<TExplicit, TSchema, TQueryFn>) => TKey
   /** Schema for validating items */
   schema?: TSchema
   sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
@@ -174,7 +180,7 @@ export interface QueryCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -227,7 +233,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -273,7 +279,7 @@ export interface QueryCollectionConfig<
    *   return { refetch: false } // Skip automatic refetch since we handled it manually
    * }
    */
-  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>>
+  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Metadata to pass to the query.
@@ -308,17 +314,17 @@ export type RefetchFn = () => Promise<void>
  * Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
  * @template TItem - The type of items stored in the collection
  * @template TKey - The type of the item keys
- * @template TInsertInput - The type accepted for insert operations
+ * @template TInput - The type accepted for insert operations
  */
 export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TItem,
+  TInput extends object = TItem,
 > extends UtilsRecord {
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
   /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
-  writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
+  writeInsert: (data: TInput | Array<TInput>) => void
   /** Update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
   writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
   /** Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update */
@@ -345,7 +351,7 @@ export interface QueryCollectionUtils<
  * @template TError - The type of errors that can occur during queries
  * @template TQueryKey - The type of the query key
  * @template TKey - The type of the item keys
- * @template TInsertInput - The type accepted for insert operations
+ * @template TInput - The type accepted for insert operations
  * @param config - Configuration options for the Query collection
  * @returns Collection options with utilities for direct writes and manual operations
  *
@@ -417,14 +423,26 @@ export function queryCollectionOptions<
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
-  TInsertInput extends object = ResolveType<TExplicit, TSchema, TQueryFn>,
+  TInput extends object = ResolveInput<TExplicit, TSchema, TQueryFn>,
 >(
-  config: QueryCollectionConfig<TExplicit, TSchema, TQueryFn, TError, TQueryKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>> & {
+  config: QueryCollectionConfig<
+    TExplicit,
+    TSchema,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey
+  >
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TQueryFn>,
+  TKey,
+  TSchema,
+  TInput
+> & {
   utils: QueryCollectionUtils<
     ResolveType<TExplicit, TSchema, TQueryFn>,
     TKey,
-    TInsertInput
+    TInput
   >
 } {
   type TItem = ResolveType<TExplicit, TSchema, TQueryFn>
@@ -467,7 +485,7 @@ export function queryCollectionOptions<
     throw new GetKeyRequiredError()
   }
 
-  const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
+  const internalSync: SyncConfig<TItem, TKey>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
     const observerOptions: QueryObserverOptions<
@@ -513,7 +531,7 @@ export function queryCollectionOptions<
         }
 
         const currentSyncedItems = new Map(collection.syncedData)
-        const newItemsMap = new Map<string | number, TItem>()
+        const newItemsMap = new Map<TKey, TItem>()
         newItemsArray.forEach((item) => {
           const key = getKey(item)
           newItemsMap.set(key, item)
@@ -607,12 +625,12 @@ export function queryCollectionOptions<
     queryKey: Array<unknown>
     getKey: (item: TItem) => TKey
     begin: () => void
-    write: (message: Omit<ChangeMessage<TItem>, `key`>) => void
+    write: (message: Omit<ChangeMessage<TItem, TKey>, `key`>) => void
     commit: () => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
-  const enhancedInternalSync: SyncConfig<TItem>[`sync`] = (params) => {
+  const enhancedInternalSync: SyncConfig<TItem, TKey>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
     // Store references for manual write operations
@@ -631,13 +649,11 @@ export function queryCollectionOptions<
   }
 
   // Create write utils using the manual-sync module
-  const writeUtils = createWriteUtils<TItem, TKey, TInsertInput>(
-    () => writeContext
-  )
+  const writeUtils = createWriteUtils<TItem, TKey, TInput>(() => writeContext)
 
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<TItem>) => {
+    ? async (params: InsertMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onInsert(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -651,7 +667,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<TItem>) => {
+    ? async (params: UpdateMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onUpdate(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
@@ -665,7 +681,7 @@ export function queryCollectionOptions<
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<TItem>) => {
+    ? async (params: DeleteMutationFnParams<TItem, TKey>) => {
         const handlerResult = (await onDelete(params)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false

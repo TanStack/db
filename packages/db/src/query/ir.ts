@@ -69,7 +69,7 @@ abstract class BaseExpression<T = any> {
 export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   constructor(
-    public collection: CollectionImpl,
+    public collection: CollectionImpl<any, any, any, any, any>,
     public alias: string
   ) {
     super()

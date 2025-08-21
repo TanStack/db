@@ -318,7 +318,7 @@ export function compileQuery(
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
-  collections: Record<string, Collection>,
+  collections: Record<string, Collection<any, any, any, any, any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -445,8 +445,11 @@ function getRefFromAlias(
 export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
-  collection: Collection
-): { collection: Collection; path: Array<string> } | void {
+  collection: Collection<any, any, any, any, any>
+): {
+  collection: Collection<any, any, any, any, any>
+  path: Array<string>
+} | void {
   if (ref.path.length === 0) {
     return
   }

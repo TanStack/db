@@ -1,14 +1,16 @@
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+
 
 /**
  * Configuration interface for Local-only collection options
@@ -26,62 +28,15 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalOnlyCollectionConfig<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Record<string, unknown> = Record<string, unknown>,
+  TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> {
-  /**
-   * Standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: (item: ResolveType<TExplicit, TSchema, TFallback>) => TKey
-
+  TSchema = never,
+> extends BaseCollectionConfig<TExplicit, TKey, TSchema> {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
    */
-  initialData?: Array<ResolveType<TExplicit, TSchema, TFallback>>
-
-  /**
-   * Optional asynchronous handler function called after an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onInsert?: (
-    params: InsertMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onUpdate?: (
-    params: UpdateMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onDelete?: (
-    params: DeleteMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
+  initialData?: Array<ResolveType<TExplicit, TSchema>>
 }
 
 /**
@@ -136,16 +91,21 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * )
  */
 export function localOnlyCollectionOptions<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Record<string, unknown> = Record<string, unknown>,
+  TExplicit extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
+  TSchema = never,
 >(
-  config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> & {
+  config: LocalOnlyCollectionConfig<TExplicit, TKey, TSchema>
+): CollectionConfig<
+  TExplicit,
+  TKey,
+  TSchema,
+  ResolveInput<TExplicit, TSchema>,
+  ResolveType<TExplicit, TSchema>
+> & {
   utils: LocalOnlyCollectionUtils
 } {
-  type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
+  type ResolvedType = ResolveType<TExplicit, TSchema>
 
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
@@ -162,7 +122,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onInsert) {
-      handlerResult = (await onInsert(params)) ?? {}
+      handlerResult = (await onInsert(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -180,7 +140,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onUpdate) {
-      handlerResult = (await onUpdate(params)) ?? {}
+      handlerResult = (await onUpdate(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -198,7 +158,7 @@ export function localOnlyCollectionOptions<
     // Call user handler first if provided
     let handlerResult
     if (onDelete) {
-      handlerResult = (await onDelete(params)) ?? {}
+      handlerResult = (await onDelete(params as any)) ?? {}
     }
 
     // Then synchronously confirm the transaction by looping through mutations
@@ -209,10 +169,10 @@ export function localOnlyCollectionOptions<
 
   return {
     ...restConfig,
-    sync: syncResult.sync,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    sync: syncResult.sync as any,
+    onInsert: wrappedOnInsert as any,
+    onUpdate: wrappedOnUpdate as any,
+    onDelete: wrappedOnDelete as any,
     utils: {} as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,
