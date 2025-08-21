@@ -197,8 +197,7 @@ class CollectionSubscriber<
   // and filter out deletes for keys that have not been sent
   private sendVisibleChangesToPipeline = (
     changes: Array<ChangeMessage<any, string | number>>,
-    loadedInitialState: boolean,
-    sentKeys: Set<string | number>
+    loadedInitialState: boolean
   ) => {
     if (loadedInitialState) {
       // There was no index for the join key
@@ -210,7 +209,7 @@ class CollectionSubscriber<
     const newChanges = []
     for (const change of changes) {
       let newChange = change
-      if (!sentKeys.has(change.key)) {
+      if (!this.sentKeys.has(change.key)) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert` }
         } else if (change.type === `delete`) {
@@ -226,16 +225,15 @@ class CollectionSubscriber<
 
   private loadKeys(
     keys: Iterable<string | number>,
-    sentKeys: Set<string | number>,
     filterFn: (item: object) => boolean
   ) {
     for (const key of keys) {
       // Only load the key once
-      if (sentKeys.has(key)) continue
+      if (this.sentKeys.has(key)) continue
 
       const value = this.collection.get(key)
       if (value !== undefined && filterFn(value)) {
-        sentKeys.add(key)
+        this.sentKeys.add(key)
         this.sendChangesToPipeline([{ type: `insert`, key, value }])
       }
     }
@@ -259,12 +257,11 @@ class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined
   ) {
     let loadedInitialState = false
-    const sentKeys = new Set<string | number>()
 
     const sendVisibleChanges = (
       changes: Array<ChangeMessage<any, string | number>>
     ) => {
-      this.sendVisibleChangesToPipeline(changes, loadedInitialState, sentKeys)
+      this.sendVisibleChangesToPipeline(changes, loadedInitialState)
     }
 
     const unsubscribe = this.collection.subscribeChanges(sendVisibleChanges, {
@@ -277,7 +274,7 @@ class CollectionSubscriber<
       ? createFilterFunctionFromExpression(whereExpression)
       : () => true
     const loadKs = (keys: Set<string | number>) => {
-      return this.loadKeys(keys, sentKeys, filterFn)
+      return this.loadKeys(keys, filterFn)
     }
 
     // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
