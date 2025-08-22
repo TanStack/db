@@ -109,24 +109,6 @@ async function generateTxId(tx) {
 }
 ```
 
-It might not always be feasible to return transactions identifiers from your API. In that case, you can use a custom match function.
-
-```js
-onInsert: async ({ transaction }) => {
-  const item = transaction.mutations[0].modified
-  await api.todos.create(item) // API doesn't return txid
-  
-  return {
-    matchStream: (stream) => matchStream(
-      stream,
-      ['insert'],
-      (msg) => msg.value.id === item.id,
-      3000 // timeout fallback
-    )
-  }
-}
-```
-
 ### Electric Proxy Example
 
 Electric is typically deployed behind a proxy server that handles shape configuration, authentication and authorization. This provides better security and allows you to control what data users can access without exposing Electric to the client.
