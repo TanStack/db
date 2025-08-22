@@ -8,7 +8,8 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.0.9",
-    "arktype": "^2.1.20"
+    "arktype": "^2.1.20",
+    "temporal-polyfill": "^0.3.0"
   },
   "exports": {
     ".": {

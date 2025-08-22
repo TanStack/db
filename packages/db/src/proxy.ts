@@ -133,6 +133,30 @@ function deepClone<T extends unknown>(
     return clone as unknown as T
   }
 
+  // Handle Temporal objects
+  // Check if it's a Temporal object by checking for the Temporal brand
+  if (typeof (obj as any)[Symbol.toStringTag] === `string`) {
+    const tag = (obj as any)[Symbol.toStringTag]
+    const temporalTypes = [
+      `Temporal.PlainDate`,
+      `Temporal.PlainTime`,
+      `Temporal.PlainDateTime`,
+      `Temporal.ZonedDateTime`,
+      `Temporal.Instant`,
+      `Temporal.PlainYearMonth`,
+      `Temporal.PlainMonthDay`,
+      `Temporal.Duration`,
+      `Temporal.TimeZone`,
+      `Temporal.Calendar`,
+    ]
+
+    if (temporalTypes.includes(tag)) {
+      // Temporal objects are immutable, so we can return them directly
+      // This preserves all their internal state correctly
+      return obj
+    }
+  }
+
   const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
@@ -242,6 +266,47 @@ function deepEqual<T>(a: T, b: T): boolean {
     }
 
     return true
+  }
+
+  // Handle Temporal objects
+  // Check if both are Temporal objects of the same type
+  const aTag = (a as any)[Symbol.toStringTag]
+  const bTag = (b as any)[Symbol.toStringTag]
+
+  if (typeof aTag === `string` && typeof bTag === `string`) {
+    const temporalTypes = [
+      `Temporal.PlainDate`,
+      `Temporal.PlainTime`,
+      `Temporal.PlainDateTime`,
+      `Temporal.ZonedDateTime`,
+      `Temporal.Instant`,
+      `Temporal.PlainYearMonth`,
+      `Temporal.PlainMonthDay`,
+      `Temporal.Duration`,
+      `Temporal.TimeZone`,
+      `Temporal.Calendar`,
+    ]
+
+    const aIsTemporal = temporalTypes.includes(aTag)
+    const bIsTemporal = temporalTypes.includes(bTag)
+
+    if (aIsTemporal && bIsTemporal) {
+      // If they're different Temporal types, they're not equal
+      if (aTag !== bTag) return false
+
+      // Use Temporal's built-in equals method if available
+      if (typeof (a as any).equals === `function`) {
+        return (a as any).equals(b)
+      }
+
+      // For Duration, use toString comparison as it doesn't have equals
+      if (aTag === `Temporal.Duration`) {
+        return (a as any).toString() === (b as any).toString()
+      }
+
+      // Fallback to toString comparison for other types
+      return (a as any).toString() === (b as any).toString()
+    }
   }
 
   // Handle plain objects
@@ -741,12 +806,31 @@ export function createChangeProxy<
           return value.bind(ptarget)
         }
 
-        // If the value is an object, create a proxy for it
+        // Check if it's a Temporal object - don't proxy them as they're immutable
+        const isTemporalObject =
+          value &&
+          typeof value === `object` &&
+          typeof (value as any)[Symbol.toStringTag] === `string` &&
+          [
+            `Temporal.PlainDate`,
+            `Temporal.PlainTime`,
+            `Temporal.PlainDateTime`,
+            `Temporal.ZonedDateTime`,
+            `Temporal.Instant`,
+            `Temporal.PlainYearMonth`,
+            `Temporal.PlainMonthDay`,
+            `Temporal.Duration`,
+            `Temporal.TimeZone`,
+            `Temporal.Calendar`,
+          ].includes((value as any)[Symbol.toStringTag])
+
+        // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
         if (
           value &&
           typeof value === `object` &&
           !((value as any) instanceof Date) &&
-          !((value as any) instanceof RegExp)
+          !((value as any) instanceof RegExp) &&
+          !isTemporalObject
         ) {
           // Create a parent reference for the nested object
           const nestedParent = {
