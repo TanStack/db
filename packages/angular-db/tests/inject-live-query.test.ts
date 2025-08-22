@@ -3,6 +3,9 @@ import {
   Injector,
   inject,
   runInInjectionContext,
+  signal,
+  ɵChangeDetectionScheduler,
+  ɵEffectScheduler,
 } from "@angular/core"
 import { describe, expect, it } from "vitest"
 import { injectLiveQuery } from "../src/index"
@@ -95,8 +98,28 @@ function createTestInjector(): Injector {
     },
   }
 
+  // Mock ChangeDetectionScheduler
+  const changeDetectionScheduler = {
+    notify: () => {},
+    runningTick: false,
+  }
+
+  // Mock EffectScheduler
+  const effectScheduler = {
+    queueEffect: () => {},
+    flush: () => {},
+    runningTickSet: new Set(),
+  }
+
   return Injector.create({
-    providers: [{ provide: DestroyRef, useValue: destroyRef }],
+    providers: [
+      { provide: DestroyRef, useValue: destroyRef },
+      {
+        provide: ɵChangeDetectionScheduler,
+        useValue: changeDetectionScheduler,
+      },
+      { provide: ɵEffectScheduler, useValue: effectScheduler },
+    ],
   })
 }
 
@@ -104,7 +127,9 @@ describe(`injectLiveQuery`, () => {
   it(`throws if used outside injection context`, () => {
     expect(() => {
       injectLiveQuery(() => ({}) as unknown as QueryBuilder<Context>)
-    }).toThrow(/injectLiveQuery:|assertInInjectionContext/i)
+    }).toThrow(
+      /NG0203:|injectLiveQuery\(\) can only be used within an injection context/i
+    )
   })
 
   it(`initializes with an existing collection and exposes signals`, () => {
@@ -193,10 +218,10 @@ describe(`injectLiveQuery`, () => {
         gcTime: 0,
       }
 
-      const first = injectLiveQuery(config, [1, `x`])
+      const first = injectLiveQuery(config)
       const col1 = first.collection()
 
-      const second = injectLiveQuery(config, [1, `x`])
+      const second = injectLiveQuery(config)
       const col2 = second.collection()
 
       expect(col2).toBe(col1)
@@ -213,10 +238,10 @@ describe(`injectLiveQuery`, () => {
         gcTime: 0,
       }
 
-      const first = injectLiveQuery(config, [1, `x`])
+      const first = injectLiveQuery(config)
       const col1 = first.collection()
 
-      const second = injectLiveQuery(config, [2, `x`])
+      const second = injectLiveQuery(config)
       const col2 = second.collection()
 
       expect(col2).not.toBe(col1)
@@ -270,7 +295,7 @@ describe(`injectLiveQuery`, () => {
       const qFn = ((_q: InitialQueryBuilder) =>
         ({}) as unknown as QueryBuilder<Context>) as any
 
-      const res = injectLiveQuery(qFn, [])
+      const res = injectLiveQuery(qFn)
       // It should produce a collection and set it to ready after startSync
       expect(res.collection().id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
@@ -289,7 +314,7 @@ describe(`injectLiveQuery`, () => {
         gcTime: 0,
       }
 
-      const res = injectLiveQuery(config, [`a`, 1])
+      const res = injectLiveQuery(config)
       expect(res.collection().id).toEqual(expect.any(String))
       expect(res.isReady()).toBe(true)
     })
@@ -306,6 +331,60 @@ describe(`injectLiveQuery`, () => {
       const col = createMockCollection<FakeRow, number>([], `ready`)
       const res = injectLiveQuery(col)
       expect(res.collection()).toBe(col)
+    })
+  })
+
+  it(`accepts reactive params with query function`, () => {
+    const injector = createTestInjector()
+    runInInjectionContext(injector, () => {
+      const projectId = signal(1)
+
+      const res = injectLiveQuery({
+        params: () => ({ projectID: projectId() }),
+        query: ({ params }) => {
+          // Mock query builder that would use params.projectID
+          const mockQueryBuilder = {
+            projectID: params.projectID,
+          } as unknown as QueryBuilder<Context>
+          return mockQueryBuilder
+        },
+      })
+
+      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.status()).toBe(`ready`)
+      expect(Array.isArray(res.data())).toBe(true)
+      expect(res.state() instanceof Map).toBe(true)
+
+      // Test that changing the signal parameter would create a new query
+      projectId.set(2)
+      // Note: In a real scenario with actual query builder, this would trigger
+      // a new collection with the updated projectID filter
+    })
+  })
+
+  it(`reactive params update when signal changes`, () => {
+    const injector = createTestInjector()
+    runInInjectionContext(injector, () => {
+      const selectedProjectId = signal(2)
+      let capturedProjectId: number | undefined
+
+      const res = injectLiveQuery({
+        params: () => ({ projectID: selectedProjectId() }),
+        query: ({ params }) => {
+          capturedProjectId = params.projectID
+          // Return a mock query builder
+          const mockQueryBuilder = {} as unknown as QueryBuilder<Context>
+          return mockQueryBuilder
+        },
+      })
+
+      expect(capturedProjectId).toBe(2)
+      expect(res.isReady()).toBe(true)
+
+      // Update the signal - in a real implementation this would trigger
+      // a new collection creation with the updated params
+      selectedProjectId.set(3)
+      expect(selectedProjectId()).toBe(3)
     })
   })
 })

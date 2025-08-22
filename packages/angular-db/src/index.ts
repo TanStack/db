@@ -4,10 +4,12 @@ import {
   computed,
   effect,
   inject,
+  linkedSignal,
   signal,
 } from "@angular/core"
 import { createLiveQueryCollection } from "@tanstack/db"
 import type {
+  ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
@@ -18,6 +20,28 @@ import type {
 } from "@tanstack/db"
 import type { Signal } from "@angular/core"
 
+export function injectLiveQuery<
+  TContext extends Context,
+  TParams extends any,
+>(options: {
+  params: () => TParams
+  query: (args: {
+    params: TParams
+    q: InitialQueryBuilder
+  }) => QueryBuilder<TContext>
+}): {
+  state: Signal<Map<string | number, GetResult<TContext>>>
+  data: Signal<Array<GetResult<TContext>>>
+  collection: Signal<
+    Collection<GetResult<TContext>, string | number, Record<string, never>>
+  >
+  status: Signal<CollectionStatus>
+  isLoading: Signal<boolean>
+  isReady: Signal<boolean>
+  isIdle: Signal<boolean>
+  isError: Signal<boolean>
+  isCleanedUp: Signal<boolean>
+}
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): {
@@ -65,81 +89,139 @@ export function injectLiveQuery<
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
 }
-export function injectLiveQuery(configOrQueryOrCollection: any) {
+export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
 
-  const state = signal<Map<any, any>>(new Map())
+  const collection = computed(() => {
+    // Check if it's an existing collection
+    const isExistingCollection =
+      opts &&
+      typeof opts === `object` &&
+      typeof opts.subscribeChanges === `function` &&
+      typeof opts.startSyncImmediate === `function` &&
+      typeof opts.id === `string`
+
+    if (isExistingCollection) {
+      if (opts.status === `idle`) {
+        opts.startSyncImmediate()
+      }
+      return opts
+    }
+
+    if (typeof opts === `function`) {
+      return createLiveQueryCollection({
+        query: opts,
+        startSync: true,
+        gcTime: 0,
+      })
+    }
+
+    // Check if it's reactive query options
+    const isReactiveQueryOptions =
+      opts &&
+      typeof opts === `object` &&
+      typeof opts.query === `function` &&
+      typeof opts.params === `function`
+
+    if (isReactiveQueryOptions) {
+      const { params, query } = opts
+      const currentParams = params()
+      return createLiveQueryCollection({
+        query: (q) => query({ params: currentParams, q }),
+        startSync: true,
+        gcTime: 0,
+      })
+    }
+  })
+
+  const state = signal(new Map<string | number, any>())
   const data = signal<Array<any>>([])
 
-  // Check if it's an existing collection
-  const isExistingCollection =
-    configOrQueryOrCollection &&
-    typeof configOrQueryOrCollection === `object` &&
-    typeof configOrQueryOrCollection.subscribeChanges === `function` &&
-    typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
-    typeof configOrQueryOrCollection.id === `string`
+  const status = linkedSignal(() => collection().status)
 
-  // Create or use existing collection
-  const collection = isExistingCollection
-    ? configOrQueryOrCollection
-    : typeof configOrQueryOrCollection === `function`
-      ? createLiveQueryCollection({
-          query: configOrQueryOrCollection,
-          startSync: true,
-          gcTime: 0,
-        })
-      : createLiveQueryCollection({
-          startSync: true,
-          gcTime: 0,
-          ...configOrQueryOrCollection,
-        })
+  const syncDataFromCollection = (
+    currentCollection: Collection<any, any, any>
+  ) => {
+    data.set(Array.from(currentCollection.values()))
+  }
 
-  let unsub: (() => void) | null = null
+  let currentUnsub: (() => void) | null = null
 
   effect((onCleanup) => {
-    // Initialize state
-    state.set(new Map(collection.entries()))
-    data.set(Array.from(collection.values()))
+    const currentCollection = collection()
 
-    // Subscribe to changes
-    unsub?.()
-    unsub = collection.subscribeChanges(() => {
-      state.set(new Map(collection.entries()))
-      data.set(Array.from(collection.values()))
+    status.set(currentCollection.status)
+
+    if (currentUnsub) {
+      currentUnsub()
+    }
+
+    state.set(new Map(currentCollection.entries()))
+
+    syncDataFromCollection(currentCollection)
+
+    currentCollection.onFirstReady(() => {
+      requestAnimationFrame(() => {
+        status.set(currentCollection.status)
+      })
     })
 
-    // Ensure sync started
-    collection.startSyncImmediate()
+    currentUnsub = currentCollection.subscribeChanges(
+      (changes: Array<ChangeMessage<any>>) => {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
+            case `update`:
+              state.update((state) => state.set(change.key, change.value))
+              break
+            case `delete`:
+              state.update((state) => {
+                state.delete(change.key)
+                return state
+              })
+              break
+          }
+        }
+
+        syncDataFromCollection(currentCollection)
+        status.set(currentCollection.status)
+      }
+    )
+
+    if (currentCollection.status === `idle`) {
+      currentCollection.preload().catch(console.error)
+    }
 
     onCleanup(() => {
-      unsub?.()
-      unsub = null
+      if (currentUnsub) {
+        currentUnsub()
+        currentUnsub = null
+      }
     })
   })
 
-  destroyRef.onDestroy(() => {
-    unsub?.()
-  })
-
-  const status = computed<CollectionStatus>(() => collection.status)
-  const isLoading = computed(
-    () => status() === `loading` || status() === `initialCommit`
-  )
-  const isReady = computed(() => status() === `ready`)
-  const isIdle = computed(() => status() === `idle`)
-  const isError = computed(() => status() === `error`)
-  const isCleanedUp = computed(() => status() === `cleaned-up`)
+  const instance = collection()
+  if (instance) {
+    destroyRef.onDestroy(() => {
+      if (currentUnsub) {
+        currentUnsub()
+        currentUnsub = null
+      }
+    })
+  }
 
   return {
     state,
     data,
-    collection: signal(collection).asReadonly(),
+    collection,
     status,
-    isLoading,
-    isReady,
-    isIdle,
-    isError,
-    isCleanedUp,
+    isLoading: computed(
+      () => status() === `loading` || status() === `initialCommit`
+    ),
+    isReady: computed(() => status() === `ready`),
+    isIdle: computed(() => status() === `idle`),
+    isError: computed(() => status() === `error`),
+    isCleanedUp: computed(() => status() === `cleaned-up`),
   }
 }

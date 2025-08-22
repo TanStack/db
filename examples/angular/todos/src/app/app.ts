@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { injectLiveQuery } from '@tanstack/angular-db';
 import { eq } from '@tanstack/db';
 import { todosCollection } from '../collections/todos-collection';
@@ -16,6 +16,24 @@ import { CommonModule } from '@angular/common';
         <div class="text-center mb-8">
           <h1 class="text-4xl font-bold text-gray-800 mb-2">Todo App</h1>
           <p class="text-gray-600">Stay organized and productive</p>
+        </div>
+
+        <!-- Project Selector -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <label for="project" class="block text-sm font-medium text-gray-700 mb-2">
+            Select project
+          </label>
+          <select
+            id="project"
+            class="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            [ngModel]="selectedProjectId()"
+            (ngModelChange)="selectedProjectId.set($event)"
+            name="project"
+          >
+            <option *ngFor="let p of projects" [ngValue]="p.id">
+              {{ p.name }}
+            </option>
+          </select>
         </div>
 
         <!-- Add Todo Form -->
@@ -119,9 +137,22 @@ import { CommonModule } from '@angular/common';
   `,
 })
 export class App {
-  todoQuery = injectLiveQuery((q) =>
-    q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.completed, false)),
-  );
+  projects = [
+    { id: 1, name: 'Work' },
+    { id: 2, name: 'Home' },
+  ];
+
+  selectedProjectId = signal(2);
+
+  todoQuery = injectLiveQuery({
+    params: () => ({ projectID: this.selectedProjectId() }),
+    query: ({ params, q }) =>
+      q
+        .from({ todo: todosCollection })
+        .where(({ todo }) => eq(todo.completed, false))
+        .where(({ todo }) => eq(todo.projectID, params.projectID)),
+  });
+
   newTodoText = '';
 
   addTodo() {
@@ -130,6 +161,7 @@ export class App {
     const newTodo = {
       id: Date.now(),
       text: this.newTodoText.trim(),
+      projectID: this.selectedProjectId(),
       completed: false,
       created_at: new Date(),
     };
