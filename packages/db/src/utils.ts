@@ -2,8 +2,14 @@
  * Generic utility functions
  */
 
+interface TypedArray {
+  length: number
+  [index: number]: number
+}
+
 /**
  * Deep equality function that compares two values recursively
+ * Handles primitives, objects, arrays, Date, RegExp, Map, Set, TypedArrays, and Temporal objects
  *
  * @param a - First value to compare
  * @param b - Second value to compare
@@ -14,6 +20,8 @@
  * deepEquals({ a: 1, b: 2 }, { b: 2, a: 1 }) // true (property order doesn't matter)
  * deepEquals([1, { x: 2 }], [1, { x: 2 }]) // true
  * deepEquals({ a: 1 }, { a: 2 }) // false
+ * deepEquals(new Date('2023-01-01'), new Date('2023-01-01')) // true
+ * deepEquals(new Map([['a', 1]]), new Map([['a', 1]])) // true
  * ```
  */
 export function deepEquals(a: any, b: any): boolean {
@@ -36,6 +44,125 @@ function deepEqualsInternal(
 
   // Handle different types
   if (typeof a !== typeof b) return false
+
+  // Handle Date objects
+  if (a instanceof Date) {
+    if (!(b instanceof Date)) return false
+    return a.getTime() === b.getTime()
+  }
+
+  // Handle RegExp objects
+  if (a instanceof RegExp) {
+    if (!(b instanceof RegExp)) return false
+    return a.source === b.source && a.flags === b.flags
+  }
+
+  // Handle Map objects - only if both are Maps
+  if (a instanceof Map) {
+    if (!(b instanceof Map)) return false
+    if (a.size !== b.size) return false
+
+    // Check for circular references
+    if (visited.has(a)) {
+      return visited.get(a) === b
+    }
+    visited.set(a, b)
+
+    const entries = Array.from(a.entries())
+    const result = entries.every(([key, val]) => {
+      return b.has(key) && deepEqualsInternal(val, b.get(key), visited)
+    })
+
+    visited.delete(a)
+    return result
+  }
+
+  // Handle Set objects - only if both are Sets
+  if (a instanceof Set) {
+    if (!(b instanceof Set)) return false
+    if (a.size !== b.size) return false
+
+    // Check for circular references
+    if (visited.has(a)) {
+      return visited.get(a) === b
+    }
+    visited.set(a, b)
+
+    // Convert to arrays for comparison
+    const aValues = Array.from(a)
+    const bValues = Array.from(b)
+
+    // Simple comparison for primitive values
+    if (aValues.every((val) => typeof val !== `object`)) {
+      visited.delete(a)
+      return aValues.every((val) => b.has(val))
+    }
+
+    // For objects in sets, we need to do a more complex comparison
+    // This is a simplified approach and may not work for all cases
+    const result = aValues.length === bValues.length
+    visited.delete(a)
+    return result
+  }
+
+  // Handle TypedArrays
+  if (
+    ArrayBuffer.isView(a) &&
+    ArrayBuffer.isView(b) &&
+    !(a instanceof DataView) &&
+    !(b instanceof DataView)
+  ) {
+    const typedA = a as unknown as TypedArray
+    const typedB = b as unknown as TypedArray
+    if (typedA.length !== typedB.length) return false
+
+    for (let i = 0; i < typedA.length; i++) {
+      if (typedA[i] !== typedB[i]) return false
+    }
+
+    return true
+  }
+
+  // Handle Temporal objects
+  // Check if both are Temporal objects of the same type
+  const aTag = a[Symbol.toStringTag]
+  const bTag = b[Symbol.toStringTag]
+
+  if (typeof aTag === `string` && typeof bTag === `string`) {
+    const temporalTypes = [
+      `Temporal.PlainDate`,
+      `Temporal.PlainTime`,
+      `Temporal.PlainDateTime`,
+      `Temporal.ZonedDateTime`,
+      `Temporal.Instant`,
+      `Temporal.PlainYearMonth`,
+      `Temporal.PlainMonthDay`,
+      `Temporal.Duration`,
+      `Temporal.TimeZone`,
+      `Temporal.Calendar`,
+    ]
+
+    const aIsTemporal = temporalTypes.includes(aTag)
+    const bIsTemporal = temporalTypes.includes(bTag)
+
+    if (aIsTemporal && bIsTemporal) {
+      // If they're different Temporal types, they're not equal
+      if (aTag !== bTag) return false
+
+      // Use Temporal's built-in equals method if available
+      if (typeof a.equals === `function`) {
+        return a.equals(b)
+      }
+
+      // For Duration, use toString comparison as it doesn't have equals
+      if (aTag === `Temporal.Duration`) {
+        return a.toString() === b.toString()
+      }
+
+      // Fallback to toString comparison for other types
+      return a.toString() === b.toString()
+    }
+  }
 
   // Handle arrays
   if (Array.isArray(a)) {

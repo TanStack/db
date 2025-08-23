@@ -1,4 +1,5 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
+import { deepEquals } from "./utils"
 import { SortedMap } from "./SortedMap"
 import {
   createSingleRowRefProxy,
@@ -1448,7 +1449,7 @@ export class CollectionImpl<
         const isRedundantSync =
           completedOp &&
           newVisibleValue !== undefined &&
-          this.deepEqual(completedOp.value, newVisibleValue)
+          deepEquals(completedOp.value, newVisibleValue)
 
         if (!isRedundantSync) {
           if (
@@ -1472,7 +1473,7 @@ export class CollectionImpl<
           } else if (
             previousVisibleValue !== undefined &&
             newVisibleValue !== undefined &&
-            !this.deepEqual(previousVisibleValue, newVisibleValue)
+            !deepEquals(previousVisibleValue, newVisibleValue)
           ) {
             events.push({
               type: `update`,
@@ -1713,29 +1714,6 @@ export class CollectionImpl<
         }
       }
     }
-  }
-
-  private deepEqual(a: any, b: any): boolean {
-    if (a === b) return true
-    if (a == null || b == null) return false
-    if (typeof a !== typeof b) return false
-
-    if (typeof a === `object`) {
-      if (Array.isArray(a) !== Array.isArray(b)) return false
-
-      const keysA = Object.keys(a)
-      const keysB = Object.keys(b)
-      if (keysA.length !== keysB.length) return false
-
-      const keysBSet = new Set(keysB)
-      for (const key of keysA) {
-        if (!keysBSet.has(key)) return false
-        if (!this.deepEqual(a[key], b[key])) return false
-      }
-      return true
-    }
-
-    return false
   }
 
   public validateData(

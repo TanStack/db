@@ -3,6 +3,8 @@
  * and provides a way to retrieve those changes.
  */
 
+import { deepEquals } from "./utils"
+
 /**
  * Simple debug utility that only logs when debug mode is enabled
  * Set DEBUG to true in localStorage to enable debug logging
@@ -180,148 +182,6 @@ function deepClone<T extends unknown>(
   return clone as T
 }
 
-/**
- * Deep equality check that handles special types like Date, RegExp, Map, and Set
- */
-function deepEqual<T>(a: T, b: T): boolean {
-  // Handle primitive types
-  if (a === b) return true
-
-  // If either is null or not an object, they're not equal
-  if (
-    a === null ||
-    b === null ||
-    typeof a !== `object` ||
-    typeof b !== `object`
-  ) {
-    return false
-  }
-
-  // Handle Date objects
-  if (a instanceof Date && b instanceof Date) {
-    return a.getTime() === b.getTime()
-  }
-
-  // Handle RegExp objects
-  if (a instanceof RegExp && b instanceof RegExp) {
-    return a.source === b.source && a.flags === b.flags
-  }
-
-  // Handle Map objects
-  if (a instanceof Map && b instanceof Map) {
-    if (a.size !== b.size) return false
-
-    const entries = Array.from(a.entries())
-    for (const [key, val] of entries) {
-      if (!b.has(key) || !deepEqual(val, b.get(key))) {
-        return false
-      }
-    }
-
-    return true
-  }
-
-  // Handle Set objects
-  if (a instanceof Set && b instanceof Set) {
-    if (a.size !== b.size) return false
-
-    // Convert to arrays for comparison
-    const aValues = Array.from(a)
-    const bValues = Array.from(b)
-
-    // Simple comparison for primitive values
-    if (aValues.every((val) => typeof val !== `object`)) {
-      return aValues.every((val) => b.has(val))
-    }
-
-    // For objects in sets, we need to do a more complex comparison
-    // This is a simplified approach and may not work for all cases
-    return aValues.length === bValues.length
-  }
-
-  // Handle arrays
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false
-
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false
-    }
-
-    return true
-  }
-
-  // Handle TypedArrays
-  if (
-    ArrayBuffer.isView(a) &&
-    ArrayBuffer.isView(b) &&
-    !(a instanceof DataView) &&
-    !(b instanceof DataView)
-  ) {
-    const typedA = a as unknown as TypedArray
-    const typedB = b as unknown as TypedArray
-    if (typedA.length !== typedB.length) return false
-
-    for (let i = 0; i < typedA.length; i++) {
-      if (typedA[i] !== typedB[i]) return false
-    }
-
-    return true
-  }
-
-  // Handle Temporal objects
-  // Check if both are Temporal objects of the same type
-  const aTag = (a as any)[Symbol.toStringTag]
-  const bTag = (b as any)[Symbol.toStringTag]
-
-  if (typeof aTag === `string` && typeof bTag === `string`) {
-    const temporalTypes = [
-      `Temporal.PlainDate`,
-      `Temporal.PlainTime`,
-      `Temporal.PlainDateTime`,
-      `Temporal.ZonedDateTime`,
-      `Temporal.Instant`,
-      `Temporal.PlainYearMonth`,
-      `Temporal.PlainMonthDay`,
-      `Temporal.Duration`,
-      `Temporal.TimeZone`,
-      `Temporal.Calendar`,
-    ]
-
-    const aIsTemporal = temporalTypes.includes(aTag)
-    const bIsTemporal = temporalTypes.includes(bTag)
-
-    if (aIsTemporal && bIsTemporal) {
-      // If they're different Temporal types, they're not equal
-      if (aTag !== bTag) return false
-
-      // Use Temporal's built-in equals method if available
-      if (typeof (a as any).equals === `function`) {
-        return (a as any).equals(b)
-      }
-
-      // For Duration, use toString comparison as it doesn't have equals
-      if (aTag === `Temporal.Duration`) {
-        return (a as any).toString() === (b as any).toString()
-      }
-
-      // Fallback to toString comparison for other types
-      return (a as any).toString() === (b as any).toString()
-    }
-  }
-
-  // Handle plain objects
-  const keysA = Object.keys(a as object)
-  const keysB = Object.keys(b as object)
-
-  if (keysA.length !== keysB.length) return false
-
-  return keysA.every(
-    (key) =>
-      Object.prototype.hasOwnProperty.call(b, key) &&
-      deepEqual((a as any)[key], (b as any)[key])
-  )
-}
-
 let count = 0
 function getProxyCount() {
   count += 1
@@ -457,7 +317,7 @@ export function createChangeProxy<
         )
 
         // If the value is not equal to original, something is still changed
-        if (!deepEqual(currentValue, originalValue)) {
+        if (!deepEquals(currentValue, originalValue)) {
           debugLog(`Property ${String(prop)} is different, returning false`)
           return false
         }
@@ -476,7 +336,7 @@ export function createChangeProxy<
         const originalValue = (state.originalObject as any)[sym]
 
         // If the value is not equal to original, something is still changed
-        if (!deepEqual(currentValue, originalValue)) {
+        if (!deepEquals(currentValue, originalValue)) {
           debugLog(`Symbol property is different, returning false`)
           return false
         }
@@ -863,11 +723,11 @@ export function createChangeProxy<
         )
 
         // Only track the change if the value is actually different
-        if (!deepEqual(currentValue, value)) {
+        if (!deepEquals(currentValue, value)) {
           // Check if the new value is equal to the original value
           // Important: Use the originalObject to get the true original value
           const originalValue = changeTracker.originalObject[prop as keyof T]
-          const isRevertToOriginal = deepEqual(value, originalValue)
+          const isRevertToOriginal = deepEquals(value, originalValue)
           debugLog(
             `value:`,
             value,
