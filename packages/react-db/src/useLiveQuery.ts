@@ -30,6 +30,13 @@ import type {
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
  *   [minPriority] // Re-run when minPriority changes
  * )
+ *  @example
+ * // Single result query
+ * const { data } = useLiveQuery(
+ *   (q) => q.from({ todos: todosCollection })
+ *          .where(({ todos }) => eq(todos.id, 1))
+ *          .findOne()
+ * )
  *
  * @example
  * // Join pattern
@@ -66,7 +73,9 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: Array<GetResult<TContext>>
+  data: TContext extends { single: true }
+    ? GetResult<TContext>
+    : Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
   isLoading: boolean
@@ -309,6 +318,7 @@ export function useLiveQuery(
   ) {
     // Capture a stable view of entries for this snapshot to avoid tearing
     const entries = Array.from(snapshot.collection.entries())
+    const single = snapshot.collection.config.single
     let stateCache: Map<string | number, unknown> | null = null
     let dataCache: Array<unknown> | null = null
 
@@ -323,7 +333,7 @@ export function useLiveQuery(
         if (!dataCache) {
           dataCache = entries.map(([, value]) => value)
         }
-        return dataCache
+        return single ? dataCache[0] : dataCache
       },
       collection: snapshot.collection,
       status: snapshot.collection.status,

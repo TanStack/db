@@ -527,6 +527,11 @@ export interface CollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey>
+
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  single?: true
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

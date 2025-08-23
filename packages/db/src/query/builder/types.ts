@@ -19,6 +19,8 @@ export interface Context {
   >
   // The result type after select (if select has been called)
   result?: any
+  // Single result only (if findOne has been called)
+  single?: boolean
 }
 
 export type ContextSchema = Record<string, unknown>
@@ -211,6 +213,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
+  single: TContext[`single`]
 }
 
 // Helper type to apply join optionality when merging new schema
