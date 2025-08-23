@@ -615,6 +615,27 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }) as any
   }
 
+  /**
+   * Specify that the query should return a single result
+   * @returns A QueryBuilder with single result enforced
+   *
+   * @example
+   * ```ts
+   * // Get the user matching the query
+   * query
+   *   .from({ users: usersCollection })
+   *   .where(({users}) => eq(users.id, 1))
+   *   .findOne()
+   *```
+   */
+  findOne(): QueryBuilder<TContext & { single: true }> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      limit: 1,
+      single: true,
+    })
+  }
+
   // Helper methods
   private _getCurrentAliases(): Array<string> {
     const aliases: Array<string> = []

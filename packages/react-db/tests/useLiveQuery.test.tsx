@@ -157,6 +157,40 @@ describe(`Query Collections`, () => {
     expect(data1).toBe(data2)
   })
 
+  it(`should be able to return a single row`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-2`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne()
+      )
+    })
+
+    // Wait for collection to sync
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1)
+    })
+
+    expect(result.current.state.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+  })
+
   it(`should be able to query a collection with live updates`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

@@ -50,6 +50,7 @@ export interface Collection<
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
+  readonly single?: true
 }
 
 /**

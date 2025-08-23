@@ -487,6 +487,11 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  single?: true
 }
 
 export interface CollectionConfig<
