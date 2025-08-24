@@ -685,5 +685,5 @@ export type WritableDeep<T> = T extends BuiltIns
 export type WithResultSize<TContext extends Context> = TContext extends {
   single: true
 }
-  ? GetResult<TContext>
+  ? GetResult<TContext> | undefined
   : Array<GetResult<TContext>>
