@@ -642,5 +642,5 @@ export type ChangeListener<
 export type WithResultSize<TContext extends Context> = TContext extends {
   single: true
 }
-  ? GetResult<TContext>
+  ? GetResult<TContext> | undefined
   : Array<GetResult<TContext>>
