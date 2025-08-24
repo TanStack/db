@@ -5,6 +5,7 @@ import type { Transaction } from "./transactions"
 
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type { BasicExpression } from "./query/ir.js"
+import type { Context, GetResult } from "./query/builder/types"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -634,3 +635,12 @@ export type ChangeListener<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > = (changes: Array<ChangeMessage<T, TKey>>) => void
+
+/**
+ * Utility type to infer the query result size (single row or an array)
+ */
+export type WithResultSize<TContext extends Context> = TContext extends {
+  single: true
+}
+  ? GetResult<TContext>
+  : Array<GetResult<TContext>>
