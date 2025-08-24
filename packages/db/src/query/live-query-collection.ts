@@ -91,6 +91,11 @@ export interface LiveQueryCollectionConfig<
    * GC time for the collection
    */
   gcTime?: number
+
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  single?: true
 }
 
 /**
@@ -649,6 +654,7 @@ export function liveQueryCollectionOptions<
     onUpdate: config.onUpdate,
     onDelete: config.onDelete,
     startSync: config.startSync,
+    single: query.single,
   }
 }
 
