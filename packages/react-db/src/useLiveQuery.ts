@@ -12,6 +12,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
+  WithResultSize,
 } from "@tanstack/db"
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
@@ -82,9 +83,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: TContext extends { single: true }
-    ? GetResult<TContext>
-    : Array<GetResult<TContext>>
+  data: WithResultSize<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
@@ -230,7 +229,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: Array<GetResult<TContext>>
+  data: WithResultSize<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled for config objects
   isLoading: boolean

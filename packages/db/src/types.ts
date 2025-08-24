@@ -3,6 +3,7 @@ import type { Collection } from "./collection/index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 import type { BasicExpression, OrderBy } from "./query/ir.js"
+import type { Context, GetResult } from "./query/builder/types"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -677,3 +678,12 @@ export type WritableDeep<T> = T extends BuiltIns
           : T extends object
             ? WritableObjectDeep<T>
             : unknown
+
+/**
+ * Utility type to infer the query result size (single row or an array)
+ */
+export type WithResultSize<TContext extends Context> = TContext extends {
+  single: true
+}
+  ? GetResult<TContext>
+  : Array<GetResult<TContext>>
