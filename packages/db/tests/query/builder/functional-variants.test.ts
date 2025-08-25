@@ -221,7 +221,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
           ({ employees, departments }) =>
             eq(employees.department_id, departments.id)
         )
-        .groupBy(({ departments }) => departments.name)
+        .groupBy(({ departments }) => departments?.name)
         .fn.having(
           (row) =>
             row.employees.salary > 60000 &&
@@ -245,7 +245,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
         )
         .fn.where((row) => row.employees.active)
         .fn.where((row) => row.employees.salary > 40000)
-        .groupBy(({ departments }) => departments.name)
+        .groupBy(({ departments }) => departments?.name)
         .fn.having((row) => row.employees.salary > 70000)
         .fn.select((row) => ({
           departmentName: row.departments?.name || `Unknown`,
