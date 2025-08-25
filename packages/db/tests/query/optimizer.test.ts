@@ -1455,9 +1455,13 @@ describe(`Query Optimizer`, () => {
       // The WHERE clause should remain in the main query to preserve LEFT JOIN semantics
       // It should NOT be completely moved to the subquery
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual(
-        createEq(createPropRef(`teamMember`, `user_id`), createValue(100))
-      )
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createEq(
+          createPropRef(`teamMember`, `user_id`),
+          createValue(100)
+        ),
+        residual: true,
+      })
 
       // If the optimizer creates a subquery for teamMember, the WHERE clause should also be copied there
       // but a residual copy must remain in the main query
@@ -1469,9 +1473,13 @@ describe(`Query Optimizer`, () => {
         // The subquery may have the WHERE clause for optimization
         if (teamMemberSubquery.where && teamMemberSubquery.where.length > 0) {
           // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual(
-            createEq(createPropRef(`teamMember`, `user_id`), createValue(100))
-          )
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createEq(
+              createPropRef(`teamMember`, `user_id`),
+              createValue(100)
+            ),
+            residual: true,
+          })
         }
       }
     })
@@ -1513,9 +1521,13 @@ describe(`Query Optimizer`, () => {
       // The WHERE clause should remain in the main query to preserve RIGHT JOIN semantics
       // It should NOT be completely moved to the subquery
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual(
-        createEq(createPropRef(`user`, `department_id`), createValue(1))
-      )
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createEq(
+          createPropRef(`user`, `department_id`),
+          createValue(1)
+        ),
+        residual: true,
+      })
 
       // If the optimizer creates a subquery for users, the WHERE clause should also be copied there
       // but a residual copy must remain in the main query
@@ -1524,9 +1536,13 @@ describe(`Query Optimizer`, () => {
         // The subquery may have the WHERE clause for optimization
         if (userSubquery.where && userSubquery.where.length > 0) {
           // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual(
-            createEq(createPropRef(`user`, `department_id`), createValue(1))
-          )
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createEq(
+              createPropRef(`user`, `department_id`),
+              createValue(1)
+            ),
+            residual: true,
+          })
         }
       }
     })
@@ -1568,9 +1584,13 @@ describe(`Query Optimizer`, () => {
       // The WHERE clause should remain in the main query to preserve FULL JOIN semantics
       // It should NOT be completely moved to the subquery
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual(
-        createGt(createPropRef(`payment`, `amount`), createValue(100))
-      )
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createGt(
+          createPropRef(`payment`, `amount`),
+          createValue(100)
+        ),
+        residual: true,
+      })
 
       // If the optimizer creates a subquery for payments, the WHERE clause should also be copied there
       // but a residual copy must remain in the main query
@@ -1582,9 +1602,13 @@ describe(`Query Optimizer`, () => {
         // The subquery may have the WHERE clause for optimization
         if (paymentSubquery.where && paymentSubquery.where.length > 0) {
           // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual(
-            createGt(createPropRef(`payment`, `amount`), createValue(100))
-          )
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createGt(
+              createPropRef(`payment`, `amount`),
+              createValue(100)
+            ),
+            residual: true,
+          })
         }
       }
     })
@@ -1621,8 +1645,7 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // For INNER JOIN, the WHERE clause CAN be completely moved to the subquery
-      // This is safe because INNER JOIN doesn't produce NULL values
-      // The main query where array might be empty or have the clause - either is semantically correct
+      // This is safe because INNER JOIN doesn't produce NULL values that need residual filtering
       expect(optimizedQuery.where).toHaveLength(0)
 
       // The WHERE clause should be pushed into the department subquery for optimization

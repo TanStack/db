@@ -631,7 +631,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other1`,
+                id: `1`, // Matches Alice from main collection
                 name: `Other Active Item`,
                 age: 40,
                 status: `active`,
@@ -641,7 +641,7 @@ describe(`Query Index Optimization`, () => {
             write({
               type: `insert`,
               value: {
-                id: `other2`,
+                id: `2`, // Matches Bob from main collection
                 name: `Other Inactive Item`,
                 age: 35,
                 status: `inactive`,
@@ -970,11 +970,11 @@ describe(`Query Index Optimization`, () => {
 
         await liveQuery.stateWhenReady()
 
-        // Should include all results from the first collection
+        // Should only include results where both sides match the WHERE condition
+        // Charlie and Eve are filtered out because they have no matching 'other' records
+        // and the WHERE clause requires other.status = 'active' (can't be NULL)
         expect(liveQuery.toArray).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
-          { id: `3`, name: `Charlie` },
-          { id: `5`, name: `Eve` },
         ])
 
         // Combine stats from both collections
@@ -1100,11 +1100,11 @@ describe(`Query Index Optimization`, () => {
 
         await liveQuery.stateWhenReady()
 
-        // Should have found results where both items are active
+        // Should only include results where both sides match the WHERE condition
+        // Charlie and Eve are filtered out because they have no matching 'other' records
+        // and the WHERE clause requires other.status = 'active' (can't be NULL)
         expect(liveQuery.toArray).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
-          { id: `3`, name: `Charlie` },
-          { id: `5`, name: `Eve` },
         ])
 
         // We should have done an index lookup on the left collection to find active items
