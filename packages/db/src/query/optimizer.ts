@@ -333,8 +333,13 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
+  // Filter out residual WHERE clauses to prevent them from being optimized again
+  const nonResidualWhereClauses = query.where.filter(
+    (where) => !isResidualWhere(where)
+  )
+
   // Step 1: Split all AND clauses at the root level for granular optimization
-  const splitWhereClauses = splitAndClauses(query.where)
+  const splitWhereClauses = splitAndClauses(nonResidualWhereClauses)
 
   // Step 2: Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
@@ -345,7 +350,20 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Step 4: Apply optimizations by lifting single-source clauses into subqueries
-  return applyOptimizations(query, groupedClauses)
+  const optimizedQuery = applyOptimizations(query, groupedClauses)
+
+  // Add back any residual WHERE clauses that were filtered out
+  const residualWhereClauses = query.where.filter((where) =>
+    isResidualWhere(where)
+  )
+  if (residualWhereClauses.length > 0) {
+    optimizedQuery.where = [
+      ...(optimizedQuery.where || []),
+      ...residualWhereClauses,
+    ]
+  }
+
+  return optimizedQuery
 }
 
 /**
@@ -437,49 +455,28 @@ function splitAndClauses(
   const result: Array<BasicExpression<boolean>> = []
 
   for (const whereClause of whereClauses) {
-    // Skip residual WHERE clauses to prevent them from being pushed down again
-    if (isResidualWhere(whereClause)) {
-      const clause = getWhereExpression(whereClause)
-      result.push(clause)
-      continue
-    }
-
     const clause = getWhereExpression(whereClause)
-    if (clause.type === `func` && clause.name === `and`) {
-      // Recursively split nested AND clauses to handle complex expressions
-      const splitArgs = splitAndClausesBasic(
-        clause.args as Array<BasicExpression<boolean>>
-      )
-      result.push(...splitArgs)
-    } else {
-      // Preserve non-AND clauses as-is (including OR clauses)
-      result.push(clause)
-    }
+    result.push(...splitAndClausesRecursive(clause))
   }
 
   return result
 }
 
 // Helper function for recursive splitting of BasicExpression arrays
-function splitAndClausesBasic(
-  whereClauses: Array<BasicExpression<boolean>>
+function splitAndClausesRecursive(
+  clause: BasicExpression<boolean>
 ): Array<BasicExpression<boolean>> {
-  const result: Array<BasicExpression<boolean>> = []
-
-  for (const clause of whereClauses) {
-    if (clause.type === `func` && clause.name === `and`) {
-      // Recursively split nested AND clauses to handle complex expressions
-      const splitArgs = splitAndClausesBasic(
-        clause.args as Array<BasicExpression<boolean>>
-      )
-      result.push(...splitArgs)
-    } else {
-      // Preserve non-AND clauses as-is (including OR clauses)
-      result.push(clause)
+  if (clause.type === `func` && clause.name === `and`) {
+    // Recursively split nested AND clauses to handle complex expressions
+    const result: Array<BasicExpression<boolean>> = []
+    for (const arg of clause.args as Array<BasicExpression<boolean>>) {
+      result.push(...splitAndClausesRecursive(arg))
     }
+    return result
+  } else {
+    // Preserve non-AND clauses as-is (including OR clauses)
+    return [clause]
   }
-
-  return result
 }
 
 /**
