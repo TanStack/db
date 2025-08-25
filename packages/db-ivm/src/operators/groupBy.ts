@@ -343,6 +343,29 @@ export function mode<T>(
   }
 }
 
+/**
+ * Creates a string aggregate function
+ */
+export function list<T, V>(
+  valueExtractor: (value: T) => V = (v) => v as unknown as V
+): AggregateFunction<T, Array<V>, V> {
+  return {
+    preMap: (data: T) => valueExtractor(data) as unknown as V,
+    reduce: (values) => {
+      const total = []
+
+      for (const [value, _multiplicity] of values) {
+        total.push(value)
+      }
+
+      return total as unknown as V
+    },
+    postMap(result) {
+      return result as unknown as Array<V>
+    },
+  }
+}
+
 export const groupByOperators = {
   sum,
   count,
@@ -351,4 +374,5 @@ export const groupByOperators = {
   max,
   median,
   mode,
+  list,
 }

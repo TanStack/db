@@ -1,5 +1,6 @@
 import { Aggregate, Func } from "../ir"
 import { toExpression } from "./ref-proxy.js"
+import type { RefProxyFor } from "./types"
 import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
 
@@ -264,6 +265,12 @@ export function max(
     | BasicExpression<number>
 ): Aggregate<number> {
   return new Aggregate(`max`, [toExpression(arg)])
+}
+
+export function list<T>(
+  arg: RefProxy<T> | RefProxyFor<T>
+): Aggregate<Array<T>> {
+  return new Aggregate(`list`, [toExpression(arg)])
 }
 
 /**

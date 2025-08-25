@@ -5,6 +5,7 @@ import {
   avg,
   count,
   groupBy,
+  list,
   max,
   median,
   min,
@@ -122,6 +123,66 @@ describe(`Operators`, () => {
             {
               total: 30,
               category: `B`,
+            },
+          ],
+          1,
+        ],
+      ]
+
+      expect(result).toEqual(expectedResult)
+    })
+
+    test(`with single stringAgg aggregate`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        productId: number
+        category: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ productId: data.productId }), {
+          categories: list((data) => data.category),
+        }),
+        output((message) => {
+          latestMessage = message
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data
+      input.sendData(
+        new MultiSet([
+          [{ category: `A`, productId: 1 }, 1],
+          [{ category: `B`, productId: 1 }, 1],
+          [{ category: `A`, productId: 2 }, 1],
+        ])
+      )
+      graph.run()
+
+      // Verify we have the latest message
+      expect(latestMessage).not.toBeNull()
+
+      const result = latestMessage.getInner()
+
+      const expectedResult = [
+        [
+          [
+            `{"productId":1}`,
+            {
+              productId: 1,
+              categories: [`A`, `B`],
+            },
+          ],
+          1,
+        ],
+        [
+          [
+            `{"productId":2}`,
+            {
+              productId: 2,
+              categories: [`A`],
             },
           ],
           1,
