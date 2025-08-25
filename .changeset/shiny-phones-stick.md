@@ -2,4 +2,4 @@
 "@tanstack/db": patch
 ---
 
-fix: make item drafts mutable
+mark item drafts as a `mutable` type
