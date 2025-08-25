@@ -149,7 +149,7 @@ export function getWhereExpression(where: Where): BasicExpression<boolean> {
  * HAVING clauses can contain aggregates, unlike regular WHERE clauses
  */
 export function getHavingExpression(
-  having: Where
+  having: Having
 ): BasicExpression | Aggregate {
   return typeof having === `object` && `expression` in having
     ? having.expression
