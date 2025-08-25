@@ -421,9 +421,9 @@ This also works with joins to derive collections from multiple source collection
 
 #### Collection
 
-There is a `Collection` interface in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this to implement your own collection types.
+There is a `Collection` interface in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this to implement your own collection types.
 
-See the existing implementations in [`../packages/db`](../packages/db), [`../packages/query-db-collection`](../packages/query-db-collection), [`../packages/electric-db-collection`](../packages/electric-db-collection) and [`../packages/trailbase-db-collection`](../packages/trailbase-db-collection) for reference.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference.
 
 ### Live queries
 
