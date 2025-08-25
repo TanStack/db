@@ -118,6 +118,7 @@ Here is an example proxy implementation using TanStack Starter:
 
 ```js
 import { createServerFileRoute } from "@tanstack/react-start/server"
+import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from "@electric-sql/client"
 
 // Electric URL
 const baseUrl = 'http://.../v1/shape'
@@ -130,21 +131,18 @@ const serve = async ({ request }: { request: Request }) => {
 
   // passthrough parameters from electric client
   url.searchParams.forEach((value, key) => {
-    if (
-      [
-        "live",
-        "handle",
-        "offset",
-        "cursor",
-      ].includes(key)
-    ) {
+    if (ELECTRIC_PROTOCOL_QUERY_PARAMS.includes(key)) {
       originUrl.searchParams.set(key, value)
     }
   })
 
-  // the shape parameters
+  // set shape parameters 
+  // full spec: https://github.com/electric-sql/electric/blob/main/website/electric-api.yaml
   originUrl.searchParams.set("table", "todos")
+  // Where clause to filter rows in the table (optional).
   // originUrl.searchParams.set("where", "completed = true")
+  
+  // Select the columns to sync (optional)
   // originUrl.searchParams.set("columns", "id,text,completed")
 
   const response = await fetch(originUrl)
