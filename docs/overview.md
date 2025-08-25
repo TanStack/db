@@ -184,7 +184,10 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection"
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["todoItems"],
-    queryFn: async () => fetch("/api/todos"),
+    queryFn: async () => {
+      const response = await fetch("/api/todos");
+      return response.json();
+    },
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
   })
