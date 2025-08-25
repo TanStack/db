@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.1.7
+
+### Patch Changes
+
+- mark item drafts as a `mutable` type ([#408](https://github.com/TanStack/db/pull/408))
+
 ## 0.1.6
 
 ### Patch Changes
