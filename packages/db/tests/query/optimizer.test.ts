@@ -1420,4 +1420,244 @@ describe(`Query Optimizer`, () => {
       }
     })
   })
+
+  describe(`JOIN semantics preservation`, () => {
+    test(`should preserve WHERE clause semantics when pushing down to LEFT JOIN`, () => {
+      // This test reproduces the bug where pushing WHERE clauses into LEFT JOIN subqueries
+      // changes the semantics by filtering out null values that should remain
+
+      const teamsCollection = { id: `teams` } as any
+      const teamMembersCollection = { id: `team-members` } as any
+
+      // Original query: LEFT JOIN with WHERE clause that should filter final results
+      const query: QueryIR = {
+        from: new CollectionRef(teamsCollection, `team`),
+        join: [
+          {
+            type: `left`,
+            from: new CollectionRef(teamMembersCollection, `teamMember`),
+            left: createPropRef(`team`, `id`),
+            right: createPropRef(`teamMember`, `team_id`),
+          },
+        ],
+        where: [
+          // This WHERE clause should filter the final result, not pre-filter the teamMember collection
+          createEq(createPropRef(`teamMember`, `user_id`), createValue(100)),
+        ],
+        select: {
+          id: createPropRef(`team`, `id`),
+          name: createPropRef(`team`, `name`),
+        },
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+
+      // The WHERE clause should remain in the main query to preserve LEFT JOIN semantics
+      // It should NOT be completely moved to the subquery
+      expect(optimizedQuery.where).toHaveLength(1)
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createEq(
+          createPropRef(`teamMember`, `user_id`),
+          createValue(100)
+        ),
+        residual: true,
+      })
+
+      // If the optimizer creates a subquery for teamMember, the WHERE clause should also be copied there
+      // but a residual copy must remain in the main query
+      if (
+        optimizedQuery.join &&
+        optimizedQuery.join[0]?.from.type === `queryRef`
+      ) {
+        const teamMemberSubquery = optimizedQuery.join[0].from.query
+        // The subquery may have the WHERE clause for optimization
+        if (teamMemberSubquery.where && teamMemberSubquery.where.length > 0) {
+          // But the main query MUST still have it to preserve semantics
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createEq(
+              createPropRef(`teamMember`, `user_id`),
+              createValue(100)
+            ),
+            residual: true,
+          })
+        }
+      }
+    })
+
+    test(`should preserve WHERE clause semantics when pushing down to RIGHT JOIN`, () => {
+      // This test reproduces the bug where pushing WHERE clauses into RIGHT JOIN subqueries
+      // changes the semantics by filtering out null values that should remain
+
+      const usersCollection = { id: `users` } as any
+      const profilesCollection = { id: `profiles` } as any
+
+      // Original query: RIGHT JOIN with WHERE clause that should filter final results
+      // This should include all profiles, but only those where user.department_id = 1 OR user is null
+      const query: QueryIR = {
+        from: new CollectionRef(usersCollection, `user`),
+        join: [
+          {
+            type: `right`,
+            from: new CollectionRef(profilesCollection, `profile`),
+            left: createPropRef(`user`, `id`),
+            right: createPropRef(`profile`, `user_id`),
+          },
+        ],
+        where: [
+          // This WHERE clause should filter the final result, not pre-filter the users collection
+          // In a RIGHT JOIN, this should keep profiles where either:
+          // 1. user.department_id = 1, OR
+          // 2. user is null (profile has no matching user)
+          createEq(createPropRef(`user`, `department_id`), createValue(1)),
+        ],
+        select: {
+          profile_id: createPropRef(`profile`, `id`),
+          user_name: createPropRef(`user`, `name`),
+        },
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+
+      // The WHERE clause should remain in the main query to preserve RIGHT JOIN semantics
+      // It should NOT be completely moved to the subquery
+      expect(optimizedQuery.where).toHaveLength(1)
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createEq(
+          createPropRef(`user`, `department_id`),
+          createValue(1)
+        ),
+        residual: true,
+      })
+
+      // If the optimizer creates a subquery for users, the WHERE clause should also be copied there
+      // but a residual copy must remain in the main query
+      if (optimizedQuery.from.type === `queryRef`) {
+        const userSubquery = optimizedQuery.from.query
+        // The subquery may have the WHERE clause for optimization
+        if (userSubquery.where && userSubquery.where.length > 0) {
+          // But the main query MUST still have it to preserve semantics
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createEq(
+              createPropRef(`user`, `department_id`),
+              createValue(1)
+            ),
+            residual: true,
+          })
+        }
+      }
+    })
+
+    test(`should preserve WHERE clause semantics when pushing down to FULL JOIN`, () => {
+      // This test reproduces the bug where pushing WHERE clauses into FULL JOIN subqueries
+      // changes the semantics by filtering out null values that should remain
+
+      const ordersCollection = { id: `orders` } as any
+      const paymentsCollection = { id: `payments` } as any
+
+      // Original query: FULL JOIN with WHERE clause that should filter final results
+      // This should include:
+      // 1. Orders with payments where payment.amount > 100
+      // 2. Orders without payments (WHERE would be false for null payment.amount, so filtered out)
+      // 3. Payments without orders where payment.amount > 100
+      const query: QueryIR = {
+        from: new CollectionRef(ordersCollection, `order`),
+        join: [
+          {
+            type: `full`,
+            from: new CollectionRef(paymentsCollection, `payment`),
+            left: createPropRef(`order`, `id`),
+            right: createPropRef(`payment`, `order_id`),
+          },
+        ],
+        where: [
+          // This WHERE clause should filter the final result, not pre-filter either collection
+          createGt(createPropRef(`payment`, `amount`), createValue(100)),
+        ],
+        select: {
+          order_id: createPropRef(`order`, `id`),
+          payment_amount: createPropRef(`payment`, `amount`),
+        },
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+
+      // The WHERE clause should remain in the main query to preserve FULL JOIN semantics
+      // It should NOT be completely moved to the subquery
+      expect(optimizedQuery.where).toHaveLength(1)
+      expect(optimizedQuery.where![0]).toEqual({
+        expression: createGt(
+          createPropRef(`payment`, `amount`),
+          createValue(100)
+        ),
+        residual: true,
+      })
+
+      // If the optimizer creates a subquery for payments, the WHERE clause should also be copied there
+      // but a residual copy must remain in the main query
+      if (
+        optimizedQuery.join &&
+        optimizedQuery.join[0]?.from.type === `queryRef`
+      ) {
+        const paymentSubquery = optimizedQuery.join[0].from.query
+        // The subquery may have the WHERE clause for optimization
+        if (paymentSubquery.where && paymentSubquery.where.length > 0) {
+          // But the main query MUST still have it to preserve semantics
+          expect(optimizedQuery.where).toContainEqual({
+            expression: createGt(
+              createPropRef(`payment`, `amount`),
+              createValue(100)
+            ),
+            residual: true,
+          })
+        }
+      }
+    })
+
+    test(`should allow WHERE clause pushdown for INNER JOIN (semantics preserved)`, () => {
+      // This test confirms that INNER JOIN optimization is still safe
+      // Because INNER JOINs don't produce NULL values, moving WHERE clauses to subqueries
+      // doesn't change the semantics
+
+      const usersCollection = { id: `users` } as any
+      const departmentsCollection = { id: `departments` } as any
+
+      // Original query: INNER JOIN with WHERE clause - optimization should be allowed
+      const query: QueryIR = {
+        from: new CollectionRef(usersCollection, `user`),
+        join: [
+          {
+            type: `inner`,
+            from: new CollectionRef(departmentsCollection, `dept`),
+            left: createPropRef(`user`, `department_id`),
+            right: createPropRef(`dept`, `id`),
+          },
+        ],
+        where: [
+          // This WHERE clause CAN be moved to subquery for INNER JOIN without changing semantics
+          createEq(createPropRef(`dept`, `budget`), createValue(100000)),
+        ],
+        select: {
+          user_name: createPropRef(`user`, `name`),
+          dept_name: createPropRef(`dept`, `name`),
+        },
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+
+      // For INNER JOIN, the WHERE clause CAN be completely moved to the subquery
+      // This is safe because INNER JOIN doesn't produce NULL values that need residual filtering
+      expect(optimizedQuery.where).toHaveLength(0)
+
+      // The WHERE clause should be pushed into the department subquery for optimization
+      expect(optimizedQuery.join).toHaveLength(1)
+      expect(optimizedQuery.join![0]?.from.type).toBe(`queryRef`)
+
+      if (optimizedQuery.join![0]?.from.type === `queryRef`) {
+        const deptSubquery = optimizedQuery.join![0].from.query
+        expect(deptSubquery.where).toContainEqual(
+          createEq(createPropRef(`dept`, `budget`), createValue(100000))
+        )
+      }
+    })
+  })
 })

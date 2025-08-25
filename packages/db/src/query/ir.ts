@@ -39,7 +39,9 @@ export interface JoinClause {
   right: BasicExpression
 }
 
-export type Where = BasicExpression<boolean>
+export type Where =
+  | BasicExpression<boolean>
+  | { expression: BasicExpression<boolean>; residual?: boolean }
 
 export type GroupBy = Array<BasicExpression>
 
@@ -127,4 +129,49 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   ) {
     super()
   }
+}
+
+/**
+ * Helper functions for working with Where clauses
+ */
+
+/**
+ * Extract the expression from a Where clause
+ */
+export function getWhereExpression(where: Where): BasicExpression<boolean> {
+  return typeof where === `object` && `expression` in where
+    ? where.expression
+    : where
+}
+
+/**
+ * Extract the expression from a HAVING clause
+ * HAVING clauses can contain aggregates, unlike regular WHERE clauses
+ */
+export function getHavingExpression(
+  having: Having
+): BasicExpression | Aggregate {
+  return typeof having === `object` && `expression` in having
+    ? having.expression
+    : having
+}
+
+/**
+ * Check if a Where clause is marked as residual
+ */
+export function isResidualWhere(where: Where): boolean {
+  return (
+    typeof where === `object` &&
+    `expression` in where &&
+    where.residual === true
+  )
+}
+
+/**
+ * Create a residual Where clause from an expression
+ */
+export function createResidualWhere(
+  expression: BasicExpression<boolean>
+): Where {
+  return { expression, residual: true }
 }
