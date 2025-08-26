@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.1.7
+
+### Patch Changes
+
+- fix a race condition that could result in the initial state of a joined collection being sent to the live query pipeline twice, this would result in incorrect join results. ([#451](https://github.com/TanStack/db/pull/451))
+
+- Refactor live query collection ([#432](https://github.com/TanStack/db/pull/432))
+
+- Fix infinite loop bug with queries that use orderBy clause with a limit ([#450](https://github.com/TanStack/db/pull/450))
+
+- mark item drafts as a `mutable` type ([#408](https://github.com/TanStack/db/pull/408))
+
+- Fix query optimizer to preserve outer join semantics by keeping residual WHERE clauses when pushing predicates to subqueries. ([#442](https://github.com/TanStack/db/pull/442))
+
 ## 0.1.6
 
 ### Patch Changes
