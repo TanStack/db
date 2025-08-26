@@ -169,7 +169,7 @@ export function count<T>(
   valueExtractor: (value: T) => any = (v) => v
 ): AggregateFunction<T, number, number> {
   return {
-    // Count only not-null values (ignore null/undefined)
+    // Count only not-null values (the `== null` comparison gives true for both null and undefined)
     preMap: (data: T) => (valueExtractor(data) == null ? 0 : 1),
     reduce: (values: Array<[number, number]>) => {
       let totalCount = 0
