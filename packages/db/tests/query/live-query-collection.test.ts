@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { createCollection } from "../../src/collection.js"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { Query } from "../../src/query/builder/index.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from "../utls.js"
 import type { ChangeMessage } from "../../src/types.js"
 
 // Sample user type for tests
@@ -319,80 +322,29 @@ describe(`createLiveQueryCollection`, () => {
       type Player = { id: number; name: string }
       type Challenge = { id: number; value: number }
 
-      let playerBeginCallback: (() => void) | undefined
-      let playerWriteCallback:
-        | ((
-            message: Omit<ChangeMessage<Player, string | number>, `key`>
-          ) => void)
-        | undefined
-      let playerCommitCallback: (() => void) | undefined
-      let playerMarkReadyCallback: (() => void) | undefined
-      const playerCollection = createCollection<Player>({
-        id: `player`,
-        getKey: (post) => post.id,
-        startSync: false,
-        autoIndex,
-        sync: {
-          sync: ({ begin, commit, write, markReady }) => {
-            playerBeginCallback = begin
-            playerCommitCallback = commit
-            playerMarkReadyCallback = markReady
-            playerWriteCallback = write
-            return () => {}
-          },
-        },
-        onInsert: async () => {}, // Add empty handler to allow direct inserts
-      })
+      const playerCollection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Player>({
+          id: `player`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
 
-      let challenge1BeginCallback: (() => void) | undefined
-      let challenge1WriteCallback:
-        | ((
-            message: Omit<ChangeMessage<Challenge, string | number>, `key`>
-          ) => void)
-        | undefined
-      let challenge1CommitCallback: (() => void) | undefined
-      let challenge1MarkReadyCallback: (() => void) | undefined
-      const challenge1Collection = createCollection<Challenge>({
-        id: `challenge1`,
-        getKey: (post) => post.id,
-        startSync: false,
-        autoIndex,
-        sync: {
-          sync: ({ begin, commit, write, markReady }) => {
-            challenge1BeginCallback = begin
-            challenge1CommitCallback = commit
-            challenge1MarkReadyCallback = markReady
-            challenge1WriteCallback = write
-            return () => {}
-          },
-        },
-        onInsert: async () => {}, // Add empty handler to allow direct inserts
-      })
+      const challenge1Collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Challenge>({
+          id: `challenge1`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
 
-      let challenge2BeginCallback: (() => void) | undefined
-      let challenge2WriteCallback:
-        | ((
-            message: Omit<ChangeMessage<Challenge, string | number>, `key`>
-          ) => void)
-        | undefined
-      let challenge2CommitCallback: (() => void) | undefined
-      let challenge2MarkReadyCallback: (() => void) | undefined
-      const challenge2Collection = createCollection<Challenge>({
-        id: `challenge2`,
-        getKey: (post) => post.id,
-        startSync: false,
-        autoIndex,
-        sync: {
-          sync: ({ begin, commit, write, markReady }) => {
-            challenge2BeginCallback = begin
-            challenge2CommitCallback = commit
-            challenge2MarkReadyCallback = markReady
-            challenge2WriteCallback = write
-            return () => {}
-          },
-        },
-        onInsert: async () => {}, // Add empty handler to allow direct inserts
-      })
+      const challenge2Collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Challenge>({
+          id: `challenge2`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
 
       const liveQuery = createLiveQueryCollection((q) =>
         q
@@ -412,31 +364,31 @@ describe(`createLiveQueryCollection`, () => {
       const preloadPromise = liveQuery.preload()
 
       // Write player
-      playerBeginCallback!()
-      playerWriteCallback!({
+      playerCollection.utils.begin()
+      playerCollection.utils.write({
         type: `insert`,
         value: { id: 1, name: `Alice` },
       })
-      playerCommitCallback!()
-      playerMarkReadyCallback!()
+      playerCollection.utils.commit()
+      playerCollection.utils.markReady()
 
       // Write challenge1
-      challenge1BeginCallback!()
-      challenge1WriteCallback!({
+      challenge1Collection.utils.begin()
+      challenge1Collection.utils.write({
         type: `insert`,
         value: { id: 1, value: 100 },
       })
-      challenge1CommitCallback!()
-      challenge1MarkReadyCallback!()
+      challenge1Collection.utils.commit()
+      challenge1Collection.utils.markReady()
 
       // Write challenge2
-      challenge2BeginCallback!()
-      challenge2WriteCallback!({
+      challenge2Collection.utils.begin()
+      challenge2Collection.utils.write({
         type: `insert`,
         value: { id: 1, value: 200 },
       })
-      challenge2CommitCallback!()
-      challenge2MarkReadyCallback!()
+      challenge2Collection.utils.commit()
+      challenge2Collection.utils.markReady()
 
       await preloadPromise
 

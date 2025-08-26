@@ -168,9 +168,11 @@ export class CollectionSubscriber<
     const sendVisibleChanges = (
       changes: Array<ChangeMessage<any, string | number>>
     ) => {
-      // We are filtering the changes out when `sendChanges` is false, but still sending
-      // an empty array to the pipeline. This is needed to ensure that the pipeline
-      // receives the status update that the collection is now ready.
+      // We filter out changes when sendChanges is false to ensure that we don't send
+      // any changes from the live subscription until the join operator requests either
+      // the initial state or its first key. This is needed otherwise it could receive
+      // changes which are then later subsumed by the initial state (and that would
+      // lead to weird bugs due to the data being received twice).
       this.sendVisibleChangesToPipeline(
         sendChanges ? changes : [],
         loadedInitialState
