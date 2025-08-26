@@ -45,20 +45,14 @@ type ExtractType<T> =
       ? U
       : T extends BasicExpression<infer U>
         ? U
-        : T extends undefined
-          ? undefined
-          : T extends null
-            ? null
-            : T
+        : T
 
 // Helper type to determine aggregate return type based on input nullability
 type AggregateReturnType<T> =
   ExtractType<T> extends infer U
     ? U extends number | undefined | null
       ? Aggregate<U>
-      : U extends number
-        ? Aggregate<number>
-        : Aggregate<number | undefined | null>
+      : Aggregate<number | undefined | null>
     : Aggregate<number | undefined | null>
 
 // Helper type to determine string function return type based on input nullability
@@ -66,37 +60,26 @@ type StringFunctionReturnType<T> =
   ExtractType<T> extends infer U
     ? U extends string | undefined | null
       ? BasicExpression<U>
-      : U extends string
-        ? BasicExpression<string>
-        : BasicExpression<string | undefined | null>
+      : BasicExpression<string | undefined | null>
     : BasicExpression<string | undefined | null>
 
 // Helper type to determine numeric function return type based on input nullability
 // This handles string, array, and number inputs for functions like length()
 type NumericFunctionReturnType<T> =
   ExtractType<T> extends infer U
-    ? U extends string
-      ? BasicExpression<number>
-      : U extends string | undefined
-        ? BasicExpression<number | undefined>
-        : U extends string | null
-          ? BasicExpression<number | null>
-          : U extends string | undefined | null
-            ? BasicExpression<number | undefined | null>
-            : U extends Array<any>
-              ? BasicExpression<number>
-              : U extends Array<any> | undefined
-                ? BasicExpression<number | undefined>
-                : U extends Array<any> | null
-                  ? BasicExpression<number | null>
-                  : U extends Array<any> | undefined | null
-                    ? BasicExpression<number | undefined | null>
-                    : U extends number | undefined | null
-                      ? BasicExpression<U>
-                      : U extends number
-                        ? BasicExpression<number>
-                        : BasicExpression<number | undefined | null>
+    ? U extends string | Array<any> | undefined | null | number
+      ? BasicExpression<MapToNumber<U>>
+      : BasicExpression<number | undefined | null>
     : BasicExpression<number | undefined | null>
+
+// Transform string/array types to number while preserving nullability
+type MapToNumber<T> = T extends string | Array<any>
+  ? number
+  : T extends undefined
+    ? undefined
+    : T extends null
+      ? null
+      : T
 
 // Helper type for binary numeric operations (combines nullability of both operands)
 type BinaryNumericReturnType<T1, T2> =
