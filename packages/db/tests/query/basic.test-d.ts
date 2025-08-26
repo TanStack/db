@@ -124,7 +124,7 @@ describe(`Query Basic Types`, () => {
         id: number
         name: string
         isAdult: number
-        literalConst: 'one'
+        literalConst: `one`
         literal: string
       }>
     >()
