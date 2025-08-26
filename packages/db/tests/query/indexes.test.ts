@@ -1339,7 +1339,7 @@ describe(`Query Index Optimization`, () => {
       ])
     })
 
-    it.only(`should stop loading data for live queries with ORDER BY and LIMIT if no more data available`, async () => {
+    it(`should stop loading data for live queries with ORDER BY and LIMIT if no more data available`, async () => {
       collection.createIndex((row) => row.age)
 
       const liveQuery = createLiveQueryCollection({
