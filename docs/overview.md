@@ -154,8 +154,9 @@ There are a number of built-in collection types:
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
-4. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-5. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+4. [`RSSCollection` and `AtomCollection`](#rsscollection-and-atomcollection) to sync data from RSS and Atom feeds with automatic polling, deduplication, and type safety
+5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -300,6 +301,84 @@ This collection requires the following TrailBase-specific options:
 
 A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
+#### `RSSCollection` and `AtomCollection`
+
+RSS and Atom feeds are widely used syndication formats for publishing frequently updated content like blogs, news, and podcasts. TanStack DB provides dedicated collection types for both RSS 2.0 and Atom 1.0 feeds with automatic polling, deduplication, and type safety.
+
+Use `rssCollectionOptions` for RSS feeds or `atomCollectionOptions` for Atom feeds to sync feed data into collections:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { rssCollectionOptions, atomCollectionOptions } from "@tanstack/rss-db-collection"
+
+// RSS Collection
+export const blogFeed = createCollection(
+  rssCollectionOptions({
+    id: "blog-posts",
+    feedUrl: "https://blog.example.com/rss.xml",
+    pollingInterval: 5 * 60 * 1000, // Poll every 5 minutes
+    getKey: (item) => item.guid || item.link,
+    transform: (item) => ({
+      id: item.guid || item.link || '',
+      title: item.title || '',
+      description: item.description || '',
+      link: item.link || '',
+      publishedAt: new Date(item.pubDate || Date.now()),
+      author: item.author
+    }),
+    schema: blogPostSchema,
+  })
+)
+
+// Atom Collection  
+export const newsFeed = createCollection(
+  atomCollectionOptions({
+    id: "news-items",
+    feedUrl: "https://news.example.com/atom.xml", 
+    pollingInterval: 10 * 60 * 1000, // Poll every 10 minutes
+    getKey: (item) => item.id,
+    transform: (item) => ({
+      id: item.id || '',
+      title: typeof item.title === 'string' ? item.title : item.title?.$text || '',
+      description: typeof item.summary === 'string' ? item.summary : item.summary?.$text || '',
+      link: typeof item.link === 'string' ? item.link : item.link?.href || '',
+      publishedAt: new Date(item.published || item.updated || Date.now()),
+      author: typeof item.author === 'object' ? item.author?.name : item.author
+    }),
+    schema: newsItemSchema,
+  })
+)
+```
+
+Both collection types require:
+
+- `feedUrl` — the RSS or Atom feed URL to fetch from
+- `getKey` — identifies the unique ID for feed items
+- `pollingInterval` — how frequently to check for new items (default: 5 minutes)
+
+Optional configuration includes:
+
+- `transform` — custom function to normalize feed items to your desired format
+- `httpOptions` — custom headers, timeout, and user agent settings
+- `startPolling` — whether to begin polling immediately (default: true)
+- `maxSeenItems` — maximum items to track for deduplication (default: 1000)
+
+RSS and Atom collections automatically handle feed parsing, deduplication of items, and provide built-in error recovery. The collections will continue polling even after network failures or parsing errors.
+
+Collections can be manually refreshed when needed:
+
+```ts
+// Manually refresh the feed data
+await blogFeed.utils.refresh()
+
+// Clear deduplication cache if needed
+blogFeed.utils.clearSeenItems()
+
+// Check how many items have been tracked
+console.log(`Tracked items: ${blogFeed.utils.getSeenItemsCount()}`)
+```
+
+For detailed documentation on RSS and Atom collections, including advanced features like smart polling intervals, content-aware deduplication, and RFC-compliant date parsing, see the [RSS Collection documentation](collections/rss-collection.md).
 
 #### `LocalStorageCollection`
 
