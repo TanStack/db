@@ -1,6 +1,7 @@
 import {
   computed,
   getCurrentInstance,
+  nextTick,
   onUnmounted,
   reactive,
   ref,
@@ -230,7 +231,10 @@ export function useLiveQuery(
 
     if (isCollection) {
       // It's already a collection, ensure sync is started for Vue hooks
-      unwrappedParam.startSyncImmediate()
+      // Only start sync if the collection is in idle state
+      if (unwrappedParam.status === `idle`) {
+        unwrappedParam.startSyncImmediate()
+      }
       return unwrappedParam
     }
 
@@ -294,6 +298,15 @@ export function useLiveQuery(
 
     // Initialize data array in correct order
     syncDataFromCollection(currentCollection)
+
+    // Listen for the first ready event to catch status transitions
+    // that might not trigger change events (fixes async status transition bug)
+    currentCollection.onFirstReady(() => {
+      // Use nextTick to ensure Vue reactivity updates properly
+      nextTick(() => {
+        status.value = currentCollection.status
+      })
+    })
 
     // Subscribe to collection changes with granular updates
     currentUnsubscribe = currentCollection.subscribeChanges(

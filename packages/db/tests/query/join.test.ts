@@ -455,6 +455,197 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
         })
       })
     }
+
+    test(`should handle WHERE clauses on nullable side of ${joinType} join`, () => {
+      // This test checks the behavior of WHERE clauses that filter on the side of the join
+      // that can produce NULL values. The behavior should differ based on join type.
+
+      // Create a specific scenario for testing nullable WHERE clauses
+      // We'll use a team/member scenario where teams may have no members
+      type Team = {
+        id: number
+        name: string
+        active: boolean
+      }
+
+      type TeamMember = {
+        id: number
+        team_id: number
+        user_id: number
+        role: string
+      }
+
+      const teams: Array<Team> = [
+        { id: 1, name: `Team Alpha`, active: true },
+        { id: 2, name: `Team Beta`, active: true },
+        { id: 3, name: `Team Gamma`, active: false }, // This team has no members
+      ]
+
+      const teamMembers: Array<TeamMember> = [
+        { id: 1, team_id: 1, user_id: 100, role: `admin` },
+        { id: 2, team_id: 1, user_id: 200, role: `member` },
+        { id: 3, team_id: 2, user_id: 100, role: `admin` },
+        // Note: Team Gamma (id: 3) has no members
+      ]
+
+      const teamsCollection = createCollection(
+        mockSyncCollectionOptions<Team>({
+          id: `test-teams-where`,
+          getKey: (team) => team.id,
+          initialData: teams,
+          autoIndex,
+        })
+      )
+
+      const teamMembersCollection = createCollection(
+        mockSyncCollectionOptions<TeamMember>({
+          id: `test-members-where`,
+          getKey: (member) => member.id,
+          initialData: teamMembers,
+          autoIndex,
+        })
+      )
+
+      // Test WHERE clause that filters on the nullable side based on join type
+      let joinQuery: any
+
+      if (joinType === `left`) {
+        // LEFT JOIN: teams LEFT JOIN members WHERE member.user_id = 100
+        // Should return only teams where user 100 is a member
+        joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ team: teamsCollection })
+              .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
+                eq(team.id, member.team_id)
+              )
+              .where(({ member }) => eq(member.user_id, 100))
+              .select(({ team, member }) => ({
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
+              })),
+        })
+      } else if (joinType === `right`) {
+        // RIGHT JOIN: teams RIGHT JOIN members WHERE team.active = true
+        // Should return only members whose teams are active
+        joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ team: teamsCollection })
+              .rightJoin(
+                { member: teamMembersCollection },
+                ({ team, member }) => eq(team.id, member.team_id)
+              )
+              .where(({ team }) => eq(team.active, true))
+              .select(({ team, member }) => ({
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
+              })),
+        })
+      } else if (joinType === `full`) {
+        // FULL JOIN: teams FULL JOIN members WHERE member.role = 'admin'
+        // Should return all teams with admin members, plus orphaned admins
+        joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ team: teamsCollection })
+              .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
+                eq(team.id, member.team_id)
+              )
+              .where(({ member }) => eq(member.role, `admin`))
+              .select(({ team, member }) => ({
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
+              })),
+        })
+      } else {
+        // INNER JOIN: teams INNER JOIN members WHERE member.user_id = 100
+        // Should return only teams where user 100 is a member (same as LEFT but no nulls)
+        joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ team: teamsCollection })
+              .innerJoin(
+                { member: teamMembersCollection },
+                ({ team, member }) => eq(team.id, member.team_id)
+              )
+              .where(({ member }) => eq(member.user_id, 100))
+              .select(({ team, member }) => ({
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
+              })),
+        })
+      }
+
+      const results = joinQuery.toArray
+
+      // Type the results properly based on our expected structure
+      type JoinResult = {
+        team_id: number | null
+        team_name: string | null
+        user_id: number | null
+        role: string | null
+      }
+
+      const typedResults = results as Array<JoinResult>
+
+      // Verify expected behavior based on join type
+      switch (joinType) {
+        case `inner`:
+          // INNER JOIN with WHERE member.user_id = 100
+          // Should return 2 results: Team Alpha and Team Beta (both have user 100)
+          expect(typedResults).toHaveLength(2)
+          expect(typedResults.every((r) => r.user_id === 100)).toBe(true)
+          expect(typedResults.map((r) => r.team_name).sort()).toEqual([
+            `Team Alpha`,
+            `Team Beta`,
+          ])
+          break
+
+        case `left`:
+          // LEFT JOIN with WHERE member.user_id = 100
+          // Should return 2 results: only teams where user 100 is actually a member
+          // Team Gamma should be filtered out because member.user_id would be null
+          expect(typedResults).toHaveLength(2)
+          expect(typedResults.every((r) => r.user_id === 100)).toBe(true)
+          expect(typedResults.map((r) => r.team_name).sort()).toEqual([
+            `Team Alpha`,
+            `Team Beta`,
+          ])
+          break
+
+        case `right`:
+          // RIGHT JOIN with WHERE team.active = true
+          // Should return 3 results: all members whose teams are active
+          // (All existing teams are active)
+          expect(typedResults).toHaveLength(3)
+          expect(typedResults.every((r) => r.team_id !== null)).toBe(true)
+          expect(typedResults.map((r) => r.user_id).sort()).toEqual([
+            100, 100, 200,
+          ])
+          break
+
+        case `full`:
+          // FULL JOIN with WHERE member.role = 'admin'
+          // Should return 2 results: Team Alpha + user 100, Team Beta + user 100
+          expect(typedResults).toHaveLength(2)
+          expect(typedResults.every((r) => r.role === `admin`)).toBe(true)
+          expect(typedResults.map((r) => r.user_id).sort()).toEqual([100, 100])
+          break
+      }
+    })
   })
 }
 

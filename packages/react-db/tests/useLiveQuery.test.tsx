@@ -114,6 +114,48 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`should keep stable ref`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const { result, rerender } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
+      )
+    })
+
+    // Wait for collection to sync and state to update
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1) // Only John Smith (age 35)
+    })
+
+    const data1 = result.current.data
+    expect(result.current.data).toHaveLength(1)
+
+    rerender()
+
+    const data2 = result.current.data
+
+    // Passes cause the underlying objects are stable
+    expect(data1).toEqual(data2)
+    expect(data1[0]).toBe(data2[0])
+
+    // Fails cause array isn't
+    expect(data1).toBe(data2)
+  })
+
   it(`should be able to query a collection with live updates`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -1077,15 +1119,17 @@ describe(`Query Collections`, () => {
     it(`should update isLoading when collection status changes`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
 
       const collection = createCollection<Person>({
         id: `status-change-has-loaded-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
             commitFn = commit
+            markReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -1116,9 +1160,10 @@ describe(`Query Collections`, () => {
 
       // Trigger the first commit to make collection ready
       act(() => {
-        if (beginFn && commitFn) {
+        if (beginFn && commitFn && markReadyFn) {
           beginFn()
           commitFn()
+          markReadyFn()
         }
       })
 
@@ -1202,8 +1247,10 @@ describe(`Query Collections`, () => {
     it(`should handle isLoading with complex queries including joins`, async () => {
       let personBeginFn: (() => void) | undefined
       let personCommitFn: (() => void) | undefined
+      let personMarkReadyFn: (() => void) | undefined
       let issueBeginFn: (() => void) | undefined
       let issueCommitFn: (() => void) | undefined
+      let issueMarkReadyFn: (() => void) | undefined
 
       const personCollection = createCollection<Person>({
         id: `join-has-loaded-persons`,
@@ -1212,10 +1259,8 @@ describe(`Query Collections`, () => {
         sync: {
           sync: ({ begin, commit, markReady }) => {
             personBeginFn = begin
-            personCommitFn = () => {
-              commit()
-              markReady()
-            }
+            personCommitFn = commit
+            personMarkReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -1231,10 +1276,8 @@ describe(`Query Collections`, () => {
         sync: {
           sync: ({ begin, commit, markReady }) => {
             issueBeginFn = begin
-            issueCommitFn = () => {
-              commit()
-              markReady()
-            }
+            issueCommitFn = commit
+            issueMarkReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -1269,13 +1312,15 @@ describe(`Query Collections`, () => {
 
       // Trigger the first commit for both collections to make them ready
       act(() => {
-        if (personBeginFn && personCommitFn) {
+        if (personBeginFn && personCommitFn && personMarkReadyFn) {
           personBeginFn()
           personCommitFn()
+          personMarkReadyFn()
         }
-        if (issueBeginFn && issueCommitFn) {
+        if (issueBeginFn && issueCommitFn && issueMarkReadyFn) {
           issueBeginFn()
           issueCommitFn()
+          issueMarkReadyFn()
         }
       })
 

@@ -7,14 +7,27 @@ import {
 } from "../../src/operators/index.js"
 import { orderByWithFractionalIndexBTree } from "../../src/operators/orderByBTree.js"
 import { loadBTree } from "../../src/operators/topKWithFractionalIndexBTree.js"
-import { MessageTracker, assertOnlyKeysAffected } from "../test-utils.js"
+import { MessageTracker } from "../test-utils.js"
 import type { KeyValue } from "../../src/types.js"
+
+const compareFractionalIndex = (
+  r1: [string, [{ id: number; value: string }, string]],
+  r2: [string, [{ id: number; value: string }, string]]
+) => {
+  const [_key1, [_value1, index1]] = r1
+  const [_key2, [_value2, index2]] = r2
+  return index1 < index2 ? -1 : index1 > index2 ? 1 : 0
+}
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,
   value,
   multiplicity,
 ]
+
+const stripFractionalIndexWithoutMultiplicity = (
+  r: [string, [{ id: number; value: string }, string]]
+) => [r[0], r[1][0]]
 
 beforeAll(async () => {
   await loadBTree()
@@ -364,10 +377,18 @@ describe(`Operators`, () => {
       )
       graph.run()
 
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       // Should have the top 3 items by value
       expect(initialResult.sortedResults.length).toBe(3)
       expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
+
+      expect(
+        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+      ).toEqual([
+        [`key1`, { id: 1, value: `a` }],
+        [`key2`, { id: 2, value: `b` }],
+        [`key3`, { id: 3, value: `c` }],
+      ])
 
       tracker.reset()
 
@@ -379,15 +400,17 @@ describe(`Operators`, () => {
       )
       graph.run()
 
-      const updateResult = tracker.getResult()
-      // Should have efficient incremental update
-      expect(updateResult.messageCount).toBeLessThanOrEqual(4) // Should be incremental
-      expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
+      const updateResult = tracker.getResult(compareFractionalIndex)
 
-      // Check that only affected keys produce messages - should be key1 (removed) and key4 (added to top 3)
-      assertOnlyKeysAffected(`orderBy remove`, updateResult.messages, [
-        `key1`,
-        `key4`,
+      // The incremental messages should tell us that key1 is no longer in the top K
+      // and that key4 entered the top K
+      expect(updateResult.messages.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.messages
+        .map(([[key, _v], multiplicity]) => [key, multiplicity])
+        .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
+      expect(sortedKeysAndMultiplicities).toEqual([
+        [`key1`, -1],
+        [`key4`, 1],
       ])
     })
 
@@ -426,9 +449,15 @@ describe(`Operators`, () => {
       )
       graph.run()
 
-      const initialResult = tracker.getResult()
       // Should have the top 3 items by value
-      expect(initialResult.sortedResults.length).toBe(3)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(
+        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+      ).toEqual([
+        [`key1`, { id: 1, value: `a` }],
+        [`key3`, { id: 3, value: `b` }],
+        [`key2`, { id: 2, value: `c` }],
+      ])
       expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
 
       tracker.reset()
@@ -442,15 +471,20 @@ describe(`Operators`, () => {
       )
       graph.run()
 
-      const updateResult = tracker.getResult()
+      const updateResult = tracker.getResult(compareFractionalIndex)
       // Should have efficient incremental update
       expect(updateResult.messageCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
-      // Check that only affected keys produce messages - should be key2 (modified) and key4 (added to top 3)
-      assertOnlyKeysAffected(`orderBy modify`, updateResult.messages, [
-        `key2`,
-        `key4`,
+      // The incremental messages should tell us that key2 is no longer in the top K
+      // and that key4 entered the top K
+      expect(updateResult.messages.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.messages
+        .map(([[key, _v], multiplicity]) => [key, multiplicity])
+        .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
+      expect(sortedKeysAndMultiplicities).toEqual([
+        [`key2`, -1],
+        [`key4`, 1],
       ])
     })
   })

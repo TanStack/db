@@ -1,5 +1,57 @@
 # @tanstack/db
 
+## 0.1.7
+
+### Patch Changes
+
+- fix a race condition that could result in the initial state of a joined collection being sent to the live query pipeline twice, this would result in incorrect join results. ([#451](https://github.com/TanStack/db/pull/451))
+
+- Refactor live query collection ([#432](https://github.com/TanStack/db/pull/432))
+
+- Fix infinite loop bug with queries that use orderBy clause with a limit ([#450](https://github.com/TanStack/db/pull/450))
+
+- mark item drafts as a `mutable` type ([#408](https://github.com/TanStack/db/pull/408))
+
+- Fix query optimizer to preserve outer join semantics by keeping residual WHERE clauses when pushing predicates to subqueries. ([#442](https://github.com/TanStack/db/pull/442))
+
+## 0.1.6
+
+### Patch Changes
+
+- fix for a performance regression when syncing large collections due to a look up of previously deleted keys ([#430](https://github.com/TanStack/db/pull/430))
+
+## 0.1.5
+
+### Patch Changes
+
+- Ensure that a new d2 graph is used for live queries that are cleaned up by the gc process. Fixes the "Graph already finalized" error. ([#419](https://github.com/TanStack/db/pull/419))
+
+## 0.1.4
+
+### Patch Changes
+
+- Ensure that the ready status is correctly returned from a live query ([#390](https://github.com/TanStack/db/pull/390))
+
+- Optimize order by to lazily load ordered data if a range index is available on the field that is being ordered on. ([#410](https://github.com/TanStack/db/pull/410))
+
+- Add a new truncate method to the sync handler to enable a collections state to be reset from a sync transaction. ([#412](https://github.com/TanStack/db/pull/412))
+
+- Ensure LiveQueryCollections are properly transitioning to ready state when source collections are preloaded after creation of the live query collection ([#395](https://github.com/TanStack/db/pull/395))
+
+- Optimize joins to use index on the join key when available. ([#335](https://github.com/TanStack/db/pull/335))
+
+- Updated dependencies [[`6c1c19c`](https://github.com/TanStack/db/commit/6c1c19cedbc1d9d98396948e8e43fa0515bb8919), [`68538b4`](https://github.com/TanStack/db/commit/68538b4c446abeb992e24964f811c8900749f141)]:
+  - @tanstack/db-ivm@0.1.2
+
+## 0.1.3
+
+### Patch Changes
+
+- Fix bug with orderBy that resulted in query results having less rows than the configured limit. ([#405](https://github.com/TanStack/db/pull/405))
+
+- Updated dependencies [[`0cb7699`](https://github.com/TanStack/db/commit/0cb76999e5d6df5916694a5afeb31b928eab68e4)]:
+  - @tanstack/db-ivm@0.1.1
+
 ## 0.1.2
 
 ### Patch Changes

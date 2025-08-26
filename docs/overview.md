@@ -184,7 +184,10 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection"
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["todoItems"],
-    queryFn: async () => fetch("/api/todos"),
+    queryFn: async () => {
+      const response = await fetch("/api/todos");
+      return response.json();
+    },
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
   })
@@ -784,7 +787,7 @@ The steps are to:
 
 ```tsx
 import { useLiveQuery, createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/electric-db-collection"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
@@ -793,7 +796,7 @@ const todoCollection = createCollection(queryCollectionOptions({
   queryFn: async () => fetch("/api/todos"),
   getKey: (item) => item.id,
   schema: todoSchema, // any standard schema
-  onInsert: ({ transaction }) => {
+  onInsert: async ({ transaction }) => {
     const { changes: newTodo } = transaction.mutations[0]
 
     // Handle the local write by sending it to your API.
@@ -805,8 +808,8 @@ const listCollection = createCollection(queryCollectionOptions({
   queryKey: ["todo-lists"],
   queryFn: async () => fetch("/api/todo-lists"),
   getKey: (item) => item.id,
-  schema: todoListSchema
-  onInsert: ({ transaction }) => {
+  schema: todoListSchema,
+  onInsert: async ({ transaction }) => {
     const { changes: newTodo } = transaction.mutations[0]
 
     // Handle the local write by sending it to your API.
@@ -865,8 +868,8 @@ export const todoCollection = createCollection(electricCollectionOptions({
     }
   },
   getKey: (item) => item.id,
-  schema: todoSchema
-  onInsert: ({ transaction }) => {
+  schema: todoSchema,
+  onInsert: async ({ transaction }) => {
     const response = await api.todos.create(transaction.mutations[0].modified)
 
     return { txid: response.txid}

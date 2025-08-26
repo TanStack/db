@@ -6,6 +6,57 @@ export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
 }
 
+function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
+  // Only proceed if auto-indexing is enabled
+  if (collection.config.autoIndex !== `eager`) {
+    return false
+  }
+
+  // Don't auto-index during sync operations
+  if (
+    collection.status === `loading` ||
+    collection.status === `initialCommit`
+  ) {
+    return false
+  }
+
+  return true
+}
+
+export function ensureIndexForField<
+  T extends Record<string, any>,
+  TKey extends string | number,
+>(
+  fieldName: string,
+  fieldPath: Array<string>,
+  collection: CollectionImpl<T, TKey, any, any, any>,
+  compareFn?: (a: any, b: any) => number
+) {
+  if (!shouldAutoIndex(collection)) {
+    return
+  }
+
+  // Check if we already have an index for this field
+  const existingIndex = Array.from(collection.indexes.values()).find((index) =>
+    index.matchesField(fieldPath)
+  )
+
+  if (existingIndex) {
+    return // Index already exists
+  }
+
+  // Create a new index for this field using the collection's createIndex method
+  try {
+    collection.createIndex((row) => (row as any)[fieldName], {
+      name: `auto_${fieldName}`,
+      indexType: BTreeIndex,
+      options: compareFn ? { compareFn } : {},
+    })
+  } catch (error) {
+    console.warn(`Failed to create auto-index for field "${fieldName}":`, error)
+  }
+}
+
 /**
  * Analyzes a where expression and creates indexes for all simple operations on single fields
  */
@@ -16,16 +67,7 @@ export function ensureIndexForExpression<
   expression: BasicExpression,
   collection: CollectionImpl<T, TKey, any, any, any>
 ): void {
-  // Only proceed if auto-indexing is enabled
-  if (collection.config.autoIndex !== `eager`) {
-    return
-  }
-
-  // Don't auto-index during sync operations
-  if (
-    collection.status === `loading` ||
-    collection.status === `initialCommit`
-  ) {
+  if (!shouldAutoIndex(collection)) {
     return
   }
 
@@ -33,27 +75,7 @@ export function ensureIndexForExpression<
   const indexableExpressions = extractIndexableExpressions(expression)
 
   for (const { fieldName, fieldPath } of indexableExpressions) {
-    // Check if we already have an index for this field
-    const existingIndex = Array.from(collection.indexes.values()).find(
-      (index) => index.matchesField(fieldPath)
-    )
-
-    if (existingIndex) {
-      continue // Index already exists
-    }
-
-    // Create a new index for this field using the collection's createIndex method
-    try {
-      collection.createIndex((row) => (row as any)[fieldName], {
-        name: `auto_${fieldName}`,
-        indexType: BTreeIndex,
-      })
-    } catch (error) {
-      console.warn(
-        `Failed to create auto-index for field "${fieldName}":`,
-        error
-      )
-    }
+    ensureIndexForField(fieldName, fieldPath, collection)
   }
 }
 
