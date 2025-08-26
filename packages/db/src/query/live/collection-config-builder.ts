@@ -132,7 +132,8 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
-        this.collectionReady = true // mark that we've run the graph at least once
+        // Remember that we marked the collection as ready
+        this.collectionReady = true
       }
     }
   }
