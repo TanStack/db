@@ -1,6 +1,6 @@
 import { createCollection } from "../collection.js"
-import { CollectionConfigBuilder } from "./live/CollectionConfigBuilder.js"
-import type { LiveQueryCollectionConfig } from "./live/LiveQueryCollectionConfig.js"
+import { CollectionConfigBuilder } from "./live/collection-config-builder.js"
+import type { LiveQueryCollectionConfig } from "./live/types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection.js"
 import type { CollectionConfig, UtilsRecord } from "../types.js"

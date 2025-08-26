@@ -52,4 +52,4 @@ export {
   liveQueryCollectionOptions,
 } from "./live-query-collection.js"
 
-export { type LiveQueryCollectionConfig } from "./live/LiveQueryCollectionConfig.js"
+export { type LiveQueryCollectionConfig } from "./live/types.js"
