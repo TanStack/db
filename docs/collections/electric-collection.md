@@ -22,7 +22,7 @@ npm install @tanstack/electric-db-collection @tanstack/react-db
 ## Basic Usage
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'	
+import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 const todosCollection = createCollection(
@@ -70,8 +70,7 @@ const todosCollection = createCollection(
     id: 'todos',
     schema: todoSchema,
     getKey: (item) => item.id,
-
-	  shapeOptions: {
+    shapeOptions: {
       url: '/api/todos',
       params: { table: 'todos' },
     },
@@ -124,9 +123,8 @@ import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from "@electric-sql/client"
 const baseUrl = 'http://.../v1/shape'
 
 const serve = async ({ request }: { request: Request }) => {
-	// ...check user authorization
-  
-	const url = new URL(request.url)
+  // ...check user authorization  
+  const url = new URL(request.url)
   const originUrl = new URL(baseUrl)
 
   // passthrough parameters from electric client
@@ -186,8 +184,7 @@ const addTodoAction = createOptimisticAction({
       data: { text, completed: false }
     })
     
-	  await todosCollection.utils.awaitTxId(response.txid)
-    
+    await todosCollection.utils.awaitTxId(response.txid)
   }
 })
 ```
