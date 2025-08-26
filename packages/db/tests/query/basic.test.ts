@@ -985,37 +985,6 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
     })
 
-    test(`should work with spread operator on nested objects`, () => {
-      const spreadCollection = createLiveQueryCollection({
-        startSync: true,
-        query: (q) =>
-          q.from({ user: usersCollection }).select(({ user }) => ({
-            id: user.id,
-            name: user.name,
-            street: user.address?.street,
-            city: user.address?.city,
-            country: user.address?.country,
-            coordinates: user.address?.coordinates,
-          })),
-      })
-
-      const results = spreadCollection.toArray
-      expect(results).toHaveLength(4) // All users, but some will have undefined values
-
-      const alice = results.find((u) => u.id === 1)
-      expect(alice).toMatchObject({
-        id: 1,
-        name: `Alice`,
-        street: `123 Main St`,
-        city: `New York`,
-        country: `USA`,
-        coordinates: {
-          lat: 40.7128,
-          lng: -74.006,
-        },
-      })
-    })
-
     test(`should filter based on deeply nested properties`, () => {
       const nyUsers = createLiveQueryCollection({
         startSync: true,

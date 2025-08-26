@@ -248,27 +248,31 @@ export type ResultTypeFromSelect<TSelectObject> = {
                   ? T
                   : TSelectObject[K] extends RefProxyFor<infer T>
                     ? T
-                    : TSelectObject[K] extends SpreadableRefProxy<infer T>
-                      ? ResultTypeFromSelect<SpreadableRefProxy<T>>
-                      : TSelectObject[K] extends string
-                        ? string
-                        : TSelectObject[K] extends number
-                          ? number
-                          : TSelectObject[K] extends boolean
-                            ? boolean
-                            : TSelectObject[K] extends null
-                              ? null
-                              : TSelectObject[K] extends undefined
-                                ? undefined
-                                : TSelectObject[K] extends { __type: infer U }
-                                  ? U
-                                  : TSelectObject[K] extends Record<string, any>
-                                    ? TSelectObject[K] extends {
-                                        __refProxy: true
-                                      }
-                                      ? never // This is a RefProxy, handled above
-                                      : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
-                                    : never
+                    : TSelectObject[K] extends
+                          | string
+                          | number
+                          | boolean
+                          | null
+                          | undefined
+                      ? TSelectObject[K] // Preserve original literal types instead of widening
+                      : TSelectObject[K] extends Record<string, any>
+                        ? TSelectObject[K] extends SpreadableRefProxy<infer T>
+                          ? T extends
+                              | string
+                              | number
+                              | boolean
+                              | null
+                              | undefined
+                            ? T // Handle primitive types in SpreadableRefProxy
+                            : ResultTypeFromSelect<SpreadableRefProxy<T>>
+                          : TSelectObject[K] extends {
+                                __refProxy: true
+                              }
+                            ? never // This is a RefProxy, handled above
+                            : ResultTypeFromSelect<TSelectObject[K]> // Recursive for nested objects
+                        : TSelectObject[K] extends { __type: infer U }
+                          ? U
+                          : never
 }
 
 /**
@@ -368,30 +372,33 @@ export type JoinOnCallback<TContext extends Context> = (
  * - Required field: `RefProxy<User>` → user.name works
  * - Optional field: `RefProxy<User> | undefined` → user?.name works
  * - Nullable field: `RefProxy<User> | null` → user?.name works
+ * - Both optional and nullable: `RefProxy<User> | undefined` → user?.name works
  *
  * The key insight is that `RefProxy<User | undefined>` would NOT allow `user?.name`
  * because the undefined is "inside" the proxy, but `RefProxy<User> | undefined`
  * does allow it because the undefined is "outside" the proxy.
+ *
+ * The logic prioritizes optional chaining by always placing `undefined` outside when
+ * a type is both optional and nullable (e.g., `string | null | undefined`).
  */
 export type RefProxyForContext<TContext extends Context> = {
-  [K in keyof TContext[`schema`]]: IsExactlyUndefined<
+  [K in keyof TContext[`schema`]]: IsNonExactOptional<
     TContext[`schema`][K]
   > extends true
-    ? // T is exactly undefined - wrap in RefProxy as-is
-      RefProxy<TContext[`schema`][K]>
-    : IsExactlyNull<TContext[`schema`][K]> extends true
-      ? // T is exactly null - wrap in RefProxy as-is
+    ? IsNonExactNullable<TContext[`schema`][K]> extends true
+      ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
+        // Extract the non-undefined and non-null part and place undefined outside
+        RefProxy<NonNullable<TContext[`schema`][K]>> | undefined
+      : // T is optional (T | undefined) but not exactly undefined, and not nullable
+        // Extract the non-undefined part and place undefined outside
+        RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
+    : IsNonExactNullable<TContext[`schema`][K]> extends true
+      ? // T is nullable (T | null) but not exactly null, and not optional
+        // Extract the non-null part and place null outside
+        RefProxy<NonNull<TContext[`schema`][K]>> | null
+      : // T is exactly undefined, exactly null, or neither optional nor nullable
+        // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
         RefProxy<TContext[`schema`][K]>
-      : IsOptional<TContext[`schema`][K]> extends true
-        ? // T is optional (T | undefined) but not exactly undefined
-          // Extract the non-undefined part and place undefined outside
-          RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
-        : IsNullable<TContext[`schema`][K]> extends true
-          ? // T is nullable (T | null) but not exactly null
-            // Extract the non-null part and place null outside
-            RefProxy<NonNull<TContext[`schema`][K]>> | null
-          : // T is not optional or nullable - always wrap in RefProxy for top-level schema types
-            RefProxy<TContext[`schema`][K]>
 }
 
 /**
@@ -402,6 +409,8 @@ export type RefProxyForContext<TContext extends Context> = {
  * - IsOptional: T includes undefined (like `string | undefined`)
  * - IsExactlyNull: T is literally `null` (not `string | null`)
  * - IsNullable: T includes null (like `string | null`)
+ * - IsNonExactOptional: T includes undefined but is not exactly undefined
+ * - IsNonExactNullable: T includes null but is not exactly null
  *
  * The [T] extends [undefined] pattern prevents distributive conditional types,
  * ensuring we check the exact type rather than distributing over union members.
@@ -419,12 +428,32 @@ type IsOptional<T> = undefined extends T ? true : false
 // Helper type to check if T includes null (is nullable)
 type IsNullable<T> = null extends T ? true : false
 
+// Helper type to check if T is optional but not exactly undefined
+type IsNonExactOptional<T> =
+  IsOptional<T> extends true
+    ? IsExactlyUndefined<T> extends false
+      ? true
+      : false
+    : false
+
+// Helper type to check if T is nullable but not exactly null
+type IsNonExactNullable<T> =
+  IsNullable<T> extends true
+    ? IsExactlyNull<T> extends false
+      ? true
+      : false
+    : false
+
 /**
  * Type Extraction Helpers
  *
  * These helpers extract the "useful" part of a type by removing null/undefined:
- * - NonUndefined: `string | undefined` → `string`
- * - NonNull: `string | null` → `string`
+ * - NonUndefined: `string | undefined` → `string` (preserves null if present)
+ * - NonNull: `string | null` → `string` (preserves undefined if present)
+ *
+ * These are used when we need to handle optional and nullable types separately.
+ * For cases where both null and undefined should be removed, use TypeScript's
+ * built-in NonNullable<T> instead.
  */
 
 // Helper type to extract non-undefined type
@@ -448,33 +477,40 @@ type NonNull<T> = T extends null ? never : T
  * Output: { bio: Ref<string>, contact: { email: Ref<string>, phone: Ref<string> | undefined } }
  *
  * The recursion handles nested objects while preserving optionality/nullability:
+ * - For optional+nullable fields: undefined goes outside for optimal chaining
  * - For optional objects: The object structure is preserved, undefined goes outside
  * - For optional leaves: Ref<T> | undefined (undefined outside the Ref)
  * - For nullable objects: The object structure is preserved, null goes outside
  * - For nullable leaves: Ref<T> | null (null outside the Ref)
  */
 export type PrecomputeRefStructure<T extends Record<string, any>> = {
-  [K in keyof T]: IsExactlyUndefined<T[K]> extends true
-    ? Ref<T[K]>
-    : IsExactlyNull<T[K]> extends true
-      ? Ref<T[K]>
-      : IsOptional<T[K]> extends true
-        ? NonUndefined<T[K]> extends Record<string, any>
-          ? // Optional object: recurse on non-undefined version, place undefined outside
-            PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
-          : // Optional leaf: wrap in Ref, place undefined outside
-            Ref<NonUndefined<T[K]>> | undefined
-        : IsNullable<T[K]> extends true
-          ? NonNull<T[K]> extends Record<string, any>
-            ? // Nullable object: recurse on non-null version, place null outside
-              PrecomputeRefStructure<NonNull<T[K]>> | null
-            : // Nullable leaf: wrap in Ref, place null outside
-              Ref<NonNull<T[K]>> | null
-          : T[K] extends Record<string, any>
-            ? // Non-optional/nullable object: recurse to handle nested structure
-              PrecomputeRefStructure<T[K]>
-            : // Non-optional/nullable leaf: wrap in Ref
-              Ref<T[K]>
+  [K in keyof T]: IsNonExactOptional<T[K]> extends true
+    ? IsNonExactNullable<T[K]> extends true
+      ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
+        NonNullable<T[K]> extends Record<string, any>
+        ? // Both optional and nullable object: recurse on non-null/non-undefined version, place undefined outside
+          PrecomputeRefStructure<NonNullable<T[K]>> | undefined
+        : // Both optional and nullable leaf: wrap in Ref, place undefined outside
+          Ref<NonNullable<T[K]>> | undefined
+      : // T is optional but not nullable
+        NonUndefined<T[K]> extends Record<string, any>
+        ? // Optional object: recurse on non-undefined version, place undefined outside
+          PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
+        : // Optional leaf: wrap in Ref, place undefined outside
+          Ref<NonUndefined<T[K]>> | undefined
+    : IsNonExactNullable<T[K]> extends true
+      ? // T is nullable but not optional
+        NonNull<T[K]> extends Record<string, any>
+        ? // Nullable object: recurse on non-null version, place null outside
+          PrecomputeRefStructure<NonNull<T[K]>> | null
+        : // Nullable leaf: wrap in Ref, place null outside
+          Ref<NonNull<T[K]>> | null
+      : // T is exactly undefined, exactly null, or neither optional nor nullable
+        T[K] extends Record<string, any>
+        ? // Object: recurse to handle nested structure
+          PrecomputeRefStructure<T[K]>
+        : // Leaf: wrap in Ref (includes exact undefined, exact null, and normal types)
+          Ref<T[K]>
 }
 
 /**
@@ -488,19 +524,22 @@ export type PrecomputeRefStructure<T extends Record<string, any>> = {
  *
  * It follows the same principles as PrecomputeRefStructure and RefProxyForContext:
  * - Place undefined/null outside refs for optional chaining support
+ * - Handle both optional and nullable types correctly
  * - Only wrap leaf values in RefProxy/Ref
  * - Preserve object structures for spread operations
  */
 export type RefProxyFor<T> =
   IsExactlyUndefined<T> extends true
     ? RefProxy<T>
-    : IsOptional<T> extends true
-      ? NonUndefined<T> extends Record<string, any>
-        ? PrecomputeRefStructure<NonUndefined<T>> | undefined
-        : RefProxy<T>
-      : T extends Record<string, any>
-        ? PrecomputeRefStructure<T>
-        : RefProxy<T>
+    : IsExactlyNull<T> extends true
+      ? RefProxy<T>
+      : IsOptional<T> extends true
+        ? NonUndefined<T> extends Record<string, any>
+          ? PrecomputeRefStructure<NonUndefined<T>> | undefined
+          : RefProxy<T>
+        : T extends Record<string, any>
+          ? PrecomputeRefStructure<T>
+          : RefProxy<T>
 
 /**
  * RefProxy - The core ref interface that powers the query builder
@@ -541,21 +580,25 @@ export type RefProxy<T = any> = {
   : T extends Record<string, any>
     ? {
         // Object types get recursive property transformation
-        [K in keyof T]: IsExactlyUndefined<T[K]> extends true
-          ? Ref<T[K]> // Exactly undefined: wrap in Ref as-is
-          : IsExactlyNull<T[K]> extends true
-            ? Ref<T[K]> // Exactly null: wrap in Ref as-is
-            : IsOptional<T[K]> extends true
-              ? NonUndefined<T[K]> extends Record<string, any>
-                ? RefProxy<NonUndefined<T[K]>> | undefined // Optional object
-                : Ref<NonUndefined<T[K]>> | undefined // Optional leaf
-              : IsNullable<T[K]> extends true
-                ? NonNull<T[K]> extends Record<string, any>
-                  ? RefProxy<NonNull<T[K]>> | null // Nullable object
-                  : Ref<NonNull<T[K]>> | null // Nullable leaf
-                : T[K] extends Record<string, any>
-                  ? RefProxy<T[K]> // Required object: full RefProxy
-                  : Ref<T[K]> // Required leaf: clean Ref display
+        [K in keyof T]: IsNonExactOptional<T[K]> extends true
+          ? IsNonExactNullable<T[K]> extends true
+            ? // T[K] is both non-exact optional and non-exact nullable
+              NonNullable<T[K]> extends Record<string, any>
+              ? RefProxy<NonNullable<T[K]>> | undefined // Both optional and nullable object
+              : Ref<NonNullable<T[K]>> | undefined // Both optional and nullable leaf
+            : // T[K] is optional but not nullable
+              NonUndefined<T[K]> extends Record<string, any>
+              ? RefProxy<NonUndefined<T[K]>> | undefined // Optional object
+              : Ref<NonUndefined<T[K]>> | undefined // Optional leaf
+          : IsNonExactNullable<T[K]> extends true
+            ? // T[K] is nullable but not optional
+              NonNull<T[K]> extends Record<string, any>
+              ? RefProxy<NonNull<T[K]>> | null // Nullable object
+              : Ref<NonNull<T[K]>> | null // Nullable leaf
+            : // T[K] is exactly undefined, exactly null, or neither
+              T[K] extends Record<string, any>
+              ? RefProxy<T[K]> // Required object: full RefProxy
+              : Ref<T[K]> // Required leaf: clean Ref display (includes exact undefined/null)
       }
     : {}) // Primitive types get no additional properties
 
@@ -596,23 +639,29 @@ export type Ref<T = any> = T extends undefined
   ? RefLeaf<T>
   : T extends Record<string, any>
     ? {
-        [K in keyof T]: IsExactlyUndefined<T[K]> extends true
-          ? Ref<T[K]>
-          : IsExactlyNull<T[K]> extends true
-            ? Ref<T[K]>
-            : IsOptional<T[K]> extends true
-              ? NonUndefined<T[K]> extends Record<string, any>
-                ?
-                    | (Ref<NonUndefined<T[K]>> | RefProxy<NonUndefined<T[K]>>)
-                    | undefined
-                : Ref<NonUndefined<T[K]>> | undefined
-              : IsNullable<T[K]> extends true
-                ? NonNull<T[K]> extends Record<string, any>
-                  ? (Ref<NonNull<T[K]>> | RefProxy<NonNull<T[K]>>) | null
-                  : Ref<NonNull<T[K]>> | null
-                : T[K] extends Record<string, any>
-                  ? Ref<T[K]> | RefProxy<T[K]>
-                  : Ref<T[K]>
+        [K in keyof T]: IsNonExactOptional<T[K]> extends true
+          ? IsNonExactNullable<T[K]> extends true
+            ? // T[K] is both non-exact optional and non-exact nullable
+              NonNullable<T[K]> extends Record<string, any>
+              ?
+                  | (Ref<NonNullable<T[K]>> | RefProxy<NonNullable<T[K]>>)
+                  | undefined
+              : Ref<NonNullable<T[K]>> | undefined
+            : // T[K] is optional but not nullable
+              NonUndefined<T[K]> extends Record<string, any>
+              ?
+                  | (Ref<NonUndefined<T[K]>> | RefProxy<NonUndefined<T[K]>>)
+                  | undefined
+              : Ref<NonUndefined<T[K]>> | undefined
+          : IsNonExactNullable<T[K]> extends true
+            ? // T[K] is nullable but not optional
+              NonNull<T[K]> extends Record<string, any>
+              ? (Ref<NonNull<T[K]>> | RefProxy<NonNull<T[K]>>) | null
+              : Ref<NonNull<T[K]>> | null
+            : // T[K] is exactly undefined, exactly null, or neither
+              T[K] extends Record<string, any>
+              ? Ref<T[K]> | RefProxy<T[K]>
+              : Ref<T[K]>
       } & RefLeaf<T>
     : RefLeaf<T>
 
@@ -850,14 +899,15 @@ export type HasJoinType<
  *
  * **Example**:
  * ```typescript
- * .leftJoin({ orders }, (refs) => {
- *   // refs.users is NOT optional here - we can access users.id directly
- *   // refs.orders is NOT optional here - we can access orders.userId directly
- *   return eq(refs.users.id, refs.orders.userId)
+ * .from({ users })
+ * .leftJoin({ orders }, ({ users, orders }) => {
+ *   // users is NOT optional here - we can access users.id directly
+ *   // orders is NOT optional here - we can access orders.userId directly
+ *   return eq(users.id, orders.userId)
  * })
- * .where((refs) => {
- *   // NOW refs.orders is optional because it's after the LEFT JOIN
- *   return refs.orders?.status === 'pending'
+ * .where(({ orders }) => {
+ *   // NOW orders is optional because it's after the LEFT JOIN
+ *   return orders?.status === 'pending'
  * })
  * ```
  *
