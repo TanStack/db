@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.1.8
+
+### Patch Changes
+
+- bump electric version ([#454](https://github.com/TanStack/db/pull/454))
+
 ## 0.1.7
 
 ### Patch Changes
