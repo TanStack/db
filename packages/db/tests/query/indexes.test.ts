@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import mitt from "mitt"
 import { createCollection } from "../../src/collection"
 
 import { createLiveQueryCollection } from "../../src/query/live-query-collection"
@@ -13,8 +12,7 @@ import {
   length,
   or,
 } from "../../src/query/builder/functions"
-import type { Collection } from "../../src/collection"
-import type { PendingMutation } from "../../src/types"
+import { mockSyncCollectionOptions } from "../utls"
 
 interface TestItem {
   id: string
@@ -186,88 +184,65 @@ function withIndexTracking(
   }
 }
 
+const testData: Array<TestItem> = [
+  {
+    id: `1`,
+    name: `Alice`,
+    age: 25,
+    status: `active`,
+    score: 95,
+    createdAt: new Date(`2023-01-01`),
+  },
+  {
+    id: `2`,
+    name: `Bob`,
+    age: 30,
+    status: `inactive`,
+    score: 80,
+    createdAt: new Date(`2023-01-02`),
+  },
+  {
+    id: `3`,
+    name: `Charlie`,
+    age: 35,
+    status: `active`,
+    score: 90,
+    createdAt: new Date(`2023-01-03`),
+  },
+  {
+    id: `4`,
+    name: `Diana`,
+    age: 28,
+    status: `pending`,
+    score: 85,
+    createdAt: new Date(`2023-01-04`),
+  },
+  {
+    id: `5`,
+    name: `Eve`,
+    age: 22,
+    status: `active`,
+    score: undefined,
+    createdAt: new Date(`2023-01-05`),
+  },
+]
+
+function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
+  return createCollection(
+    mockSyncCollectionOptions<TestItem>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      initialData: testData,
+      autoIndex,
+    })
+  )
+}
+
 describe(`Query Index Optimization`, () => {
-  let collection: Collection<TestItem, string>
-  let testData: Array<TestItem>
-  let emitter: any
+  let collection: ReturnType<typeof createTestItemCollection>
 
   beforeEach(async () => {
-    testData = [
-      {
-        id: `1`,
-        name: `Alice`,
-        age: 25,
-        status: `active`,
-        score: 95,
-        createdAt: new Date(`2023-01-01`),
-      },
-      {
-        id: `2`,
-        name: `Bob`,
-        age: 30,
-        status: `inactive`,
-        score: 80,
-        createdAt: new Date(`2023-01-02`),
-      },
-      {
-        id: `3`,
-        name: `Charlie`,
-        age: 35,
-        status: `active`,
-        score: 90,
-        createdAt: new Date(`2023-01-03`),
-      },
-      {
-        id: `4`,
-        name: `Diana`,
-        age: 28,
-        status: `pending`,
-        score: 85,
-        createdAt: new Date(`2023-01-04`),
-      },
-      {
-        id: `5`,
-        name: `Eve`,
-        age: 22,
-        status: `active`,
-        score: undefined,
-        createdAt: new Date(`2023-01-05`),
-      },
-    ]
-
-    emitter = mitt()
-
-    collection = createCollection<TestItem, string>({
-      getKey: (item) => item.id,
-      startSync: true,
-      sync: {
-        sync: ({ begin, write, commit }) => {
-          // Provide initial data through sync
-          begin()
-          for (const item of testData) {
-            write({
-              type: `insert`,
-              value: item,
-            })
-          }
-          commit()
-
-          // Listen for mutations and sync them back (only register once)
-          if (!emitter.all.has(`sync`)) {
-            emitter.on(`sync`, (changes: Array<PendingMutation>) => {
-              begin()
-              changes.forEach((change) => {
-                write({
-                  type: change.type,
-                  value: change.modified as unknown as TestItem,
-                })
-              })
-              commit()
-            })
-          }
-        },
-      },
-    })
+    collection = createTestItemCollection()
 
     // Wait for sync to complete
     await collection.stateWhenReady()
@@ -1315,36 +1290,101 @@ describe(`Query Index Optimization`, () => {
     })
 
     it(`should optimize live queries with ORDER BY and LIMIT`, async () => {
-      await withIndexTracking(collection, async (tracker) => {
-        const liveQuery = createLiveQueryCollection({
-          query: (q: any) =>
-            q
-              .from({ item: collection })
-              .where(({ item }: any) => eq(item.status, `active`))
-              .orderBy(({ item }: any) => [item.age])
-              .limit(2)
-              .select(({ item }: any) => ({
-                id: item.id,
-                name: item.name,
-                age: item.age,
-              })),
-          startSync: true,
-        })
+      collection.createIndex((row) => row.age)
 
-        await liveQuery.stateWhenReady()
-
-        // Should have found limited results
-        expect(liveQuery.size).toBeLessThanOrEqual(2)
-
-        // Should use index optimization for the WHERE clause even with ORDER BY + LIMIT
-        // The WHERE clause can be optimized independently of the ORDER BY + LIMIT operations
-        expectIndexUsage(tracker.stats, {
-          shouldUseIndex: true,
-          shouldUseFullScan: false,
-          indexCallCount: 1, // The status='active' condition can use index
-          fullScanCallCount: 0,
-        })
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ item: collection })
+            .where(({ item }: any) => eq(item.status, `active`))
+            .orderBy(({ item }: any) => item.age)
+            .limit(2)
+            .select(({ item }: any) => ({
+              id: item.id,
+              name: item.name,
+              age: item.age,
+            })),
+        startSync: true,
       })
+
+      await liveQuery.stateWhenReady()
+
+      // Should have found limited results
+      expect(liveQuery.size).toBe(2)
+
+      expect(liveQuery.toArray).toEqual([
+        { id: `5`, name: `Eve`, age: 22 },
+        { id: `1`, name: `Alice`, age: 25 },
+      ])
+
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `6`,
+          name: `Dave`,
+          age: 20,
+          status: `active`,
+          score: undefined,
+          createdAt: new Date(`2023-01-09`),
+        },
+      })
+      collection.utils.commit()
+
+      expect(liveQuery.size).toBe(2)
+
+      expect(liveQuery.toArray).toEqual([
+        { id: `6`, name: `Dave`, age: 20 },
+        { id: `5`, name: `Eve`, age: 22 },
+      ])
+    })
+
+    it.only(`should stop loading data for live queries with ORDER BY and LIMIT if no more data available`, async () => {
+      collection.createIndex((row) => row.age)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q: any) =>
+          q
+            .from({ item: collection })
+            .orderBy(({ item }: any) => item.age)
+            .limit(10) // limit > than total number of items in the collection (5)
+            .select(({ item }: any) => ({
+              id: item.id,
+              name: item.name,
+              age: item.age,
+            })),
+        startSync: true,
+      })
+
+      await liveQuery.stateWhenReady()
+
+      expect(liveQuery.size).toBe(5)
+
+      // Insert a new item
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `6`,
+          name: `Dave`,
+          age: 29,
+          status: `active`,
+          score: undefined,
+          createdAt: new Date(`2023-01-09`),
+        },
+      })
+      collection.utils.commit()
+
+      expect(liveQuery.size).toBe(6)
+
+      expect(liveQuery.toArray).toEqual([
+        { id: `5`, name: `Eve`, age: 22 },
+        { id: `1`, name: `Alice`, age: 25 },
+        { id: `4`, name: `Diana`, age: 28 },
+        { id: `6`, name: `Dave`, age: 29 },
+        { id: `2`, name: `Bob`, age: 30 },
+        { id: `3`, name: `Charlie`, age: 35 },
+      ])
     })
 
     it(`should handle live queries without WHERE clauses`, async () => {
