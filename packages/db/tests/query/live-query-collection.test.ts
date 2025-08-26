@@ -313,4 +313,143 @@ describe(`createLiveQueryCollection`, () => {
     // Resubscribe should not throw (would throw "Graph already finalized" without the fix)
     expect(() => liveQuery.subscribeChanges(() => {})).not.toThrow()
   })
+
+  for (const autoIndex of [`eager`, `off`] as const) {
+    it(`should not send the initial state twice on joins with autoIndex: ${autoIndex}`, async () => {
+      type Player = { id: number; name: string }
+      type Challenge = { id: number; value: number }
+
+      let playerBeginCallback: (() => void) | undefined
+      let playerWriteCallback:
+        | ((
+            message: Omit<ChangeMessage<Player, string | number>, `key`>
+          ) => void)
+        | undefined
+      let playerCommitCallback: (() => void) | undefined
+      let playerMarkReadyCallback: (() => void) | undefined
+      const playerCollection = createCollection<Player>({
+        id: `player`,
+        getKey: (post) => post.id,
+        startSync: false,
+        autoIndex,
+        sync: {
+          sync: ({ begin, commit, write, markReady }) => {
+            playerBeginCallback = begin
+            playerCommitCallback = commit
+            playerMarkReadyCallback = markReady
+            playerWriteCallback = write
+            return () => {}
+          },
+        },
+        onInsert: async () => {}, // Add empty handler to allow direct inserts
+      })
+
+      let challenge1BeginCallback: (() => void) | undefined
+      let challenge1WriteCallback:
+        | ((
+            message: Omit<ChangeMessage<Challenge, string | number>, `key`>
+          ) => void)
+        | undefined
+      let challenge1CommitCallback: (() => void) | undefined
+      let challenge1MarkReadyCallback: (() => void) | undefined
+      const challenge1Collection = createCollection<Challenge>({
+        id: `challenge1`,
+        getKey: (post) => post.id,
+        startSync: false,
+        autoIndex,
+        sync: {
+          sync: ({ begin, commit, write, markReady }) => {
+            challenge1BeginCallback = begin
+            challenge1CommitCallback = commit
+            challenge1MarkReadyCallback = markReady
+            challenge1WriteCallback = write
+            return () => {}
+          },
+        },
+        onInsert: async () => {}, // Add empty handler to allow direct inserts
+      })
+
+      let challenge2BeginCallback: (() => void) | undefined
+      let challenge2WriteCallback:
+        | ((
+            message: Omit<ChangeMessage<Challenge, string | number>, `key`>
+          ) => void)
+        | undefined
+      let challenge2CommitCallback: (() => void) | undefined
+      let challenge2MarkReadyCallback: (() => void) | undefined
+      const challenge2Collection = createCollection<Challenge>({
+        id: `challenge2`,
+        getKey: (post) => post.id,
+        startSync: false,
+        autoIndex,
+        sync: {
+          sync: ({ begin, commit, write, markReady }) => {
+            challenge2BeginCallback = begin
+            challenge2CommitCallback = commit
+            challenge2MarkReadyCallback = markReady
+            challenge2WriteCallback = write
+            return () => {}
+          },
+        },
+        onInsert: async () => {}, // Add empty handler to allow direct inserts
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ player: playerCollection })
+          .leftJoin(
+            { challenge1: challenge1Collection },
+            ({ player, challenge1 }) => eq(player.id, challenge1.id)
+          )
+          .leftJoin(
+            { challenge2: challenge2Collection },
+            ({ player, challenge2 }) => eq(player.id, challenge2.id)
+          )
+      )
+
+      // Start the query, but don't wait it, we are doing to write the data to the
+      // source collections while the query is loading the initial state
+      const preloadPromise = liveQuery.preload()
+
+      // Write player
+      playerBeginCallback!()
+      playerWriteCallback!({
+        type: `insert`,
+        value: { id: 1, name: `Alice` },
+      })
+      playerCommitCallback!()
+      playerMarkReadyCallback!()
+
+      // Write challenge1
+      challenge1BeginCallback!()
+      challenge1WriteCallback!({
+        type: `insert`,
+        value: { id: 1, value: 100 },
+      })
+      challenge1CommitCallback!()
+      challenge1MarkReadyCallback!()
+
+      // Write challenge2
+      challenge2BeginCallback!()
+      challenge2WriteCallback!({
+        type: `insert`,
+        value: { id: 1, value: 200 },
+      })
+      challenge2CommitCallback!()
+      challenge2MarkReadyCallback!()
+
+      await preloadPromise
+
+      // With a failed test the results show more than 1 item
+      // It returns both an unjoined player with no joined challenges, and a joined
+      // player with the challenges
+      const results = liveQuery.toArray
+      expect(results.length).toBe(1)
+
+      const result = results[0]!
+      expect(result.player.name).toBe(`Alice`)
+      expect(result.challenge1?.value).toBe(100)
+      expect(result.challenge2?.value).toBe(200)
+    })
+  }
 })
