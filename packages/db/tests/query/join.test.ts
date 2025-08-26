@@ -520,12 +520,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id)
               )
-              .where(({ member }) => eq(member.user_id, 100))
+              .where(({ member }) => eq(member?.user_id, 100))
               .select(({ team, member }) => ({
                 team_id: team.id,
                 team_name: team.name,
-                user_id: member.user_id,
-                role: member.role,
+                user_id: member?.user_id,
+                role: member?.role,
               })),
         })
       } else if (joinType === `right`) {
@@ -540,10 +540,10 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 { member: teamMembersCollection },
                 ({ team, member }) => eq(team.id, member.team_id)
               )
-              .where(({ team }) => eq(team.active, true))
+              .where(({ team }) => eq(team?.active, true))
               .select(({ team, member }) => ({
-                team_id: team.id,
-                team_name: team.name,
+                team_id: team?.id,
+                team_name: team?.name,
                 user_id: member.user_id,
                 role: member.role,
               })),
@@ -559,12 +559,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id)
               )
-              .where(({ member }) => eq(member.role, `admin`))
+              .where(({ member }) => eq(member?.role, `admin`))
               .select(({ team, member }) => ({
-                team_id: team.id,
-                team_name: team.name,
-                user_id: member.user_id,
-                role: member.role,
+                team_id: team?.id,
+                team_name: team?.name,
+                user_id: member?.user_id,
+                role: member?.role,
               })),
         })
       } else {
