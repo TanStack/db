@@ -80,12 +80,22 @@ export class CollectionSubscriber<
     callback?: () => boolean
   ) {
     const input = this.syncState.inputs[this.collectionId]!
-    sendChangesToInput(input, changes, this.collection.config.getKey)
-    this.collectionConfigBuilder.maybeRunGraph(
-      this.config,
-      this.syncState,
-      callback
+    const sentChanges = sendChangesToInput(
+      input,
+      changes,
+      this.collection.config.getKey
     )
+    if (sentChanges > 0) {
+      // Only run the graph if we sent any changes
+      // otherwise we may get into an infinite loop
+      // trying to load more data for the orderBy query
+      // when there's no more data in the collection
+      this.collectionConfigBuilder.maybeRunGraph(
+        this.config,
+        this.syncState,
+        callback
+      )
+    }
   }
 
   // Wraps the sendChangesToPipeline function
@@ -357,7 +367,7 @@ function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
   changes: Iterable<ChangeMessage>,
   getKey: (item: ChangeMessage[`value`]) => any
-) {
+): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {
     const key = getKey(change.value)
@@ -372,6 +382,7 @@ function sendChangesToInput(
     }
   }
   input.sendData(new MultiSet(multiSetArray))
+  return multiSetArray.length
 }
 
 /** Splits updates into a delete of the old value and an insert of the new value */
