@@ -12,7 +12,7 @@ The `@tanstack/query-db-collection` package allows you to create collections tha
 - Automatically sync with remote data via TanStack Query
 - Support optimistic updates with automatic rollback on errors
 - Handle persistence through customizable mutation handlers
-- Provide direct write capabilities as an escape hatch for advanced scenarios
+- Provide direct write capabilities for directly writing to the sync store
 
 ## Installation
 
@@ -136,9 +136,9 @@ The collection provides these utility methods via `collection.utils`:
 
 - `refetch()`: Manually trigger a refetch of the query
 
-## Direct Writes (Advanced)
+## Direct Writes
 
-Direct writes are an escape hatch for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to write directly to the synced data store, bypassing the optimistic update system and query refetch mechanism.
+Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to write directly to the synced data store, bypassing the optimistic update system and query refetch mechanism.
 
 ### Understanding the Data Stores
 

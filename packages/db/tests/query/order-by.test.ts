@@ -454,6 +454,226 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
         )
       })
+
+      it(`applies incremental insert of a new row before the topK correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .offset(1)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+
+        // Now insert a new employee with highest salary
+        // this should push Diana which previously had the highest salary (65k)
+        // into the 2nd position and thus part of the top 2 with offset 1
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 70_000,
+          hire_date: `2023-01-01`,
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults).toHaveLength(2)
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [4, 65_000],
+          [2, 60_000],
+        ])
+      })
+
+      it(`applies incremental insert of a new row inside the topK correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .offset(1)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+
+        // Now insert a new employee with 2nd highest salary
+        // this should push Charlie which previously had the 3rd highest salary (55k)
+        // to position 4 and thus out of the top 2 with offset 1
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 62_000,
+          hire_date: `2023-01-01`,
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults).toHaveLength(2)
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [6, 62_000],
+          [2, 60_000],
+        ])
+      })
+
+      it(`applies incremental insert of a new row after the topK correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .offset(1)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+
+        // Now insert a new employee with a lower salary than those from the top K
+        // There should be no changes to the top K
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 43_000,
+          hire_date: `2023-01-01`,
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+      })
+
+      it(`applies incremental update of a row inside the topK correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .offset(1)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+
+        // Now we update the salary of Bob from 60k to 62k
+        // he should stay in the top 2 with offset 1
+        // and there should be no changes to the top 2 except for the salary change
+        const bobData = employeeData.find((e) => e.id === 2)!
+        const bobUpdatedData = { ...bobData, salary: 62_000 }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `update`,
+          previousValue: bobData,
+          value: bobUpdatedData,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults).toHaveLength(2)
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [2, 62_000],
+          [3, 55_000],
+        ])
+      })
+
+      it(`applies incremental delete of a row in the topK correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .offset(1)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([60000, 55000])
+
+        // Now delete Bob with salary 60k
+        // as a result, Eve with salary 52k should move into the top 2 with offset 1
+        const bobData = employeeData.find((e) => e.id === 2)!
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `delete`,
+          value: bobData,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults).toHaveLength(2)
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [3, 55_000],
+          [5, 52_000],
+        ])
+      })
     })
 
     describe(`OrderBy with Joins`, () => {

@@ -1,5 +1,5 @@
 import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
-import { Func, PropRef } from "../ir.js"
+import { Func, PropRef, getHavingExpression } from "../ir.js"
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -129,8 +129,9 @@ export function processGroupBy(
     // Apply HAVING clauses if present
     if (havingClauses && havingClauses.length > 0) {
       for (const havingClause of havingClauses) {
+        const havingExpression = getHavingExpression(havingClause)
         const transformedHavingClause = transformHavingClause(
-          havingClause,
+          havingExpression,
           selectClause || {}
         )
         const compiledHaving = compileExpression(transformedHavingClause)
@@ -166,7 +167,9 @@ export function processGroupBy(
   const mapping = validateAndCreateMapping(groupByClause, selectClause)
 
   // Pre-compile groupBy expressions
-  const compiledGroupByExpressions = groupByClause.map(compileExpression)
+  const compiledGroupByExpressions = groupByClause.map((e) =>
+    compileExpression(e)
+  )
 
   // Create a key extractor function using simple __key_X format
   const keyExtractor = ([, row]: [
@@ -261,8 +264,9 @@ export function processGroupBy(
   // Apply HAVING clauses if present
   if (havingClauses && havingClauses.length > 0) {
     for (const havingClause of havingClauses) {
+      const havingExpression = getHavingExpression(havingClause)
       const transformedHavingClause = transformHavingClause(
-        havingClause,
+        havingExpression,
         selectClause || {}
       )
       const compiledHaving = compileExpression(transformedHavingClause)

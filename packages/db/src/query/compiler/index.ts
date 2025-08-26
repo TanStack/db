@@ -7,18 +7,21 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { Value as ValClass } from "../ir.js"
+import { Value as ValClass,PropRef, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelectToResults } from "./select.js"
+import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
   CollectionRef,
   QueryIR,
   QueryRef,
 } from "../ir.js"
+import type { LazyCollectionCallbacks } from "./joins.js"
+import type { Collection } from "../../collection.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -30,6 +33,8 @@ import type { QueryCache, QueryMapping } from "./types.js"
  * Result of query compilation including both the pipeline and collection-specific WHERE clauses
  */
 export interface CompilationResult {
+  /** The ID of the main collection */
+  collectionId: string
   /** The compiled query pipeline */
   pipeline: ResultStream
   /** Map of collection aliases to their WHERE clauses for index optimization */
@@ -47,6 +52,10 @@ export interface CompilationResult {
 export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection<any, any, any, any, any>>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
@@ -71,9 +80,17 @@ export function compileQuery(
   const tables: Record<string, KeyedStream> = {}
 
   // Process the FROM clause to get the main table
-  const { alias: mainTableAlias, input: mainInput } = processFrom(
+  const {
+    alias: mainTableAlias,
+    input: mainInput,
+    collectionId: mainCollectionId,
+  } = processFrom(
     query.from,
     allInputs,
+    collections,
+    callbacks,
+    lazyCollections,
+    optimizableOrderByCollections,
     cache,
     queryMapping
   )
@@ -97,10 +114,16 @@ export function compileQuery(
       pipeline,
       query.join,
       tables,
+      mainCollectionId,
       mainTableAlias,
       allInputs,
       cache,
-      queryMapping
+      queryMapping,
+      collections,
+      callbacks,
+      lazyCollections,
+      optimizableOrderByCollections,
+      rawQuery
     )
   }
 
@@ -108,7 +131,8 @@ export function compileQuery(
   if (query.where && query.where.length > 0) {
     // Apply each WHERE condition as a filter (they are ANDed together)
     for (const where of query.where) {
-      const compiledWhere = compileExpression(where)
+      const whereExpression = getWhereExpression(where)
+      const compiledWhere = compileExpression(whereExpression)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return compiledWhere(namespacedRow)
@@ -232,8 +256,11 @@ export function compileQuery(
   // Process orderBy parameter if it exists
   if (query.orderBy && query.orderBy.length > 0) {
     const orderedPipeline = processOrderBy(
+      rawQuery,
       pipeline,
       query.orderBy,
+      collections[mainCollectionId]!,
+      optimizableOrderByCollections,
       query.limit,
       query.offset
     )
@@ -259,6 +286,7 @@ export function compileQuery(
     const result = resultPipeline
     // Cache the result before returning (use original query as key)
     const compilationResult = {
+      collectionId: mainCollectionId,
       pipeline: result,
       collectionWhereClauses,
     }
@@ -294,6 +322,7 @@ export function compileQuery(
   const result = resultPipeline
   // Cache the result before returning (use original query as key)
   const compilationResult = {
+    collectionId: mainCollectionId,
     pipeline: result,
     collectionWhereClauses,
   }
@@ -308,16 +337,20 @@ export function compileQuery(
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
+  collections: Record<string, Collection>,
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  lazyCollections: Set<string>,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping
-): { alias: string; input: KeyedStream } {
+): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
       const input = allInputs[from.collection.id]
       if (!input) {
         throw new CollectionInputNotFoundError(from.collection.id)
       }
-      return { alias: from.alias, input }
+      return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
       // Find the original query for caching purposes
@@ -327,6 +360,10 @@ function processFrom(
       const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
+        collections,
+        callbacks,
+        lazyCollections,
+        optimizableOrderByCollections,
         cache,
         queryMapping
       )
@@ -351,7 +388,11 @@ function processFrom(
         })
       )
 
-      return { alias: from.alias, input: extractedInput }
+      return {
+        alias: from.alias,
+        input: extractedInput,
+        collectionId: subQueryResult.collectionId,
+      }
     }
     default:
       throw new UnsupportedFromTypeError((from as any).type)
@@ -404,6 +445,72 @@ function mapNestedQueries(
           queryMapping
         )
       }
+    }
+  }
+}
+
+function getRefFromAlias(
+  query: QueryIR,
+  alias: string
+): CollectionRef | QueryRef | void {
+  if (query.from.alias === alias) {
+    return query.from
+  }
+
+  for (const join of query.join || []) {
+    if (join.from.alias === alias) {
+      return join.from
+    }
+  }
+}
+
+/**
+ * Follows the given reference in a query
+ * until its finds the root field the reference points to.
+ * @returns The collection, its alias, and the path to the root field in this collection
+ */
+export function followRef(
+  query: QueryIR,
+  ref: PropRef<any>,
+  collection: Collection
+): { collection: Collection; path: Array<string> } | void {
+  if (ref.path.length === 0) {
+    return
+  }
+
+  if (ref.path.length === 1) {
+    // This field should be part of this collection
+    const field = ref.path[0]!
+    // is it part of the select clause?
+    if (query.select) {
+      const selectedField = query.select[field]
+      if (selectedField && selectedField.type === `ref`) {
+        return followRef(query, selectedField, collection)
+      }
+    }
+
+    // Either this field is not part of the select clause
+    // and thus it must be part of the collection itself
+    // or it is part of the select but is not a reference
+    // so we can stop here and don't have to follow it
+    return { collection, path: [field] }
+  }
+
+  if (ref.path.length > 1) {
+    // This is a nested field
+    const [alias, ...rest] = ref.path
+    const aliasRef = getRefFromAlias(query, alias!)
+    if (!aliasRef) {
+      return
+    }
+
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(rest), collection)
+    } else {
+      // This is a reference to a collection
+      // we can't follow it further
+      // so the field must be on the collection itself
+      return { collection: aliasRef.collection, path: rest }
     }
   }
 }

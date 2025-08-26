@@ -187,9 +187,11 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.id === `string`
 
   // Use refs to cache collection and track dependencies
-  const collectionRef = useRef<any>(null)
+  const collectionRef = useRef<Collection<object, string | number, {}> | null>(
+    null
+  )
   const depsRef = useRef<Array<unknown> | null>(null)
-  const configRef = useRef<any>(null)
+  const configRef = useRef<unknown>(null)
 
   // Check if we need to create/recreate the collection
   const needsNewCollection =
@@ -214,13 +216,13 @@ export function useLiveQuery(
           query: configOrQueryOrCollection,
           startSync: true,
           gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
-        })
+        }) as unknown as Collection<object, string | number, {}>
       } else {
         collectionRef.current = createLiveQueryCollection({
           startSync: true,
           gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
           ...configOrQueryOrCollection,
-        })
+        }) as unknown as Collection<object, string | number, {}>
       }
       depsRef.current = [...deps]
     }
@@ -229,10 +231,8 @@ export function useLiveQuery(
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
   const snapshotRef = useRef<{
-    state: Map<any, any>
-    data: Array<any>
-    collection: Collection<any, any, any>
-    _version: number
+    collection: Collection<object, string | number, {}>
+    version: number
   } | null>(null)
 
   // Reset refs when collection changes
@@ -248,6 +248,7 @@ export function useLiveQuery(
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = collectionRef.current!.subscribeChanges(() => {
+        // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
       })
@@ -260,9 +261,8 @@ export function useLiveQuery(
   // Create stable getSnapshot function using ref
   const getSnapshotRef = useRef<
     | (() => {
-        state: Map<any, any>
-        data: Array<any>
-        collection: Collection<any, any, any>
+        collection: Collection<object, string | number, {}>
+        version: number
       })
     | null
   >(null)
@@ -271,20 +271,15 @@ export function useLiveQuery(
       const currentVersion = versionRef.current
       const currentCollection = collectionRef.current!
 
-      // If we don't have a snapshot or the version changed, create a new one
+      // Recreate snapshot object only if version/collection changed
       if (
         !snapshotRef.current ||
-        snapshotRef.current._version !== currentVersion
+        snapshotRef.current.version !== currentVersion ||
+        snapshotRef.current.collection !== currentCollection
       ) {
         snapshotRef.current = {
-          get state() {
-            return new Map(currentCollection.entries())
-          },
-          get data() {
-            return Array.from(currentCollection.values())
-          },
           collection: currentCollection,
-          _version: currentVersion,
+          version: currentVersion,
         }
       }
 
@@ -298,17 +293,52 @@ export function useLiveQuery(
     getSnapshotRef.current
   )
 
-  return {
-    state: snapshot.state,
-    data: snapshot.data,
-    collection: snapshot.collection,
-    status: snapshot.collection.status,
-    isLoading:
-      snapshot.collection.status === `loading` ||
-      snapshot.collection.status === `initialCommit`,
-    isReady: snapshot.collection.status === `ready`,
-    isIdle: snapshot.collection.status === `idle`,
-    isError: snapshot.collection.status === `error`,
-    isCleanedUp: snapshot.collection.status === `cleaned-up`,
+  // Track last snapshot (from useSyncExternalStore) and the returned value separately
+  const returnedSnapshotRef = useRef<{
+    collection: Collection<object, string | number, {}>
+    version: number
+  } | null>(null)
+  // Keep implementation return loose to satisfy overload signatures
+  const returnedRef = useRef<any>(null)
+
+  // Rebuild returned object only when the snapshot changes (version or collection identity)
+  if (
+    !returnedSnapshotRef.current ||
+    returnedSnapshotRef.current.version !== snapshot.version ||
+    returnedSnapshotRef.current.collection !== snapshot.collection
+  ) {
+    // Capture a stable view of entries for this snapshot to avoid tearing
+    const entries = Array.from(snapshot.collection.entries())
+    let stateCache: Map<string | number, unknown> | null = null
+    let dataCache: Array<unknown> | null = null
+
+    returnedRef.current = {
+      get state() {
+        if (!stateCache) {
+          stateCache = new Map(entries)
+        }
+        return stateCache
+      },
+      get data() {
+        if (!dataCache) {
+          dataCache = entries.map(([, value]) => value)
+        }
+        return dataCache
+      },
+      collection: snapshot.collection,
+      status: snapshot.collection.status,
+      isLoading:
+        snapshot.collection.status === `loading` ||
+        snapshot.collection.status === `initialCommit`,
+      isReady: snapshot.collection.status === `ready`,
+      isIdle: snapshot.collection.status === `idle`,
+      isError: snapshot.collection.status === `error`,
+      isCleanedUp: snapshot.collection.status === `cleaned-up`,
+    }
+
+    // Remember the snapshot that produced this returned value
+    returnedSnapshotRef.current = snapshot
   }
+
+  return returnedRef.current!
 }

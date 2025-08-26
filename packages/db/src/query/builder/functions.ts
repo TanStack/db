@@ -4,6 +4,36 @@ import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
 import type { Ref } from "./types.js"
 
+type StringRef = Ref<string> | Ref<string | null> | Ref<string | undefined>
+type StringRefProxy =
+  | RefProxy<string>
+  | RefProxy<string | null>
+  | RefProxy<string | undefined>
+type StringBasicExpression =
+  | BasicExpression<string>
+  | BasicExpression<string | null>
+  | BasicExpression<string | undefined>
+type StringLike =
+  | StringRef
+  | StringRefProxy
+  | StringBasicExpression
+  | string
+  | null
+  | undefined
+
+type ComparisonOperand<T> =
+  | RefProxy<T>
+  | Ref<T>
+  | T
+  | BasicExpression<T>
+  | undefined
+  | null
+type ComparisonOperandPrimitive<T extends string | number | boolean> =
+  | T
+  | BasicExpression<T>
+  | undefined
+  | null
+
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | RefProxy<any> | Ref<any> | any
 
@@ -15,20 +45,14 @@ type ExtractType<T> =
       ? U
       : T extends BasicExpression<infer U>
         ? U
-        : T extends undefined
-          ? undefined
-          : T extends null
-            ? null
-            : T
+        : T
 
 // Helper type to determine aggregate return type based on input nullability
 type AggregateReturnType<T> =
   ExtractType<T> extends infer U
     ? U extends number | undefined | null
       ? Aggregate<U>
-      : U extends number
-        ? Aggregate<number>
-        : Aggregate<number | undefined | null>
+      : Aggregate<number | undefined | null>
     : Aggregate<number | undefined | null>
 
 // Helper type to determine string function return type based on input nullability
@@ -36,37 +60,26 @@ type StringFunctionReturnType<T> =
   ExtractType<T> extends infer U
     ? U extends string | undefined | null
       ? BasicExpression<U>
-      : U extends string
-        ? BasicExpression<string>
-        : BasicExpression<string | undefined | null>
+      : BasicExpression<string | undefined | null>
     : BasicExpression<string | undefined | null>
 
 // Helper type to determine numeric function return type based on input nullability
 // This handles string, array, and number inputs for functions like length()
 type NumericFunctionReturnType<T> =
   ExtractType<T> extends infer U
-    ? U extends string
-      ? BasicExpression<number>
-      : U extends string | undefined
-        ? BasicExpression<number | undefined>
-        : U extends string | null
-          ? BasicExpression<number | null>
-          : U extends string | undefined | null
-            ? BasicExpression<number | undefined | null>
-            : U extends Array<any>
-              ? BasicExpression<number>
-              : U extends Array<any> | undefined
-                ? BasicExpression<number | undefined>
-                : U extends Array<any> | null
-                  ? BasicExpression<number | null>
-                  : U extends Array<any> | undefined | null
-                    ? BasicExpression<number | undefined | null>
-                    : U extends number | undefined | null
-                      ? BasicExpression<U>
-                      : U extends number
-                        ? BasicExpression<number>
-                        : BasicExpression<number | undefined | null>
+    ? U extends string | Array<any> | undefined | null | number
+      ? BasicExpression<MapToNumber<U>>
+      : BasicExpression<number | undefined | null>
     : BasicExpression<number | undefined | null>
+
+// Transform string/array types to number while preserving nullability
+type MapToNumber<T> = T extends string | Array<any>
+  ? number
+  : T extends undefined
+    ? undefined
+    : T extends null
+      ? null
+      : T
 
 // Helper type for binary numeric operations (combines nullability of both operands)
 type BinaryNumericReturnType<T1, T2> =
@@ -97,12 +110,12 @@ type BinaryNumericReturnType<T1, T2> =
 // Operators
 
 export function eq<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
@@ -110,12 +123,12 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gt<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gt(left: any, right: any): BasicExpression<boolean> {
@@ -123,12 +136,12 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function gte<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gte(left: any, right: any): BasicExpression<boolean> {
@@ -136,12 +149,12 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lt<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
@@ -149,12 +162,12 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
 }
 
 export function lte<T>(
-  left: RefProxy<T> | Ref<T> | undefined | null,
-  right: T | RefProxy<T> | Ref<T> | BasicExpression<T> | undefined | null
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
-  left: T | BasicExpression<T> | undefined | null,
-  right: T | BasicExpression<T> | undefined | null
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
 ): BasicExpression<boolean>
 export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lte(left: any, right: any): BasicExpression<boolean> {
@@ -236,64 +249,16 @@ export function inArray(
 }
 
 export function like(
-  left:
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | string
-    | null
-    | undefined
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>,
-  right:
-    | string
-    | null
-    | undefined
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
+  left: StringLike,
+  right: StringLike
 ): BasicExpression<boolean>
 export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
 }
 
 export function ilike(
-  left:
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | string
-    | null
-    | undefined
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>,
-  right:
-    | string
-    | null
-    | undefined
-    | Ref<string>
-    | Ref<string | null>
-    | Ref<string | undefined>
-    | RefProxy<string>
-    | RefProxy<string | null>
-    | RefProxy<string | undefined>
-    | BasicExpression<string>
-    | BasicExpression<string | null>
-    | BasicExpression<string | undefined>
+  left: StringLike,
+  right: StringLike
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }

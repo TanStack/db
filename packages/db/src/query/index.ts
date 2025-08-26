@@ -50,5 +50,6 @@ export { compileQuery } from "./compiler/index.js"
 export {
   createLiveQueryCollection,
   liveQueryCollectionOptions,
-  type LiveQueryCollectionConfig,
 } from "./live-query-collection.js"
+
+export { type LiveQueryCollectionConfig } from "./live/types.js"
