@@ -59,6 +59,8 @@ export class CollectionConfigBuilder<
     OrderByOptimizationInfo
   > = {}
 
+  private collectionReady = false
+
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>
   ) {
@@ -76,6 +78,10 @@ export class CollectionConfigBuilder<
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
+  }
+
+  isCollectionReady() {
+    return this.collectionReady
   }
 
   getConfig(): CollectionConfig<TResult> {
@@ -126,6 +132,7 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
+        this.collectionReady = true // mark that we've run the graph at least once
       }
     }
   }

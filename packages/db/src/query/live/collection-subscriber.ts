@@ -85,11 +85,14 @@ export class CollectionSubscriber<
       changes,
       this.collection.config.getKey
     )
-    if (sentChanges > 0) {
+    if (sentChanges > 0 || !this.collectionConfigBuilder.isCollectionReady()) {
       // Only run the graph if we sent any changes
       // otherwise we may get into an infinite loop
       // trying to load more data for the orderBy query
       // when there's no more data in the collection
+      // EXCEPTION: if the collection is not yet ready
+      //            we need to run it even if there are no changes
+      //            in order for the collection to be marked as ready
       this.collectionConfigBuilder.maybeRunGraph(
         this.config,
         this.syncState,
