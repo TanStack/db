@@ -80,10 +80,6 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  isCollectionReady() {
-    return this.collectionReady
-  }
-
   getConfig(): CollectionConfig<TResult> {
     return {
       id: this.id,
@@ -132,6 +128,7 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
+        // Remember that we marked the collection as ready
         this.collectionReady = true
       }
     }
