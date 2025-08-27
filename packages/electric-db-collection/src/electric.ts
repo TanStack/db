@@ -540,9 +540,8 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
-            // Commit the truncate transaction immediately
-            commit()
-            transactionStarted = false
+            // Reset hasUpToDate so we continue accumulating changes until next up-to-date
+            hasUpToDate = false
           }
         }
 

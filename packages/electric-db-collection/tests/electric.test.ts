@@ -254,8 +254,10 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    // The collection should be cleared but remain in ready state
-    expect(collection.state.size).toBe(0)
+    // The collection should still have old data because truncate is in pending
+    // transaction. This is the intended behavior of the collection, you should have
+    // the old data until the next up-to-date message.
+    expect(collection.state.size).toBe(2)
     expect(collection.status).toBe(`ready`)
 
     // Send new data after must-refetch
