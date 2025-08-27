@@ -746,6 +746,12 @@ export class CollectionImpl<
     }
 
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+
+    // If gcTime is 0, GC is disabled
+    if (gcTime === 0) {
+      return
+    }
+
     this.gcTimeoutId = setTimeout(() => {
       if (this.activeSubscribersCount === 0) {
         this.cleanup()
@@ -784,7 +790,6 @@ export class CollectionImpl<
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
-      this.activeSubscribersCount = 0
       this.startGCTimer()
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
