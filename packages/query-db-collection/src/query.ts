@@ -497,7 +497,10 @@ export function queryCollectionOptions<
       TQueryKey
     >(queryClient, observerOptions)
 
-    const actualUnsubscribeFn = localObserver.subscribe((result) => {
+    let isSubscribed = false
+    let actualUnsubscribeFn: (() => void) | null = null
+
+    const handleQueryResult = (result: any) => {
       if (result.isSuccess) {
         const newItemsArray = result.data
 
@@ -581,10 +584,43 @@ export function queryCollectionOptions<
         // Mark collection as ready even on error to avoid blocking apps
         markReady()
       }
-    })
+    }
+
+    const subscribeToQuery = () => {
+      if (!isSubscribed) {
+        actualUnsubscribeFn = localObserver.subscribe(handleQueryResult)
+        isSubscribed = true
+      }
+    }
+
+    const unsubscribeFromQuery = () => {
+      if (isSubscribed && actualUnsubscribeFn) {
+        actualUnsubscribeFn()
+        actualUnsubscribeFn = null
+        isSubscribed = false
+      }
+    }
+
+    // If startSync=true or there are subscribers to the collection, subscribe to the query straight away
+    if (config.startSync || collection.subscriberCount > 0) {
+      subscribeToQuery()
+    }
+
+    // Set up event listener for subscriber changes
+    const unsubscribeFromCollectionEvents = collection.events.on(
+      `subscriberCountChanged`,
+      (count) => {
+        if (count > 0) {
+          subscribeToQuery()
+        } else if (count === 0) {
+          unsubscribeFromQuery()
+        }
+      }
+    )
 
     return async () => {
-      actualUnsubscribeFn()
+      unsubscribeFromCollectionEvents()
+      unsubscribeFromQuery()
       await queryClient.cancelQueries({ queryKey })
       queryClient.removeQueries({ queryKey })
     }
