@@ -383,6 +383,55 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(results.map((r) => r.salary)).toEqual([60000, 55000])
       })
 
+      it(`applies a where clause with a limit and an orderBy`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        console.log(results)
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([52000, 55000])
+        expect(results.map((r) => r.id)).toEqual([5, 3])
+      })
+
+      it(`fetches single row with an orderBy and limit 1`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.id, `asc`)
+            .where(({ employees }) => eq(employees.id, 2))
+            .limit(1)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        console.log(results)
+
+        expect(results).toHaveLength(1)
+        expect(results[0]!.id).toEqual(2)
+        expect(results[0]!.name).toEqual(`Bob`)
+        expect(results[0]!.salary).toEqual(60000)
+      })
+
       it(`throws error when limit/offset used without orderBy`, () => {
         expect(() => {
           createLiveQueryCollection((q) =>
