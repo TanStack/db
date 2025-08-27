@@ -1850,5 +1850,64 @@ describe(`QueryCollection`, () => {
       expect(collection.utils.lastError()).toBe(testError)
       expect(collection.utils.errorCount()).toBe(1)
     })
+
+    it(`should increment errorCount only after final failure when using Query retries`, async () => {
+      const testError = new Error(`Retry test error`)
+      const retryCount = 2
+      const totalAttempts = retryCount + 1
+
+      // Create a queryFn that fails consistently
+      const queryFn = vi.fn().mockRejectedValue(testError)
+
+      // Create collection with retry enabled (2 retries = 3 total attempts)
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `retry-semantics-test`,
+        queryClient,
+        queryKey: [`retry-semantics-test`],
+        queryFn,
+        getKey,
+        startSync: true,
+        retry: retryCount, // This will result in 3 total attempts (initial + 2 retries)
+        retryDelay: 5, // Short delay for faster tests
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for all retry attempts to complete and final failure
+      await vi.waitFor(
+        () => {
+          expect(collection.status).toBe(`ready`) // Should be ready even with error
+          expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
+          expect(collection.utils.isError()).toBe(true)
+        },
+        { timeout: 2000 }
+      )
+
+      // Error count should only increment once after all retries are exhausted
+      // This ensures we track "consecutive post-retry failures," not per-attempt failures
+      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
+
+      // Reset attempt counter for second test
+      queryFn.mockClear()
+
+      // Trigger another refetch which should also retry and fail
+      await collection.utils.refetch()
+
+      // Wait for the second set of retries to complete
+      await vi.waitFor(
+        () => {
+          expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
+        },
+        { timeout: 2000 }
+      )
+
+      // Error count should now be 2 (two post-retry failures)
+      expect(collection.utils.errorCount()).toBe(2)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
+    })
   })
 })

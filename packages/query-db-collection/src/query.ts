@@ -329,11 +329,14 @@ export interface QueryCollectionUtils<
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
   /** Execute multiple write operations as a single atomic batch to the synced data store */
   writeBatch: (callback: () => void) => void
-  /** Get the last error encountered by the query (if any) */
+  /** Get the last error encountered by the query (if any); reset on success */
   lastError: () => TError | undefined
   /** Check if the collection is in an error state */
   isError: () => boolean
-  /** Get the number of consecutive sync failures */
+  /**
+   * Get the number of consecutive sync failures.
+   * Incremented only when query fails completely (not per retry attempt); reset on success.
+   */
   errorCount: () => number
   /** Clear the error state and trigger a refetch of the query */
   clearError: () => Promise<void>
@@ -482,6 +485,8 @@ export function queryCollectionOptions<
   let lastError: TError | undefined
   /** The number of consecutive sync failures */
   let errorCount = 0
+  /** The timestamp for when the query most recently returned the status as "error" */
+  let lastErrorUpdatedAt = 0
 
   const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
@@ -593,10 +598,10 @@ export function queryCollectionOptions<
         // Mark collection as ready after first successful query result
         markReady()
       } else if (result.isError) {
-        // This prevents double counting when QueryObserver calls subscribe twice
-        if (lastError !== result.error) {
+        if (result.errorUpdatedAt !== lastErrorUpdatedAt) {
           lastError = result.error
           errorCount++
+          lastErrorUpdatedAt = result.errorUpdatedAt
         }
 
         console.error(
@@ -720,6 +725,7 @@ export function queryCollectionOptions<
       clearError: () => {
         lastError = undefined
         errorCount = 0
+        lastErrorUpdatedAt = 0
         return refetch()
       },
     },
