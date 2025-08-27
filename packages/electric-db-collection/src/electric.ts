@@ -476,7 +476,7 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate } = params
+      const { begin, write, commit, markReady, truncate, collection } = params
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
@@ -487,6 +487,13 @@ function createElectricSync<T extends Row<unknown>>(
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
+          } else {
+            console.error(
+              `An error occurred while syncing collection: ${collection.id}, \n` +
+                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
+                `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
+              errorParams
+            )
           }
 
           return
