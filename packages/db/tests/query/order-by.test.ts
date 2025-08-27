@@ -680,6 +680,50 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(3) // Alice (50000) and Eve (52000) filtered out
         expect(results.map((r) => r.salary)).toEqual([55000, 60000, 65000])
       })
+
+      it(`orders correctly with a limit`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([52000, 55000])
+        expect(results.map((r) => r.id)).toEqual([5, 3])
+      })
+
+      it(`returns a single row with limit 1`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(1)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(1)
+        expect(results[0]!.id).toEqual(5)
+        expect(results[0]!.salary).toEqual(52000)
+      })
     })
 
     describe(`Fractional Index Behavior`, () => {
