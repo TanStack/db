@@ -256,11 +256,11 @@ export type ResultTypeFromSelect<TSelectObject> = Simplify<{
                 : StripInternalKeys<TSelectObject>[K] extends Aggregate<infer T>
                   ? T
                   : StripInternalKeys<TSelectObject>[K] extends string
-                    ? string
+                    ? StripInternalKeys<TSelectObject>[K]
                     : StripInternalKeys<TSelectObject>[K] extends number
-                      ? number
+                      ? StripInternalKeys<TSelectObject>[K]
                       : StripInternalKeys<TSelectObject>[K] extends boolean
-                        ? boolean
+                        ? StripInternalKeys<TSelectObject>[K]
                         : StripInternalKeys<TSelectObject>[K] extends null
                           ? null
                           : StripInternalKeys<TSelectObject>[K] extends undefined
