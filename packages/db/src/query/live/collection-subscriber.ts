@@ -85,20 +85,20 @@ export class CollectionSubscriber<
       changes,
       this.collection.config.getKey
     )
-    if (sentChanges > 0 || !this.collectionConfigBuilder.isCollectionReady()) {
-      // Only run the graph if we sent any changes
-      // otherwise we may get into an infinite loop
-      // trying to load more data for the orderBy query
-      // when there's no more data in the collection
-      // EXCEPTION: if the collection is not yet ready
-      //            we need to run it even if there are no changes
-      //            in order for the collection to be marked as ready
-      this.collectionConfigBuilder.maybeRunGraph(
-        this.config,
-        this.syncState,
-        callback
-      )
-    }
+
+    // Do not provide the callback that loads more data
+    // if there's no more data to load
+    // otherwise we end up in an infinite loop trying to load more data
+    const dataLoader = sentChanges > 0 ? callback : undefined
+
+    // We need to call `maybeRunGraph` even if there's no data to load
+    // because we need to mark the collection as ready if it's not already
+    // and that's only done in `maybeRunGraph`
+    this.collectionConfigBuilder.maybeRunGraph(
+      this.config,
+      this.syncState,
+      dataLoader
+    )
   }
 
   // Wraps the sendChangesToPipeline function
@@ -268,11 +268,19 @@ export class CollectionSubscriber<
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  private loadMoreIfNeeded() {
-    const { dataNeeded } =
+  loadMoreIfNeeded() {
+    const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
-      ]!
+      ]
+
+    if (!orderByInfo) {
+      // This query has no orderBy operator
+      // so there's no data to load, just return true
+      return true
+    }
+
+    const { dataNeeded } = orderByInfo
 
     if (!dataNeeded) {
       // This should never happen because the topK operator should always set the size callback
@@ -285,12 +293,15 @@ export class CollectionSubscriber<
     // `dataNeeded` probes the orderBy operator to see if it needs more data
     // if it needs more data, it returns the number of items it needs
     const n = dataNeeded()
+    let noMoreNextItems = false
     if (n > 0) {
-      this.loadNextItems(n)
+      const loadedItems = this.loadNextItems(n)
+      noMoreNextItems = loadedItems === 0
     }
 
     // Indicate that we're done loading data if we didn't need to load more data
-    return n === 0
+    // or there's no more data to load
+    return n === 0 || noMoreNextItems
   }
 
   private sendChangesToPipelineWithTracking(
@@ -322,6 +333,7 @@ export class CollectionSubscriber<
         return { type: `insert`, key, value: this.collection.get(key) }
       })
     this.sendChangesToPipelineWithTracking(nextInserts)
+    return nextInserts.length
   }
 
   private getWhereClauseFromAlias(

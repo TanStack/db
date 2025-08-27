@@ -132,7 +132,6 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
-        // Remember that we marked the collection as ready
         this.collectionReady = true
       }
     }
@@ -158,10 +157,13 @@ export class CollectionConfigBuilder<
       syncState
     )
 
-    this.subscribeToAllCollections(config, fullSyncState)
+    const loadMoreDataCallbacks = this.subscribeToAllCollections(
+      config,
+      fullSyncState
+    )
 
-    // Initial run
-    this.maybeRunGraph(config, fullSyncState)
+    // Initial run with callback to load more data if needed
+    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
@@ -315,19 +317,33 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
   ) {
-    Object.entries(this.collections).forEach(([collectionId, collection]) => {
-      const collectionSubscriber = new CollectionSubscriber(
-        collectionId,
-        collection,
-        config,
-        syncState,
-        this
-      )
-      collectionSubscriber.subscribe()
-    })
+    const loaders = Object.entries(this.collections).map(
+      ([collectionId, collection]) => {
+        const collectionSubscriber = new CollectionSubscriber(
+          collectionId,
+          collection,
+          config,
+          syncState,
+          this
+        )
+        collectionSubscriber.subscribe()
+
+        const loadMore =
+          collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+
+        return loadMore
+      }
+    )
+
+    const loadMoreDataCallback = () => {
+      loaders.map((loader) => loader()) // .every((doneLoading) => doneLoading)
+      return true
+    }
 
     // Mark the collections as subscribed in the sync state
     syncState.subscribedToAllCollections = true
+
+    return loadMoreDataCallback
   }
 }
 
