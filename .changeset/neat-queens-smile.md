@@ -3,4 +3,4 @@
 "@tanstack/db": patch
 ---
 
-fix disabling of gc by settings `gcTime: 0` on the collection options
+fix disabling of gc by setting `gcTime: 0` on the collection options
