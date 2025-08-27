@@ -59,8 +59,6 @@ export class CollectionConfigBuilder<
     OrderByOptimizationInfo
   > = {}
 
-  private collectionReady = false
-
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>
   ) {
@@ -128,8 +126,6 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
-        // Remember that we marked the collection as ready
-        this.collectionReady = true
       }
     }
   }
