@@ -211,9 +211,9 @@ export function avg<T>(
  * Creates a min aggregate function that computes the minimum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function min<T, R, V>(
+export function min<T, V>(
   valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, R, V> {
+): AggregateFunction<T, never, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
     reduce: (values) => {
@@ -232,9 +232,9 @@ export function min<T, R, V>(
  * Creates a max aggregate function that computes the maximum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function max<T, R, V>(
+export function max<T, V>(
   valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, R, V> {
+): AggregateFunction<T, never, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
     reduce: (values) => {
