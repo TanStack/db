@@ -1,5 +1,16 @@
 # @tanstack/electric-db-collection
 
+## 0.1.9
+
+### Patch Changes
+
+- fix the handling of an electric must-refetch message so that the truncate is handled in the same transaction as the next up-to-date, ensuring you don't get a momentary empty collection. ([#460](https://github.com/TanStack/db/pull/460))
+
+- fix disabling of gc by setting `gcTime: 0` on the collection options ([#463](https://github.com/TanStack/db/pull/463))
+
+- Updated dependencies [[`1c5e206`](https://github.com/TanStack/db/commit/1c5e206d00d0a99f8419f0d00429b5a3c6cdc76e), [`4d20004`](https://github.com/TanStack/db/commit/4d2000488b9b5abf85c05801633297528af0eff6), [`968602e`](https://github.com/TanStack/db/commit/968602e4ffc597eaa559219daf22d6ef6321162a)]:
+  - @tanstack/db@0.1.8
+
 ## 0.1.8
 
 ### Patch Changes

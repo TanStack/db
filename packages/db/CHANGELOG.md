@@ -1,5 +1,15 @@
 # @tanstack/db
 
+## 0.1.8
+
+### Patch Changes
+
+- Fix bug that caused initial query results to have too few rows when query has orderBy, limit, and where clauses. ([#461](https://github.com/TanStack/db/pull/461))
+
+- fix disabling of gc by setting `gcTime: 0` on the collection options ([#463](https://github.com/TanStack/db/pull/463))
+
+- docs: electric-collection reference page ([#429](https://github.com/TanStack/db/pull/429))
+
 ## 0.1.7
 
 ### Patch Changes

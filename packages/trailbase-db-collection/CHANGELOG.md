@@ -1,5 +1,12 @@
 # @tanstack/trailbase-db-collection
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [[`1c5e206`](https://github.com/TanStack/db/commit/1c5e206d00d0a99f8419f0d00429b5a3c6cdc76e), [`4d20004`](https://github.com/TanStack/db/commit/4d2000488b9b5abf85c05801633297528af0eff6), [`968602e`](https://github.com/TanStack/db/commit/968602e4ffc597eaa559219daf22d6ef6321162a)]:
+  - @tanstack/db@0.1.8
+
 ## 0.1.7
 
 ### Patch Changes
