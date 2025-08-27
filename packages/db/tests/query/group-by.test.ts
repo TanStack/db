@@ -144,7 +144,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 avg_amount: avg(orders.amount),
                 min_amount: min(orders.amount),
                 max_amount: max(orders.amount),
-                order_count_sales_rep: count(orders.sales_rep_id),
               })),
         })
 
@@ -159,7 +158,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer1?.avg_amount).toBe(233.33333333333334) // (100+200+400)/3
         expect(customer1?.min_amount).toBe(100)
         expect(customer1?.max_amount).toBe(400)
-        expect(customer1?.order_count_sales_rep).toBe(3) // All 3 orders have a sales rep (not null)
 
         // Customer 2: orders 3, 4 (amounts: 150, 300)
         const customer2 = customerSummary.get(2)
@@ -170,7 +168,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer2?.avg_amount).toBe(225) // (150+300)/2
         expect(customer2?.min_amount).toBe(150)
         expect(customer2?.max_amount).toBe(300)
-        expect(customer2?.order_count_sales_rep).toBe(2) // Both orders have a sales rep (not null)
 
         // Customer 3: orders 5, 6 (amounts: 250, 75)
         const customer3 = customerSummary.get(3)
@@ -181,7 +178,40 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer3?.avg_amount).toBe(162.5) // (250+75)/2
         expect(customer3?.min_amount).toBe(75)
         expect(customer3?.max_amount).toBe(250)
-        expect(customer3?.order_count_sales_rep).toBe(1) // Only 1 cause order 5 has a null `sales_rep_id`
+      })
+
+      test(`group by customer_id with count aggregation (not null only)`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                total: count(orders.id),
+                onlyNotNull: count(orders.sales_rep_id),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3) // 3 customers
+
+        // Customer 1: orders 1, 2, 7 (total: 3, onlyNotNull: 3)
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.total).toBe(3)
+        expect(customer1?.onlyNotNull).toBe(3)
+
+        // Customer 2: orders 3, 4 (total: 2, onlyNotNull: 2)
+        const customer2 = customerSummary.get(2)
+        expect(customer2).toBeDefined()
+        expect(customer2?.total).toBe(2)
+        expect(customer2?.onlyNotNull).toBe(2)
+
+        // Customer 3: orders 5, 6 (total: 2, onlyNotNull: 1)
+        const customer3 = customerSummary.get(3)
+        expect(customer3).toBeDefined()
+        expect(customer3?.total).toBe(2)
+        expect(customer3?.onlyNotNull).toBe(1)
       })
 
       test(`group by status`, () => {
