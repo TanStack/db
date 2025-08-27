@@ -4,6 +4,36 @@ import type { QueryBuilder } from "./index.js"
 import type { ResolveType } from "../../types.js"
 
 /**
+ * CLEAN TYPES ARCHITECTURE
+ *
+ * This file defines clean, user-facing types for the query builder that hide
+ * internal implementation details. The key separation is:
+ *
+ * 1. **User-Facing Types** (this file):
+ *    - RefProxy<T> - Clean interface without internal properties
+ *    - Ref<T> - Opaque branded type showing `Ref<T>` in IDE
+ *    - No __refProxy, __path, __type properties visible to users
+ *    - Recursive support for nested property access
+ *
+ * 2. **Runtime Implementation** (ref-proxy.ts):
+ *    - RefProxy interface with internal properties for runtime functionality
+ *    - Structurally compatible with clean types
+ *    - Internal properties (__refProxy, __path, __type) available at runtime
+ *
+ * 3. **Type Compatibility**:
+ *    - Runtime proxies are assignable to clean types
+ *    - Query builder callbacks use clean types for IDE experience
+ *    - Runtime uses actual proxies with internal properties
+ *
+ * 4. **Nested Property Access** (FIXED):
+ *    - Optional properties correctly handled with `| undefined` outside RefProxy
+ *    - Nested access like `user.address?.city` works correctly
+ *    - Proper optionality and nullability preservation
+ *
+ * This architecture provides optimal IDE experience while maintaining runtime functionality.
+ */
+
+/**
  * Context - The central state container for query builder operations
  *
  * This interface tracks all the information needed to build and type-check queries:
@@ -144,8 +174,7 @@ export type WhereCallback<TContext extends Context> = (
  * - `{ [key: string]: SelectValue }`: Nested object projection
  * - `PrecomputeRefStructure<any>`: Spread operations like `...users`
  *
- * Note: The runtime spread implementation uses internal RefProxy properties
- * but these are hidden from the type system for cleaner typing.
+ * The clean RefProxy type ensures no internal properties are visible to users.
  *
  * Examples:
  * ```typescript
@@ -176,7 +205,7 @@ type SelectValue =
   | undefined // Optional values
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
-  | SpreadableRefProxy<any> // For spread operations without internal properties
+  | SpreadableRefProxy<any> // For spread operations
   | Array<Ref<any>>
 
 // Recursive shape for select objects allowing nested projections
@@ -215,11 +244,11 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  *
  * **Nested Objects** (recursive):
  * - Plain objects are recursively processed to handle nested projections
- * - RefProxy objects are detected and excluded from recursion
+ * - RefProxy objects are detected and their types extracted
  *
  * **Special Cases**:
  * - `undefined` → `undefined`: Direct undefined values
- * - Objects with `__type` → the type (for internal RefProxy handling)
+ * - Objects with SpreadableRefProxy are handled for spread operations
  *
  * Example transformation:
  * ```typescript
@@ -231,61 +260,41 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  * ```
  */
 export type ResultTypeFromSelect<TSelectObject> = Simplify<{
-  [K in keyof StripInternalKeys<TSelectObject>]: StripInternalKeys<TSelectObject>[K] extends RefProxy<
-    infer T
-  >
+  [K in keyof TSelectObject]: TSelectObject[K] extends SpreadableRefProxy<infer T>
     ? T
-    : StripInternalKeys<TSelectObject>[K] extends Ref<infer T>
+    : TSelectObject[K] extends RefProxy<infer T>
       ? T
-      : StripInternalKeys<TSelectObject>[K] extends Ref<infer T> | undefined
-        ? T | undefined
-        : StripInternalKeys<TSelectObject>[K] extends Ref<infer T> | null
-          ? T | null
-          : StripInternalKeys<TSelectObject>[K] extends
-                | RefProxy<infer T>
-                | undefined
-            ? T | undefined
-            : StripInternalKeys<TSelectObject>[K] extends RefProxy<
-                  infer T
-                > | null
-              ? T | null
-              : StripInternalKeys<TSelectObject>[K] extends BasicExpression<
-                    infer T
-                  >
-                ? T
-                : StripInternalKeys<TSelectObject>[K] extends Aggregate<infer T>
+      : TSelectObject[K] extends Ref<infer T>
+        ? T
+        : TSelectObject[K] extends Ref<infer T> | undefined
+          ? T | undefined
+          : TSelectObject[K] extends Ref<infer T> | null
+            ? T | null
+            : TSelectObject[K] extends RefProxy<infer T> | undefined
+              ? T | undefined
+              : TSelectObject[K] extends RefProxy<infer T> | null
+                ? T | null
+                : TSelectObject[K] extends BasicExpression<infer T>
                   ? T
-                  : StripInternalKeys<TSelectObject>[K] extends string
-                    ? StripInternalKeys<TSelectObject>[K]
-                    : StripInternalKeys<TSelectObject>[K] extends number
-                      ? StripInternalKeys<TSelectObject>[K]
-                      : StripInternalKeys<TSelectObject>[K] extends boolean
-                        ? StripInternalKeys<TSelectObject>[K]
-                        : StripInternalKeys<TSelectObject>[K] extends null
-                          ? null
-                          : StripInternalKeys<TSelectObject>[K] extends undefined
-                            ? undefined
-                            : StripInternalKeys<TSelectObject>[K] extends {
-                                  __type: infer U
-                                }
-                              ? U
-                              : StripInternalKeys<TSelectObject>[K] extends Record<
-                                    string,
-                                    any
-                                  >
-                                ? ResultTypeFromSelect<
-                                    StripInternalKeys<
-                                      StripInternalKeys<TSelectObject>[K]
-                                    >
-                                  >
+                  : TSelectObject[K] extends Aggregate<infer T>
+                    ? T
+                    : TSelectObject[K] extends string
+                      ? TSelectObject[K]
+                      : TSelectObject[K] extends number
+                        ? TSelectObject[K]
+                      : TSelectObject[K] extends boolean
+                          ? TSelectObject[K]
+                          : TSelectObject[K] extends null
+                            ? null
+                            : TSelectObject[K] extends undefined
+                              ? undefined
+                              : TSelectObject[K] extends Record<string, any>
+                                ? ResultTypeFromSelect<TSelectObject[K]>
                                 : never
 }>
 
-// Helper to strip internal RefProxy keys from any object type
-type StripInternalKeys<T> =
-  T extends Record<string, any>
-    ? Omit<T, `__refProxy` | `__path` | `__type`>
-    : T
+// Helper to convert union to intersection
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never
 
 // Helper to make a type display better in IDEs
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -529,18 +538,18 @@ export type PrecomputeRefStructure<T extends Record<string, any>> = {
 }
 
 /**
- * RefProxyFor - Backward compatibility wrapper for creating refs from any type
+ * RefProxyFor - Clean wrapper for creating refs from any type
  *
- * This is a simplified version of the ref creation logic that can be used
- * for individual types rather than entire query contexts. It's useful for:
+ * This provides a clean interface for creating ref structures from individual types.
+ * It's useful for:
  * - Standalone composable functions
  * - Reusable query fragments
- * - Backward compatibility with existing code
+ * - Type-safe ref creation
  *
- * It follows the same principles as PrecomputeRefStructure and RefProxyForContext:
+ * It follows the same principles as RefProxyForContext:
  * - Place undefined/null outside refs for optional chaining support
  * - Handle both optional and nullable types correctly
- * - Only wrap leaf values in RefProxy/Ref
+ * - Only wrap leaf values in Ref/RefProxy
  * - Preserve object structures for spread operations
  */
 export type RefProxyFor<T> =
@@ -550,135 +559,102 @@ export type RefProxyFor<T> =
       ? RefProxy<T>
       : IsOptional<T> extends true
         ? NonUndefined<T> extends Record<string, any>
-          ? PrecomputeRefStructure<NonUndefined<T>> | undefined
-          : RefProxy<T>
+          ? RefProxy<NonUndefined<T>> | undefined
+          : Ref<T>
         : T extends Record<string, any>
-          ? PrecomputeRefStructure<T>
-          : RefProxy<T>
+          ? RefProxy<T>
+          : Ref<T>
 
 /**
- * RefProxy - The core ref interface that powers the query builder
+ * RefProxy - The user-facing ref interface for the query builder
  *
- * This is the foundational type that represents a reference to a value in the query.
- * It contains internal metadata for tracking the path to the value and its type,
- * plus user-facing properties that mirror the structure of the referenced type.
+ * This is a clean type that represents a reference to a value in the query,
+ * designed for optimal IDE experience without internal implementation details.
+ * It provides a recursive interface that allows nested property access while
+ * preserving optionality and nullability correctly.
  *
- * Key features:
- * 1. **Internal metadata**: __refProxy, __path, __type for runtime and type system
- * 2. **Recursive structure**: Object properties become nested RefProxy/Ref types
- * 3. **Optionality handling**: undefined/null are placed outside refs for ?. support
- * 4. **Type preservation**: The structure mirrors the original type as closely as possible
- * 5. **Spread support**: Internal properties are hidden during spread operations
+ * When spread in select clauses, it correctly produces the underlying data type
+ * without Ref wrappers, enabling clean spread operations.
  *
- * Examples:
- * RefProxy<string> → { __refProxy: true, __path: [...], __type: string }
- * RefProxy<{name: string}> → {
- *   __refProxy: true, __path: [...], __type: {...},
- *   name: Ref<string>  // Clean display, same as RefProxy<string>
- * }
+ * Example usage:
+ * ```typescript
+ * // Clean interface - no internal properties visible
+ * const users: RefProxy<{ id: number; profile?: { bio: string } }> = { ... }
+ * users.id // Ref<number> - clean display
+ * users.profile?.bio // Ref<string> - nested optional access works
  *
- * The intersection (&) with the conditional type ensures that:
- * - For primitive types: Only internal metadata is added
- * - For object types: Properties are recursively transformed with optionality preserved
- * - For undefined: No additional properties (just metadata)
- * - For spreads: Internal properties are excluded from type checking
+ * // Spread operations work cleanly:
+ * select(({ user }) => ({ ...user })) // Returns User type, not Ref types
+ * // No __refProxy, __path, or __type properties visible
+ * ```
  */
 export type RefProxy<T = any> = {
-  /** @internal - Runtime marker to identify ref proxy objects */
-  readonly __refProxy: true
-  /** @internal - Path segments for building query expressions */
-  readonly __path: Array<string>
-  /** @internal - Type information for TypeScript inference */
-  readonly __type: T
-} & (T extends undefined
-  ? {} // undefined types get no additional properties
-  : T extends Record<string, any>
-    ? {
-        // Object types get recursive property transformation
-        [K in keyof T]: IsNonExactOptional<T[K]> extends true
-          ? IsNonExactNullable<T[K]> extends true
-            ? // T[K] is both non-exact optional and non-exact nullable
-              NonNullable<T[K]> extends Record<string, any>
-              ? RefProxy<NonNullable<T[K]>> | undefined // Both optional and nullable object
-              : Ref<NonNullable<T[K]>> | undefined // Both optional and nullable leaf
-            : // T[K] is optional but not nullable
-              NonUndefined<T[K]> extends Record<string, any>
-              ? RefProxy<NonUndefined<T[K]>> | undefined // Optional object
-              : Ref<NonUndefined<T[K]>> | undefined // Optional leaf
-          : IsNonExactNullable<T[K]> extends true
-            ? // T[K] is nullable but not optional
-              NonNull<T[K]> extends Record<string, any>
-              ? RefProxy<NonNull<T[K]>> | null // Nullable object
-              : Ref<NonNull<T[K]>> | null // Nullable leaf
-            : // T[K] is exactly undefined, exactly null, or neither
-              T[K] extends Record<string, any>
-              ? RefProxy<T[K]> // Required object: full RefProxy
-              : Ref<T[K]> // Required leaf: clean Ref display (includes exact undefined/null)
-      }
-    : {}) // Primitive types get no additional properties
+  [K in keyof T]: IsNonExactOptional<T[K]> extends true
+    ? IsNonExactNullable<T[K]> extends true
+      ? // Both optional and nullable
+        NonNullable<T[K]> extends Record<string, any>
+        ? RefProxy<NonNullable<T[K]>> | undefined
+        : Ref<NonNullable<T[K]>> | undefined
+      : // Optional only
+        NonUndefined<T[K]> extends Record<string, any>
+        ? RefProxy<NonUndefined<T[K]>> | undefined
+        : Ref<NonUndefined<T[K]>> | undefined
+    : IsNonExactNullable<T[K]> extends true
+      ? // Nullable only
+        NonNull<T[K]> extends Record<string, any>
+        ? RefProxy<NonNull<T[K]>> | null
+        : Ref<NonNull<T[K]>> | null
+      : // Required
+        T[K] extends Record<string, any>
+        ? RefProxy<T[K]>
+        : Ref<T[K]>
+} & Ref<T>
 
 /**
- * SpreadableRefProxy - Type for spread operations that excludes internal properties
+ * SpreadableRefProxy - Type for spread operations that extracts underlying values
  *
- * This type represents what you get when you spread a RefProxy. It omits the internal
- * properties (__refProxy, __path, __type) and only includes the user-facing properties
- * that should be part of the spread operation.
+ * This type represents what you get when you spread a RefProxy. It recursively
+ * extracts the underlying values from Ref types, enabling clean spread operations.
  *
- * This enables clean spread operations like:
+ * When spread (...), it provides the original data structure with actual values,
+ * not Ref wrappers. This allows spreading RefProxy objects into select clauses
+ * while getting the underlying data types.
+ *
+ * Example usage:
  * ```typescript
  * select({
  *   id: employees.id,
- *   name: employees.name,
- *   ...employees.profile  // Only spreads bio, skills, contact - not __refProxy etc.
+ *   ...employees.profile  // Gets { bio: string, department: string }, not Ref types
  * })
  * ```
  */
-export type SpreadableRefProxy<T> = Omit<
-  RefProxy<T>,
-  `__refProxy` | `__path` | `__type`
->
+export type SpreadableRefProxy<T> = T extends Ref<infer U>
+  ? U
+  : T extends Record<string, any>
+    ? T extends RefProxy<infer U>
+      ? U  // If T is RefProxy<U>, extract U directly
+      : {
+          [K in keyof T]: T[K] extends Ref<infer U>
+            ? U
+            : T[K] extends RefProxy<infer U>
+              ? SpreadableRefProxy<U>
+              : SpreadableRefProxy<T[K]>
+        }
+    : T
 
 /**
  * Ref - The user-facing ref type with clean IDE display
  *
- * Structurally compatible with `RefProxy<T>` so runtime proxies can be used
- * wherever a `Ref<T>` is expected, while hiding internal proxy properties.
+ * An opaque branded type that represents a reference to a value in a query.
+ * This shows as `Ref<T>` in the IDE without exposing internal structure.
  *
- * - For object types: exposes the same nested property structure, with leaves
- *   typed as `Ref<Leaf>` and optionality/nullability preserved outside the Ref.
- * - For primitives: an opaque branded wrapper so hovers show `Ref<T>`.
+ * Example usage:
+ * - Ref<number> displays as `Ref<number>` in IDE
+ * - Ref<string> displays as `Ref<string>` in IDE
+ * - No internal properties like __refProxy, __path, __type are visible
  */
 declare const RefBrand: unique symbol
-type RefLeaf<T> = { readonly [RefBrand]?: T }
-export type Ref<T = any> = T extends undefined
-  ? RefLeaf<T>
-  : T extends Record<string, any>
-    ? {
-        [K in keyof T]: IsNonExactOptional<T[K]> extends true
-          ? IsNonExactNullable<T[K]> extends true
-            ? // T[K] is both non-exact optional and non-exact nullable
-              NonNullable<T[K]> extends Record<string, any>
-              ?
-                  | (Ref<NonNullable<T[K]>> | RefProxy<NonNullable<T[K]>>)
-                  | undefined
-              : Ref<NonNullable<T[K]>> | undefined
-            : // T[K] is optional but not nullable
-              NonUndefined<T[K]> extends Record<string, any>
-              ?
-                  | (Ref<NonUndefined<T[K]>> | RefProxy<NonUndefined<T[K]>>)
-                  | undefined
-              : Ref<NonUndefined<T[K]>> | undefined
-          : IsNonExactNullable<T[K]> extends true
-            ? // T[K] is nullable but not optional
-              NonNull<T[K]> extends Record<string, any>
-              ? (Ref<NonNull<T[K]>> | RefProxy<NonNull<T[K]>>) | null
-              : Ref<NonNull<T[K]>> | null
-            : // T[K] is exactly undefined, exactly null, or neither
-              T[K] extends Record<string, any>
-              ? Ref<T[K]> | RefProxy<T[K]>
-              : Ref<T[K]>
-      } & RefLeaf<T>
-    : RefLeaf<T>
+export type Ref<T = any> = { readonly [RefBrand]?: T }
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
