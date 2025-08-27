@@ -190,12 +190,13 @@ export function createRefProxy<T extends Record<string, any>>(
  * If it's a RefProxy, creates a Ref, otherwise creates a Value
  */
 export function toExpression<T = any>(value: T): BasicExpression<T>
-export function toExpression(value: RefProxy<any>): BasicExpression<any>
+export function toExpression<T>(value: RefProxy<T>): BasicExpression<T>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
+    // Carry through the generic type from the ref-proxy's __type
     const expr = new PropRef(value.__path)
     ;(expr as any).__orderId = (value as any).__orderId
-    return expr
+    return expr as unknown as BasicExpression<typeof value.__type>
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (
