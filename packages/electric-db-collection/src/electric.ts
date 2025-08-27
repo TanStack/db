@@ -483,6 +483,9 @@ function createElectricSync<T extends Row<unknown>>(
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
+          // Note that Electric sends a 409 error on a `must-refetch` message, but the
+          // ShapeStream handled this and it will not reach this handler, therefor
+          // this markReady will not be triggers by a `must-refetch`.
           markReady()
 
           if (shapeOptions.onError) {
