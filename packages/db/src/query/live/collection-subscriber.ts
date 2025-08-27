@@ -229,7 +229,7 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const { offset, limit, comparator } =
+    const { offset, limit, comparator, dataNeeded } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -245,11 +245,18 @@ export class CollectionSubscriber<
       // and filter out changes that are bigger than the biggest value we've sent so far
       // because they can't affect the topK
       const splittedChanges = splitUpdates(changes)
-      const filteredChanges = filterChangesSmallerOrEqualToMax(
-        splittedChanges,
-        comparator,
-        this.biggest
-      )
+      let filteredChanges = splittedChanges
+      if (dataNeeded!() === 0) {
+        // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
+        // because they can never make it into the topK.
+        // However, if the topK isn't full yet, we need to also send changes > maxSentValue
+        // because they will make it into the topK
+        filteredChanges = filterChangesSmallerOrEqualToMax(
+          splittedChanges,
+          comparator,
+          this.biggest
+        )
+      }
       this.sendChangesToPipeline(
         filteredChanges,
         this.loadMoreIfNeeded.bind(this)
