@@ -138,10 +138,48 @@ describe(`RxDB Integration`, () => {
 
         // deletes
         await doc.getLatest().remove()
-        console.log(':::::::::::::::::::::::::::::::::1')
-        console.dir(collection.get(`3`))
         expect(collection.get(`3`)).toEqual(undefined)
 
+        await db.remove()
+    })
+
+    it(`should update RxDB when the collection changes data`, async () => {
+        const initialItems: Array<TestDocType> = [
+            { id: `1`, name: `Item 1` },
+            { id: `2`, name: `Item 2` },
+        ]
+
+        const { collection, rxCollection, db } = await createTestState(initialItems);
+
+
+        // inserts
+        console.log(':::::::::::::::::::::::::::::::::::')
+        const xxx = collection.insert({ id: `3`, name: `inserted` })
+        let doc = await rxCollection.findOne('3').exec(true)
+        expect(doc.name).toEqual('inserted')
+
+        // updates
+        collection.update(
+            '3',
+            d => {
+                console.log('inside of update:')
+                console.dir(d)
+                d.name = 'updated'
+            })
+        expect(collection.get(`3`).name).toEqual('updated')
+        await collection.stateWhenReady()
+        console.log('UPDATE OUTER DONE')
+        await rxCollection.database.requestIdlePromise()
+        doc = await rxCollection.findOne('3').exec(true)
+        expect(doc.name).toEqual('updated')
+
+
+        // deletes
+        collection.delete('3')
+        await rxCollection.database.requestIdlePromise()
+        console.log('DELETE OUTER DONE')
+        const mustNotBeFound = await rxCollection.findOne('3').exec()
+        expect(mustNotBeFound).toEqual(null)
 
         await db.remove()
     })

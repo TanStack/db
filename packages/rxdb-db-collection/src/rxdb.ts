@@ -2,6 +2,7 @@ import {
     RxCollection,
     RxDocument,
     RxQuery,
+    clone,
     getFromMapOrCreate,
     lastOfArray
 } from "rxdb/plugins/core"
@@ -19,12 +20,13 @@ import type {
     UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { stripRxdbFields } from './helper'
 
 const debug = DebugModule.debug(`ts/db:electric`)
 
 
 export type RxDBCollectionConfig<
-    TExplicit extends object = object,
+    TExplicit extends object = Record<string, unknown>,
     TSchema extends StandardSchemaV1 = never
 > = Omit<
     CollectionConfig<
@@ -47,7 +49,7 @@ export type RxDBCollectionConfig<
  * @returns Collection options with utilities
  */
 export function rxdbCollectionOptions<
-    TExplicit extends object = object,
+    TExplicit extends object = Record<string, unknown>,
     TSchema extends StandardSchemaV1 = never
 >(
     config: RxDBCollectionConfig<TExplicit, TSchema>
@@ -135,7 +137,7 @@ export function rxdbCollectionOptions<
                     docs.forEach(d => {
                         write({
                             type: 'insert',
-                            value: d.toMutableJSON()
+                            value: stripRxdbFields(clone(d.toJSON()))
                         })
                     })
 
@@ -161,7 +163,7 @@ export function rxdbCollectionOptions<
             async function startOngoingFetch() {
                 // Subscribe early and buffer live changes during initial load and ongoing
                 sub = rxCollection.$.subscribe((ev) => {
-                    const cur = ev.documentData as Row
+                    const cur = stripRxdbFields(clone(ev.documentData as Row))
                     switch (ev.operation) {
                         case 'INSERT':
                             if (cur) queue({ type: 'insert', value: cur })
@@ -205,22 +207,41 @@ export function rxdbCollectionOptions<
         getKey,
         sync,
         onInsert: async (params) => {
+            console.log('ON INSERT CALLED')
             debug("insert", params)
-            return rxCollection.insert(params.value)
+            const newItems = params.transaction.mutations.map(m => m.modified)
+            return rxCollection.bulkUpsert(newItems as any).then(result => {
+                if (result.error.length > 0) {
+                    throw result.error
+                }
+                return result.success
+            })
         },
         onUpdate: async (params) => {
-            debug("update", params.id, params.value)
-            const doc = await rxCollection.findOne(params.id).exec()
-            if (doc) {
-                await doc.patch(params.value)
+            debug("update", params)
+            const mutations = params.transaction.mutations.filter(m => m.type === 'update')
+
+            for (const mutation of mutations) {
+                const newValue = stripRxdbFields(mutation.modified)
+                const id = (newValue as any)[primaryPath]
+                const doc = await rxCollection.findOne(id).exec()
+                if (!doc) {
+                    continue
+                }
+                await doc.incrementalPatch(newValue as any)
+                console.log('UPDATE DONE')
             }
         },
         onDelete: async (params) => {
-            debug("delete", params.id)
-            const doc = await rxCollection.findOne(params.id).exec()
-            if (doc) {
-                await doc.remove()
-            }
+            debug("delete", params)
+            const mutations = params.transaction.mutations.filter(m => m.type === 'delete')
+            const ids = mutations.map(mutation => (mutation.original as any)[primaryPath])
+            return rxCollection.bulkRemove(ids).then(result => {
+                if (result.error.length > 0) {
+                    throw result.error
+                }
+                return result.success
+            })
         }
     }
     return collectionConfig;
