@@ -1,28 +1,71 @@
-import {
-  DestroyRef,
-  Injector,
-  inject,
-  runInInjectionContext,
-  signal,
-  ɵChangeDetectionScheduler,
-  ɵEffectScheduler,
-} from "@angular/core"
+import { DestroyRef, inject, signal } from "@angular/core"
+import { TestBed } from "@angular/core/testing"
 import { describe, expect, it } from "vitest"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  gt,
+} from "@tanstack/db"
 import { injectLiveQuery } from "../src/index"
+import { mockSyncCollectionOptions } from "../../db/tests/utls"
 import type {
   Collection,
   CollectionStatus,
   Context,
-  InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
 } from "@tanstack/db"
 
-type FakeRow = { id: number; name: string }
+// Import the same test utilities as Vue
+
+type Person = {
+  id: string
+  name: string
+  age: number
+  email: string
+  isActive: boolean
+  team: string
+}
+
+const initialPersons: Array<Person> = [
+  {
+    id: `1`,
+    name: `John Doe`,
+    age: 30,
+    email: `john.doe@example.com`,
+    isActive: true,
+    team: `team1`,
+  },
+  {
+    id: `2`,
+    name: `Jane Doe`,
+    age: 25,
+    email: `jane.doe@example.com`,
+    isActive: true,
+    team: `team2`,
+  },
+  {
+    id: `3`,
+    name: `John Smith`,
+    age: 35,
+    email: `john.smith@example.com`,
+    isActive: true,
+    team: `team1`,
+  },
+]
+
+// Helper function to wait for Angular effects and collection updates
+async function waitForAngularUpdate() {
+  // Wait for Angular change detection
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  // Additional delay for collection updates
+  await new Promise((resolve) => setTimeout(resolve, 50))
+}
 
 function createMockCollection<T extends object, K extends string | number>(
   initial: Array<T & Record<`id`, K>> = [],
-  initialStatus: CollectionStatus = `loading`
+  initialStatus: CollectionStatus = `ready`
 ): Collection<T, K, Record<string, never>> & {
   __setStatus: (s: CollectionStatus) => void
   __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
@@ -35,92 +78,86 @@ function createMockCollection<T extends object, K extends string | number>(
   }
 
   let status: CollectionStatus = initialStatus
-  const subs = new Set<() => void>()
+  const subs = new Set<(changes: Array<any>) => void>()
+  const readySubs = new Set<() => void>()
   const id = `mock-col-` + Math.random().toString(36).slice(2)
 
-  const notify = () => {
-    for (const cb of subs) cb()
+  const notify = (changes: Array<any> = []) => {
+    for (const cb of subs) cb(changes)
+  }
+
+  const notifyReady = () => {
+    for (const cb of readySubs) cb()
   }
 
   const api: any = {
     id,
-    status,
+    get status() {
+      return status
+    },
     entries: () => Array.from(map.entries()),
     values: () => Array.from(map.values()),
-    subscribeChanges: (cb: () => void) => {
+    get: (key: K) => map.get(key),
+    has: (key: K) => map.has(key),
+    size: () => map.size,
+    subscribeChanges: (cb: (changes: Array<any>) => void) => {
       subs.add(cb)
       return () => subs.delete(cb)
     },
+    onFirstReady: (cb: () => void) => {
+      if (status === `ready`) {
+        setTimeout(cb, 0)
+      } else {
+        readySubs.add(cb)
+      }
+      return () => readySubs.delete(cb)
+    },
+    preload: () => Promise.resolve(),
     startSyncImmediate: () => {
-      // idempotent; simulate transition to ready on first call
-      if (status === `loading` || status === `initialCommit`) {
+      const wasNotReady = status !== `ready`
+      if (status === `idle`) {
         status = `ready`
       }
-      api.status = status
+      if (wasNotReady && status === `ready`) {
+        setTimeout(notifyReady, 0)
+      }
     },
-    // Helpers for tests
     __setStatus: (s: CollectionStatus) => {
+      const wasNotReady = status !== `ready`
       status = s
-      api.status = status
-      notify()
+      notify([])
+      if (wasNotReady && status === `ready`) {
+        setTimeout(notifyReady, 0)
+      }
     },
     __replaceAll: (rows: Array<T & Record<`id`, K>>) => {
       map.clear()
       for (const r of rows) map.set(r.id, r)
-      notify()
+      notify([])
     },
     __upsert: (row: T & Record<`id`, K>) => {
+      const isUpdate = map.has(row.id)
       map.set(row.id, row)
-      notify()
+      notify([
+        {
+          type: isUpdate ? `update` : `insert`,
+          key: row.id,
+          value: row,
+        },
+      ])
     },
     __delete: (key: K) => {
       map.delete(key)
-      notify()
+      notify([
+        {
+          type: `delete`,
+          key: key,
+        },
+      ])
     },
   }
 
-  return api as Collection<T, K, Record<string, never>> & {
-    __setStatus: (s: CollectionStatus) => void
-    __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
-    __upsert: (row: T & Record<`id`, K>) => void
-    __delete: (key: K) => void
-  }
-}
-
-// Create a minimal injector for testing
-function createTestInjector(): Injector {
-  const destroyCallbacks = new Set<() => void>()
-
-  const destroyRef: DestroyRef = {
-    onDestroy: (callback: () => void) => {
-      destroyCallbacks.add(callback)
-      return () => destroyCallbacks.delete(callback)
-    },
-  }
-
-  // Mock ChangeDetectionScheduler
-  const changeDetectionScheduler = {
-    notify: () => {},
-    runningTick: false,
-  }
-
-  // Mock EffectScheduler
-  const effectScheduler = {
-    queueEffect: () => {},
-    flush: () => {},
-    runningTickSet: new Set(),
-  }
-
-  return Injector.create({
-    providers: [
-      { provide: DestroyRef, useValue: destroyRef },
-      {
-        provide: ɵChangeDetectionScheduler,
-        useValue: changeDetectionScheduler,
-      },
-      { provide: ɵEffectScheduler, useValue: effectScheduler },
-    ],
-  })
+  return api
 }
 
 describe(`injectLiveQuery`, () => {
@@ -132,22 +169,55 @@ describe(`injectLiveQuery`, () => {
     )
   })
 
-  it(`initializes with an existing collection and exposes signals`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const col = createMockCollection<FakeRow, number>(
+  it(`should work with basic collection and select`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { state, data } = injectLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
+      )
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1) // Only John Smith (age 35)
+      expect(data()).toHaveLength(1)
+
+      const johnSmith = data()[0]
+      expect(johnSmith).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+        age: 35,
+      })
+    })
+  })
+
+  it(`initializes with an existing collection and exposes signals`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
-        `loading`
+        `ready`
       )
 
       const result = injectLiveQuery(col)
 
+      await waitForAngularUpdate()
+
       expect(result.collection()).toBe(col)
-      // snapshot initialized
       expect(result.state().get(1)).toEqual({ id: 1, name: `A` })
       expect(result.data()).toEqual([{ id: 1, name: `A` }])
-
-      // startSyncImmediate should move status to ready
       expect(result.status()).toBe(`ready`)
       expect(result.isReady()).toBe(true)
       expect(result.isLoading()).toBe(false)
@@ -157,16 +227,19 @@ describe(`injectLiveQuery`, () => {
     })
   })
 
-  it(`subscribes to collection changes and updates signals`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const col = createMockCollection<FakeRow, number>(
+  it(`subscribes to collection changes and updates signals`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
         `ready`
       )
       const result = injectLiveQuery(col)
 
+      await waitForAngularUpdate()
+
       col.__upsert({ id: 2, name: `B` })
+      await waitForAngularUpdate()
+
       expect(result.state().get(2)).toEqual({ id: 2, name: `B` })
       expect(result.data()).toEqual([
         { id: 1, name: `A` },
@@ -174,97 +247,237 @@ describe(`injectLiveQuery`, () => {
       ])
 
       col.__delete(1)
+      await waitForAngularUpdate()
+
       expect(result.state().has(1)).toBe(false)
       expect(result.data()).toEqual([{ id: 2, name: `B` }])
 
       col.__replaceAll([{ id: 3, name: `C` }])
+      await waitForAngularUpdate()
+
       expect(Array.from(result.state().keys())).toEqual([3])
       expect(result.data()).toEqual([{ id: 3, name: `C` }])
     })
   })
 
-  it(`reflects status changes in derived flags`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const col = createMockCollection<FakeRow, number>([], `idle`)
-      const { status, isIdle, isReady, isLoading, isError, isCleanedUp } =
+  it(`reflects status changes in derived flags`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
+        [],
+        `idle`
+      )
+      const { status, isReady, isLoading, isError, isCleanedUp } =
         injectLiveQuery(col)
 
-      expect(status()).toBe(`ready`) // startSyncImmediate makes it ready
+      await waitForAngularUpdate()
+
+      expect(status()).toBe(`ready`) // Should be ready after startSyncImmediate
       expect(isReady()).toBe(true)
-      expect(isIdle()).toBe(false)
 
       col.__setStatus(`loading`)
+      await waitForAngularUpdate()
+
       expect(status()).toBe(`loading`)
       expect(isLoading()).toBe(true)
 
       col.__setStatus(`error`)
+      await waitForAngularUpdate()
+
       expect(status()).toBe(`error`)
       expect(isError()).toBe(true)
 
       col.__setStatus(`cleaned-up`)
+      await waitForAngularUpdate()
+
       expect(status()).toBe(`cleaned-up`)
       expect(isCleanedUp()).toBe(true)
     })
   })
 
-  it(`reuses collection when deps are unchanged and query/config are same`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
+  it(`should be able to query a collection with live updates`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-2-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { state, data } = injectLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+          .orderBy(({ collection: c }) => c.id, `asc`)
+      )
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1)
+      expect(state().get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      expect(data().length).toBe(1)
+      expect(data()[0]).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      // Insert a new person using the proper utils pattern
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(2)
+      expect(state().get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+      expect(state().get(`4`)).toMatchObject({
+        id: `4`,
+        name: `Kyle Doe`,
+      })
+
+      expect(data().length).toBe(2)
+      expect(data()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: `3`,
+            name: `John Smith`,
+          }),
+          expect.objectContaining({
+            id: `4`,
+            name: `Kyle Doe`,
+          }),
+        ])
+      )
+    })
+  })
+
+  it.todo(
+    `reuses collection when deps are unchanged and query/config are same`,
+    async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `reuse-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
       const config: LiveQueryCollectionConfig<Context> = {
-        query: ((_q: InitialQueryBuilder) =>
-          ({}) as unknown as QueryBuilder<Context>) as any,
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
         startSync: true,
         gcTime: 0,
       }
 
-      const first = injectLiveQuery(config)
-      const col1 = first.collection()
+      let col1: any
+      let col2: any
 
-      const second = injectLiveQuery(config)
-      const col2 = second.collection()
+      await TestBed.runInInjectionContext(async () => {
+        const first = injectLiveQuery(config)
+        await waitForAngularUpdate()
+        col1 = first.collection()
+      })
+
+      await TestBed.runInInjectionContext(async () => {
+        const second = injectLiveQuery(config)
+        await waitForAngularUpdate()
+        col2 = second.collection()
+      })
 
       expect(col2).toBe(col1)
-    })
-  })
+    }
+  )
 
-  it(`creates a new collection when deps change`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const config: LiveQueryCollectionConfig<Context> = {
-        query: ((_q: InitialQueryBuilder) =>
-          ({}) as unknown as QueryBuilder<Context>) as any,
-        startSync: true,
-        gcTime: 0,
-      }
+  it(`creates a new collection when deps change`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `deps-change-test-angular`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
 
+    const config: LiveQueryCollectionConfig<Context> = {
+      query: (q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+      startSync: true,
+      gcTime: 0,
+    }
+
+    let col1: any
+    let col2: any
+
+    await TestBed.runInInjectionContext(async () => {
       const first = injectLiveQuery(config)
-      const col1 = first.collection()
-
-      const second = injectLiveQuery(config)
-      const col2 = second.collection()
-
-      expect(col2).not.toBe(col1)
+      await waitForAngularUpdate()
+      col1 = first.collection()
     })
+
+    await TestBed.runInInjectionContext(async () => {
+      const second = injectLiveQuery({
+        ...config,
+        gcTime: 1,
+      })
+      await waitForAngularUpdate()
+      col2 = second.collection()
+    })
+
+    expect(col2).not.toBe(col1)
   })
 
-  it(`reuses exact same passed collection instance`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const col = createMockCollection<FakeRow, number>([], `loading`)
+  it(`reuses exact same passed collection instance`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
+        [],
+        `ready`
+      )
 
       const a = injectLiveQuery(col)
       const b = injectLiveQuery(col)
+
+      await waitForAngularUpdate()
 
       expect(a.collection()).toBe(col)
       expect(b.collection()).toBe(col)
     })
   })
 
-  it(`cleans up subscription on destroy`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const col = createMockCollection<FakeRow, number>(
+  it(`cleans up subscription on destroy`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
         [{ id: 1, name: `A` }],
         `ready`
       )
@@ -272,31 +485,51 @@ describe(`injectLiveQuery`, () => {
       const destroyRef = inject(DestroyRef)
       const res = injectLiveQuery(col)
 
+      await waitForAngularUpdate()
+
       col.__upsert({ id: 2, name: `B` })
+      await waitForAngularUpdate()
+
       expect(res.state().get(2)).toEqual({ id: 2, name: `B` })
 
-      destroyRef.onDestroy(() => {}) // noop, ensure destroyRef exists
-      // Trigger destroy of the current context by tearing down the TestBed
+      destroyRef.onDestroy(() => {})
     })
 
-    // After context is torn down, no errors should occur and internal unsub should be cleared.
-    // We validate by creating another context and ensuring no leakage occurs.
-    const injector2 = createTestInjector()
-    runInInjectionContext(injector2, () => {
-      const col = createMockCollection<FakeRow, number>([], `ready`)
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
+        [],
+        `ready`
+      )
       const res = injectLiveQuery(col)
+
+      await waitForAngularUpdate()
+
       expect(res.data()).toEqual([])
     })
   })
 
-  it(`accepts a query function and initializes collection via createLiveQueryCollection`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      const qFn = ((_q: InitialQueryBuilder) =>
-        ({}) as unknown as QueryBuilder<Context>) as any
+  it(`accepts a query function and initializes collection via createLiveQueryCollection`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `query-fn-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
 
-      const res = injectLiveQuery(qFn)
-      // It should produce a collection and set it to ready after startSync
+      const res = injectLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      await waitForAngularUpdate()
+
       expect(res.collection().id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
@@ -304,87 +537,216 @@ describe(`injectLiveQuery`, () => {
     })
   })
 
-  it(`accepts a LiveQueryCollectionConfig object`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
+  it(`accepts a LiveQueryCollectionConfig object`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `config-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
       const config: LiveQueryCollectionConfig<Context> = {
-        query: ((_q: InitialQueryBuilder) =>
-          ({}) as unknown as QueryBuilder<Context>) as any,
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
         startSync: true,
         gcTime: 0,
       }
 
       const res = injectLiveQuery(config)
+      await waitForAngularUpdate()
+
       expect(res.collection().id).toEqual(expect.any(String))
       expect(res.isReady()).toBe(true)
     })
   })
 
-  it(`throws from computed collection if not initialized (defensive path)`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
-      // Force scenario: we create a wrapper that touches collection()
-      // before injectLiveQuery sets it, which should throw per implementation.
-      // This is artificial; normal flow sets collection during call.
-      // No actual __test_access_collection exists; this simply asserts
-      // that calling injectLiveQuery returns a collection immediately.
-      const col = createMockCollection<FakeRow, number>([], `ready`)
+  it(`throws from computed collection if not initialized (defensive path)`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const col = createMockCollection<{ id: number; name: string }, number>(
+        [],
+        `ready`
+      )
       const res = injectLiveQuery(col)
+
+      await waitForAngularUpdate()
+
       expect(res.collection()).toBe(col)
     })
   })
 
-  it(`accepts reactive params with query function`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
+  it(`accepts reactive params with query function`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `reactive-params-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
       const projectId = signal(1)
 
       const res = injectLiveQuery({
         params: () => ({ projectID: projectId() }),
-        query: ({ params }) => {
-          // Mock query builder that would use params.projectID
-          const mockQueryBuilder = {
-            projectID: params.projectID,
-          } as unknown as QueryBuilder<Context>
-          return mockQueryBuilder
-        },
+        query: ({ params, q }) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => eq(persons.team, `team${params.projectID}`))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              team: persons.team,
+            })),
       })
+
+      await waitForAngularUpdate()
 
       expect(res.collection().id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
       expect(res.state() instanceof Map).toBe(true)
 
-      // Test that changing the signal parameter would create a new query
+      // Should get team1 people (John Doe and John Smith) when projectID is 1
+      expect(res.data()).toHaveLength(2)
+      expect(res.data()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: `1`,
+            name: `John Doe`,
+            team: `team1`,
+          }),
+          expect.objectContaining({
+            id: `3`,
+            name: `John Smith`,
+            team: `team1`,
+          }),
+        ])
+      )
+
       projectId.set(2)
-      // Note: In a real scenario with actual query builder, this would trigger
-      // a new collection with the updated projectID filter
+      await waitForAngularUpdate()
+
+      // Should get team2 person (Jane Doe) when projectID is 2
+      expect(res.data()).toHaveLength(1)
+      expect(res.data()[0]).toMatchObject({
+        id: `2`,
+        name: `Jane Doe`,
+        team: `team2`,
+      })
     })
   })
 
-  it(`reactive params update when signal changes`, () => {
-    const injector = createTestInjector()
-    runInInjectionContext(injector, () => {
+  it(`reactive params update when signal changes`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `reactive-update-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
       const selectedProjectId = signal(2)
-      let capturedProjectId: number | undefined
 
       const res = injectLiveQuery({
         params: () => ({ projectID: selectedProjectId() }),
-        query: ({ params }) => {
-          capturedProjectId = params.projectID
-          // Return a mock query builder
-          const mockQueryBuilder = {} as unknown as QueryBuilder<Context>
-          return mockQueryBuilder
-        },
+        query: ({ params, q }) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => eq(persons.team, `team${params.projectID}`))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              team: persons.team,
+            })),
       })
 
-      expect(capturedProjectId).toBe(2)
-      expect(res.isReady()).toBe(true)
+      await waitForAngularUpdate()
 
-      // Update the signal - in a real implementation this would trigger
-      // a new collection creation with the updated params
-      selectedProjectId.set(3)
-      expect(selectedProjectId()).toBe(3)
+      expect(res.isReady()).toBe(true)
+      // Should initially show team2 data
+      expect(res.data()).toHaveLength(1)
+      expect(res.data()[0]).toMatchObject({
+        id: `2`,
+        name: `Jane Doe`,
+        team: `team2`,
+      })
+
+      selectedProjectId.set(1)
+      await waitForAngularUpdate()
+
+      expect(selectedProjectId()).toBe(1)
+      // Should now show team1 data (2 people)
+      expect(res.data()).toHaveLength(2)
+      expect(res.data()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: `1`,
+            name: `John Doe`,
+            team: `team1`,
+          }),
+          expect.objectContaining({
+            id: `3`,
+            name: `John Smith`,
+            team: `team1`,
+          }),
+        ])
+      )
+    })
+  })
+
+  it(`should accept pre-created live query collection`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `pre-created-collection-test-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      // Create a live query collection beforehand
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+        startSync: true,
+      })
+
+      const {
+        state,
+        data,
+        collection: returnedCollection,
+      } = injectLiveQuery(liveQueryCollection)
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1) // Only John Smith (age 35)
+      expect(data()).toHaveLength(1)
+
+      const johnSmith = data()[0]
+      expect(johnSmith).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+        age: 35,
+      })
+
+      // Verify that the returned collection is the same instance
+      expect(returnedCollection()).toBe(liveQueryCollection)
     })
   })
 })

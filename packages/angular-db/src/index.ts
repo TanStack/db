@@ -4,7 +4,6 @@ import {
   computed,
   effect,
   inject,
-  linkedSignal,
   signal,
 } from "@angular/core"
 import { createLiveQueryCollection } from "@tanstack/db"
@@ -103,9 +102,6 @@ export function injectLiveQuery(opts: any) {
       typeof opts.id === `string`
 
     if (isExistingCollection) {
-      if (opts.status === `idle`) {
-        opts.startSyncImmediate()
-      }
       return opts
     }
 
@@ -133,83 +129,71 @@ export function injectLiveQuery(opts: any) {
         gcTime: 0,
       })
     }
+
+    // Handle LiveQueryCollectionConfig objects
+    if (opts && typeof opts === `object` && typeof opts.query === `function`) {
+      return createLiveQueryCollection(opts)
+    }
+
+    throw new Error(`Invalid options provided to injectLiveQuery`)
   })
 
   const state = signal(new Map<string | number, any>())
   const data = signal<Array<any>>([])
-
-  const status = linkedSignal(() => collection().status)
+  const status = signal<CollectionStatus>(`idle`)
 
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>
   ) => {
-    data.set(Array.from(currentCollection.values()))
+    const newState = new Map(currentCollection.entries())
+    const newData = Array.from(currentCollection.values())
+
+    state.set(newState)
+    data.set(newData)
+    status.set(currentCollection.status)
   }
 
-  let currentUnsub: (() => void) | null = null
+  let unsub: (() => void) | null = null
+  const cleanup = () => {
+    unsub?.()
+    unsub = null
+  }
 
   effect((onCleanup) => {
     const currentCollection = collection()
 
-    status.set(currentCollection.status)
-
-    if (currentUnsub) {
-      currentUnsub()
+    if (!currentCollection) {
+      return
     }
 
-    state.set(new Map(currentCollection.entries()))
+    cleanup()
 
+    // Initialize immediately with current state
     syncDataFromCollection(currentCollection)
 
-    currentCollection.onFirstReady(() => {
-      requestAnimationFrame(() => {
-        status.set(currentCollection.status)
-      })
-    })
+    // Start sync if idle
+    if (currentCollection.status === `idle`) {
+      currentCollection.startSyncImmediate()
+      // Update status after starting sync
+      status.set(currentCollection.status)
+    }
 
-    currentUnsub = currentCollection.subscribeChanges(
-      (changes: Array<ChangeMessage<any>>) => {
-        for (const change of changes) {
-          switch (change.type) {
-            case `insert`:
-            case `update`:
-              state.update((state) => state.set(change.key, change.value))
-              break
-            case `delete`:
-              state.update((state) => {
-                state.delete(change.key)
-                return state
-              })
-              break
-          }
-        }
-
+    // Subscribe to changes
+    unsub = currentCollection.subscribeChanges(
+      (_: Array<ChangeMessage<any>>) => {
         syncDataFromCollection(currentCollection)
-        status.set(currentCollection.status)
       }
     )
 
-    if (currentCollection.status === `idle`) {
-      currentCollection.preload().catch(console.error)
-    }
-
-    onCleanup(() => {
-      if (currentUnsub) {
-        currentUnsub()
-        currentUnsub = null
-      }
+    // Handle ready state
+    currentCollection.onFirstReady(() => {
+      status.set(currentCollection.status)
     })
+
+    onCleanup(cleanup)
   })
 
-  const instance = collection()
-  if (instance) {
-    destroyRef.onDestroy(() => {
-      if (currentUnsub) {
-        currentUnsub()
-        currentUnsub = null
-      }
-    })
-  }
+  destroyRef.onDestroy(cleanup)
 
   return {
     state,

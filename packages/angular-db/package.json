@@ -22,6 +22,7 @@
   "devDependencies": {
     "@angular/common": "^19.0.0",
     "@angular/core": "^19.0.0",
+    "@angular/platform-browser-dynamic": "^19.0.0",
     "@vitest/coverage-istanbul": "^3.0.9",
     "rxjs": "^7.8.0",
     "zone.js": "^0.14.0"
