@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
+import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection.js"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { Query } from "../../src/query/builder/index.js"
@@ -315,6 +316,67 @@ describe(`createLiveQueryCollection`, () => {
 
     // Resubscribe should not throw (would throw "Graph already finalized" without the fix)
     expect(() => liveQuery.subscribeChanges(() => {})).not.toThrow()
+  })
+
+  it(`should handle temporal values correctly in live queries`, async () => {
+    // Define a type with temporal values
+    type Task = {
+      id: number
+      name: string
+      duration: Temporal.Duration
+    }
+
+    // Initial data with temporal duration
+    const initialTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 1 }),
+    }
+
+    // Create a collection with temporal values
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-tasks`,
+        getKey: (task) => task.id,
+        initialData: [initialTask],
+      })
+    )
+
+    // Create a live query collection that includes the temporal value
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ task: taskCollection })
+    )
+
+    await liveQuery.preload()
+
+    // After initial sync, the live query should see the row with the temporal value
+    expect(liveQuery.size).toBe(1)
+    const initialResult = liveQuery.get(1)
+    expect(initialResult).toBeDefined()
+    expect(initialResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(initialResult!.duration.hours).toBe(1)
+
+    // Simulate backend change: update the temporal value to 10 hours
+    const updatedTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 10 }),
+    }
+
+    // Update the task in the collection (simulating backend sync)
+    taskCollection.utils.begin()
+    taskCollection.utils.write({
+      type: `update`,
+      value: updatedTask,
+    })
+    taskCollection.utils.commit()
+
+    // The live query should now contain the new temporal value
+    const updatedResult = liveQuery.get(1)
+    expect(updatedResult).toBeDefined()
+    expect(updatedResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(updatedResult!.duration.hours).toBe(10)
+    expect(updatedResult!.duration.total({ unit: `hours` })).toBe(10)
   })
 
   for (const autoIndex of [`eager`, `off`] as const) {
