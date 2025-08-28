@@ -85,3 +85,14 @@ npm install @tanstack/trailbase-db-collection
 ```
 
 Use `trailBaseCollectionOptions` to sync records from TrailBase's Record APIs with built-in subscription support.
+
+### RxDB Collection
+
+For offline-first apps and local persistence with [RxDB](https://rxdb.info):
+
+```sh
+npm install @tanstack/rxdb-db-collection
+```
+
+Use `rxdbCollectionOptions` to bridge an [RxDB collection](https://rxdb.info/rx-collection.html) into TanStack DB.
+This gives you reactive TanStack DB collections backed by RxDB's powerful local-first database, replication, and conflict handling features.

@@ -4,7 +4,7 @@ import {
     createCollection,
     createTransaction,
 } from "@tanstack/db"
-import { RxDBCollectionConfig, rxdbCollectionOptions } from "../src/rxdb"
+import { OPEN_RXDB_SUBSCRIPTIONS, RxDBCollectionConfig, rxdbCollectionOptions } from "../src/rxdb"
 import type {
     Collection,
     InsertMutationFnParams,
@@ -15,7 +15,7 @@ import type {
     UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { RxCollection, addRxPlugin, createRxDatabase } from 'rxdb/plugins/core'
+import { RxCollection, addRxPlugin, createRxDatabase, getFromMapOrCreate } from 'rxdb/plugins/core'
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv'
@@ -68,7 +68,8 @@ describe(`RxDB Integration`, () => {
                             maxLength: 100
                         },
                         name: {
-                            type: 'string'
+                            type: 'string',
+                            maxLength: 9
                         }
                     }
                 }
@@ -97,90 +98,173 @@ describe(`RxDB Integration`, () => {
     }
 
 
-    it(`should initialize and fetch initial data`, async () => {
-        const initialItems: Array<TestDocType> = [
-            { id: `1`, name: `Item 1` },
-            { id: `2`, name: `Item 2` },
-        ]
+    describe('sync', () => {
 
-        const { collection, db } = await createTestState(initialItems);
 
-        // Verify the collection state contains our items
-        expect(collection.size).toBe(initialItems.length)
-        expect(collection.get(`1`)).toEqual(initialItems[0])
-        expect(collection.get(`2`)).toEqual(initialItems[1])
+        it(`should initialize and fetch initial data`, async () => {
+            const initialItems: Array<TestDocType> = [
+                { id: `1`, name: `Item 1` },
+                { id: `2`, name: `Item 2` },
+            ]
 
-        // Verify the synced data
-        expect(collection.syncedData.size).toBe(initialItems.length)
-        expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
-        expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
+            const { collection, db } = await createTestState(initialItems);
 
-        await db.remove()
+            // Verify the collection state contains our items
+            expect(collection.size).toBe(initialItems.length)
+            expect(collection.get(`1`)).toEqual(initialItems[0])
+            expect(collection.get(`2`)).toEqual(initialItems[1])
+
+            // Verify the synced data
+            expect(collection.syncedData.size).toBe(initialItems.length)
+            expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
+            expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
+
+            await db.remove()
+        })
+
+        it(`should update the collection when RxDB changes data`, async () => {
+            const initialItems: Array<TestDocType> = [
+                { id: `1`, name: `Item 1` },
+                { id: `2`, name: `Item 2` },
+            ]
+
+            const { collection, rxCollection, db } = await createTestState(initialItems);
+
+
+            // inserts
+            const doc = await rxCollection.insert({ id: '3', name: 'inserted' })
+            expect(collection.get(`3`).name).toEqual('inserted')
+
+            // updates
+            await doc.getLatest().patch({ name: 'updated' })
+            expect(collection.get(`3`).name).toEqual('updated')
+
+
+            // deletes
+            await doc.getLatest().remove()
+            expect(collection.get(`3`)).toEqual(undefined)
+
+            await db.remove()
+        })
+
+        it(`should update RxDB when the collection changes data`, async () => {
+            const initialItems: Array<TestDocType> = [
+                { id: `1`, name: `Item 1` },
+                { id: `2`, name: `Item 2` },
+            ]
+
+            const { collection, rxCollection, db } = await createTestState(initialItems);
+
+
+            // inserts
+            const tx = collection.insert({ id: `3`, name: `inserted` })
+            await tx.isPersisted.promise
+            let doc = await rxCollection.findOne('3').exec(true)
+            expect(doc.name).toEqual('inserted')
+
+            // updates
+            collection.update(
+                '3',
+                d => {
+                    d.name = 'updated'
+                }
+            )
+            expect(collection.get(`3`).name).toEqual('updated')
+            await collection.stateWhenReady()
+            await rxCollection.database.requestIdlePromise()
+            doc = await rxCollection.findOne('3').exec(true)
+            expect(doc.name).toEqual('updated')
+
+
+            // deletes
+            collection.delete('3')
+            await rxCollection.database.requestIdlePromise()
+            const mustNotBeFound = await rxCollection.findOne('3').exec()
+            expect(mustNotBeFound).toEqual(null)
+
+            await db.remove()
+        })
+    });
+
+    describe(`lifecycle management`, () => {
+        it(`should call unsubscribe when collection is cleaned up`, async () => {
+            const { collection, rxCollection, db } = await createTestState();
+
+            await collection.cleanup()
+
+            const subs = getFromMapOrCreate(
+                OPEN_RXDB_SUBSCRIPTIONS,
+                rxCollection,
+                () => new Set()
+            )
+            expect(subs.size).toEqual(0)
+
+
+            await db.remove()
+        })
+
+        it(`should restart sync when collection is accessed after cleanup`, async () => {
+            const initialItems: Array<TestDocType> = [
+                { id: `1`, name: `Item 1` },
+                { id: `2`, name: `Item 2` },
+            ]
+            const { collection, rxCollection, db } = await createTestState(initialItems);
+
+            await collection.cleanup()
+            await flushPromises()
+            expect(collection.status).toBe(`cleaned-up`)
+
+            // insert into RxDB while cleaned-up
+            await rxCollection.insert({ id: '3', name: 'Item 3' })
+
+            // Access collection data to restart sync
+            const unsubscribe = collection.subscribeChanges(() => { })
+
+            await collection.toArrayWhenReady()
+            expect(collection.get(`3`).name).toEqual('Item 3')
+
+
+            unsubscribe()
+            await db.remove()
+        })
     })
 
-    it(`should update the collection when RxDB changes data`, async () => {
-        const initialItems: Array<TestDocType> = [
-            { id: `1`, name: `Item 1` },
-            { id: `2`, name: `Item 2` },
-        ]
+    describe('error handling', () => {
+        it('should rollback the transaction on invalid data that does not match the RxCollection schema', async () => {
+            const initialItems: Array<TestDocType> = [
+                { id: `1`, name: `Item 1` },
+                { id: `2`, name: `Item 2` },
+            ]
+            const { collection, db } = await createTestState(initialItems);
 
-        const { collection, rxCollection, db } = await createTestState(initialItems);
+            // INSERT
+            await expect(async () => {
+                const tx = await collection.insert({
+                    id: '3',
+                    name: 'invalid',
+                    foo: 'bar'
+                })
+                await tx.isPersisted.promise
+            }).rejects.toThrow(/schema validation error/)
+            expect(collection.has('3')).toBe(false)
+
+            // UPDATE
+            await expect(async () => {
+                const tx = await collection.update(
+                    '2',
+                    d => {
+                        d.name = 'invalid'
+                        d.foo = 'bar'
+                    }
+                )
+                await tx.isPersisted.promise
+            }).rejects.toThrow(/schema validation error/)
+            expect(collection.get('2').name).toBe('Item 2')
 
 
-        // inserts
-        const doc = await rxCollection.insert({ id: '3', name: 'inserted' })
-        expect(collection.get(`3`).name).toEqual('inserted')
-
-        // updates
-        await doc.getLatest().patch({ name: 'updated' })
-        expect(collection.get(`3`).name).toEqual('updated')
-
-
-        // deletes
-        await doc.getLatest().remove()
-        expect(collection.get(`3`)).toEqual(undefined)
-
-        await db.remove()
+            await db.remove()
+        })
     })
 
-    it(`should update RxDB when the collection changes data`, async () => {
-        const initialItems: Array<TestDocType> = [
-            { id: `1`, name: `Item 1` },
-            { id: `2`, name: `Item 2` },
-        ]
 
-        const { collection, rxCollection, db } = await createTestState(initialItems);
-
-
-        // inserts
-        console.log(':::::::::::::::::::::::::::::::::::')
-        const xxx = collection.insert({ id: `3`, name: `inserted` })
-        let doc = await rxCollection.findOne('3').exec(true)
-        expect(doc.name).toEqual('inserted')
-
-        // updates
-        collection.update(
-            '3',
-            d => {
-                console.log('inside of update:')
-                console.dir(d)
-                d.name = 'updated'
-            })
-        expect(collection.get(`3`).name).toEqual('updated')
-        await collection.stateWhenReady()
-        console.log('UPDATE OUTER DONE')
-        await rxCollection.database.requestIdlePromise()
-        doc = await rxCollection.findOne('3').exec(true)
-        expect(doc.name).toEqual('updated')
-
-
-        // deletes
-        collection.delete('3')
-        await rxCollection.database.requestIdlePromise()
-        console.log('DELETE OUTER DONE')
-        const mustNotBeFound = await rxCollection.findOne('3').exec()
-        expect(mustNotBeFound).toEqual(null)
-
-        await db.remove()
-    })
 });

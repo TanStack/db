@@ -154,8 +154,9 @@ There are a number of built-in collection types:
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
-4. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-5. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+4. [`RxDBCollection`](#rxdbcollection) to integrate with [RxDB](https://rxdb.info) for local persistence and sync
+5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -297,6 +298,52 @@ This collection requires the following TrailBase-specific options:
 
 A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
+
+#### `RxDBCollection`
+
+[RxDB](https://rxdb.info) is a client-side database for JavaScript apps with replication, conflict resolution, and offline-first features.  
+Use `rxdbCollectionOptions` from `@tanstack/rxdb-db-collection` to integrate an RxDB collection with TanStack DB:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { rxdbCollectionOptions } from "@tanstack/rxdb-db-collection"
+import { createRxDatabase } from "rxdb"
+
+const db = await createRxDatabase({
+  name: "mydb",
+  storage: getRxStorageMemory(),
+})
+await db.addCollections({
+  todos: {
+    schema: {
+      version: 0,
+      primaryKey: "id",
+      type: "object",
+      properties: {
+        id: { type: "string", maxLength: 100 },
+        text: { type: "string" },
+        completed: { type: "boolean" },
+      },
+    },
+  },
+})
+
+// Wrap the RxDB collection with TanStack DB
+export const todoCollection = createCollection(
+  rxdbCollectionOptions({
+    rxCollection: db.todos,
+    startSync: true
+  })
+)
+```
+
+With this integration:
+
+- TanStack DB subscribes to RxDB's change streams and reflects updates, deletes, and inserts in real-time.
+- You get local-first sync when RxDB replication is configured.
+- Mutation handlers (onInsert, onUpdate, onDelete) are implemented using RxDB's APIs (bulkUpsert, incrementalPatch, bulkRemove).
+
+This makes RxDB a great choice for apps that need local-first storage, replication, or peer-to-peer sync combined with TanStack DB's live queries and transaction lifecycle.
 
 #### `LocalStorageCollection`
 

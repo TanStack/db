@@ -1,10 +1,15 @@
 import {
+    FilledMangoQuery,
     RxCollection,
     RxDocument,
+    RxDocumentData,
     RxQuery,
     clone,
+    ensureNotFalsy,
     getFromMapOrCreate,
-    lastOfArray
+    lastOfArray,
+    prepareQuery,
+    rxStorageWriteErrorToRxError
 } from "rxdb/plugins/core"
 import type { Subscription } from 'rxjs'
 
@@ -25,19 +30,25 @@ import { stripRxdbFields } from './helper'
 const debug = DebugModule.debug(`ts/db:electric`)
 
 
+/**
+ * Used in tests to ensure proper cleanup
+ */
+export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<Subscription>>()
+
+
 export type RxDBCollectionConfig<
     TExplicit extends object = Record<string, unknown>,
     TSchema extends StandardSchemaV1 = never
 > = Omit<
     CollectionConfig<
-        TExplicit,
-        string, // because RxDB primary keys must be strings
+        ResolveType<TExplicit, TSchema, any>, // ← use Row here
+        string,                               // key is string
         TSchema
     >,
-    "insert" | "update" | "delete" | "getKey" | "sync"
+    'insert' | 'update' | 'delete' | 'getKey' | 'sync'
 > & {
     rxCollection: RxCollection<TExplicit, unknown, unknown, unknown>
-};
+}
 
 /**
  * Creates RxDB collection options for use with a standard Collection
@@ -65,7 +76,7 @@ export function rxdbCollectionOptions<
     // "getKey"
     const primaryPath = rxCollection.schema.primaryPath
     const getKey: CollectionConfig<Row, Key>['getKey'] = (item) => {
-        const key: string = (item as any)[primaryPath]
+        const key: string = (item as any)[primaryPath] as string
         return key
     }
 
@@ -78,56 +89,66 @@ export function rxdbCollectionOptions<
     type SyncParams = Parameters<SyncConfig<Row, Key>['sync']>[0]
     const sync: SyncConfig<Row, Key> = {
         sync: (params: SyncParams) => {
-            console.log('SYCN START!!!')
             const { begin, write, commit, markReady } = params
 
             let ready = false
             async function initialFetch() {
-                console.log('initialFetch() START');
                 /**
                  * RxDB stores a last-write-time
                  * which can be used to "sort" document writes,
                  * so for initial sync we iterate over that.
                  */
-                let cursor: RxDocument<TExplicit> | undefined = undefined
+                let cursor: RxDocumentData<TExplicit> | undefined = undefined
                 const syncBatchSize = 1000 // make this configureable
                 begin()
 
                 while (!ready) {
-                    console.log('initialFetch() loooooop');
-                    let query: RxQuery<TExplicit, RxDocument<TExplicit>[], unknown, unknown>
+                    let query: FilledMangoQuery<TExplicit>
                     if (cursor) {
-                        query = rxCollection.find({
+                        query = {
                             selector: {
                                 $or: [
-                                    { '_meta.lwt': { $gt: cursor._data._meta.lwt } },
+                                    { '_meta.lwt': { $gt: (cursor._meta.lwt as number) } },
                                     {
-                                        '_meta.lwt': cursor._data._meta.lwt,
+                                        '_meta.lwt': cursor._meta.lwt,
                                         [primaryPath]: {
-                                            $gt: cursor.primary
+                                            $gt: cursor[primaryPath]
                                         },
                                     }
                                 ]
-                            },
+                            } as any,
                             sort: [
                                 { '_meta.lwt': 'asc' },
-                                { [primaryPath]: 'asc' }
+                                { [primaryPath]: 'asc' } as any
                             ],
-                            limit: syncBatchSize
-                        })
+                            limit: syncBatchSize,
+                            skip: 0
+                        }
                     } else {
-                        query = rxCollection.find({
+                        query = {
                             selector: {},
                             sort: [
                                 { '_meta.lwt': 'asc' },
-                                { [primaryPath]: 'asc' }
+                                { [primaryPath]: 'asc' } as any
                             ],
-                            limit: syncBatchSize
-                        })
+                            limit: syncBatchSize,
+                            skip: 0
+                        }
                     }
 
-                    const docs = await query.exec();
-                    console.dir(docs.map(d => d.toJSON()))
+                    /**
+                     * Instead of doing a RxCollection.query(),
+                     * we directly query the storage engine of the RxCollection so we do not use the
+                     * RxCollection document cache because it likely wont be used anyway
+                     * since most queries will run directly on the tanstack-db side.
+                     */
+                    const preparedQuery = prepareQuery<TExplicit>(
+                        rxCollection.storageInstance.schema,
+                        query
+                    );
+                    const result = await rxCollection.storageInstance.query(preparedQuery)
+                    const docs = result.documents
+
                     cursor = lastOfArray(docs)
                     if (docs.length === 0) {
                         ready = true
@@ -137,13 +158,11 @@ export function rxdbCollectionOptions<
                     docs.forEach(d => {
                         write({
                             type: 'insert',
-                            value: stripRxdbFields(clone(d.toJSON()))
+                            value: stripRxdbFields(clone(d)) as any
                         })
                     })
 
                 }
-                console.log('initialFetch() DONE');
-
                 commit()
             }
 
@@ -176,6 +195,13 @@ export function rxdbCollectionOptions<
                             break
                     }
                 })
+
+                const subs = getFromMapOrCreate(
+                    OPEN_RXDB_SUBSCRIPTIONS,
+                    rxCollection,
+                    () => new Set()
+                )
+                subs.add(sub)
             }
 
 
@@ -196,7 +222,15 @@ export function rxdbCollectionOptions<
 
             start()
 
-            return () => sub.unsubscribe()
+            return () => {
+                const subs = getFromMapOrCreate(
+                    OPEN_RXDB_SUBSCRIPTIONS,
+                    rxCollection,
+                    () => new Set()
+                )
+                subs.delete(sub)
+                sub.unsubscribe()
+            }
         },
         // Expose the getSyncMetadata function
         getSyncMetadata: undefined,
@@ -207,12 +241,11 @@ export function rxdbCollectionOptions<
         getKey,
         sync,
         onInsert: async (params) => {
-            console.log('ON INSERT CALLED')
             debug("insert", params)
             const newItems = params.transaction.mutations.map(m => m.modified)
             return rxCollection.bulkUpsert(newItems as any).then(result => {
                 if (result.error.length > 0) {
-                    throw result.error
+                    throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
                 }
                 return result.success
             })
@@ -229,7 +262,6 @@ export function rxdbCollectionOptions<
                     continue
                 }
                 await doc.incrementalPatch(newValue as any)
-                console.log('UPDATE DONE')
             }
         },
         onDelete: async (params) => {
