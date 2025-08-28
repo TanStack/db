@@ -649,16 +649,13 @@ export function createChangeProxy<
           return value.bind(ptarget)
         }
 
-        // Check if it's a Temporal object - don't proxy them as they're immutable
-        const isTemporalObject = isTemporal(value)
-
         // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
         if (
           value &&
           typeof value === `object` &&
           !((value as any) instanceof Date) &&
           !((value as any) instanceof RegExp) &&
-          !isTemporalObject
+          !isTemporal(value)
         ) {
           // Create a parent reference for the nested object
           const nestedParent = {
