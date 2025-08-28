@@ -1,5 +1,5 @@
 import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
-import { Func, PropRef } from "../ir.js"
+import { Func, PropRef, getHavingExpression } from "../ir.js"
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -129,8 +129,9 @@ export function processGroupBy(
     // Apply HAVING clauses if present
     if (havingClauses && havingClauses.length > 0) {
       for (const havingClause of havingClauses) {
+        const havingExpression = getHavingExpression(havingClause)
         const transformedHavingClause = transformHavingClause(
-          havingClause,
+          havingExpression,
           selectClause || {}
         )
         const compiledHaving = compileExpression(transformedHavingClause)
@@ -263,8 +264,9 @@ export function processGroupBy(
   // Apply HAVING clauses if present
   if (havingClauses && havingClauses.length > 0) {
     for (const havingClause of havingClauses) {
+      const havingExpression = getHavingExpression(havingClause)
       const transformedHavingClause = transformHavingClause(
-        havingClause,
+        havingExpression,
         selectClause || {}
       )
       const compiledHaving = compileExpression(transformedHavingClause)

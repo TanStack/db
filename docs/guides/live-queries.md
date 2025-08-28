@@ -136,7 +136,7 @@ function UserList() {
 }
 ```
 
-For more details on framework integration, see the [React](/docs/framework/react/adapter) and [Vue](/docs/framework/vue/adapter) adapter documentation.
+For more details on framework integration, see the [React](../../framework/react/adapter) and [Vue](../../framework/vue/adapter) adapter documentation.
 
 ## From Clause
 

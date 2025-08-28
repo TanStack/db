@@ -493,6 +493,57 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
+      it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .offset(1)
+            .limit(10)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results.map((r) => r.salary)).toEqual([
+          52_000, 55_000, 60_000, 65_000,
+        ])
+
+        // Now insert a new employee with highest salary
+        // this should now become part of the topK because
+        // the topK isn't full yet, so even though it's after the max sent value
+        // it should still be part of the topK
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 72_000,
+          hire_date: `2023-01-01`,
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [5, 52_000],
+          [3, 55_000],
+          [2, 60_000],
+          [4, 65_000],
+          [6, 72_000],
+        ])
+      })
+
       it(`applies incremental insert of a new row after the topK correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
           q
@@ -679,6 +730,50 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         expect(results).toHaveLength(3) // Alice (50000) and Eve (52000) filtered out
         expect(results.map((r) => r.salary)).toEqual([55000, 60000, 65000])
+      })
+
+      it(`orders correctly with a limit`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([52000, 55000])
+        expect(results.map((r) => r.id)).toEqual([5, 3])
+      })
+
+      it(`returns a single row with limit 1`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(1)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(1)
+        expect(results[0]!.id).toEqual(5)
+        expect(results[0]!.salary).toEqual(52000)
       })
     })
 
