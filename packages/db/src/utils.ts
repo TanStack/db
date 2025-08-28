@@ -125,43 +125,20 @@ function deepEqualsInternal(
 
   // Handle Temporal objects
   // Check if both are Temporal objects of the same type
-  const aTag = a[Symbol.toStringTag]
-  const bTag = b[Symbol.toStringTag]
+  if (isTemporal(a) && isTemporal(b)) {
+    const aTag = getStringTag(a)
+    const bTag = getStringTag(b)
 
-  if (typeof aTag === `string` && typeof bTag === `string`) {
-    const temporalTypes = [
-      `Temporal.PlainDate`,
-      `Temporal.PlainTime`,
-      `Temporal.PlainDateTime`,
-      `Temporal.ZonedDateTime`,
-      `Temporal.Instant`,
-      `Temporal.PlainYearMonth`,
-      `Temporal.PlainMonthDay`,
-      `Temporal.Duration`,
-      `Temporal.TimeZone`,
-      `Temporal.Calendar`,
-    ]
+    // If they're different Temporal types, they're not equal
+    if (aTag !== bTag) return false
 
-    const aIsTemporal = temporalTypes.includes(aTag)
-    const bIsTemporal = temporalTypes.includes(bTag)
-
-    if (aIsTemporal && bIsTemporal) {
-      // If they're different Temporal types, they're not equal
-      if (aTag !== bTag) return false
-
-      // Use Temporal's built-in equals method if available
-      if (typeof a.equals === `function`) {
-        return a.equals(b)
-      }
-
-      // For Duration, use toString comparison as it doesn't have equals
-      if (aTag === `Temporal.Duration`) {
-        return a.toString() === b.toString()
-      }
-
-      // Fallback to toString comparison for other types
-      return a.toString() === b.toString()
+    // Use Temporal's built-in equals method if available
+    if (typeof a.equals === `function`) {
+      return a.equals(b)
     }
+
+    // Fallback to toString comparison for other types
+    return a.toString() === b.toString()
   }
 
   // Handle arrays
@@ -210,4 +187,25 @@ function deepEqualsInternal(
 
   // For primitives that aren't strictly equal
   return false
+}
+
+const temporalTypes = [
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`,
+]
+
+function getStringTag(a: any): any {
+  return a[Symbol.toStringTag]
+}
+
+/** Checks if the value is a Temporal object by checking for the Temporal brand */
+export function isTemporal(a: any): boolean {
+  const tag = getStringTag(a)
+  return typeof tag === `string` && temporalTypes.includes(tag)
 }

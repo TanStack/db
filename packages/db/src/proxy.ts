@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals } from "./utils"
+import { deepEquals, isTemporal } from "./utils"
 
 /**
  * Simple debug utility that only logs when debug mode is enabled
@@ -136,27 +136,10 @@ function deepClone<T extends unknown>(
   }
 
   // Handle Temporal objects
-  // Check if it's a Temporal object by checking for the Temporal brand
-  if (typeof (obj as any)[Symbol.toStringTag] === `string`) {
-    const tag = (obj as any)[Symbol.toStringTag]
-    const temporalTypes = [
-      `Temporal.PlainDate`,
-      `Temporal.PlainTime`,
-      `Temporal.PlainDateTime`,
-      `Temporal.ZonedDateTime`,
-      `Temporal.Instant`,
-      `Temporal.PlainYearMonth`,
-      `Temporal.PlainMonthDay`,
-      `Temporal.Duration`,
-      `Temporal.TimeZone`,
-      `Temporal.Calendar`,
-    ]
-
-    if (temporalTypes.includes(tag)) {
-      // Temporal objects are immutable, so we can return them directly
-      // This preserves all their internal state correctly
-      return obj
-    }
+  if (isTemporal(obj)) {
+    // Temporal objects are immutable, so we can return them directly
+    // This preserves all their internal state correctly
+    return obj
   }
 
   const clone = {} as Record<string | symbol, unknown>
@@ -667,22 +650,7 @@ export function createChangeProxy<
         }
 
         // Check if it's a Temporal object - don't proxy them as they're immutable
-        const isTemporalObject =
-          value &&
-          typeof value === `object` &&
-          typeof (value as any)[Symbol.toStringTag] === `string` &&
-          [
-            `Temporal.PlainDate`,
-            `Temporal.PlainTime`,
-            `Temporal.PlainDateTime`,
-            `Temporal.ZonedDateTime`,
-            `Temporal.Instant`,
-            `Temporal.PlainYearMonth`,
-            `Temporal.PlainMonthDay`,
-            `Temporal.Duration`,
-            `Temporal.TimeZone`,
-            `Temporal.Calendar`,
-          ].includes((value as any)[Symbol.toStringTag])
+        const isTemporalObject = isTemporal(value)
 
         // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
         if (
