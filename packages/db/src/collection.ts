@@ -1225,7 +1225,11 @@ export class CollectionImpl<
 
     // If we have a committed truncate OR we already flagged that a rebuild
     // should be allowed while persisting, permit applying committed sync now.
-    if (!hasPersistingTransaction || hasCommittedTruncateSync || this.allowRebuildWhilePersisting) {
+    if (
+      !hasPersistingTransaction ||
+      hasCommittedTruncateSync ||
+      this.allowRebuildWhilePersisting
+    ) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -1278,7 +1282,10 @@ export class CollectionImpl<
           // while a user tx is persisting, defer the visible clear until the
           // next committed rebuild. Otherwise we risk a stuck-empty UI.
           const hasWritesInThisTransaction = transaction.operations.some(
-            (op) => op.type === `insert` || op.type === `update` || op.type === `delete`
+            (op) =>
+              op.type === `insert` ||
+              op.type === `update` ||
+              op.type === `delete`
           )
 
           if (hasPersistingTransaction && !hasWritesInThisTransaction) {
