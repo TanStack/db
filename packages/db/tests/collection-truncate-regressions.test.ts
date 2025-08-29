@@ -4,7 +4,7 @@ import { createTransaction } from "../src/transactions"
 import type { ChangeMessage } from "../src/types"
 
 describe(`Regression - truncate/must-refetch ordering`, () => {
-  it(`should apply rebuild after must-refetch even if a user tx persists`, async () => {
+  it(`should apply rebuild after must-refetch even if a user tx persists`, () => {
     type Row = { id: number; name: string }
 
     let testSyncFunctions!: {

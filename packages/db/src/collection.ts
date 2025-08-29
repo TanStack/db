@@ -1281,14 +1281,11 @@ export class CollectionImpl<
           // If this is a truncate-only commit (no writes in this transaction)
           // while a user tx is persisting, defer the visible clear until the
           // next committed rebuild. Otherwise we risk a stuck-empty UI.
-          const hasWritesInThisTransaction = transaction.operations.some(
-            (op) =>
-              op.type === `insert` ||
-              op.type === `update` ||
-              op.type === `delete`
+          const hasRebuildWritesInThisTransaction = transaction.operations.some(
+            (op) => op.type === `insert` || op.type === `update`
           )
 
-          if (hasPersistingTransaction && !hasWritesInThisTransaction) {
+          if (hasPersistingTransaction && !hasRebuildWritesInThisTransaction) {
             this.deferredTruncatePending = true
             // When a committed truncate arrives during persisting, explicitly
             // allow the subsequent rebuild commits to apply, even if persisting
