@@ -1509,3 +1509,52 @@ describe(`Collection with schema validation`, () => {
     expect(collection.syncedMetadata.size).toBe(0)
   })
 })
+
+describe(`Regression - truncate commit ordering`, () => {
+  it(`should not apply an uncommitted truncate`, async () => {
+    type Row = { id: number; name: string }
+
+    let testSyncFunctions: {
+      begin: () => void
+      write: (m: Omit<ChangeMessage<Row>, `key`>) => void
+      commit: () => void
+      truncate: () => void
+    }
+
+    const collection = createCollection<Row>({
+      id: `repro`,
+      getKey: (r) => r.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate }) => {
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    // Commit initial data (applies normally)
+    testSyncFunctions.begin()
+    testSyncFunctions.write({ type: `insert`, value: { id: 1, name: `one` } })
+    testSyncFunctions.commit()
+
+    await collection.stateWhenReady()
+    expect(collection.state.size).toBe(1)
+
+    // Start a truncate but DO NOT commit it yet
+    testSyncFunctions.begin()
+    testSyncFunctions.truncate()
+
+    // Trigger a user transaction to cause collection to process state changes
+    const tx = createTransaction<Row>({
+      mutationFn: async () => {},
+    })
+    tx.mutate(() => {
+      // Use optimistic=false to avoid visible impact; this only triggers touch
+      collection.insert({ id: 2, name: `noop` }, { optimistic: false })
+    })
+
+    // Uncommitted truncate must NOT be applied
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)?.name).toBe(`one`)
+  })
+})
