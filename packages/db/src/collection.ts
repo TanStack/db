@@ -320,6 +320,12 @@ export class CollectionImpl<
   private recentlySyncedKeys = new Set<TKey>()
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
+  // When a truncate-only commit is received while a user transaction is
+  // persisting, defer the visible clear until the next committed rebuild.
+  private deferredTruncatePending = false
+  // After a committed truncate while a user tx persists, allow the next
+  // rebuild commits to apply even during persisting to avoid stuck-empty.
+  private allowRebuildWhilePersisting = false
 
   // Array to store one-time ready listeners
   private onFirstReadyCallbacks: Array<() => void> = []
@@ -730,6 +736,8 @@ export class CollectionImpl<
     this.preloadPromise = null
     this.batchedEvents = []
     this.shouldBatchEvents = false
+    this.deferredTruncatePending = false
+    this.allowRebuildWhilePersisting = false
 
     // Update status
     this.setStatus(`cleaned-up`)
@@ -1186,7 +1194,22 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
+    // Partition pending sync transactions into committed and uncommitted.
+    // We should only apply (commit) sync transactions that have been explicitly
+    // marked as committed by the sync adapter (e.g. upon receiving up-to-date).
+    const committedSyncTransactions = this.pendingSyncedTransactions.filter(
+      (t) => t.committed
+    )
+    const uncommittedSyncTransactions = this.pendingSyncedTransactions.filter(
+      (t) => !t.committed
+    )
+
+    // If there is nothing committed yet, there is nothing to apply.
+    if (committedSyncTransactions.length === 0) {
+      return
+    }
+
+    // Check if there are any persisting user transactions
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `persisting`) {
@@ -1195,17 +1218,41 @@ export class CollectionImpl<
       }
     }
 
-    const hasTruncateSync = this.pendingSyncedTransactions.some(
+    // Only consider truncate on committed sync transactions for gating
+    const hasCommittedTruncateSync = committedSyncTransactions.some(
       (t) => t.truncate === true
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    // If we have a committed truncate OR we already flagged that a rebuild
+    // should be allowed while persisting, permit applying committed sync now.
+    if (
+      !hasPersistingTransaction ||
+      hasCommittedTruncateSync ||
+      this.allowRebuildWhilePersisting
+    ) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
+      // If a later committed batch includes a truncate, we must discard any earlier
+      // committed batches and only apply from the LAST truncate forward. This ensures
+      // older ops do not apply then get immediately cleared by the truncate.
+      let transactionsToApply = committedSyncTransactions
+      if (hasCommittedTruncateSync) {
+        let lastTruncateIndex = -1
+        for (let i = 0; i < committedSyncTransactions.length; i++) {
+          if (committedSyncTransactions[i]!.truncate) {
+            lastTruncateIndex = i
+          }
+        }
+        if (lastTruncateIndex >= 0) {
+          transactionsToApply =
+            committedSyncTransactions.slice(lastTruncateIndex)
+        }
+      }
+
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of transactionsToApply) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
         }
@@ -1228,27 +1275,42 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of transactionsToApply) {
         // Handle truncate operations first
         if (transaction.truncate) {
-          // TRUNCATE PHASE
-          // 1) Emit a delete for every currently-synced key so downstream listeners/indexes
-          //    observe a clear-before-rebuild. We intentionally skip keys already in
-          //    optimisticDeletes because their delete was previously emitted by the user.
-          for (const key of this.syncedData.keys()) {
-            if (this.optimisticDeletes.has(key)) continue
-            const previousValue =
-              this.optimisticUpserts.get(key) || this.syncedData.get(key)
-            if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
-            }
-          }
+          // If this is a truncate-only commit (no writes in this transaction)
+          // while a user tx is persisting, defer the visible clear until the
+          // next committed rebuild. Otherwise we risk a stuck-empty UI.
+          const hasRebuildWritesInThisTransaction = transaction.operations.some(
+            (op) => op.type === `insert` || op.type === `update`
+          )
 
-          // 2) Clear the authoritative synced base. Subsequent server ops in this
-          //    same commit will rebuild the base atomically.
-          this.syncedData.clear()
-          this.syncedMetadata.clear()
-          this.syncedKeys.clear()
+          if (
+            hasPersistingTransaction &&
+            !hasRebuildWritesInThisTransaction &&
+            this.optimisticUpserts.size === 0 &&
+            this.optimisticDeletes.size === 0
+          ) {
+            this.deferredTruncatePending = true
+            // When a committed truncate arrives during persisting, explicitly
+            // allow the subsequent rebuild commits to apply, even if persisting
+            // is still in progress, to avoid a stuck-empty state.
+            this.allowRebuildWhilePersisting = true
+          } else {
+            // TRUNCATE PHASE (visible)
+            for (const key of this.syncedData.keys()) {
+              if (this.optimisticDeletes.has(key)) continue
+              const previousValue =
+                this.optimisticUpserts.get(key) || this.syncedData.get(key)
+              if (previousValue !== undefined) {
+                events.push({ type: `delete`, key, value: previousValue })
+              }
+            }
+            this.syncedData.clear()
+            this.syncedMetadata.clear()
+            this.syncedKeys.clear()
+            this.deferredTruncatePending = false
+          }
         }
 
         for (const operation of transaction.operations) {
@@ -1278,7 +1340,12 @@ export class CollectionImpl<
           // Update synced data
           switch (operation.type) {
             case `insert`:
+              // If we had a deferred truncate and this is a rebuild write, apply as normal
+              // and finalize the deferred truncate so state is rebuilt visibly.
               this.syncedData.set(key, operation.value)
+              if (this.deferredTruncatePending) {
+                this.deferredTruncatePending = false
+              }
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -1304,13 +1371,11 @@ export class CollectionImpl<
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      const hadTruncate = this.pendingSyncedTransactions.some(
-        (t) => t.truncate === true
-      )
+      const hadTruncate = transactionsToApply.some((t) => t.truncate === true)
       if (hadTruncate) {
         // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of this.pendingSyncedTransactions) {
+        for (const t of transactionsToApply) {
           for (const op of t.operations) {
             if (op.type === `insert` || op.type === `update`) {
               syncedInsertedOrUpdatedKeys.add(op.key as TKey)
@@ -1496,7 +1561,8 @@ export class CollectionImpl<
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
-      this.pendingSyncedTransactions = []
+      // Preserve any uncommitted sync transactions (e.g. begin() called but no commit yet)
+      this.pendingSyncedTransactions = uncommittedSyncTransactions
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()

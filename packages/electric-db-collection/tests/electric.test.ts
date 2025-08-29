@@ -278,6 +278,60 @@ describe(`Electric Integration`, () => {
     expect(collection.status).toBe(`ready`)
   })
 
+  it(`should not flash empty when must-refetch occurs before up-to-date and a user tx runs`, () => {
+    // Seed initial data and commit
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `One` },
+        headers: { operation: `insert` },
+      },
+      {
+        key: `2`,
+        value: { id: 2, name: `Two` },
+        headers: { operation: `insert` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+
+    expect(collection.state.size).toBe(2)
+    expect(collection.status).toBe(`ready`)
+
+    // Server signals must-refetch (begin + truncate without commit yet)
+    subscriber([{ headers: { control: `must-refetch` } }])
+
+    // Simulate a user transaction that updates an item while the refetch is pending
+    const userTx = createTransaction({
+      mutationFn: async () => {},
+    })
+
+    userTx.mutate(() => {
+      collection.update(1, (draft) => {
+        ;(draft as any).name = `One (local)`
+      })
+    })
+
+    // The collection should still show the pre-refetch data (no empty/partial flash)
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `One (local)` })
+
+    // Now the server sends the rebuilt dataset and up-to-date
+    subscriber([
+      {
+        key: `3`,
+        value: { id: 3, name: `Three` },
+        headers: { operation: `insert` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+
+    // After up-to-date, the truncate + rebuild is applied atomically without
+    // showing an empty flash. Local optimistic update remains by design.
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(3)).toEqual({ id: 3, name: `Three` })
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `One (local)` })
+  })
+
   // Tests for txid tracking functionality
   describe(`txid tracking`, () => {
     it(`should track txids from incoming messages`, async () => {
