@@ -1186,7 +1186,22 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
+    // Partition pending sync transactions into committed and uncommitted.
+    // We should only apply (commit) sync transactions that have been explicitly
+    // marked as committed by the sync adapter (e.g. upon receiving up-to-date).
+    const committedSyncTransactions = this.pendingSyncedTransactions.filter(
+      (t) => t.committed
+    )
+    const uncommittedSyncTransactions = this.pendingSyncedTransactions.filter(
+      (t) => !t.committed
+    )
+
+    // If there is nothing committed yet, there is nothing to apply.
+    if (committedSyncTransactions.length === 0) {
+      return
+    }
+
+    // Check if there are any persisting user transactions
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `persisting`) {
@@ -1195,17 +1210,18 @@ export class CollectionImpl<
       }
     }
 
-    const hasTruncateSync = this.pendingSyncedTransactions.some(
+    // Only consider truncate on committed sync transactions for gating
+    const hasCommittedTruncateSync = committedSyncTransactions.some(
       (t) => t.truncate === true
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    if (!hasPersistingTransaction || hasCommittedTruncateSync) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of committedSyncTransactions) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
         }
@@ -1228,7 +1244,7 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of committedSyncTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
@@ -1304,13 +1320,13 @@ export class CollectionImpl<
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      const hadTruncate = this.pendingSyncedTransactions.some(
+      const hadTruncate = committedSyncTransactions.some(
         (t) => t.truncate === true
       )
       if (hadTruncate) {
         // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of this.pendingSyncedTransactions) {
+        for (const t of committedSyncTransactions) {
           for (const op of t.operations) {
             if (op.type === `insert` || op.type === `update`) {
               syncedInsertedOrUpdatedKeys.add(op.key as TKey)
@@ -1496,7 +1512,8 @@ export class CollectionImpl<
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
-      this.pendingSyncedTransactions = []
+      // Preserve any uncommitted sync transactions (e.g. begin() called but no commit yet)
+      this.pendingSyncedTransactions = uncommittedSyncTransactions
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
