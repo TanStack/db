@@ -278,6 +278,36 @@ describe(`Electric Integration`, () => {
     expect(collection.status).toBe(`ready`)
   })
 
+  it(`must-refetch followed by up-to-date with no writes should not clear state`, () => {
+    // Seed initial data
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User` },
+        headers: { operation: `insert` },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Server sends must-refetch, but no writes in the batch
+    subscriber([
+      {
+        headers: { control: `must-refetch` },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // State should remain intact (no truncate-only commit applied)
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User` })
+  })
+
   it(`should not flash empty when must-refetch occurs before up-to-date and a user tx runs`, () => {
     // Seed initial data and commit
     subscriber([
