@@ -30,7 +30,7 @@ export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<Subscriptio
 
 
 /**
- * Configuration interface for Electric collection options
+ * Configuration interface for RxDB collection options
  * @template TExplicit - The explicit type of items in the collection (highest priority). Use the document type of your RxCollection here.
  * @template TSchema - The schema type for validation and type inference (second priority)
  *
@@ -81,7 +81,7 @@ export type RxDBCollectionConfig<
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @param config - Configuration options for the Electric collection
+ * @param config - Configuration options for the RxDB collection
  * @returns Collection options with utilities
  */
 export function rxdbCollectionOptions<
