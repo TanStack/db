@@ -1,9 +1,7 @@
 import {
     FilledMangoQuery,
     RxCollection,
-    RxDocument,
     RxDocumentData,
-    RxQuery,
     clone,
     ensureNotFalsy,
     getFromMapOrCreate,
@@ -13,21 +11,16 @@ import {
 } from "rxdb/plugins/core"
 import type { Subscription } from 'rxjs'
 
-import { Store } from "@tanstack/store"
 import DebugModule from "debug"
 import type {
     CollectionConfig,
-    DeleteMutationFnParams,
-    InsertMutationFnParams,
     ResolveType,
     SyncConfig,
-    UpdateMutationFnParams,
-    UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { stripRxdbFields } from './helper'
 
-const debug = DebugModule.debug(`ts/db:electric`)
+const debug = DebugModule.debug(`ts/db:rxdb`)
 
 
 /**
@@ -36,6 +29,18 @@ const debug = DebugModule.debug(`ts/db:electric`)
 export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<Subscription>>()
 
 
+/**
+ * Configuration interface for Electric collection options
+ * @template TExplicit - The explicit type of items in the collection (highest priority). Use the document type of your RxCollection here.
+ * @template TSchema - The schema type for validation and type inference (second priority)
+ *
+ * @remarks
+ * Type resolution follows a priority order:
+ * 1. If you provide an explicit type via generic parameter, it will be used
+ * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
+ *
+ * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ */
 export type RxDBCollectionConfig<
     TExplicit extends object = Record<string, unknown>,
     TSchema extends StandardSchemaV1 = never
@@ -47,6 +52,9 @@ export type RxDBCollectionConfig<
     >,
     'insert' | 'update' | 'delete' | 'getKey' | 'sync'
 > & {
+    /**
+     * The RxCollection from a RxDB Database instance.
+     */
     rxCollection: RxCollection<TExplicit, unknown, unknown, unknown>
 }
 
@@ -55,7 +63,6 @@ export type RxDBCollectionConfig<
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the Electric collection
  * @returns Collection options with utilities
  */
@@ -70,8 +77,6 @@ export function rxdbCollectionOptions<
 
     const { ...restConfig } = config
     const rxCollection = config.rxCollection
-    debug("wrapping RxDB collection", name)
-
 
     // "getKey"
     const primaryPath = rxCollection.schema.primaryPath
