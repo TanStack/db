@@ -1557,4 +1557,58 @@ describe(`Regression - truncate commit ordering`, () => {
     expect(collection.state.size).toBe(1)
     expect(collection.state.get(1)?.name).toBe(`one`)
   })
+
+  it(`applies only from the last truncate forward across multiple committed batches`, async () => {
+    type Row = { id: number; name: string }
+
+    let testSyncFunctions!: {
+      begin: () => void
+      write: (m: Omit<ChangeMessage<Row>, `key`>) => void
+      commit: () => void
+      truncate: () => void
+    }
+
+    const collection = createCollection<Row>({
+      id: `repro-last-truncate`,
+      getKey: (r) => r.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate }) => {
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    // Hold a persisting user transaction so early committed batches queue up
+    const holdTx = createTransaction<Row>({
+      autoCommit: false,
+      mutationFn: async () => new Promise(() => {}),
+    })
+    holdTx.mutate(() => {
+      collection.insert({ id: 999, name: `hold` }, { optimistic: false })
+    })
+    void holdTx.commit()
+
+    // Batch A: insert 1 + commit (queued, not applied)
+    testSyncFunctions.begin()
+    testSyncFunctions.write({ type: `insert`, value: { id: 1, name: `one` } })
+    testSyncFunctions.commit()
+
+    // Batch B: insert 2 + commit (queued, not applied)
+    testSyncFunctions.begin()
+    testSyncFunctions.write({ type: `insert`, value: { id: 2, name: `two` } })
+    testSyncFunctions.commit()
+
+    // Batch C: truncate + insert 3 + commit
+    testSyncFunctions.begin()
+    testSyncFunctions.truncate()
+    testSyncFunctions.write({ type: `insert`, value: { id: 3, name: `three` } })
+    testSyncFunctions.commit()
+
+    // With the fix, only batches from the LAST truncate forward are applied.
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.has(1)).toBe(false)
+    expect(collection.state.has(2)).toBe(false)
+    expect(collection.state.get(3)?.name).toBe(`three`)
+  })
 })
