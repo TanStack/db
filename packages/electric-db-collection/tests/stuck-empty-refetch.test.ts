@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection, createTransaction } from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
-import type { ElectricCollectionUtils } from "../src/electric"
 import type { Collection } from "@tanstack/db"
 import type { Message, Row } from "@electric-sql/client"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
@@ -22,11 +21,11 @@ vi.mock(`@electric-sql/client`, async () => {
 
 describe(`Electric Integration - stuck empty repro`, () => {
   let collection: Collection<
-    Row,
+    Row<unknown>,
     string | number,
-    ElectricCollectionUtils,
+    any,
     StandardSchemaV1<unknown, unknown>,
-    Row
+    Row<unknown>
   >
   let subscriber: (messages: Array<Message<Row>>) => void
 
@@ -39,7 +38,7 @@ describe(`Electric Integration - stuck empty repro`, () => {
       return () => {}
     })
 
-    const options = electricCollectionOptions({
+    const config = {
       id: `repro`,
       shapeOptions: {
         url: `http://test-url`,
@@ -47,7 +46,9 @@ describe(`Electric Integration - stuck empty repro`, () => {
       },
       startSync: true,
       getKey: (item: Row) => item.id as number,
-    })
+    } as any
+
+    const options = electricCollectionOptions(config)
 
     collection = createCollection(options)
   })
