@@ -1,21 +1,23 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
-    CollectionImpl,
     createCollection,
-    createTransaction,
 } from "@tanstack/db"
-import { OPEN_RXDB_SUBSCRIPTIONS, RxDBCollectionConfig, rxdbCollectionOptions } from "../src/rxdb"
+import {
+    OPEN_RXDB_SUBSCRIPTIONS,
+    RxDBCollectionConfig,
+    rxdbCollectionOptions
+} from "../src/rxdb"
 import type {
     Collection,
-    InsertMutationFnParams,
-    MutationFnParams,
-    PendingMutation,
-    Transaction,
-    TransactionWithMutations,
     UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import { RxCollection, addRxPlugin, createRxDatabase, getFromMapOrCreate } from 'rxdb/plugins/core'
+import {
+    RxCollection,
+    addRxPlugin,
+    createRxDatabase,
+    getFromMapOrCreate
+} from 'rxdb/plugins/core'
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv'
@@ -46,6 +48,14 @@ describe(`RxDB Integration`, () => {
     >;
 
     let dbNameId = 0;
+    function getTestData(amount: number): Array<TestDocType> {
+        return new Array(amount).fill(0).map((_v, i) => {
+            return {
+                id: (i + 1) + '',
+                name: 'Item ' + (i + 1)
+            }
+        })
+    }
     async function createTestState(
         initialDocs: TestDocType[] = [],
         config: Partial<RxDBCollectionConfig<TestDocType, any>> = {}
@@ -84,6 +94,11 @@ describe(`RxDB Integration`, () => {
         const options = rxdbCollectionOptions({
             rxCollection: rxCollection,
             startSync: true,
+            /**
+             * In tests we use a small batch size
+             * to ensure iteration works.
+             */
+            syncBatchSize: 10,
             ...config
         })
 
@@ -97,15 +112,9 @@ describe(`RxDB Integration`, () => {
         }
     }
 
-
     describe('sync', () => {
-
-
         it(`should initialize and fetch initial data`, async () => {
-            const initialItems: Array<TestDocType> = [
-                { id: `1`, name: `Item 1` },
-                { id: `2`, name: `Item 2` },
-            ]
+            const initialItems = getTestData(2)
 
             const { collection, db } = await createTestState(initialItems);
 
@@ -122,11 +131,31 @@ describe(`RxDB Integration`, () => {
             await db.remove()
         })
 
+        it('should initialize and fetch initial data with many documents', async () => {
+            const docsAmount = 25; // > 10 to force multiple batches
+            const initialItems = getTestData(docsAmount);
+            const { collection, db } = await createTestState(initialItems);
+
+            // All docs should be present after initial sync
+            expect(collection.size).toBe(docsAmount);
+            expect(collection.syncedData.size).toBe(docsAmount);
+
+            // Spot-check a few positions
+            expect(collection.get('1')).toEqual({ id: '1', name: 'Item 1' });
+            expect(collection.get('10')).toEqual({ id: '10', name: 'Item 10' });
+            expect(collection.get('11')).toEqual({ id: '11', name: 'Item 11' });
+            expect(collection.get('25')).toEqual({ id: '25', name: 'Item 25' });
+
+            // Ensure no gaps
+            for (let i = 1; i <= docsAmount; i++) {
+                expect(collection.has(String(i))).toBe(true);
+            }
+
+            await db.remove()
+        })
+
         it(`should update the collection when RxDB changes data`, async () => {
-            const initialItems: Array<TestDocType> = [
-                { id: `1`, name: `Item 1` },
-                { id: `2`, name: `Item 2` },
-            ]
+            const initialItems = getTestData(2)
 
             const { collection, rxCollection, db } = await createTestState(initialItems);
 
@@ -148,10 +177,7 @@ describe(`RxDB Integration`, () => {
         })
 
         it(`should update RxDB when the collection changes data`, async () => {
-            const initialItems: Array<TestDocType> = [
-                { id: `1`, name: `Item 1` },
-                { id: `2`, name: `Item 2` },
-            ]
+            const initialItems = getTestData(2)
 
             const { collection, rxCollection, db } = await createTestState(initialItems);
 
@@ -204,10 +230,7 @@ describe(`RxDB Integration`, () => {
         })
 
         it(`should restart sync when collection is accessed after cleanup`, async () => {
-            const initialItems: Array<TestDocType> = [
-                { id: `1`, name: `Item 1` },
-                { id: `2`, name: `Item 2` },
-            ]
+            const initialItems = getTestData(2)
             const { collection, rxCollection, db } = await createTestState(initialItems);
 
             await collection.cleanup()
@@ -231,10 +254,7 @@ describe(`RxDB Integration`, () => {
 
     describe('error handling', () => {
         it('should rollback the transaction on invalid data that does not match the RxCollection schema', async () => {
-            const initialItems: Array<TestDocType> = [
-                { id: `1`, name: `Item 1` },
-                { id: `2`, name: `Item 2` },
-            ]
+            const initialItems = getTestData(2)
             const { collection, db } = await createTestState(initialItems);
 
             // INSERT

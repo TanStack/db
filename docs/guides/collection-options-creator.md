@@ -352,11 +352,8 @@ For complete, production-ready examples, see the collection packages in the TanS
 
 **From RxDB Collection:**
 - Uses RxDB's built-in queries and change streams
-- Uses `RxCollection.$` to subscribe to inserts/updates/deletes and forward them to TanStack DB with begin - write - commit
+- Uses `RxCollection.$` to subscribe to inserts/updates/deletes and forward them to TanStack DB with begin-write-commit
 - Implements built-in mutation handlers (onInsert, onUpdate, onDelete) that call RxDB APIs (bulkUpsert, incrementalPatch, bulkRemove)
-
-Pattern: Built-in handlers, great for offline-first and P2P use cases
-
 
 ## Complete Example: WebSocket Collection
 

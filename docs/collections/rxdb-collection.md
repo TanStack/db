@@ -113,10 +113,9 @@ The `rxdbCollectionOptions` function accepts the following options:
 - `id`: Unique identifier for the collection
 - `schema`: Schema for validating items. RxDB already has schema validation but having additional validation on the TanStack DB side can help to unify error handling between different tanstack collections.
 - `startSync`: Whether to start syncing immediately (default: true)
-- `onInsert, onUpdate, onDelete`: Override default persistence handlers
-    
+- `onInsert, onUpdate, onDelete`: Override default persistence handlers. By default, TanStack DB writes are persisted to RxDB using bulkUpsert, patch, and bulkRemove.
+- `syncBatchSize`: The maximum number of documents fetched per batch during the initial sync from RxDB into TanStack DB (default: 1000). Larger values reduce round trips but use more memory; smaller values are lighter but may increase query calls. Note that this only affects the initial sync. Ongoing live updates are streamed one by one via RxDB's change feed.
 
-By default, TanStack DB writes are persisted to RxDB using bulkUpsert, patch, and bulkRemove.
 
 
 ## Syncing with Backends

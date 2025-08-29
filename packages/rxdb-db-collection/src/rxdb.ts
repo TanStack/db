@@ -40,14 +40,15 @@ export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<Subscriptio
  * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
  *
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * Notice that primary keys in RxDB must always be a string.
  */
 export type RxDBCollectionConfig<
     TExplicit extends object = Record<string, unknown>,
     TSchema extends StandardSchemaV1 = never
 > = Omit<
     CollectionConfig<
-        ResolveType<TExplicit, TSchema, any>, // ← use Row here
-        string,                               // key is string
+        ResolveType<TExplicit, TSchema, any>,
+        string,
         TSchema
     >,
     'insert' | 'update' | 'delete' | 'getKey' | 'sync'
@@ -56,6 +57,23 @@ export type RxDBCollectionConfig<
      * The RxCollection from a RxDB Database instance.
      */
     rxCollection: RxCollection<TExplicit, unknown, unknown, unknown>
+
+    /**
+     * The maximum number of documents to read from the RxDB collection
+     * in a single batch during the initial sync between RxDB and the
+     * in-memory TanStack DB collection.
+     * 
+     * @remarks
+     * - Defaults to `1000` if not specified.
+     * - Larger values reduce the number of round trips to the storage
+     *   engine but increase memory usage per batch.
+     * - Smaller values may lower memory usage and allow earlier
+     *   streaming of initial results, at the cost of more query calls.
+     *
+     * Adjust this depending on your expected collection size and
+     * performance characteristics of the chosen RxDB storage adapter.
+     */
+    syncBatchSize?: number
 }
 
 /**
@@ -104,7 +122,7 @@ export function rxdbCollectionOptions<
                  * so for initial sync we iterate over that.
                  */
                 let cursor: RxDocumentData<TExplicit> | undefined = undefined
-                const syncBatchSize = 1000 // make this configureable
+                const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
                 begin()
 
                 while (!ready) {
