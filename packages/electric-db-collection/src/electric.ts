@@ -569,9 +569,10 @@ function createElectricSync<T extends Row<unknown>>(
           if (shouldCommit) {
             commit()
             transactionStarted = false
-            // Mark the collection as ready now that sync is up to date
-            markReady()
           }
+
+          // Mark the collection as ready now that sync is up to date
+          markReady()
 
           // Reset batch flags for next batch
           hasAnyChangeInBatch = false

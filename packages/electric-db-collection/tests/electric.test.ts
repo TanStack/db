@@ -308,6 +308,35 @@ describe(`Electric Integration`, () => {
     expect(collection.state.get(1)).toEqual({ id: 1, name: `User` })
   })
 
+  it(`two consecutive must-refetch with no writes should not clear state`, () => {
+    // Seed initial data
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Alpha` },
+        headers: { operation: `insert` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // First must-refetch with no writes
+    subscriber([
+      { headers: { control: `must-refetch` } },
+      { headers: { control: `up-to-date` } },
+    ])
+    expect(collection.state.size).toBe(1)
+
+    // Second must-refetch with no writes
+    subscriber([
+      { headers: { control: `must-refetch` } },
+      { headers: { control: `up-to-date` } },
+    ])
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `Alpha` })
+  })
+
   it(`should not flash empty when must-refetch occurs before up-to-date and a user tx runs`, () => {
     // Seed initial data and commit
     subscriber([
