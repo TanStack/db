@@ -1219,9 +1219,26 @@ export class CollectionImpl<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
+      // If a later committed batch includes a truncate, we must discard any earlier
+      // committed batches and only apply from the LAST truncate forward. This ensures
+      // older ops do not apply then get immediately cleared by the truncate.
+      let transactionsToApply = committedSyncTransactions
+      if (hasCommittedTruncateSync) {
+        let lastTruncateIndex = -1
+        for (let i = 0; i < committedSyncTransactions.length; i++) {
+          if (committedSyncTransactions[i]!.truncate) {
+            lastTruncateIndex = i
+          }
+        }
+        if (lastTruncateIndex >= 0) {
+          transactionsToApply =
+            committedSyncTransactions.slice(lastTruncateIndex)
+        }
+      }
+
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      for (const transaction of committedSyncTransactions) {
+      for (const transaction of transactionsToApply) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
         }
@@ -1244,7 +1261,7 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      for (const transaction of committedSyncTransactions) {
+      for (const transaction of transactionsToApply) {
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
@@ -1320,13 +1337,11 @@ export class CollectionImpl<
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      const hadTruncate = committedSyncTransactions.some(
-        (t) => t.truncate === true
-      )
+      const hadTruncate = transactionsToApply.some((t) => t.truncate === true)
       if (hadTruncate) {
         // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of committedSyncTransactions) {
+        for (const t of transactionsToApply) {
           for (const op of t.operations) {
             if (op.type === `insert` || op.type === `update`) {
               syncedInsertedOrUpdatedKeys.add(op.key as TKey)
