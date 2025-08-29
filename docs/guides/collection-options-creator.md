@@ -17,7 +17,7 @@ Collection options creators follow a consistent pattern:
 ## When to Create a Custom Collection
 
 You should create a custom collection when:
-- You have a dedicated sync engine (like ElectricSQL, Trailbase, Firebase, or a custom WebSocket solution)
+- You have a dedicated sync engine (like ElectricSQL, Trailbase, Firebase, RxDB or a custom WebSocket solution)
 - You need specific sync behaviors that aren't covered by the query collection
 - You want to integrate with a backend that has its own sync protocol
 
@@ -331,6 +331,7 @@ For complete, production-ready examples, see the collection packages in the TanS
 - **[@tanstack/query-collection](https://github.com/TanStack/db/tree/main/packages/query-collection)** - Pattern A: User-provided handlers with full refetch strategy
 - **[@tanstack/trailbase-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-collection)** - Pattern B: Built-in handlers with ID-based tracking  
 - **[@tanstack/electric-collection](https://github.com/TanStack/db/tree/main/packages/electric-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
+- **[@tanstack/rxdb-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
 
 ### Key Lessons from Production Collections
 
@@ -348,6 +349,11 @@ For complete, production-ready examples, see the collection packages in the TanS
 - Complex transaction ID tracking for distributed sync
 - Demonstrates advanced deduplication techniques
 - Shows how to wrap user handlers with sync coordination
+
+**From RxDB Collection:**
+- Uses RxDB's built-in queries and change streams
+- Uses `RxCollection.$` to subscribe to inserts/updates/deletes and forward them to TanStack DB with begin-write-commit
+- Implements built-in mutation handlers (onInsert, onUpdate, onDelete) that call RxDB APIs (bulkUpsert, incrementalPatch, bulkRemove)
 
 ## Complete Example: WebSocket Collection
 
