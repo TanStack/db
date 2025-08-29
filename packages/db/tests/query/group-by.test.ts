@@ -9,6 +9,7 @@ import {
   eq,
   gt,
   gte,
+  list,
   lt,
   max,
   min,
@@ -228,6 +229,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .groupBy(({ orders }) => orders.product_category)
               .select(({ orders }) => ({
                 product_category: orders.product_category,
+                product_ids: list(orders),
                 total_quantity: sum(orders.quantity),
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
@@ -238,6 +240,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // Electronics: orders 1, 2, 4, 6 (quantities: 2, 1, 1, 1)
         const electronics = categorySummary.get(`electronics`)
+        console.log(electronics)
         expect(electronics?.product_category).toBe(`electronics`)
         expect(electronics?.total_quantity).toBe(5)
         expect(electronics?.order_count).toBe(4)

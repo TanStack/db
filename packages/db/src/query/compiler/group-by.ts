@@ -16,7 +16,7 @@ import type {
 } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
-const { sum, count, avg, min, max } = groupByOperators
+const { sum, count, avg, min, max, list } = groupByOperators
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -346,7 +346,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
   const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     const value = compiledExpr(namespacedRow)
     // Ensure we return a number for numeric aggregate functions
-    return typeof value === `number` ? value : value != null ? Number(value) : 0
+    return value
   }
 
   // Return the appropriate aggregate function
@@ -361,7 +361,10 @@ function getAggregateFunction(aggExpr: Aggregate) {
       return min(valueExtractor)
     case `max`:
       return max(valueExtractor)
+    case `list`:
+      return list(valueExtractor)
     default:
+      console.log(aggExpr)
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
 }
