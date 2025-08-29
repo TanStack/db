@@ -31,7 +31,12 @@ npm install @tanstack/rxdb-db-collection rxdb @tanstack/db
 
 ```ts
 import { createRxDatabase, addRxPlugin } from 'rxdb/plugins/core'
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie' // Browser (IndexedDB via Dexie.js)
+
+/**
+ * Here we use the localstorage based storage for RxDB.
+ * RxDB has a wide range of storages based on Dexie.js, IndexedDB, SQLite and more.
+ */
+import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
 
 // add json-schema validation (optional)
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
@@ -45,7 +50,7 @@ type Todo = { id: string; text: string; completed: boolean }
 const db = await createRxDatabase({
   name: 'my-todos',
   storage: wrappedValidateAjvStorage({
-    storage: getRxStorageDexie()
+    storage: getRxStorageLocalstorage()
   })
 })
 
