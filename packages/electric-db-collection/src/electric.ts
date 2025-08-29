@@ -503,6 +503,8 @@ function createElectricSync<T extends Row<unknown>>(
         },
       })
       let transactionStarted = false
+      let hasAnyChangeInBatch = false
+      let hasMustRefetchInBatch = false
       const newTxids = new Set<Txid>()
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
@@ -535,6 +537,7 @@ function createElectricSync<T extends Row<unknown>>(
                 ...message.headers,
               },
             })
+            hasAnyChangeInBatch = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -549,6 +552,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             truncate()
+            hasMustRefetchInBatch = true
 
             // Reset hasUpToDate so we continue accumulating changes until next up-to-date
             hasUpToDate = false
@@ -556,14 +560,22 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (hasUpToDate) {
-          // Commit transaction if one was started
-          if (transactionStarted) {
+          // Commit only if the batch contained real changes, or there was no
+          // must-refetch in this batch. This prevents committing a truncate-only
+          // transaction that would leave the collection visibly empty.
+          const shouldCommit =
+            transactionStarted &&
+            (hasAnyChangeInBatch || !hasMustRefetchInBatch)
+          if (shouldCommit) {
             commit()
             transactionStarted = false
+            // Mark the collection as ready now that sync is up to date
+            markReady()
           }
 
-          // Mark the collection as ready now that sync is up to date
-          markReady()
+          // Reset batch flags for next batch
+          hasAnyChangeInBatch = false
+          hasMustRefetchInBatch = false
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
