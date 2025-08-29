@@ -38,6 +38,7 @@ The result types are automatically inferred from your query structure, providing
 - [Joins](#joins)
 - [Subqueries](#subqueries)
 - [groupBy and Aggregations](#groupby-and-aggregations)
+- [Distinct](#distinct)
 - [Order By, Limit, and Offset](#order-by-limit-and-offset)
 - [Composable Queries](#composable-queries)
 - [Expression Functions Reference](#expression-functions-reference)
@@ -867,6 +868,187 @@ const engineeringStats = deptStats.get(1)
 > **Note**: Grouped results are keyed differently based on the grouping:
 > - **Single column grouping**: Keyed by the actual value (e.g., `deptStats.get(1)`)
 > - **Multiple column grouping**: Keyed by a JSON string of the grouped values (e.g., `userStats.get('[1,"admin"]')`)
+
+## Distinct
+
+Use `distinct` to remove duplicate rows from your query results based on the selected columns. The `distinct` operator ensures that each unique combination of selected values appears only once in the result set.
+
+> [!IMPORTANT]
+> The `distinct` operator requires a `select` clause. You cannot use `distinct` without specifying which columns to select.
+
+### Method Signature
+
+```ts
+distinct(): Query
+```
+
+### Basic Usage
+
+Get unique values from a single column:
+
+```ts
+const uniqueCountries = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({ country: user.country }))
+    .distinct()
+)
+
+// Result contains only unique countries
+// If you have users from USA, Canada, and UK, the result will have 3 items
+```
+
+### Multiple Column Distinct
+
+Get unique combinations of multiple columns:
+
+```ts
+const uniqueRoleSalaryPairs = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      role: user.role,
+      salary: user.salary,
+    }))
+    .distinct()
+)
+
+// Result contains only unique role-salary combinations
+// e.g., Developer-75000, Developer-80000, Manager-90000
+```
+
+### Distinct with Computed Fields
+
+Use `distinct` with computed values:
+
+```ts
+import { concat } from '@tanstack/db'
+
+const uniqueDepartmentRoles = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      deptRole: concat(user.department, ' - ', user.role),
+    }))
+    .distinct()
+)
+
+// Result contains unique department-role combinations as strings
+// e.g., "Engineering - Developer", "Marketing - Manager"
+```
+
+### Distinct with Functional Select
+
+Apply `distinct` to results from functional selects:
+
+```ts
+const uniqueSalaryTiers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .fn.select(({ user }) => ({
+      salaryTier: user.salary > 80000 ? 'Senior' : 'Junior',
+    }))
+    .distinct()
+)
+
+// Result contains only 'Senior' and 'Junior' entries
+```
+
+### Distinct with Order By
+
+Combine `distinct` with ordering:
+
+```ts
+const orderedUniqueRoles = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({
+      role: user.role,
+    }))
+    .distinct()
+    .orderBy(({ user }) => user.salary, 'desc')
+)
+
+// Returns unique roles, ordered by salary
+// Note: When ordering by a non-selected column with distinct,
+// the order may be non-deterministic if multiple rows with the 
+// same distinct value have different ordering values
+```
+
+### Live Updates with Distinct
+
+Distinct results automatically update when the underlying data changes:
+
+```ts
+const uniqueDepartments = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({ department: user.department }))
+    .distinct()
+)
+
+// Initially: ['Engineering', 'Marketing', 'Sales']
+
+// Add a user with a new department
+usersCollection.set({
+  id: 10,
+  name: 'New User',
+  department: 'HR',
+  // ...
+})
+
+// Now: ['Engineering', 'Marketing', 'Sales', 'HR']
+
+// Add another user with existing department
+usersCollection.set({
+  id: 11,
+  name: 'Another User',
+  department: 'Engineering',
+  // ...
+})
+
+// Still: ['Engineering', 'Marketing', 'Sales', 'HR']
+// (No change - Engineering already exists)
+```
+
+### Edge Cases
+
+#### Null Values
+
+Null values are treated as distinct values:
+
+```ts
+const uniqueValues = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({ department: user.department }))
+    .distinct()
+)
+
+// If some users have null departments, null will appear as a distinct value
+// Result might be: ['Engineering', 'Marketing', null]
+```
+
+#### Boolean Values
+
+Boolean fields will have at most two distinct values:
+
+```ts
+const uniqueActiveStatuses = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(({ user }) => ({ active: user.active }))
+    .distinct()
+)
+
+// Result will contain at most: [true, false]
+```
+
+### Important Notes
+
+- **Requires Select**: You must use a `select` clause before `distinct`. Attempting to use `distinct` without `select` will throw a `DistinctRequiresSelectError`.
+- **Performance**: The distinct operation is performed after data retrieval and transformation, so it processes all matching rows before deduplication.
+- **Keying**: Distinct results maintain the same keying behavior as the source collection when possible.
 
 ## Order By, Limit, and Offset
 
