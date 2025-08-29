@@ -1285,7 +1285,12 @@ export class CollectionImpl<
             (op) => op.type === `insert` || op.type === `update`
           )
 
-          if (hasPersistingTransaction && !hasRebuildWritesInThisTransaction) {
+          if (
+            hasPersistingTransaction &&
+            !hasRebuildWritesInThisTransaction &&
+            this.optimisticUpserts.size === 0 &&
+            this.optimisticDeletes.size === 0
+          ) {
             this.deferredTruncatePending = true
             // When a committed truncate arrives during persisting, explicitly
             // allow the subsequent rebuild commits to apply, even if persisting
