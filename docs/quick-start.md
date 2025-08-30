@@ -178,6 +178,6 @@ You now understand the basics of TanStack DB! The collection loads and persists 
 
 Explore the docs to learn more about:
 
-- **[Installation](./installation.md)** - All framework and collection packages
-- **[Overview](./overview.md)** - Complete feature overview and examples  
-- **[Live Queries](./live-queries.md)** - Advanced querying, joins, and aggregations
+- **[Installation](../installation.md)** - All framework and collection packages
+- **[Overview](../overview.md)** - Complete feature overview and examples
+- **[Live Queries](../guides/live-queries.md)** - Advanced querying, joins, and aggregations

@@ -239,6 +239,30 @@ describe(`Collection Lifecycle Management`, () => {
       unsubscribe3()
       expect((collection as any).activeSubscribersCount).toBe(0)
     })
+
+    it(`should handle rapid subscribe/unsubscribe correctly`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `rapid-sub-test`,
+        getKey: (item) => item.id,
+        gcTime: 1000, // Short GC time for testing
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      // Subscribe and immediately unsubscribe multiple times
+      for (let i = 0; i < 5; i++) {
+        const unsubscribe = collection.subscribeChanges(() => {})
+        expect((collection as any).activeSubscribersCount).toBe(1)
+        unsubscribe()
+        expect((collection as any).activeSubscribersCount).toBe(0)
+
+        // Should start GC timer each time
+        expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
+      }
+
+      expect(mockSetTimeout).toHaveBeenCalledTimes(5)
+    })
   })
 
   describe(`Garbage Collection`, () => {
@@ -324,6 +348,24 @@ describe(`Collection Lifecycle Management`, () => {
 
       // Should use default 5 minutes (300000ms)
       expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 300000)
+    })
+
+    it(`should disable GC when gcTime is 0`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `disabled-gc-test`,
+        getKey: (item) => item.id,
+        gcTime: 0, // Disabled GC
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      const unsubscribe = collection.subscribeChanges(() => {})
+      unsubscribe()
+
+      // Should not start any timer when GC is disabled
+      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(collection.status).not.toBe(`cleaned-up`)
     })
   })
 

@@ -82,7 +82,7 @@ Live queries support joins across collections. This allows you to:
 
 Every query returns another collection which can _also_ be queried.
 
-For more details on live queries, see the [Live Queries](live-queries.md) documentation.
+For more details on live queries, see the [Live Queries](../guides/live-queries.md) documentation.
 
 ### Making optimistic mutations
 
@@ -184,7 +184,10 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection"
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["todoItems"],
-    queryFn: async () => fetch("/api/todos"),
+    queryFn: async () => {
+      const response = await fetch("/api/todos");
+      return response.json();
+    },
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
   })
@@ -421,9 +424,9 @@ This also works with joins to derive collections from multiple source collection
 
 #### Collection
 
-There is a `Collection` interface in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this to implement your own collection types.
+There is a `Collection` interface in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this to implement your own collection types.
 
-See the existing implementations in [`../packages/db`](../packages/db), [`../packages/query-db-collection`](../packages/query-db-collection), [`../packages/electric-db-collection`](../packages/electric-db-collection) and [`../packages/trailbase-db-collection`](../packages/trailbase-db-collection) for reference.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference.
 
 ### Live queries
 
@@ -501,7 +504,7 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [Live Queries](live-queries.md) documentation for more details.
+See the [Live Queries](../guides/live-queries.md) documentation for more details.
 
 ### Transactional mutators
 

@@ -562,12 +562,6 @@ export function queryCollectionOptions<
           return keys1.every((key) => {
             // Skip comparing functions and complex objects deeply
             if (typeof obj1[key] === `function`) return true
-            if (typeof obj1[key] === `object` && obj1[key] !== null) {
-              // For nested objects, just compare references
-              // A more robust solution might do recursive shallow comparison
-              // or let users provide a custom equality function
-              return obj1[key] === obj2[key]
-            }
             return obj1[key] === obj2[key]
           })
         }

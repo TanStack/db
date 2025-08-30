@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest"
+import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection.js"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { Query } from "../../src/query/builder/index.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from "../utls.js"
 import type { ChangeMessage } from "../../src/types.js"
 
 // Sample user type for tests
@@ -313,4 +317,153 @@ describe(`createLiveQueryCollection`, () => {
     // Resubscribe should not throw (would throw "Graph already finalized" without the fix)
     expect(() => liveQuery.subscribeChanges(() => {})).not.toThrow()
   })
+
+  it(`should handle temporal values correctly in live queries`, async () => {
+    // Define a type with temporal values
+    type Task = {
+      id: number
+      name: string
+      duration: Temporal.Duration
+    }
+
+    // Initial data with temporal duration
+    const initialTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 1 }),
+    }
+
+    // Create a collection with temporal values
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-tasks`,
+        getKey: (task) => task.id,
+        initialData: [initialTask],
+      })
+    )
+
+    // Create a live query collection that includes the temporal value
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ task: taskCollection })
+    )
+
+    await liveQuery.preload()
+
+    // After initial sync, the live query should see the row with the temporal value
+    expect(liveQuery.size).toBe(1)
+    const initialResult = liveQuery.get(1)
+    expect(initialResult).toBeDefined()
+    expect(initialResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(initialResult!.duration.hours).toBe(1)
+
+    // Simulate backend change: update the temporal value to 10 hours
+    const updatedTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 10 }),
+    }
+
+    // Update the task in the collection (simulating backend sync)
+    taskCollection.utils.begin()
+    taskCollection.utils.write({
+      type: `update`,
+      value: updatedTask,
+    })
+    taskCollection.utils.commit()
+
+    // The live query should now contain the new temporal value
+    const updatedResult = liveQuery.get(1)
+    expect(updatedResult).toBeDefined()
+    expect(updatedResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(updatedResult!.duration.hours).toBe(10)
+    expect(updatedResult!.duration.total({ unit: `hours` })).toBe(10)
+  })
+
+  for (const autoIndex of [`eager`, `off`] as const) {
+    it(`should not send the initial state twice on joins with autoIndex: ${autoIndex}`, async () => {
+      type Player = { id: number; name: string }
+      type Challenge = { id: number; value: number }
+
+      const playerCollection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Player>({
+          id: `player`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
+
+      const challenge1Collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Challenge>({
+          id: `challenge1`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
+
+      const challenge2Collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<Challenge>({
+          id: `challenge2`,
+          getKey: (post) => post.id,
+          autoIndex,
+        })
+      )
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ player: playerCollection })
+          .leftJoin(
+            { challenge1: challenge1Collection },
+            ({ player, challenge1 }) => eq(player.id, challenge1.id)
+          )
+          .leftJoin(
+            { challenge2: challenge2Collection },
+            ({ player, challenge2 }) => eq(player.id, challenge2.id)
+          )
+      )
+
+      // Start the query, but don't wait it, we are doing to write the data to the
+      // source collections while the query is loading the initial state
+      const preloadPromise = liveQuery.preload()
+
+      // Write player
+      playerCollection.utils.begin()
+      playerCollection.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice` },
+      })
+      playerCollection.utils.commit()
+      playerCollection.utils.markReady()
+
+      // Write challenge1
+      challenge1Collection.utils.begin()
+      challenge1Collection.utils.write({
+        type: `insert`,
+        value: { id: 1, value: 100 },
+      })
+      challenge1Collection.utils.commit()
+      challenge1Collection.utils.markReady()
+
+      // Write challenge2
+      challenge2Collection.utils.begin()
+      challenge2Collection.utils.write({
+        type: `insert`,
+        value: { id: 1, value: 200 },
+      })
+      challenge2Collection.utils.commit()
+      challenge2Collection.utils.markReady()
+
+      await preloadPromise
+
+      // With a failed test the results show more than 1 item
+      // It returns both an unjoined player with no joined challenges, and a joined
+      // player with the challenges
+      const results = liveQuery.toArray
+      expect(results.length).toBe(1)
+
+      const result = results[0]!
+      expect(result.player.name).toBe(`Alice`)
+      expect(result.challenge1?.value).toBe(100)
+      expect(result.challenge2?.value).toBe(200)
+    })
+  }
 })
