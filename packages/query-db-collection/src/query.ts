@@ -309,11 +309,13 @@ export type RefetchFn = () => Promise<void>
  * @template TItem - The type of items stored in the collection
  * @template TKey - The type of the item keys
  * @template TInsertInput - The type accepted for insert operations
+ * @template TError - The type of errors that can occur during queries
  */
 export interface QueryCollectionUtils<
   TItem extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
+  TError = unknown,
 > extends UtilsRecord {
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
@@ -327,6 +329,17 @@ export interface QueryCollectionUtils<
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
   /** Execute multiple write operations as a single atomic batch to the synced data store */
   writeBatch: (callback: () => void) => void
+  /** Get the last error encountered by the query (if any); reset on success */
+  lastError: () => TError | undefined
+  /** Check if the collection is in an error state */
+  isError: () => boolean
+  /**
+   * Get the number of consecutive sync failures.
+   * Incremented only when query fails completely (not per retry attempt); reset on success.
+   */
+  errorCount: () => number
+  /** Clear the error state and trigger a refetch of the query */
+  clearError: () => Promise<void>
 }
 
 /**
@@ -424,7 +437,8 @@ export function queryCollectionOptions<
   utils: QueryCollectionUtils<
     ResolveType<TExplicit, TSchema, TQueryFn>,
     TKey,
-    TInsertInput
+    TInsertInput,
+    TError
   >
 } {
   type TItem = ResolveType<TExplicit, TSchema, TQueryFn>
@@ -467,6 +481,13 @@ export function queryCollectionOptions<
     throw new GetKeyRequiredError()
   }
 
+  /** The last error encountered by the query */
+  let lastError: TError | undefined
+  /** The number of consecutive sync failures */
+  let errorCount = 0
+  /** The timestamp for when the query most recently returned the status as "error" */
+  let lastErrorUpdatedAt = 0
+
   const internalSync: SyncConfig<TItem>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
@@ -499,6 +520,10 @@ export function queryCollectionOptions<
 
     const actualUnsubscribeFn = localObserver.subscribe((result) => {
       if (result.isSuccess) {
+        // Clear error state
+        lastError = undefined
+        errorCount = 0
+
         const newItemsArray = result.data
 
         if (
@@ -567,6 +592,12 @@ export function queryCollectionOptions<
         // Mark collection as ready after first successful query result
         markReady()
       } else if (result.isError) {
+        if (result.errorUpdatedAt !== lastErrorUpdatedAt) {
+          lastError = result.error
+          errorCount++
+          lastErrorUpdatedAt = result.errorUpdatedAt
+        }
+
         console.error(
           `[QueryCollection] Error observing query ${String(queryKey)}:`,
           result.error
@@ -588,7 +619,7 @@ export function queryCollectionOptions<
    * Refetch the query data
    * @returns Promise that resolves when the refetch is complete
    */
-  const refetch: RefetchFn = async (): Promise<void> => {
+  const refetch: RefetchFn = () => {
     return queryClient.refetchQueries({
       queryKey: queryKey,
     })
@@ -682,6 +713,15 @@ export function queryCollectionOptions<
     utils: {
       refetch,
       ...writeUtils,
+      lastError: () => lastError,
+      isError: () => !!lastError,
+      errorCount: () => errorCount,
+      clearError: () => {
+        lastError = undefined
+        errorCount = 0
+        lastErrorUpdatedAt = 0
+        return refetch()
+      },
     },
   }
 }

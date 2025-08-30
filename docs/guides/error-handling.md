@@ -45,6 +45,52 @@ The error includes:
 - `issues`: Array of validation issues with messages and paths
 - `message`: A formatted error message listing all issues
 
+## Query Collection Error Tracking
+
+Query collections provide enhanced error tracking utilities through the `utils` object. These methods expose error state information and provide recovery mechanisms for failed queries:
+
+```tsx
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { useLiveQuery } from "@tanstack/react-db"
+
+const syncedCollection = createCollection(
+  queryCollectionOptions({
+    queryClient,
+    queryKey: ['synced-data'],
+    queryFn: fetchData,
+    getKey: (item) => item.id,
+  })
+)
+
+// Component can check error state
+function DataList() {
+  const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
+  const isError = syncedCollection.utils.isError()
+  const errorCount = syncedCollection.utils.errorCount()
+  
+  return (
+    <>
+      {isError && errorCount > 3 && (
+        <Alert>
+          Unable to sync. Showing cached data.
+          <button onClick={() => syncedCollection.utils.clearError()}>
+            Retry
+          </button>
+        </Alert>
+      )}
+      {/* Render data */}
+    </>
+  )
+}
+```
+
+Error tracking methods:
+- **`lastError()`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
+- **`isError()`**: Returns a boolean indicating whether the collection is currently in an error state:
+- **`errorCount()`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
+- **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
+
 ## Collection Status and Error States
 
 Collections track their status and transition between states:
@@ -281,6 +327,7 @@ When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
 - Collection is marked as ready to prevent blocking the application
 - Cached data remains available
+- Error tracking counters are updated (`lastError`, `errorCount`)
 
 ### Sync Write Errors
 
