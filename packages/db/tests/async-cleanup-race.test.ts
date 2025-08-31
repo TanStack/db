@@ -15,7 +15,7 @@ const observers = new Map<
 const startCounts = new Map<string, number>()
 
 describe(`Async sync cleanup race with GC`, () => {
-  it(`reproduces: GC cleanup cancels the restarted sync, leaving collection stuck empty`, async () => {
+  it(`reproduces: GC cleanup cancels the restarted sync, leaving collection stuck empty`, () => {
     vi.useFakeTimers()
 
     try {
@@ -26,8 +26,8 @@ describe(`Async sync cleanup race with GC`, () => {
         // Do not start immediately - start occurs on first subscription
         startSync: false,
         sync: {
-          sync: ({ begin, write, commit, markReady, collection }) => {
-            const id = collection.id
+          sync: ({ begin, write, commit, markReady, collection: col }) => {
+            const id = col.id
 
             // Simulate an async initial fetch that would populate and mark ready
             const count = (startCounts.get(id) ?? 0) + 1
@@ -57,9 +57,7 @@ describe(`Async sync cleanup race with GC`, () => {
             // might have been started by a restart (racing)
             return async () => {
               // Immediate unsubscribe of the fetch from this sync instance
-              if (fetchTimer) {
-                clearTimeout(fetchTimer)
-              }
+              clearTimeout(fetchTimer)
 
               // Simulate async cleanup (e.g., await cancelQueries)
               await new Promise<void>((resolve) => setTimeout(resolve, 5))
