@@ -34,7 +34,10 @@ describe(`Async sync cleanup race with GC`, () => {
               // If this observer has been cancelled (e.g. by cleanup racing), do nothing
               const current = observers.get(id)
               if (cancelledRef.value || current !== state) return
-              // Simulate successful sync signaling readiness
+              // Simulate successful sync delivering data and signaling readiness
+              begin()
+              write({ type: `insert`, value: { id: `1`, name: `foo` } })
+              commit()
               markReady()
             }, delay)
             state.fetchTimer = fetchTimer
@@ -83,15 +86,13 @@ describe(`Async sync cleanup race with GC`, () => {
       // 4) Let the async cleanup finish; it will cancel the NEW observer's fetch timer
       vi.advanceTimersByTime(5)
 
-      // 5) Even if we advance far beyond the fetch time, no data should arrive
-      // because the new fetch was canceled by the racing async cleanup
+      // 5) After advancing time beyond the fetch, the restarted sync should have delivered data
       vi.advanceTimersByTime(1000)
 
-      expect(collection.size).toBe(0)
-      // Status may vary depending on internal transitions; we only assert no data arrived
-      expect([`idle`, `loading`, `initialCommit`, `ready`, `cleaned-up`, `error`]).toContain(
-        collection.status
-      )
+      // Correct behavior: data arrives and collection is ready
+      expect(collection.size).toBe(1)
+      expect(collection.isReady()).toBe(true)
+      expect(collection.status).toBe(`ready`)
 
       // Cleanup
       unsubscribe2()
