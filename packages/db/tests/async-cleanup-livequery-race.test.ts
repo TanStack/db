@@ -61,6 +61,22 @@ describe(`LiveQueryCollection async cleanup race with GC`, () => {
         },
       })
 
+      // Wrap subscribeChanges so any unsubscribe cancels the latest scheduled timer (simulating cleanup clobbering restart)
+      const originalSubscribe = (base as any).subscribeChanges.bind(base)
+      ;(base as any).subscribeChanges = (cb: any, opts?: any) => {
+        const unsub = originalSubscribe(cb, opts)
+        return () => {
+          const cur = scheduled.get(base.id)
+          if (cur) {
+            cur.canceled.value = true
+            if (cur.timer) clearTimeout(cur.timer)
+            cur.timer = null
+            scheduled.delete(base.id)
+          }
+          unsub()
+        }
+      }
+
       // Create the live query collection but do not startSync immediately; we'll rely on subscribe
       const live = createLiveQueryCollection({
         id: `live-race`,
