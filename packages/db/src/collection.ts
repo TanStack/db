@@ -335,6 +335,7 @@ export class CollectionImpl<
   private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private preloadPromise: Promise<void> | null = null
   private syncCleanupFn: (() => void) | null = null
+  private cleanupInFlight: Promise<void> | null = null
 
   /**
    * Register a callback to be executed when the collection first becomes ready
@@ -536,6 +537,17 @@ export class CollectionImpl<
       return // Already started or in progress
     }
 
+    // If a previous cleanup is still in flight, wait for it to finish before starting a new sync
+    if (this.cleanupInFlight) {
+      this.cleanupInFlight.then(() => {
+        // Only attempt to start if we're still eligible
+        if (this._status === `idle` || this._status === `cleaned-up`) {
+          this.startSync()
+        }
+      })
+      return
+    }
+
     this.setStatus(`loading`)
 
     try {
@@ -698,10 +710,22 @@ export class CollectionImpl<
     // Stop sync - wrap in try/catch since it's user-provided code
     try {
       if (this.syncCleanupFn) {
-        this.syncCleanupFn()
+        const result = this.syncCleanupFn()
+        // Track in-flight cleanup to block subsequent starts until finished
+        this.cleanupInFlight = Promise.resolve(result as unknown as void)
+          .catch(() => {})
+          .finally(() => {
+            this.cleanupInFlight = null
+          })
         this.syncCleanupFn = null
       }
     } catch (error) {
+      // Ensure cleanupInFlight is cleared even on syncCleanupFn throw
+      if (!this.cleanupInFlight) {
+        this.cleanupInFlight = Promise.resolve().finally(() => {
+          this.cleanupInFlight = null
+        })
+      }
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
         if (error instanceof Error) {
