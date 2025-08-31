@@ -5,7 +5,13 @@ type Row = { id: string; name: string }
 
 // Simulate an external observer keyed by collection id (like a query observer)
 // The cleanup() will cancel whatever observer is currently active for that id
-const observers = new Map<string, { fetchTimer: ReturnType<typeof setTimeout> | null; cancelled: { value: boolean } }>()
+const observers = new Map<
+  string,
+  {
+    fetchTimer: ReturnType<typeof setTimeout> | null
+    cancelled: { value: boolean }
+  }
+>()
 const startCounts = new Map<string, number>()
 
 describe(`Async sync cleanup race with GC`, () => {
@@ -29,7 +35,10 @@ describe(`Async sync cleanup race with GC`, () => {
             const delay = count === 1 ? 200 : 20
 
             const cancelledRef = { value: false }
-            const state = { fetchTimer: null as ReturnType<typeof setTimeout> | null, cancelled: cancelledRef }
+            const state = {
+              fetchTimer: null as ReturnType<typeof setTimeout> | null,
+              cancelled: cancelledRef,
+            }
             const fetchTimer = setTimeout(() => {
               // If this observer has been cancelled (e.g. by cleanup racing), do nothing
               const current = observers.get(id)
@@ -102,4 +111,3 @@ describe(`Async sync cleanup race with GC`, () => {
     }
   })
 })
-
