@@ -15,7 +15,7 @@ const observers = new Map<
 const startCounts = new Map<string, number>()
 
 describe(`Async sync cleanup race with GC`, () => {
-  it(`reproduces: GC cleanup cancels the restarted sync, leaving collection stuck empty`, () => {
+  it(`reproduces: GC cleanup cancels the restarted sync, leaving collection stuck empty`, async () => {
     vi.useFakeTimers()
 
     try {
@@ -85,16 +85,16 @@ describe(`Async sync cleanup race with GC`, () => {
       unsubscribe1()
 
       // 2) Advance to trigger GC cleanup (which calls the async cleanup function)
-      vi.advanceTimersByTime(50) // gcTime (cleanup kicks off now)
+      await vi.advanceTimersByTimeAsync(50) // gcTime (cleanup kicks off now)
 
       // 3) Before the async cleanup completes (it waits 10ms), re-subscribe to restart sync
       const unsubscribe2 = collection.subscribeChanges(() => {})
 
       // 4) Let the async cleanup finish; it will cancel the NEW observer's fetch timer
-      vi.advanceTimersByTime(5)
+      await vi.advanceTimersByTimeAsync(5)
 
       // 5) After advancing time beyond the fetch, the restarted sync should have delivered data
-      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(1000)
 
       // Correct behavior: data arrives and collection is ready
       expect(collection.size).toBe(1)
