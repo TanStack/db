@@ -16,7 +16,7 @@ describe(`QueryCollection async cleanup race with GC`, () => {
     vi.useFakeTimers()
 
     try {
-      const queryKey = ["race-query"] as const
+      const queryKey = [`race-query`] as const
 
       const queryClient = new QueryClient({
         defaultOptions: {
@@ -28,33 +28,37 @@ describe(`QueryCollection async cleanup race with GC`, () => {
       })
 
       // Stub cancelQueries to asynchronously cancel the latest scheduled fetch
-      vi.spyOn(queryClient, "cancelQueries").mockImplementation((params?: any): Promise<void> => {
-        const keyStr = JSON.stringify(params?.queryKey ?? [])
-        return new Promise<void>((resolve) => {
-          setTimeout(() => {
-            const state = activeFetches.get(keyStr)
-            if (state) {
-              if (state.timer) {
-                clearTimeout(state.timer)
-                state.timer = null
+      vi.spyOn(queryClient, `cancelQueries`).mockImplementation(
+        (params?: any): Promise<void> => {
+          const keyStr = JSON.stringify(params?.queryKey ?? [])
+          return new Promise<void>((resolve) => {
+            setTimeout(() => {
+              const state = activeFetches.get(keyStr)
+              if (state) {
+                if (state.timer) {
+                  clearTimeout(state.timer)
+                  state.timer = null
+                }
+                state.canceled.value = true
+                activeFetches.delete(keyStr)
               }
-              state.canceled.value = true
-              activeFetches.delete(keyStr)
-            }
-            resolve()
-          }, 5)
-        })
-      })
+              resolve()
+            }, 5)
+          })
+        }
+      )
 
       const baseOptions = queryCollectionOptions<Row>({
-        id: "race-qc",
+        id: `race-qc`,
         queryKey,
         queryClient,
         getKey: (r) => r.id,
         // Do not start immediately; we'll control via subscription
         startSync: false,
         queryFn: async (ctx) => {
-          const keyStr = JSON.stringify(ctx.queryKey as unknown as Array<unknown>)
+          const keyStr = JSON.stringify(
+            ctx.queryKey as unknown as Array<unknown>
+          )
           const count = (startCounts.get(keyStr) ?? 0) + 1
           startCounts.set(keyStr, count)
           const delay = count === 1 ? 200 : 20
@@ -67,7 +71,7 @@ describe(`QueryCollection async cleanup race with GC`, () => {
                 resolve([])
                 return
               }
-              resolve([{ id: "1", name: "foo" }])
+              resolve([{ id: `1`, name: `foo` }])
             }, delay)
             activeFetches.set(keyStr, { timer, canceled: canceledRef })
           })
@@ -99,7 +103,7 @@ describe(`QueryCollection async cleanup race with GC`, () => {
       // Correct behavior would be to have data and be ready; assert that (to make this fail)
       expect(collection.size).toBe(1)
       expect(collection.isReady()).toBe(true)
-      expect(collection.status).toBe("ready")
+      expect(collection.status).toBe(`ready`)
 
       unsubscribe2()
     } finally {
@@ -109,4 +113,3 @@ describe(`QueryCollection async cleanup race with GC`, () => {
     }
   })
 })
-
