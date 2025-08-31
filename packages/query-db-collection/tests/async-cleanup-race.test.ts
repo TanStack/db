@@ -27,26 +27,7 @@ describe(`QueryCollection async cleanup race with GC`, () => {
         },
       })
 
-      // Stub cancelQueries to asynchronously cancel the latest scheduled fetch
-      vi.spyOn(queryClient, `cancelQueries`).mockImplementation(
-        (params?: any): Promise<void> => {
-          const keyStr = JSON.stringify(params?.queryKey ?? [])
-          return new Promise<void>((resolve) => {
-            setTimeout(() => {
-              const state = activeFetches.get(keyStr)
-              if (state) {
-                if (state.timer) {
-                  clearTimeout(state.timer)
-                  state.timer = null
-                }
-                state.canceled.value = true
-                activeFetches.delete(keyStr)
-              }
-              resolve()
-            }, 5)
-          })
-        }
-      )
+      // Use base Collection GC cleanup timing via cleanupInFlight; no need to stub cancelQueries
 
       const baseOptions = queryCollectionOptions<Row>({
         id: `race-qc`,
@@ -67,7 +48,6 @@ describe(`QueryCollection async cleanup race with GC`, () => {
           return await new Promise<Array<Row>>((resolve) => {
             const timer = setTimeout(() => {
               if (canceledRef.value) {
-                // Simulate canceled fetch: do nothing
                 resolve([])
                 return
               }
@@ -88,13 +68,13 @@ describe(`QueryCollection async cleanup race with GC`, () => {
       // Immediately unsubscribe to trigger GC countdown
       unsubscribe1()
 
-      // 2) Advance timers to fire GC and call async cleanup (which schedules cancel)
+      // 2) Advance timers to fire GC and call async cleanup (which will defer next start until done)
       await vi.advanceTimersByTimeAsync(50) // gcTime
 
       // 3) Before async cancel completes (5ms), resubscribe to restart fetch
       const unsubscribe2 = collection.subscribeChanges(() => {})
 
-      // 4) Allow async cancel to run and cancel the restarted fetch
+      // 4) Allow async cleanup to run
       await vi.advanceTimersByTimeAsync(5)
 
       // 5) Advance beyond fetch delays; the restarted fetch was canceled, so no data delivered
