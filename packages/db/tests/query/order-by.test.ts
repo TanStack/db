@@ -1241,6 +1241,92 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
     })
 
+    describe(`OrderBy Optimization Tests`, () => {
+      const itWhenAutoIndex = autoIndex === `eager` ? it : it.skip
+
+      itWhenAutoIndex(
+        `optimizes single-column orderBy when passed as single value`,
+        async () => {
+          // Patch getConfig to expose the builder on the returned config for test access
+          const { CollectionConfigBuilder } = await import(
+            `../../src/query/live/collection-config-builder.js`
+          )
+          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+            const cfg = originalGetConfig.call(this)
+            ;(cfg as any).__builder = this
+            return cfg
+          }
+
+          try {
+            const collection = createLiveQueryCollection((q) =>
+              q
+                .from({ employees: employeesCollection })
+                .orderBy(({ employees }) => employees.salary, `desc`)
+                .limit(3)
+                .select(({ employees }) => ({
+                  id: employees.id,
+                  name: employees.name,
+                  salary: employees.salary,
+                }))
+            )
+
+            await collection.preload()
+
+            const builder = (collection as any).config.__builder
+            expect(builder).toBeTruthy()
+            expect(
+              Object.keys(builder.optimizableOrderByCollections)
+            ).toContain(employeesCollection.id)
+          } finally {
+            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+          }
+        }
+      )
+
+      itWhenAutoIndex(
+        `optimizes single-column orderBy when passed as array with single element`,
+        async () => {
+          // Patch getConfig to expose the builder on the returned config for test access
+          const { CollectionConfigBuilder } = await import(
+            `../../src/query/live/collection-config-builder.js`
+          )
+          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+            const cfg = originalGetConfig.call(this)
+            ;(cfg as any).__builder = this
+            return cfg
+          }
+
+          try {
+            const collection = createLiveQueryCollection((q) =>
+              q
+                .from({ employees: employeesCollection })
+                .orderBy(({ employees }) => [employees.salary], `desc`)
+                .limit(3)
+                .select(({ employees }) => ({
+                  id: employees.id,
+                  name: employees.name,
+                  salary: employees.salary,
+                }))
+            )
+
+            await collection.preload()
+
+            const builder = (collection as any).config.__builder
+            expect(builder).toBeTruthy()
+            expect(
+              Object.keys(builder.optimizableOrderByCollections)
+            ).toContain(employeesCollection.id)
+          } finally {
+            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+          }
+        }
+      )
+    })
+
     describe(`String Comparison Tests`, () => {
       it(`handles case differently in lexical vs locale string comparison`, async () => {
         const numericEmployees = [
