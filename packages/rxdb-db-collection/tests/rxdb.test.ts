@@ -56,12 +56,15 @@ describe(`RxDB Integration`, () => {
             }
         })
     }
-    async function createTestState(
+
+
+    async function getDatababase(
         initialDocs: TestDocType[] = [],
-        config: Partial<RxDBCollectionConfig<TestDocType, any>> = {}
+        dbId = dbNameId++
     ) {
         const db = await createRxDatabase<RxCollections, unknown, unknown, unknown>({
-            name: 'my-rxdb-' + (dbNameId++),
+            name: 'my-rxdb-' + dbId,
+            ignoreDuplicate: true,
             storage: wrappedValidateAjvStorage({
                 storage: getRxStorageMemory()
             })
@@ -90,7 +93,18 @@ describe(`RxDB Integration`, () => {
             const insertResult = await rxCollection.bulkInsert(initialDocs)
             expect(insertResult.error.length).toBe(0)
         }
+        return db
+    }
 
+    async function createTestState(
+        initialDocs: TestDocType[] = [],
+        config: Partial<RxDBCollectionConfig<TestDocType, any>> = {}
+    ) {
+        const db = await getDatababase(
+            initialDocs,
+            dbNameId++
+        )
+        const rxCollection: RxCollection<TestDocType> = db.test;
         const options = rxdbCollectionOptions({
             rxCollection: rxCollection,
             startSync: true,
@@ -249,6 +263,52 @@ describe(`RxDB Integration`, () => {
 
             unsubscribe()
             await db.remove()
+        })
+    })
+
+    /**
+     * Here we simulate having multiple browser tabs
+     * open where the data should still be in sync.
+     */
+    describe(`multi tab`, () => {
+        it(`should update the state accross instances`, async () => {
+            const dbid = dbNameId++
+            const db1 = await getDatababase([], dbid)
+            const db2 = await getDatababase(getTestData(2), dbid)
+
+            const col1 = createCollection(
+                rxdbCollectionOptions({
+                    rxCollection: db1.test,
+                    startSync: true,
+                })
+            )
+            const col2 = createCollection(
+                rxdbCollectionOptions({
+                    rxCollection: db2.test,
+                    startSync: true,
+                })
+            )
+            await col1.stateWhenReady()
+            await col2.stateWhenReady()
+
+            // tanstack-db writes
+            col1.insert({ id: 't1', name: 't1' })
+            col2.insert({ id: 't2', name: 't2' })
+            await db1.test.findOne('t1').exec(true)
+            await db1.test.findOne('t2').exec(true)
+            await db2.test.findOne('t1').exec(true)
+            await db2.test.findOne('t2').exec(true)
+            expect(col2.get(`t1`)).toBeTruthy()
+            expect(col1.get(`t2`)).toBeTruthy()
+
+            // RxDB writes
+            await db1.test.insert({ id: 'rx1', name: 'rx1' })
+            await db2.test.insert({ id: 'rx2', name: 'rx2' })
+            expect(col2.get(`rx1`)).toBeTruthy()
+            expect(col1.get(`rx2`)).toBeTruthy()
+
+            db1.remove()
+            db2.remove()
         })
     })
 
