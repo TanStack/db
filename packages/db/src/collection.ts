@@ -537,19 +537,21 @@ export class CollectionImpl<
       return // Already started or in progress
     }
 
-    // If a previous cleanup is still in flight, wait for it to finish before starting a new sync
+    // Enter loading state immediately so callers see progress
+    this.setStatus(`loading`)
+
+    // If a previous cleanup is still in flight, wait for it to finish before actually starting
     if (this.cleanupInFlight) {
       this.cleanupInFlight.then(() => {
-        // Only attempt to start if we're still eligible
-        if (this._status === `idle` || this._status === `cleaned-up`) {
-          this.startSync()
-        }
+        this.doStartSync()
       })
       return
     }
 
-    this.setStatus(`loading`)
+    this.doStartSync()
+  }
 
+  private doStartSync(): void {
     try {
       const cleanupFn = this.config.sync.sync({
         collection: this,
