@@ -1101,4 +1101,121 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 describe(`Query JOIN Operations`, () => {
   createJoinTests(`off`)
   createJoinTests(`eager`)
+
+  // Test for chained joins bug fix
+  describe(`Chained Joins Bug Fix`, () => {
+    // Test schema similar to the bug report
+    type Player = {
+      name: string
+      club_id: string
+      position: string
+    }
+
+    type Client = {
+      name: string
+      player: string // references Player.name
+      email: string
+    }
+
+    type Balance = {
+      name: string
+      client: string // references Client.name
+      amount: number
+    }
+
+    // Sample data
+    const samplePlayers: Array<Player> = [
+      { name: `player1`, club_id: `club1`, position: `forward` },
+      { name: `player2`, club_id: `club1`, position: `midfielder` },
+      { name: `player3`, club_id: `club1`, position: `defender` },
+    ]
+
+    const sampleClients: Array<Client> = [
+      { name: `client1`, player: `player1`, email: `client1@example.com` },
+      { name: `client2`, player: `player2`, email: `client2@example.com` },
+      { name: `client3`, player: `player3`, email: `client3@example.com` },
+    ]
+
+    const sampleBalances: Array<Balance> = [
+      { name: `balance1`, client: `client1`, amount: 1000 },
+      { name: `balance2`, client: `client2`, amount: 2000 },
+      { name: `balance3`, client: `client3`, amount: 1500 },
+    ]
+
+    function createPlayersCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Player>({
+          id: `test-players-chained`,
+          getKey: (player) => player.name,
+          initialData: samplePlayers,
+        })
+      )
+    }
+
+    function createClientsCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Client>({
+          id: `test-clients-chained`,
+          getKey: (client) => client.name,
+          initialData: sampleClients,
+        })
+      )
+    }
+
+    function createBalancesCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Balance>({
+          id: `test-balances-chained`,
+          getKey: (balance) => balance.name,
+          initialData: sampleBalances,
+        })
+      )
+    }
+
+    test(`should allow chained joins where second join references first joined table`, () => {
+      const playersCollection = createPlayersCollection()
+      const clientsCollection = createClientsCollection()
+      const balancesCollection = createBalancesCollection()
+
+      // This reproduces the exact scenario from the bug report
+      // where the second join joins against the previously joined collection (client)
+      // and not the base collection (player)
+
+      const chainedJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ player: playersCollection })
+            .join({ client: clientsCollection }, ({ client, player }) =>
+              eq(client.player, player.name)
+            )
+            .join({ balance: balancesCollection }, ({ balance, client }) =>
+              eq(balance.client, client.name)
+            )
+            .select(({ player, client, balance }) => ({
+              player,
+              client,
+              balance,
+            })),
+      })
+
+      const results = chainedJoinQuery.toArray
+
+      // Should have 3 results - one for each player-client-balance chain
+      expect(results).toHaveLength(3)
+
+      // Verify the structure
+      const result1 = results.find((r) => r.player.name === `player1`)
+      expect(result1).toBeDefined()
+      expect(result1!.client.name).toBe(`client1`)
+      expect(result1!.balance.name).toBe(`balance1`)
+      expect(result1!.balance.amount).toBe(1000)
+
+      const result2 = results.find((r) => r.player.name === `player2`)
+      expect(result2).toBeDefined()
+      expect(result2!.client.name).toBe(`client2`)
+      expect(result2!.balance.name).toBe(`balance2`)
+      expect(result2!.balance.amount).toBe(2000)
+    })
+  })
 })

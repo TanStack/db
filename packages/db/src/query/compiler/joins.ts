@@ -139,10 +139,11 @@ function processJoin(
   )
 
   // Analyze which table each expression refers to and swap if necessary
+  const availableTableAliases = Object.keys(tables)
   const { mainExpr, joinedExpr } = analyzeJoinExpressions(
     joinClause.left,
     joinClause.right,
-    mainTableAlias,
+    availableTableAliases,
     joinedTableAlias
   )
 
@@ -286,29 +287,31 @@ function processJoin(
 
 /**
  * Analyzes join expressions to determine which refers to which table
- * and returns them in the correct order (main table expression first, joined table expression second)
+ * and returns them in the correct order (available table expression first, joined table expression second)
  */
 function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
-  mainTableAlias: string,
+  availableTableAliases: Array<string>,
   joinedTableAlias: string
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
   const leftTableAlias = getTableAliasFromExpression(left)
   const rightTableAlias = getTableAliasFromExpression(right)
 
-  // If left expression refers to main table and right refers to joined table, keep as is
+  // If left expression refers to an available table and right refers to joined table, keep as is
   if (
-    leftTableAlias === mainTableAlias &&
+    leftTableAlias &&
+    availableTableAliases.includes(leftTableAlias) &&
     rightTableAlias === joinedTableAlias
   ) {
     return { mainExpr: left, joinedExpr: right }
   }
 
-  // If left expression refers to joined table and right refers to main table, swap them
+  // If left expression refers to joined table and right refers to an available table, swap them
   if (
     leftTableAlias === joinedTableAlias &&
-    rightTableAlias === mainTableAlias
+    rightTableAlias &&
+    availableTableAliases.includes(rightTableAlias)
   ) {
     return { mainExpr: right, joinedExpr: left }
   }
@@ -318,19 +321,42 @@ function analyzeJoinExpressions(
     throw new InvalidJoinConditionSameTableError(leftTableAlias || `unknown`)
   }
 
-  // If one expression doesn't refer to either table, this is an invalid join
+  // If one expression doesn't refer to any table, this is an invalid join
   if (!leftTableAlias || !rightTableAlias) {
+    // For backward compatibility, use the first available table alias in error message
+    const firstAvailableAlias = availableTableAliases[0] || `unknown`
     throw new InvalidJoinConditionTableMismatchError(
-      mainTableAlias,
+      firstAvailableAlias,
       joinedTableAlias
     )
   }
 
   // If expressions refer to tables not involved in this join, this is an invalid join
+  // One expression must reference an available table, the other must reference the joined table
+  const leftIsAvailable = availableTableAliases.includes(leftTableAlias)
+  const rightIsAvailable = availableTableAliases.includes(rightTableAlias)
+  const leftIsJoined = leftTableAlias === joinedTableAlias
+  const rightIsJoined = rightTableAlias === joinedTableAlias
+
+  if (
+    !((leftIsAvailable && rightIsJoined) || (leftIsJoined && rightIsAvailable))
+  ) {
+    // For backward compatibility, use the first available table alias in error message
+    const firstAvailableAlias = availableTableAliases[0] || `unknown`
+    throw new InvalidJoinConditionWrongTablesError(
+      leftTableAlias,
+      rightTableAlias,
+      firstAvailableAlias,
+      joinedTableAlias
+    )
+  }
+
+  // This should not be reachable given the logic above, but just in case
+  const firstAvailableAlias = availableTableAliases[0] || `unknown`
   throw new InvalidJoinConditionWrongTablesError(
     leftTableAlias,
     rightTableAlias,
-    mainTableAlias,
+    firstAvailableAlias,
     joinedTableAlias
   )
 }
