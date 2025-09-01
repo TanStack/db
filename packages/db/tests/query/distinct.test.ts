@@ -611,9 +611,9 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ users: usersCollection })
+              .orderBy(({ users }) => users.country, `asc`)
               .select(({ users }) => ({ country: users.country }))
-              .distinct()
-              .orderBy(({ country }) => country, `asc`),
+              .distinct(),
         })
 
         expect(distinctOrderedCountries.size).toBe(3)
@@ -621,7 +621,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         const orderedCountries = distinctOrderedCountries.toArray.map(
           (u) => u.country
         )
-        expect(orderedCountries.sort()).toEqual([`Canada`, `UK`, `USA`])
+        expect(orderedCountries).toEqual([`Canada`, `UK`, `USA`])
       })
 
       test(`distinct with multiple chained operators`, () => {
@@ -631,22 +631,22 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
             q
               .from({ users: usersCollection })
               .where(({ users }) => gte(users.salary, 75000))
+              .orderBy(({ users }) => users.department, `asc`)
               .select(({ users }) => ({
                 department: users.department,
                 role: users.role,
               }))
-              .distinct()
-              .orderBy(({ department }) => department, `asc`),
+              .distinct(),
         })
 
         // Should have distinct department-role combinations for users with salary >= 75000
         const results = complexQuery.toArray
         expect(results.length).toBeGreaterThan(0)
 
-        // Check that results are ordered by department
-        const departments = results.map((r) => r.department)
-        const sortedDepartments = [...departments].sort()
-        expect(departments.sort()).toEqual(sortedDepartments)
+        // Check that we have distinct combinations
+        const combinations = results.map((r) => `${r.department}-${r.role}`)
+        const uniqueCombinations = [...new Set(combinations)]
+        expect(combinations.length).toBe(uniqueCombinations.length)
       })
 
       test(`groupBy with distinct on aggregated results`, () => {
