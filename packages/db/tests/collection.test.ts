@@ -13,6 +13,7 @@ import {
   SchemaValidationError,
 } from "../src/errors"
 import { createTransaction } from "../src/transactions"
+import { mockSyncCollectionOptionsNoInitialState } from "./utls"
 import type {
   ChangeMessage,
   MutationFn,
@@ -1507,5 +1508,65 @@ describe(`Collection with schema validation`, () => {
     expect(collection.state.size).toBe(0)
     expect(collection.syncedData.size).toBe(0)
     expect(collection.syncedMetadata.size).toBe(0)
+  })
+  it(`open sync transaction doesn't get applied when optimistic mutation is resolved`, async () => {
+    type Row = { id: number; name: string }
+
+    const collection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<Row>({
+        id: `repro-truncate-open-transaction`,
+        getKey: (r) => r.id,
+      })
+    )
+    const preloadPromise = collection.preload()
+
+    collection.utils.begin()
+    collection.utils.write({ type: `insert`, value: { id: 1, name: `one` } })
+    collection.utils.write({ type: `insert`, value: { id: 2, name: `two` } })
+    collection.utils.commit()
+    collection.utils.markReady()
+
+    await preloadPromise
+
+    expect(collection.state.size).toBe(2)
+
+    // start a transaction with a truncate, but don't commit it
+    collection.utils.begin()
+    collection.utils.truncate()
+
+    // expect the state to still be the same
+    expect(collection.state.size).toBe(2)
+
+    // we now do a local optimistic insert
+    collection.insert({ id: 3, name: `three` })
+
+    // we should immediately see the optimistic state
+    expect(collection.state.size).toBe(3)
+    expect(collection.state.get(3)?.name).toBe(`three`)
+
+    // resolve the sync, this is a bit of an anti-pattern here as we haven't
+    // actually seen the insert from the server yet... but this could easily happen in
+    // a misconfigured setup.
+    // you would see the same effect if the local mutation was rejected and rolled back.
+    collection.utils.resolveSync()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // we should now be back to the original state
+    expect(collection.state.size).toBe(2)
+
+    // write the new row back via sync
+    collection.utils.write({
+      type: `insert`,
+      value: { id: 3, name: `tree (from sync)` },
+    })
+
+    // expect the state to still be the same
+    expect(collection.state.size).toBe(2)
+
+    // now commit the sync transaction
+    collection.utils.commit()
+
+    // we truncated everything, so we should only have one item left that synced
+    expect(collection.state.size).toBe(1)
   })
 })

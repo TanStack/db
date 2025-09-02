@@ -271,6 +271,7 @@ export function mockSyncCollectionOptionsNoInitialState<
   let write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
   let commit: () => void
   let markReady: () => void
+  let truncate: () => void
 
   let syncPendingPromise: Promise<void> | undefined
   let syncPendingResolve: (() => void) | undefined
@@ -297,6 +298,7 @@ export function mockSyncCollectionOptionsNoInitialState<
     write: ((value) => write!(value)) as typeof write,
     commit: () => commit!(),
     markReady: () => markReady!(),
+    truncate: () => truncate!(),
     resolveSync: () => {
       syncPendingResolve!()
     },
@@ -312,6 +314,7 @@ export function mockSyncCollectionOptionsNoInitialState<
         write = params.write
         commit = params.commit
         markReady = params.markReady
+        truncate = params.truncate
       },
     },
     startSync: false,
