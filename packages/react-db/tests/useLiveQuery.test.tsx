@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import {
   Query,
@@ -1007,6 +1007,106 @@ describe(`Query Collections`, () => {
       name: `John Smith`,
       age: 35,
     })
+  })
+
+  it(`nested live query should not go blank after GC and resubscribe`, async () => {
+    type Thread = { id: string; last_email_id: string; last_sent_at: number }
+    type LabelByEmail = { email_id: string; label: string }
+
+    const threads = createCollection(
+      mockSyncCollectionOptions<Thread>({
+        id: `threads-for-nested-gc-repro`,
+        getKey: (t) => t.id,
+        initialData: [
+          { id: `t1`, last_email_id: `e1`, last_sent_at: 3 },
+          { id: `t2`, last_email_id: `e2`, last_sent_at: 2 },
+        ],
+      })
+    )
+
+    const labelsByEmail = createCollection(
+      mockSyncCollectionOptions<LabelByEmail>({
+        id: `labels-for-nested-gc-repro`,
+        getKey: (l) => l.email_id,
+        initialData: [
+          { email_id: `e1`, label: `inbox` },
+          { email_id: `e2`, label: `work` },
+        ],
+      })
+    )
+
+    // Source live query (pre-created)
+    const sourceLQ = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ thread: threads })
+          .orderBy(({ thread }: any) => thread.last_sent_at, {
+            direction: `desc`,
+          }),
+      startSync: true,
+      gcTime: 5,
+    })
+
+    // Nested live query built from the source live query
+    const nestedLQ = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ thread: sourceLQ })
+          .join(
+            { label: labelsByEmail },
+            ({ thread, label }: any) =>
+              eq(thread.last_email_id, label.email_id),
+            `inner`
+          )
+          .orderBy(({ thread }: any) => thread.last_sent_at, {
+            direction: `desc`,
+          }),
+      startSync: true,
+      gcTime: 5,
+    })
+
+    // First mount
+    const { result, unmount } = renderHook(() => useLiveQuery(nestedLQ))
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(2)
+    })
+    unmount()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Try multiple resubscribe cycles to increase chance of reproduction
+    for (let i = 0; i < 3; i++) {
+      const { result: r2, unmount: u2 } = renderHook(() =>
+        useLiveQuery(nestedLQ)
+      )
+
+      // Immediate read simulating UI
+      const immediateJoinedSize = r2.current.state.size
+      const sourceThreadsSize = threads.size
+      const sourceLabelsSize = labelsByEmail.size
+
+      if (
+        sourceThreadsSize > 0 &&
+        sourceLabelsSize > 0 &&
+        immediateJoinedSize === 0
+      ) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Reproduced blank nested joined state after GC/resubscribe`,
+          {
+            cycle: i,
+            immediateJoinedSize,
+            sourceThreadsSize,
+            sourceLabelsSize,
+          }
+        )
+      }
+
+      await waitFor(() => {
+        expect(r2.current.state.size).toBe(2)
+      })
+      u2()
+      await new Promise((r) => setTimeout(r, 20))
+    }
   })
 
   describe(`isLoaded property`, () => {
