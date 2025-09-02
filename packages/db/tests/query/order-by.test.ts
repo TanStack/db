@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { createCollection } from "../../src/collection.js"
 import { mockSyncCollectionOptions } from "../utls.js"
 import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
-import { eq, gt } from "../../src/query/builder/functions.js"
+import { eq, gt, max } from "../../src/query/builder/functions.js"
 
 type Person = {
   id: string
@@ -707,6 +707,126 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           { dept: `Engineering`, salary: 50000 }, // Alice
           { dept: `Sales`, salary: 65000 }, // Diana
           { dept: `Sales`, salary: 60000 }, // Bob
+        ])
+      })
+    })
+
+    describe(`OrderBy with GroupBy`, () => {
+      it(`should order grouped results correctly`, async () => {
+        type VehicleDocument = {
+          id: number
+          vin: string
+          updatedAt: number
+        }
+
+        const vehicleDocumentsData = [
+          { id: 1, vin: `1`, updatedAt: new Date(`2023-01-01`).getTime() },
+          { id: 2, vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+          { id: 3, vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+        ]
+
+        const vehicleDocumentCollection = createCollection(
+          mockSyncCollectionOptions<VehicleDocument>({
+            id: `vehicle-document-collection`,
+            getKey: (doc) => doc.id,
+            autoIndex: `eager`,
+            initialData: vehicleDocumentsData,
+          })
+        )
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ vehicleDocuments: vehicleDocumentCollection })
+              .groupBy((q) => q.vehicleDocuments.vin)
+              .orderBy((q) => q.vehicleDocuments.vin, `asc`)
+              .select((q) => ({
+                vin: q.vehicleDocuments.vin,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+        expect(liveQuery.toArray).toEqual([{ vin: `1` }, { vin: `2` }])
+
+        // Insert a vehicle document
+        vehicleDocumentCollection.utils.begin()
+        vehicleDocumentCollection.utils.write({
+          type: `insert`,
+          value: {
+            id: 4,
+            vin: `3`,
+            updatedAt: new Date(`2023-01-03`).getTime(),
+          },
+        })
+        vehicleDocumentCollection.utils.commit()
+
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1` },
+          { vin: `2` },
+          { vin: `3` },
+        ])
+      })
+
+      it(`should order groups based on aggregates correctly`, async () => {
+        type VehicleDocument = {
+          id: number
+          vin: string
+          updatedAt: number
+        }
+
+        const vehicleDocumentsData = [
+          { id: 1, vin: `1`, updatedAt: new Date(`2023-01-01`).getTime() },
+          { id: 2, vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+          { id: 3, vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+        ]
+
+        const vehicleDocumentCollection = createCollection(
+          mockSyncCollectionOptions<VehicleDocument>({
+            id: `vehicle-document-collection`,
+            getKey: (doc) => doc.id,
+            autoIndex: `eager`,
+            initialData: vehicleDocumentsData,
+          })
+        )
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ vehicleDocuments: vehicleDocumentCollection })
+              .groupBy((q) => q.vehicleDocuments.vin)
+              .orderBy((q) => max(q.vehicleDocuments.updatedAt), `desc`)
+              .select((q) => ({
+                vin: q.vehicleDocuments.vin,
+                updatedAt: max(q.vehicleDocuments.updatedAt),
+              }))
+              .offset(0)
+              .limit(10),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+          { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+        ])
+
+        // Insert a vehicle document
+        vehicleDocumentCollection.utils.begin()
+        vehicleDocumentCollection.utils.write({
+          type: `insert`,
+          value: {
+            id: 4,
+            vin: `3`,
+            updatedAt: new Date(`2023-01-03`).getTime(),
+          },
+        })
+        vehicleDocumentCollection.utils.commit()
+
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+          { vin: `3`, updatedAt: new Date(`2023-01-03`).getTime() },
+          { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
         ])
       })
     })
