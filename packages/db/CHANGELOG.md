@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.1.10
+
+### Patch Changes
+
+- Fixed an optimization bug where orderBy clauses using a single-column array were not recognized as optimizable. Queries that order by a single column are now correctly optimized even when specified as an array. ([#477](https://github.com/TanStack/db/pull/477))
+
+- fix an bug where a live query that used joins could become stuck empty when its remounted/resubscribed ([#484](https://github.com/TanStack/db/pull/484))
+
+- fixed a bug where a pending sync transaction could be applied early when an optimistic mutation was resolved or rolled back ([#482](https://github.com/TanStack/db/pull/482))
+
+- Add support for queries to order results based on aggregated values ([#481](https://github.com/TanStack/db/pull/481))
+
 ## 0.1.9
 
 ### Patch Changes

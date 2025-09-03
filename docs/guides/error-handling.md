@@ -101,7 +101,7 @@ const todoCollection = createCollection({
 
 // Usage - optimistic update will be rolled back if the mutation fails
 try {
-  const tx = await todoCollection.insert({
+  const tx = todoCollection.insert({
     id: "1",
     text: "New todo",
     completed: false,

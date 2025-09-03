@@ -49,15 +49,11 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of collection IDs to functions that load keys for that lazy collection
-  readonly lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> =
-    {}
+  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
   readonly lazyCollections = new Set<string>()
   // Set of collection IDs that include an optimizable ORDER BY clause
-  readonly optimizableOrderByCollections: Record<
-    string,
-    OrderByOptimizationInfo
-  > = {}
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>
@@ -168,6 +164,11 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.collectionWhereClausesCache = undefined
+
+      // Reset lazy collection state
+      this.lazyCollections.clear()
+      this.optimizableOrderByCollections = {}
+      this.lazyCollectionsCallbacks = {}
     }
   }
 

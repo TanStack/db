@@ -13,7 +13,7 @@ import {
   lte,
   or,
 } from "../src/query/builder/functions"
-import { expectIndexUsage, withIndexTracking } from "./utls"
+import { expectIndexUsage, withIndexTracking } from "./utils"
 import type { Collection } from "../src/collection"
 import type { MutationFn, PendingMutation } from "../src/types"
 
