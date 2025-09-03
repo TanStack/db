@@ -70,7 +70,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       }
       ref = new QueryRef(subQuery, alias)
     } else {
-      throw new InvalidSourceError()
+      throw new InvalidSourceError(alias)
     }
 
     return [alias, ref]
