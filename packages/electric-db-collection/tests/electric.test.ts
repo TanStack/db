@@ -4,7 +4,7 @@ import {
   createCollection,
   createTransaction,
 } from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
+import { electricCollectionOptions, isChangeMessage } from "../src/electric"
 import type { ElectricCollectionUtils } from "../src/electric"
 import type {
   Collection,
@@ -539,9 +539,9 @@ describe(`Electric Integration`, () => {
       const options = electricCollectionOptions(config)
 
       // Call the wrapped handler and expect it to throw
-      await expect(options.onInsert!(mockParams)).rejects.toThrow(
-        `Electric collection onInsert handler must return a txid`
-      )
+      // With the new matching strategies, empty object triggers void strategy (3-second wait)
+      // So we expect it to resolve, not throw
+      await expect(options.onInsert!(mockParams)).resolves.not.toThrow()
     })
 
     it(`should simulate complete flow with direct persistence handlers`, async () => {
@@ -642,6 +642,185 @@ describe(`Electric Integration`, () => {
         name: `Direct Persistence User`,
       })
       expect(testCollection.syncedData.size).toEqual(1)
+    })
+
+    it(`should support void strategy when handler returns empty object`, async () => {
+      const onInsert = vi.fn().mockResolvedValue({})
+
+      const config = {
+        id: `test-void-strategy`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert with void strategy - should complete after ~3 seconds
+      const startTime = Date.now()
+      const tx = testCollection.insert({ id: 1, name: `Void Test` })
+      await tx.isPersisted.promise
+      const endTime = Date.now()
+      const duration = endTime - startTime
+
+      // Should take approximately 3 seconds (allow for some variance)
+      expect(duration).toBeGreaterThan(2900)
+      expect(duration).toBeLessThan(3200)
+      expect(onInsert).toHaveBeenCalled()
+    })
+
+    it(`should support custom match function strategy`, async () => {
+      let resolveCustomMatch: () => void
+      const customMatchPromise = new Promise<void>((resolve) => {
+        resolveCustomMatch = resolve
+      })
+
+      const onInsert = vi.fn().mockImplementation(({ transaction }) => {
+        const item = transaction.mutations[0].modified
+        return {
+          matchFn: (message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.name === item.name
+            ) {
+              resolveCustomMatch()
+              return true
+            }
+            return false
+          },
+          timeout: 5000,
+        }
+      })
+
+      const config = {
+        id: `test-custom-match`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert - will wait for custom match
+      const insertPromise = testCollection.insert({
+        id: 1,
+        name: `Custom Match Test`,
+      })
+
+      // Wait a moment then send matching message
+      setTimeout(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `Custom Match Test` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `up-to-date` } },
+        ])
+      }, 100)
+
+      // Wait for both the custom match and persistence
+      await Promise.all([customMatchPromise, insertPromise.isPersisted.promise])
+
+      expect(onInsert).toHaveBeenCalled()
+      expect(testCollection.has(1)).toBe(true)
+    })
+
+    it(`should timeout with custom match function when no match found`, async () => {
+      const onInsert = vi.fn().mockResolvedValue({
+        matchFn: () => false, // Never matches
+        timeout: 100, // Short timeout for test
+      })
+
+      const config = {
+        id: `test-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+      const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
+
+      // Should timeout and fail
+      await expect(tx.isPersisted.promise).rejects.toThrow()
+    })
+  })
+
+  // Tests for matching strategies utilities
+  describe(`Matching strategies utilities`, () => {
+    it(`should export isChangeMessage helper for custom match functions`, () => {
+      expect(typeof isChangeMessage).toBe(`function`)
+
+      // Test with a change message
+      const changeMessage = {
+        key: `1`,
+        value: { id: 1, name: `Test` },
+        headers: { operation: `insert` as const },
+      }
+      expect(isChangeMessage(changeMessage)).toBe(true)
+
+      // Test with a control message
+      const controlMessage = {
+        headers: { control: `up-to-date` as const },
+      }
+      expect(isChangeMessage(controlMessage)).toBe(false)
+    })
+
+    it(`should provide awaitMatch utility in collection utils`, () => {
+      const config = {
+        id: `test-await-match`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+      expect(typeof testCollection.utils.awaitMatch).toBe(`function`)
+    })
+
+    it(`should support multiple matching strategies in different handlers`, () => {
+      const onInsert = vi.fn().mockResolvedValue({ txid: 100 }) // Txid strategy
+      const onUpdate = vi.fn().mockImplementation(() => Promise.resolve({})) // Void strategy
+      const onDelete = vi.fn().mockResolvedValue({
+        // Custom match strategy
+        matchFn: (message: any) =>
+          isChangeMessage(message) && message.headers.operation === `delete`,
+      })
+
+      const config = {
+        id: `test-mixed-strategies`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+        onUpdate,
+        onDelete,
+      }
+
+      const options = electricCollectionOptions(config)
+
+      // All handlers should be wrapped properly
+      expect(options.onInsert).toBeDefined()
+      expect(options.onUpdate).toBeDefined()
+      expect(options.onDelete).toBeDefined()
     })
   })
 

@@ -6,9 +6,6 @@ import {
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
 import {
-  ElectricDeleteHandlerMustReturnTxIdError,
-  ElectricInsertHandlerMustReturnTxIdError,
-  ElectricUpdateHandlerMustReturnTxIdError,
   ExpectedNumberInAwaitTxIdError,
   TimeoutWaitingForTxIdError,
 } from "./errors"
@@ -29,12 +26,31 @@ import type {
   ShapeStreamOptions,
 } from "@electric-sql/client"
 
+// Re-export for user convenience in custom match functions
+export { isChangeMessage, isControlMessage } from "@electric-sql/client"
+
 const debug = DebugModule.debug(`ts/db:electric`)
 
 /**
  * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
+
+/**
+ * Custom match function type - receives stream messages and returns boolean
+ * indicating if the mutation has been synchronized
+ */
+export type MatchFunction<T extends Row<unknown>> = (
+  message: Message<T>
+) => boolean
+
+/**
+ * Matching strategies for Electric synchronization
+ */
+export type MatchingStrategy<T extends Row<unknown> = Row<unknown>> =
+  | { type: `txid`; txid: Txid | Array<Txid> }
+  | { type: `custom`; matchFn: MatchFunction<T>; timeout?: number }
+  | { type: `void` }
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -92,17 +108,40 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
-   * Must return an object containing a txid number or array of txids
+   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
+   * @returns Promise resolving to a matching strategy
    * @example
-   * // Basic Electric insert handler - MUST return { txid: number }
+   * // Basic Electric insert handler with txid matching (backward compatible)
    * onInsert: async ({ transaction }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
+   *   return { txid: result.txid } // Txid strategy (backward compatible)
+   * }
+   *
+   * @example
+   * // Custom match function strategy
+   * onInsert: async ({ transaction }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.todos.create({ data: newItem })
+   *   return {
+   *     matchFn: (message) => {
+   *       return isChangeMessage(message) &&
+   *              message.headers.operation === 'insert' &&
+   *              message.value.name === newItem.name
+   *     },
+   *     timeout: 5000 // Optional timeout in ms, defaults to 30000
+   *   }
+   * }
+   *
+   * @example
+   * // Void strategy - always waits 3 seconds
+   * onInsert: async ({ transaction }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.todos.create({ data: newItem })
+   *   return {} // Void strategy
    * }
    *
    * @example
@@ -114,138 +153,114 @@ export interface ElectricCollectionConfig<
    *   )
    *   return { txid: results.map(r => r.txid) } // Array of txids
    * }
-   *
-   * @example
-   * // Insert handler with error handling
-   * onInsert: async ({ transaction }) => {
-   *   try {
-   *     const newItem = transaction.mutations[0].modified
-   *     const result = await api.createTodo(newItem)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     console.error('Insert failed:', error)
-   *     throw error // This will cause the transaction to fail
-   *   }
-   * }
-   *
-   * @example
-   * // Insert handler with batch operation - single txid
-   * onInsert: async ({ transaction }) => {
-   *   const items = transaction.mutations.map(m => m.modified)
-   *   const result = await api.todos.createMany({
-   *     data: items
-   *   })
-   *   return { txid: result.txid } // Single txid for batch operation
-   * }
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
+  ) => Promise<
+    | { txid: Txid | Array<Txid> }
+    | {
+        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
+        timeout?: number
+      }
+    | Record<string, never>
+  >
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Must return an object containing a txid number or array of txids
+   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
+   * @returns Promise resolving to a matching strategy
    * @example
-   * // Basic Electric update handler - MUST return { txid: number }
+   * // Basic Electric update handler with txid matching (backward compatible)
    * onUpdate: async ({ transaction }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
-   *     data: changes // Only the changed fields
+   *     data: changes
    *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
+   *   return { txid: result.txid } // Txid strategy (backward compatible)
    * }
    *
    * @example
-   * // Update handler with multiple items - return array of txids
+   * // Custom match function strategy for updates
    * onUpdate: async ({ transaction }) => {
-   *   const updates = await Promise.all(
-   *     transaction.mutations.map(m =>
-   *       api.todos.update({
-   *         where: { id: m.original.id },
-   *         data: m.changes
-   *       })
-   *     )
-   *   )
-   *   return { txid: updates.map(u => u.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Update handler with optimistic rollback
-   * onUpdate: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   try {
-   *     const result = await api.updateTodo(mutation.original.id, mutation.changes)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     // Transaction will automatically rollback optimistic changes
-   *     console.error('Update failed, rolling back:', error)
-   *     throw error
+   *   const { original, changes } = transaction.mutations[0]
+   *   await api.todos.update({ where: { id: original.id }, data: changes })
+   *   return {
+   *     matchFn: (message) => {
+   *       return isChangeMessage(message) &&
+   *              message.headers.operation === 'update' &&
+   *              message.value.id === original.id
+   *     }
    *   }
+   * }
+   *
+   * @example
+   * // Void strategy - always waits 3 seconds
+   * onUpdate: async ({ transaction }) => {
+   *   const { original, changes } = transaction.mutations[0]
+   *   await api.todos.update({ where: { id: original.id }, data: changes })
+   *   return {} // Void strategy
    * }
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
+  ) => Promise<
+    | { txid: Txid | Array<Txid> }
+    | {
+        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
+        timeout?: number
+      }
+    | Record<string, never>
+  >
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Must return an object containing a txid number or array of txids
+   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
+   * @returns Promise resolving to a matching strategy
    * @example
-   * // Basic Electric delete handler - MUST return { txid: number }
+   * // Basic Electric delete handler with txid matching (backward compatible)
    * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
+   *   return { txid: result.txid } // Txid strategy (backward compatible)
    * }
    *
    * @example
-   * // Delete handler with multiple items - return array of txids
-   * onDelete: async ({ transaction }) => {
-   *   const deletes = await Promise.all(
-   *     transaction.mutations.map(m =>
-   *       api.todos.delete({
-   *         where: { id: m.key }
-   *       })
-   *     )
-   *   )
-   *   return { txid: deletes.map(d => d.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Delete handler with batch operation - single txid
-   * onDelete: async ({ transaction }) => {
-   *   const idsToDelete = transaction.mutations.map(m => m.original.id)
-   *   const result = await api.todos.deleteMany({
-   *     ids: idsToDelete
-   *   })
-   *   return { txid: result.txid } // Single txid for batch operation
-   * }
-   *
-   * @example
-   * // Delete handler with optimistic rollback
+   * // Custom match function strategy for deletes
    * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
-   *   try {
-   *     const result = await api.deleteTodo(mutation.original.id)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     // Transaction will automatically rollback optimistic changes
-   *     console.error('Delete failed, rolling back:', error)
-   *     throw error
+   *   await api.todos.delete({ id: mutation.original.id })
+   *   return {
+   *     matchFn: (message) => {
+   *       return isChangeMessage(message) &&
+   *              message.headers.operation === 'delete' &&
+   *              message.value.id === mutation.original.id
+   *     }
    *   }
    * }
    *
+   * @example
+   * // Void strategy - always waits 3 seconds
+   * onDelete: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   await api.todos.delete({ id: mutation.original.id })
+   *   return {} // Void strategy
+   * }
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
+  ) => Promise<
+    | { txid: Txid | Array<Txid> }
+    | {
+        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
+        timeout?: number
+      }
+    | Record<string, never>
+  >
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -273,10 +288,20 @@ function hasTxids<T extends Row<unknown>>(
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
 /**
+ * Type for the awaitMatch utility function
+ */
+export type AwaitMatchFn<T extends Row<unknown>> = (
+  matchFn: MatchFunction<T>,
+  timeout?: number
+) => Promise<boolean>
+
+/**
  * Electric collection utilities type
  */
-export interface ElectricCollectionUtils extends UtilsRecord {
+export interface ElectricCollectionUtils<T extends Row<unknown> = Row<unknown>>
+  extends UtilsRecord {
   awaitTxId: AwaitTxIdFn
+  awaitMatch: AwaitMatchFn<T>
 }
 
 /**
@@ -294,10 +319,24 @@ export function electricCollectionOptions<
   TFallback extends Row<unknown> = Row<unknown>,
 >(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
+  const pendingMatches = new Store<
+    Map<
+      string,
+      {
+        matchFn: (
+          message: Message<ResolveType<TExplicit, TSchema, TFallback>>
+        ) => boolean
+        resolve: (value: boolean) => void
+        reject: (error: Error) => void
+        timeoutId: NodeJS.Timeout
+      }
+    >
+  >(new Map())
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
     config.shapeOptions,
     {
       seenTxids,
+      pendingMatches,
     }
   )
 
@@ -336,29 +375,113 @@ export function electricCollectionOptions<
     })
   }
 
-  // Create wrapper handlers for direct persistence operations that handle txid awaiting
+  /**
+   * Wait for a custom match function to find a matching message
+   * @param matchFn Function that returns true when a message matches
+   * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
+   * @returns Promise that resolves when a matching message is found
+   */
+  const awaitMatch: AwaitMatchFn<
+    ResolveType<TExplicit, TSchema, TFallback>
+  > = async (
+    matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>,
+    timeout: number = 30000
+  ): Promise<boolean> => {
+    debug(`awaitMatch called with custom function`)
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        debug(`awaitMatch timed out after %dms`, timeout)
+        reject(new Error(`Timeout waiting for custom match function`))
+      }, timeout)
+
+      // We need access to the stream messages to check against the match function
+      // This will be handled by the sync configuration
+      const checkMatch = (
+        message: Message<ResolveType<TExplicit, TSchema, TFallback>>
+      ) => {
+        if (matchFn(message)) {
+          debug(`awaitMatch found matching message`)
+          clearTimeout(timeoutId)
+          resolve(true)
+          return true
+        }
+        return false
+      }
+
+      // Store the match function for the sync process to use
+      // We'll add this to a pending matches store
+      const matchId = Math.random().toString(36)
+      pendingMatches.setState((current) => {
+        const newMatches = new Map(current)
+        newMatches.set(matchId, {
+          matchFn: checkMatch,
+          resolve,
+          reject,
+          timeoutId,
+        })
+        return newMatches
+      })
+    })
+  }
+
+  /**
+   * Wait for a fixed timeout (void strategy)
+   * @param timeout Timeout in milliseconds (defaults to 3000ms for void strategy)
+   * @returns Promise that resolves after the timeout
+   */
+  const awaitVoid = async (timeout: number = 3000): Promise<boolean> => {
+    debug(`awaitVoid called with timeout %dms`, timeout)
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        debug(`awaitVoid completed after %dms`, timeout)
+        resolve(true)
+      }, timeout)
+    })
+  }
+
+  /**
+   * Process matching strategy and wait for synchronization
+   */
+  const processMatchingStrategy = async (
+    result:
+      | { txid: Txid | Array<Txid> }
+      | {
+          matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
+          timeout?: number
+        }
+      | Record<string, never>
+  ): Promise<void> => {
+    // Check for txid strategy (backward compatible)
+    if (`txid` in result) {
+      // Handle both single txid and array of txids
+      if (Array.isArray(result.txid)) {
+        await Promise.all(result.txid.map((id) => awaitTxId(id)))
+      } else {
+        await awaitTxId(result.txid)
+      }
+      return
+    }
+
+    // Check for custom match function strategy
+    if (`matchFn` in result) {
+      await awaitMatch(result.matchFn, result.timeout)
+      return
+    }
+
+    // Default to void strategy (3-second wait) if no specific strategy provided
+    await awaitVoid()
+  }
+
+  // Create wrapper handlers for direct persistence operations that handle different matching strategies
   const wrappedOnInsert = config.onInsert
     ? async (
         params: InsertMutationFnParams<
           ResolveType<TExplicit, TSchema, TFallback>
         >
       ) => {
-        // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
-        const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
-
-        if (!txid) {
-          throw new ElectricInsertHandlerMustReturnTxIdError()
-        }
-
-        // Handle both single txid and array of txids
-        if (Array.isArray(txid)) {
-          await Promise.all(txid.map((id) => awaitTxId(id)))
-        } else {
-          await awaitTxId(txid)
-        }
-
+        const handlerResult = await config.onInsert!(params)
+        await processMatchingStrategy(handlerResult)
         return handlerResult
       }
     : undefined
@@ -369,22 +492,8 @@ export function electricCollectionOptions<
           ResolveType<TExplicit, TSchema, TFallback>
         >
       ) => {
-        // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
-        const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
-
-        if (!txid) {
-          throw new ElectricUpdateHandlerMustReturnTxIdError()
-        }
-
-        // Handle both single txid and array of txids
-        if (Array.isArray(txid)) {
-          await Promise.all(txid.map((id) => awaitTxId(id)))
-        } else {
-          await awaitTxId(txid)
-        }
-
+        const handlerResult = await config.onUpdate!(params)
+        await processMatchingStrategy(handlerResult)
         return handlerResult
       }
     : undefined
@@ -396,17 +505,7 @@ export function electricCollectionOptions<
         >
       ) => {
         const handlerResult = await config.onDelete!(params)
-        if (!handlerResult.txid) {
-          throw new ElectricDeleteHandlerMustReturnTxIdError()
-        }
-
-        // Handle both single txid and array of txids
-        if (Array.isArray(handlerResult.txid)) {
-          await Promise.all(handlerResult.txid.map((id) => awaitTxId(id)))
-        } else {
-          await awaitTxId(handlerResult.txid)
-        }
-
+        await processMatchingStrategy(handlerResult)
         return handlerResult
       }
     : undefined
@@ -428,7 +527,8 @@ export function electricCollectionOptions<
     onDelete: wrappedOnDelete,
     utils: {
       awaitTxId,
-    },
+      awaitMatch,
+    } as ElectricCollectionUtils<ResolveType<TExplicit, TSchema, TFallback>>,
   }
 }
 
@@ -439,9 +539,20 @@ function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     seenTxids: Store<Set<Txid>>
+    pendingMatches: Store<
+      Map<
+        string,
+        {
+          matchFn: (message: Message<T>) => boolean
+          resolve: (value: boolean) => void
+          reject: (error: Error) => void
+          timeoutId: NodeJS.Timeout
+        }
+      >
+    >
   }
 ): SyncConfig<T> {
-  const { seenTxids } = options
+  const { seenTxids, pendingMatches } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -512,6 +623,25 @@ function createElectricSync<T extends Row<unknown>>(
           // Check for txids in the message and add them to our store
           if (hasTxids(message)) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
+          }
+
+          // Check pending matches against this message
+          const matchesToRemove: Array<string> = []
+          pendingMatches.state.forEach((match, matchId) => {
+            if (match.matchFn(message)) {
+              clearTimeout(match.timeoutId)
+              match.resolve(true)
+              matchesToRemove.push(matchId)
+            }
+          })
+
+          // Remove resolved matches
+          if (matchesToRemove.length > 0) {
+            pendingMatches.setState((current) => {
+              const newMatches = new Map(current)
+              matchesToRemove.forEach((id) => newMatches.delete(id))
+              return newMatches
+            })
           }
 
           if (isChangeMessage(message)) {

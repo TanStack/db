@@ -21,30 +21,3 @@ export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
     this.name = `TimeoutWaitingForTxIdError`
   }
 }
-
-export class ElectricInsertHandlerMustReturnTxIdError extends ElectricDBCollectionError {
-  constructor() {
-    super(
-      `Electric collection onInsert handler must return a txid or array of txids`
-    )
-    this.name = `ElectricInsertHandlerMustReturnTxIdError`
-  }
-}
-
-export class ElectricUpdateHandlerMustReturnTxIdError extends ElectricDBCollectionError {
-  constructor() {
-    super(
-      `Electric collection onUpdate handler must return a txid or array of txids`
-    )
-    this.name = `ElectricUpdateHandlerMustReturnTxIdError`
-  }
-}
-
-export class ElectricDeleteHandlerMustReturnTxIdError extends ElectricDBCollectionError {
-  constructor() {
-    super(
-      `Electric collection onDelete handler must return a txid or array of txids`
-    )
-    this.name = `ElectricDeleteHandlerMustReturnTxIdError`
-  }
-}
