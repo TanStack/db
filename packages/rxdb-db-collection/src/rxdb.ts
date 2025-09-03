@@ -13,7 +13,6 @@ import type {
   RxCollection,
   RxDocumentData,
 } from "rxdb/plugins/core"
-import type { Subscription } from "rxjs"
 
 import type { CollectionConfig, ResolveType, SyncConfig } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
@@ -25,7 +24,7 @@ const debug = DebugModule.debug(`ts/db:rxdb`)
  */
 export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<
   RxCollection,
-  Set<Subscription>
+  Set<any>
 >()
 
 /**
@@ -187,11 +186,11 @@ export function rxdbCollectionOptions<
         commit()
       }
 
-      let sub: Subscription
+      let sub: any
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
         sub = rxCollection.$.subscribe((ev) => {
-          const cur = stripRxdbFields(clone(ev.documentData as Row))
+          const cur: ResolveType<TExplicit, TSchema, any> = stripRxdbFields(clone(ev.documentData as Row))
           switch (ev.operation) {
             case `INSERT`:
               queue({ type: `insert`, value: cur })
