@@ -87,8 +87,8 @@ export function rxdbCollectionOptions<
 
   // "getKey"
   const primaryPath = rxCollection.schema.primaryPath as string;
-  const getKey: CollectionConfig<Row, Key>[`getKey`] = (item) => {
-    const key: string = (item as any)[primaryPath] as string
+  function getKey(item: any): string {
+    const key: string = item[primaryPath] as string
     return key
   }
 
@@ -124,7 +124,7 @@ export function rxdbCollectionOptions<
                   {
                     "_meta.lwt": cursor._meta.lwt,
                     [primaryPath]: {
-                      $gt: (cursor as any)[primaryPath],
+                      $gt: getKey(cursor),
                     },
                   },
                 ],
@@ -245,7 +245,7 @@ export function rxdbCollectionOptions<
     ResolveType<TExplicit, TSchema>
   > = {
     ...restConfig,
-    getKey,
+    getKey: getKey as any,
     sync,
     onInsert: async (params) => {
       debug(`insert`, params)
@@ -265,7 +265,7 @@ export function rxdbCollectionOptions<
 
       for (const mutation of mutations) {
         const newValue = stripRxdbFields(mutation.modified)
-        const id = (newValue as any)[primaryPath]
+        const id = getKey(newValue);
         const doc = await rxCollection.findOne(id).exec()
         if (!doc) {
           continue
@@ -279,7 +279,7 @@ export function rxdbCollectionOptions<
         (m) => m.type === `delete`
       )
       const ids = mutations.map(
-        (mutation) => (mutation.original as any)[primaryPath]
+        (mutation: any) => getKey(mutation.original)
       )
       return rxCollection.bulkRemove(ids).then((result) => {
         if (result.error.length > 0) {
