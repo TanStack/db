@@ -267,39 +267,50 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  * ```
  */
 export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
-  Simplify<{
-    [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
-      ? ExtractExpressionType<TSelectObject[K]>
-      : TSelectObject[K] extends SpreadableRefProxy<infer T>
-        ? WithoutRefBrand<T>
-        : TSelectObject[K] extends RefProxy<infer T>
-          ? T
-          : TSelectObject[K] extends Ref<infer T>
-            ? T
-            : TSelectObject[K] extends Ref<infer T> | undefined
-              ? T | undefined
-              : TSelectObject[K] extends Ref<infer T> | null
-                ? T | null
-                : TSelectObject[K] extends RefProxy<infer T> | undefined
+  HasSpreadSentinel<TSelectObject> extends true
+    ? ExtractSpreadType<TSelectObject>
+    : Simplify<{
+        [K in keyof TSelectObject]: NeedsExtraction<
+          TSelectObject[K]
+        > extends true
+          ? ExtractExpressionType<TSelectObject[K]>
+          : TSelectObject[K] extends SpreadableRefProxy<infer T>
+            ? WithoutRefBrand<T>
+            : TSelectObject[K] extends RefProxy<infer T>
+              ? T
+              : TSelectObject[K] extends Ref<infer T>
+                ? T
+                : TSelectObject[K] extends Ref<infer T> | undefined
                   ? T | undefined
-                  : TSelectObject[K] extends RefProxy<infer T> | null
+                  : TSelectObject[K] extends Ref<infer T> | null
                     ? T | null
-                    : TSelectObject[K] extends Aggregate<infer T>
-                      ? T
-                      : TSelectObject[K] extends string
-                        ? TSelectObject[K]
-                        : TSelectObject[K] extends number
-                          ? TSelectObject[K]
-                          : TSelectObject[K] extends boolean
+                    : TSelectObject[K] extends RefProxy<infer T> | undefined
+                      ? T | undefined
+                      : TSelectObject[K] extends RefProxy<infer T> | null
+                        ? T | null
+                        : TSelectObject[K] extends Aggregate<infer T>
+                          ? T
+                          : TSelectObject[K] extends string
                             ? TSelectObject[K]
-                            : TSelectObject[K] extends null
-                              ? null
-                              : TSelectObject[K] extends undefined
-                                ? undefined
-                                : TSelectObject[K] extends Record<string, any>
-                                  ? ExtractSpreadType<TSelectObject[K]>
-                                  : never
-  }>
+                            : TSelectObject[K] extends number
+                              ? TSelectObject[K]
+                              : TSelectObject[K] extends boolean
+                                ? TSelectObject[K]
+                                : TSelectObject[K] extends null
+                                  ? null
+                                  : TSelectObject[K] extends undefined
+                                    ? undefined
+                                    : TSelectObject[K] extends Record<
+                                          string,
+                                          any
+                                        >
+                                      ? HasSpreadSentinel<
+                                          TSelectObject[K]
+                                        > extends true
+                                        ? ExtractSpreadType<TSelectObject[K]>
+                                        : ResultTypeFromSelect<TSelectObject[K]>
+                                      : never
+      }>
 >
 
 // Helper to make a type display better in IDEs
@@ -688,44 +699,57 @@ export type Ref<T = any> = { readonly [RefBrand]?: T }
 type WithoutRefBrand<T> =
   T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
 
-
+// Helper type to detect if an object contains spread sentinel keys
+type HasSpreadSentinel<T> =
+  T extends Record<string, any>
+    ? true extends {
+        [K in keyof T]: K extends `__SPREAD_SENTINEL__${string}` ? true : false
+      }[keyof T]
+      ? true
+      : false
+    : false
 
 // Helper type to extract the type from a spread object (remove sentinel keys and extract underlying types)
 type ExtractSpreadType<T> =
   T extends Record<string, any>
-    ? // Extract spread types and regular properties separately, then merge
-      UnionToIntersection<
-        | {
-            // Extract spread types from sentinel keys
-            [K in keyof T]: K extends `__SPREAD_SENTINEL__${string}`
-              ? T[K] extends SpreadableRefProxy<infer U>
-                ? U
-                : never
-              : never
-          }[keyof T]
-        | {
-            // Extract non-spread properties
-            [K in keyof T as K extends `__SPREAD_SENTINEL__${string}`
-              ? never
-              : K]: NeedsExtraction<T[K]> extends true
-              ? ExtractExpressionType<T[K]>
-              : T[K] extends SpreadableRefProxy<infer U>
-                ? WithoutRefBrand<U>
-                : T[K] extends RefProxy<infer U>
-                  ? U
-                  : T[K] extends Ref<infer U>
-                    ? U
-                    : T[K] extends Aggregate<infer U>
-                      ? U
-                      : T[K] extends Record<string, any>
-                        ? ResultTypeFromSelect<T[K]>
-                        : T[K]
-          }
-      >
+    ? {
+        [K in keyof T as K extends `__SPREAD_SENTINEL__${string}`
+          ? never
+          : K]: T[K] extends Ref<infer U>
+          ? U
+          : T[K] extends RefProxy<infer U>
+            ? U
+            : T[K] extends SpreadableRefProxy<infer U>
+              ? WithoutRefBrand<U>
+              : T[K] extends Ref<infer U> | undefined
+                ? U | undefined
+                : T[K] extends Ref<infer U> | null
+                  ? U | null
+                  : T[K] extends RefProxy<infer U> | undefined
+                    ? U | undefined
+                    : T[K] extends RefProxy<infer U> | null
+                      ? U | null
+                      : NeedsExtraction<T[K]> extends true
+                        ? ExtractExpressionType<T[K]>
+                        : T[K] extends Aggregate<infer U>
+                          ? U
+                          : T[K] extends string
+                            ? T[K]
+                            : T[K] extends number
+                              ? T[K]
+                              : T[K] extends boolean
+                                ? T[K]
+                                : T[K] extends null
+                                  ? null
+                                  : T[K] extends undefined
+                                    ? undefined
+                                    : T[K] extends Record<string, any>
+                                      ? HasSpreadSentinel<T[K]> extends true
+                                        ? ExtractSpreadType<T[K]>
+                                        : ResultTypeFromSelect<T[K]>
+                                      : never
+      }
     : T
-
-// Helper to convert union to intersection
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
