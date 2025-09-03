@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.1.11
+
+### Patch Changes
+
+- Fixed a bug where a race condition could cause initial results not to be rendered when using `useLiveQuery`. ([#485](https://github.com/TanStack/db/pull/485))
+
+- Updated dependencies [[`b869f68`](https://github.com/TanStack/db/commit/b869f68f0109b3126509f202a38855cee38b4276)]:
+  - @tanstack/db@0.1.11
+
 ## 0.1.10
 
 ### Patch Changes
