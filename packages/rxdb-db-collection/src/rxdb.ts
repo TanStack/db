@@ -86,7 +86,7 @@ export function rxdbCollectionOptions<
   const rxCollection = config.rxCollection
 
   // "getKey"
-  const primaryPath = rxCollection.schema.primaryPath
+  const primaryPath = rxCollection.schema.primaryPath as string;
   const getKey: CollectionConfig<Row, Key>[`getKey`] = (item) => {
     const key: string = (item as any)[primaryPath] as string
     return key
@@ -124,7 +124,7 @@ export function rxdbCollectionOptions<
                   {
                     "_meta.lwt": cursor._meta.lwt,
                     [primaryPath]: {
-                      $gt: cursor[primaryPath],
+                      $gt: (cursor as any)[primaryPath],
                     },
                   },
                 ],
@@ -242,7 +242,7 @@ export function rxdbCollectionOptions<
   }
 
   const collectionConfig: CollectionConfig<
-    ResolveType<TExplicit, TSchema, any>
+    ResolveType<TExplicit, TSchema>
   > = {
     ...restConfig,
     getKey,
@@ -250,7 +250,7 @@ export function rxdbCollectionOptions<
     onInsert: async (params) => {
       debug(`insert`, params)
       const newItems = params.transaction.mutations.map((m) => m.modified)
-      return rxCollection.bulkUpsert(newItems as any).then((result) => {
+      return rxCollection.bulkUpsert(newItems as any[]).then((result) => {
         if (result.error.length > 0) {
           throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
         }
