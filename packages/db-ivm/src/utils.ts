@@ -1,4 +1,15 @@
-import murmurhash from "murmurhash-js"
+/**
+ * Simple assertion function for runtime checks.
+ * Throws an error if the condition is false.
+ */
+export function assert(
+  condition: unknown,
+  message?: string
+): asserts condition {
+  if (!condition) {
+    throw new Error(message || `Assertion failed`)
+  }
+}
 
 /**
  * A map that returns a default value for keys that are not present.
@@ -46,11 +57,12 @@ export function chunkedArrayPush(array: Array<unknown>, other: Array<unknown>) {
   }
 }
 
-const hashCache = new WeakMap()
+// const hashCache = new WeakMap()
 
 /**
  * Replacer function for JSON.stringify that converts unsupported types to strings
  */
+/*
 function hashReplacer(_key: string, value: any): any {
   if (typeof value === `bigint`) {
     return String(value)
@@ -67,10 +79,12 @@ function hashReplacer(_key: string, value: any): any {
   }
   return value
 }
+  */
 
 /**
  * A hash method that caches the hash of a value in a week map
  */
+/*
 export function hash(data: any): string {
   if (
     data === null ||
@@ -91,6 +105,7 @@ export function hash(data: any): string {
   hashCache.set(data, hashValue)
   return hashValue
 }
+*/
 
 export function binarySearch<T>(
   array: Array<T>,

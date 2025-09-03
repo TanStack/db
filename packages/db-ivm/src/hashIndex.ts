@@ -1,4 +1,6 @@
-import { DefaultMap, hash } from "./utils.js"
+import { DefaultMap } from "./utils.js"
+import { hash } from "./hashing/index.js"
+import type { Hash } from "./hashing/index.js"
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
@@ -6,12 +8,11 @@ import { DefaultMap, hash } from "./utils.js"
  * exploit the key-value structure of the data to run efficiently.
  */
 export class HashIndex<K, V> {
-  #inner: DefaultMap<K, DefaultMap<string, [V, number]>>
+  #inner: DefaultMap<K, DefaultMap<Hash, [V, number]>>
 
   constructor() {
-    this.#inner = new DefaultMap<K, DefaultMap<string, [V, number]>>(
-      () =>
-        new DefaultMap<string, [V, number]>(() => [undefined as any as V, 0])
+    this.#inner = new DefaultMap<K, DefaultMap<Hash, [V, number]>>(
+      () => new DefaultMap<Hash, [V, number]>(() => [undefined as any as V, 0])
     )
     // #inner is as map of:
     // {
