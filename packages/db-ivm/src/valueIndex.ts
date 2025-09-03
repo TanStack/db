@@ -1,4 +1,4 @@
-import { hash } from "./utils.js"
+import { hash } from "./hashing/index.js"
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
