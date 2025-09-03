@@ -12,7 +12,7 @@ import {
   length,
   or,
 } from "../../src/query/builder/functions"
-import { mockSyncCollectionOptions } from "../utls"
+import { mockSyncCollectionOptions } from "../utils"
 
 interface TestItem {
   id: string

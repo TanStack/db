@@ -1197,15 +1197,27 @@ export class CollectionImpl<
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
-    const committedSyncedTransactions = this.pendingSyncedTransactions.filter(
-      (t) => t.committed
-    )
-    const uncommittedSyncedTransactions = this.pendingSyncedTransactions.filter(
-      (t) => !t.committed
-    )
-
-    const hasTruncateSync = committedSyncedTransactions.some(
-      (t) => t.truncate === true
+    const {
+      committedSyncedTransactions,
+      uncommittedSyncedTransactions,
+      hasTruncateSync,
+    } = this.pendingSyncedTransactions.reduce(
+      (acc, t) => {
+        if (t.committed) {
+          acc.committedSyncedTransactions.push(t)
+          if (t.truncate === true) {
+            acc.hasTruncateSync = true
+          }
+        } else {
+          acc.uncommittedSyncedTransactions.push(t)
+        }
+        return acc
+      },
+      {
+        committedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
+        uncommittedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
+        hasTruncateSync: false,
+      }
     )
 
     if (!hasPersistingTransaction || hasTruncateSync) {
@@ -1313,10 +1325,7 @@ export class CollectionImpl<
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      const hadTruncate = committedSyncedTransactions.some(
-        (t) => t.truncate === true
-      )
-      if (hadTruncate) {
+      if (hasTruncateSync) {
         // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
         for (const t of committedSyncedTransactions) {

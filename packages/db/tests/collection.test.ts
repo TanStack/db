@@ -13,7 +13,11 @@ import {
   SchemaValidationError,
 } from "../src/errors"
 import { createTransaction } from "../src/transactions"
-import { mockSyncCollectionOptionsNoInitialState } from "./utls"
+import {
+  flushPromises,
+  mockSyncCollectionOptionsNoInitialState,
+  withExpectedRejection,
+} from "./utils"
 import type {
   ChangeMessage,
   MutationFn,
@@ -1509,7 +1513,8 @@ describe(`Collection with schema validation`, () => {
     expect(collection.syncedData.size).toBe(0)
     expect(collection.syncedMetadata.size).toBe(0)
   })
-  it(`open sync transaction doesn't get applied when optimistic mutation is resolved`, async () => {
+
+  it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {
     type Row = { id: number; name: string }
 
     const collection = createCollection(
@@ -1544,14 +1549,16 @@ describe(`Collection with schema validation`, () => {
     expect(collection.state.size).toBe(3)
     expect(collection.state.get(3)?.name).toBe(`three`)
 
-    // resolve the sync, this is a bit of an anti-pattern here as we haven't
-    // actually seen the insert from the server yet... but this could easily happen in
-    // a misconfigured setup.
-    // you would see the same effect if the local mutation was rejected and rolled back.
-    collection.utils.resolveSync()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // we now reject the sync, this should trigger a rollback of the open transaction
+    // and the optimistic state should be removed
+    // it should *not* trigger the open sync transaction to be applied to the synced state
+    await withExpectedRejection(`trigger rollback`, () => {
+      collection.utils.rejectSync(new Error(`trigger rollback`))
+      return flushPromises()
+    })
 
-    // we should now be back to the original state
+    // we should now be back to the original state, the optimistic state has
+    // been removed
     expect(collection.state.size).toBe(2)
 
     // write the new row back via sync

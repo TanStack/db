@@ -6,7 +6,7 @@ import { Query } from "../../src/query/builder/index.js"
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
-} from "../utls.js"
+} from "../utils.js"
 import type { ChangeMessage } from "../../src/types.js"
 
 // Sample user type for tests
