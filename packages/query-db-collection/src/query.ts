@@ -497,7 +497,8 @@ export function queryCollectionOptions<
       TQueryKey
     >(queryClient, observerOptions)
 
-    const actualUnsubscribeFn = localObserver.subscribe((result) => {
+    type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
+    const handleUpdate: UpdateHandler = (result) => {
       if (result.isSuccess) {
         const newItemsArray = result.data
 
@@ -575,7 +576,13 @@ export function queryCollectionOptions<
         // Mark collection as ready even on error to avoid blocking apps
         markReady()
       }
-    })
+    }
+
+    const actualUnsubscribeFn = localObserver.subscribe(handleUpdate)
+
+    // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial
+    // state)
+    handleUpdate(localObserver.getCurrentResult())
 
     return async () => {
       actualUnsubscribeFn()
