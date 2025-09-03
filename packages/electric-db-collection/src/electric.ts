@@ -74,7 +74,10 @@ export interface ElectricCollectionConfig<
   TExplicit extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends Row<unknown> = Row<unknown>,
-> {
+> extends Omit<
+    CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>,
+    `sync` | `onInsert` | `onUpdate` | `onDelete`
+  > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
@@ -83,11 +86,8 @@ export interface ElectricCollectionConfig<
   >
 
   /**
-   * All standard Collection configuration properties
+   * Optional sync configuration (if you want to provide additional sync behavior)
    */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
   sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
 
   /**
