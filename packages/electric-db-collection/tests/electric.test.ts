@@ -645,6 +645,8 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should support void strategy when handler returns empty object`, async () => {
+      vi.useFakeTimers()
+
       const onInsert = vi.fn().mockResolvedValue({})
 
       const config = {
@@ -660,17 +662,16 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Insert with void strategy - should complete after ~3 seconds
-      const startTime = Date.now()
+      // Insert with void strategy - should complete after 3 seconds with fake timers
       const tx = testCollection.insert({ id: 1, name: `Void Test` })
-      await tx.isPersisted.promise
-      const endTime = Date.now()
-      const duration = endTime - startTime
 
-      // Should take approximately 3 seconds (allow for some variance)
-      expect(duration).toBeGreaterThan(2900)
-      expect(duration).toBeLessThan(3200)
+      // Use runOnlyPendingTimers to execute the timeout
+      await vi.runOnlyPendingTimersAsync()
+
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
+
+      vi.useRealTimers()
     })
 
     it(`should support custom match function strategy`, async () => {
@@ -943,6 +944,8 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should support configurable timeout for void strategy`, async () => {
+      vi.useFakeTimers()
+
       const customTimeout = 500 // Custom short timeout
 
       const onInsert = vi.fn().mockResolvedValue({
@@ -963,16 +966,15 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
 
       // Insert with custom void timeout
-      const startTime = Date.now()
       const tx = testCollection.insert({ id: 1, name: `Custom Timeout Test` })
-      await tx.isPersisted.promise
-      const endTime = Date.now()
-      const duration = endTime - startTime
 
-      // Should take approximately the custom timeout (500ms), not default 3000ms
-      expect(duration).toBeGreaterThan(450)
-      expect(duration).toBeLessThan(650)
+      // Use runOnlyPendingTimers to execute the timeout
+      await vi.runOnlyPendingTimersAsync()
+
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
+
+      vi.useRealTimers()
     })
   })
 

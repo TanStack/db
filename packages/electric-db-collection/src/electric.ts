@@ -7,6 +7,8 @@ import { Store } from "@tanstack/store"
 import DebugModule from "debug"
 import {
   ExpectedNumberInAwaitTxIdError,
+  StreamAbortedError,
+  TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import type {
@@ -136,7 +138,7 @@ export interface ElectricCollectionConfig<
    *              message.headers.operation === 'insert' &&
    *              message.value.name === newItem.name
    *     },
-   *     timeout: 5000 // Optional timeout in ms, defaults to 30000
+   *     timeout: 5000 // Optional timeout in ms, defaults to 3000
    *   }
    * }
    *
@@ -316,23 +318,29 @@ export function electricCollectionOptions<
       }
     >
   >(new Map())
+
+  // Buffer messages since last up-to-date to handle race conditions
+  const currentBatchMessages = new Store<
+    Array<Message<ResolveType<TExplicit, TSchema, TFallback>>>
+  >([])
   const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
     config.shapeOptions,
     {
       seenTxids,
       pendingMatches,
+      currentBatchMessages,
     }
   )
 
   /**
    * Wait for a specific transaction ID to be synced
    * @param txId The transaction ID to wait for as a number
-   * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
+   * @param timeout Optional timeout in milliseconds (defaults to 3000ms)
    * @returns Promise that resolves when the txId is synced
    */
   const awaitTxId: AwaitTxIdFn = async (
     txId: Txid,
-    timeout: number = 30000
+    timeout: number = 3000
   ): Promise<boolean> => {
     debug(`awaitTxId called with txid %d`, txId)
     if (typeof txId !== `number`) {
@@ -362,14 +370,14 @@ export function electricCollectionOptions<
   /**
    * Wait for a custom match function to find a matching message
    * @param matchFn Function that returns true when a message matches
-   * @param timeout Optional timeout in milliseconds (defaults to 30000ms)
+   * @param timeout Optional timeout in milliseconds (defaults to 3000ms)
    * @returns Promise that resolves when a matching message is found
    */
   const awaitMatch: AwaitMatchFn<
     ResolveType<TExplicit, TSchema, TFallback>
   > = async (
     matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>,
-    timeout: number = 30000
+    timeout: number = 3000
   ): Promise<boolean> => {
     debug(`awaitMatch called with custom function`)
 
@@ -386,7 +394,7 @@ export function electricCollectionOptions<
 
       const onTimeout = () => {
         cleanupMatch()
-        reject(new Error(`Timeout waiting for custom match function`))
+        reject(new TimeoutWaitingForMatchError())
       }
 
       const timeoutId = setTimeout(onTimeout, timeout)
@@ -410,6 +418,28 @@ export function electricCollectionOptions<
           return true
         }
         return false
+      }
+
+      // Check against current batch messages first to handle race conditions
+      for (const message of currentBatchMessages.state) {
+        if (checkMatch(message)) {
+          debug(
+            `awaitMatch found immediate match in current batch, waiting for up-to-date`
+          )
+          // Mark as matched and register for up-to-date resolution
+          pendingMatches.setState((current) => {
+            const newMatches = new Map(current)
+            newMatches.set(matchId, {
+              matchFn: checkMatch,
+              resolve,
+              reject,
+              timeoutId,
+              matched: true, // Already matched
+            })
+            return newMatches
+          })
+          return
+        }
       }
 
       // Store the match function for the sync process to use
@@ -549,9 +579,11 @@ function createElectricSync<T extends Row<unknown>>(
         }
       >
     >
+    currentBatchMessages: Store<Array<Message<T>>>
   }
 ): SyncConfig<T> {
-  const { seenTxids, pendingMatches } = options
+  const { seenTxids, pendingMatches, currentBatchMessages } = options
+  const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -587,7 +619,7 @@ function createElectricSync<T extends Row<unknown>>(
     pendingMatches.setState((current) => {
       current.forEach((match) => {
         clearTimeout(match.timeoutId)
-        match.reject(new Error(`Stream aborted`))
+        match.reject(new StreamAbortedError())
       })
       return new Map() // Clear all pending matches
     })
@@ -630,6 +662,18 @@ function createElectricSync<T extends Row<unknown>>(
         let hasUpToDate = false
 
         for (const message of messages) {
+          // Add message to current batch buffer (for race condition handling)
+          if (isChangeMessage(message)) {
+            currentBatchMessages.setState((currentBuffer) => {
+              const newBuffer = [...currentBuffer, message]
+              // Limit buffer size for safety
+              if (newBuffer.length > MAX_BATCH_MESSAGES) {
+                newBuffer.splice(0, newBuffer.length - MAX_BATCH_MESSAGES)
+              }
+              return newBuffer
+            })
+          }
+
           // Check for txids in the message and add them to our store
           if (hasTxids(message)) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
@@ -637,11 +681,31 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Check pending matches against this message
           // Note: matchFn will mark matches internally, we don't resolve here
-          pendingMatches.state.forEach((match) => {
+          const matchesToRemove: Array<string> = []
+          pendingMatches.state.forEach((match, matchId) => {
             if (!match.matched) {
-              match.matchFn(message)
+              try {
+                match.matchFn(message)
+              } catch (err) {
+                // If matchFn throws, clean up and reject the promise
+                clearTimeout(match.timeoutId)
+                match.reject(
+                  err instanceof Error ? err : new Error(String(err))
+                )
+                matchesToRemove.push(matchId)
+                debug(`matchFn error: %o`, err)
+              }
             }
           })
+
+          // Remove matches that errored
+          if (matchesToRemove.length > 0) {
+            pendingMatches.setState((current) => {
+              const newMatches = new Map(current)
+              matchesToRemove.forEach((id) => newMatches.delete(id))
+              return newMatches
+            })
+          }
 
           if (isChangeMessage(message)) {
             // Check if the message contains schema information
@@ -685,6 +749,9 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (hasUpToDate) {
+          // Clear the current batch buffer since we're now up-to-date
+          currentBatchMessages.setState(() => [])
+
           // Commit transaction if one was started
           if (transactionStarted) {
             commit()

@@ -21,3 +21,17 @@ export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
     this.name = `TimeoutWaitingForTxIdError`
   }
 }
+
+export class TimeoutWaitingForMatchError extends ElectricDBCollectionError {
+  constructor() {
+    super(`Timeout waiting for custom match function`)
+    this.name = `TimeoutWaitingForMatchError`
+  }
+}
+
+export class StreamAbortedError extends ElectricDBCollectionError {
+  constructor() {
+    super(`Stream aborted`)
+    this.name = `StreamAbortedError`
+  }
+}
