@@ -124,9 +124,6 @@ export interface QueryCollectionConfig<
     TQueryKey
   >[`staleTime`]
 
-  /** Optional sync configuration (if you want to provide additional sync behavior) */
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
-
   // Direct persistence handlers
   /**
    * Optional asynchronous handler function called before an insert operation

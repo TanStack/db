@@ -86,11 +86,6 @@ export interface ElectricCollectionConfig<
   >
 
   /**
-   * Optional sync configuration (if you want to provide additional sync behavior)
-   */
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
-
-  /**
    * Optional asynchronous handler function called before an insert operation
    * Must return an object containing a txid number or array of txids
    * @param params Object containing transaction and collection information
