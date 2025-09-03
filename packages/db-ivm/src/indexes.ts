@@ -46,9 +46,6 @@ export class Index<K, V> {
     return this.#hashIndex.getMultiplicity(key, value)
   }
 
-  // TODO: make it back public if we notice that it's not used externally
-  //       but we made it private just to notice if anyone is using it externally
-
   /**
    * This returns an iterator that iterates over all key-value pairs.
    * @returns An iterable of all key-value pairs (and their multiplicities) in the index.
