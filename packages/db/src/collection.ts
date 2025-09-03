@@ -1,3 +1,4 @@
+import { createNanoEvents } from "nanoevents"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { deepEquals } from "./utils"
 import { SortedMap } from "./SortedMap"
@@ -38,6 +39,7 @@ import {
   UpdateKeyNotFoundError,
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
+import type { Emitter } from "nanoevents"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
@@ -71,6 +73,10 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   deletedKeys: Set<string | number>
 }
 
+interface CollectionEvents {
+  subscriberCountChanged: (count: number) => void
+}
+
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
  * @template T - The type of items in the collection
@@ -86,6 +92,8 @@ export interface Collection<
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
+  readonly subscriberCount: number
+  readonly events: Emitter<CollectionEvents>
 }
 
 /**
@@ -309,6 +317,7 @@ export class CollectionImpl<
   // Event system
   private changeListeners = new Set<ChangeListener<T, TKey>>()
   private changeKeyListeners = new Map<TKey, Set<ChangeListener<T, TKey>>>()
+  public events = createNanoEvents<CollectionEvents>()
 
   // Utilities namespace
   // This is populated by createCollection
@@ -411,6 +420,13 @@ export class CollectionImpl<
    */
   public get status(): CollectionStatus {
     return this._status
+  }
+
+  /**
+   * Gets the current number of active subscribers
+   */
+  public get subscriberCount(): number {
+    return this.activeSubscribersCount
   }
 
   /**
@@ -777,6 +793,7 @@ export class CollectionImpl<
   private addSubscriber(): void {
     this.activeSubscribersCount++
     this.cancelGCTimer()
+    this.events.emit(`subscriberCountChanged`, this.activeSubscribersCount)
 
     // Start sync if collection was cleaned up
     if (this._status === `cleaned-up` || this._status === `idle`) {
@@ -795,6 +812,8 @@ export class CollectionImpl<
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
     }
+
+    this.events.emit(`subscriberCountChanged`, this.activeSubscribersCount)
   }
 
   /**
