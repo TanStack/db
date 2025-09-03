@@ -22,10 +22,7 @@ const debug = DebugModule.debug(`ts/db:rxdb`)
 /**
  * Used in tests to ensure proper cleanup
  */
-export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<
-  RxCollection,
-  Set<any>
->()
+export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<any>>()
 
 /**
  * Configuration interface for RxDB collection options
@@ -190,7 +187,9 @@ export function rxdbCollectionOptions<
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
         sub = rxCollection.$.subscribe((ev) => {
-          const cur: ResolveType<TExplicit, TSchema, any> = stripRxdbFields(clone(ev.documentData as Row))
+          const cur: ResolveType<TExplicit, TSchema, any> = stripRxdbFields(
+            clone(ev.documentData as Row)
+          )
           switch (ev.operation) {
             case `INSERT`:
               queue({ type: `insert`, value: cur })
