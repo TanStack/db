@@ -33,7 +33,26 @@ function createUsers() {
   )
 }
 
-describe(`nested select types`, () => {
+describe(`select types`, () => {
+  test(`works with functions`, () => {
+    const users = createUsers()
+    const col = createLiveQueryCollection((q) =>
+      q.from({ u: users }).select(({ u }) => ({
+        id: u.id,
+        nameUpper: upper(u.name),
+      }))
+    )
+
+    type Expected = {
+      id: number
+      nameUpper: string
+    }
+
+    const results = col.toArray[0]!
+
+    expectTypeOf(results).toEqualTypeOf<Expected>()
+  })
+
   test(`nested object selection infers nested result type`, () => {
     const users = createUsers()
     const col = createLiveQueryCollection((q) =>
@@ -46,40 +65,49 @@ describe(`nested select types`, () => {
       }))
     )
 
-    type Expected = Array<{
+    type Expected = {
       id: number
       meta: {
         city: string | undefined
         coords: { lat: number; lng: number } | undefined
       }
-    }>
+    }
 
-    expectTypeOf(col.toArray).toEqualTypeOf<Expected>()
+    const results = col.toArray[0]!
+
+    expectTypeOf(results).toEqualTypeOf<Expected>()
   })
 
   test(`nested spread preserves object structure types`, () => {
     const users = createUsers()
-    const col = createLiveQueryCollection((q) =>
-      q.from({ u: users }).select(({ u }) => ({
-        user: {
-          id: u.id,
+    const col = createLiveQueryCollection((q) => {
+      const r = q.from({ u: users }).select(({ u }) => {
+        const s = {
           nameUpper: upper(u.name),
-          profile: { ...u.profile },
-        },
-      }))
-    )
+          user: {
+            id: u.id,
+            profile: { ...u.profile },
+          },
+        }
+        return s
+      })
 
-    type Expected = Array<{
+      return r
+    })
+
+    type Expected = {
+      nameUpper: string
       user: {
         id: number
-        nameUpper: string
         profile: {
           bio: string
           preferences: { notifications: boolean; theme: `light` | `dark` }
         }
       }
-    }>
+    }
 
-    expectTypeOf(col.toArray).toEqualTypeOf<Expected>()
+    const results = col.toArray[0]!
+
+    expectTypeOf(results).toEqualTypeOf<Expected>()
   })
 })

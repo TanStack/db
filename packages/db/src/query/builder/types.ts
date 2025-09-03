@@ -1,5 +1,12 @@
 import type { CollectionImpl } from "../../collection.js"
-import type { Aggregate, BasicExpression, OrderByDirection } from "../ir.js"
+import type {
+  Aggregate,
+  BasicExpression,
+  Func,
+  OrderByDirection,
+  PropRef,
+  Value,
+} from "../ir.js"
 import type { QueryBuilder } from "./index.js"
 import type { ResolveType } from "../../types.js"
 
@@ -260,29 +267,29 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  * ```
  */
 export type ResultTypeFromSelect<TSelectObject> = Simplify<{
-  [K in keyof TSelectObject]: TSelectObject[K] extends SpreadableRefProxy<infer T>
-    ? T
-    : TSelectObject[K] extends RefProxy<infer T>
+  [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
+    ? ExtractExpressionType<TSelectObject[K]>
+    : TSelectObject[K] extends SpreadableRefProxy<infer T>
       ? T
-      : TSelectObject[K] extends Ref<infer T>
+      : TSelectObject[K] extends RefProxy<infer T>
         ? T
-        : TSelectObject[K] extends Ref<infer T> | undefined
-          ? T | undefined
-          : TSelectObject[K] extends Ref<infer T> | null
-            ? T | null
-            : TSelectObject[K] extends RefProxy<infer T> | undefined
-              ? T | undefined
-              : TSelectObject[K] extends RefProxy<infer T> | null
-                ? T | null
-                : TSelectObject[K] extends BasicExpression<infer T>
-                  ? T
+        : TSelectObject[K] extends Ref<infer T>
+          ? T
+          : TSelectObject[K] extends Ref<infer T> | undefined
+            ? T | undefined
+            : TSelectObject[K] extends Ref<infer T> | null
+              ? T | null
+              : TSelectObject[K] extends RefProxy<infer T> | undefined
+                ? T | undefined
+                : TSelectObject[K] extends RefProxy<infer T> | null
+                  ? T | null
                   : TSelectObject[K] extends Aggregate<infer T>
                     ? T
                     : TSelectObject[K] extends string
                       ? TSelectObject[K]
                       : TSelectObject[K] extends number
                         ? TSelectObject[K]
-                      : TSelectObject[K] extends boolean
+                        : TSelectObject[K] extends boolean
                           ? TSelectObject[K]
                           : TSelectObject[K] extends null
                             ? null
@@ -293,11 +300,29 @@ export type ResultTypeFromSelect<TSelectObject> = Simplify<{
                                 : never
 }>
 
-// Helper to convert union to intersection
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void ? I : never
-
 // Helper to make a type display better in IDEs
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
+
+// Helper type to extract the underlying type from various expression types
+type ExtractExpressionType<T> =
+  T extends PropRef<infer U>
+    ? U
+    : T extends Value<infer U>
+      ? U
+      : T extends Func<infer U>
+        ? U
+        : T extends BasicExpression<infer U>
+          ? U
+          : T
+
+// Helper type to check if a type needs expression type extraction
+type NeedsExtraction<T> = T extends
+  | PropRef<any>
+  | Value<any>
+  | Func<any>
+  | BasicExpression<any>
+  ? true
+  : false
 
 /**
  * OrderByCallback - Type for orderBy clause callback functions
@@ -628,19 +653,20 @@ export type RefProxy<T = any> = {
  * })
  * ```
  */
-export type SpreadableRefProxy<T> = T extends Ref<infer U>
-  ? U
-  : T extends Record<string, any>
-    ? T extends RefProxy<infer U>
-      ? U  // If T is RefProxy<U>, extract U directly
-      : {
-          [K in keyof T]: T[K] extends Ref<infer U>
-            ? U
-            : T[K] extends RefProxy<infer U>
-              ? SpreadableRefProxy<U>
-              : SpreadableRefProxy<T[K]>
-        }
-    : T
+export type SpreadableRefProxy<T> =
+  T extends Ref<infer U>
+    ? U
+    : T extends Record<string, any>
+      ? T extends RefProxy<infer U>
+        ? U // If T is RefProxy<U>, extract U directly
+        : {
+            [K in keyof T]: T[K] extends Ref<infer U>
+              ? U
+              : T[K] extends RefProxy<infer U>
+                ? SpreadableRefProxy<U>
+                : SpreadableRefProxy<T[K]>
+          } & { [RefBrand]?: never } // Remove RefBrand from spread results
+      : T
 
 /**
  * Ref - The user-facing ref type with clean IDE display
@@ -655,6 +681,42 @@ export type SpreadableRefProxy<T> = T extends Ref<infer U>
  */
 declare const RefBrand: unique symbol
 export type Ref<T = any> = { readonly [RefBrand]?: T }
+
+// Helper type to remove RefBrand from objects
+type WithoutRefBrand<T> =
+  T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
+
+// Helper type to detect if an object contains spread sentinel keys
+type HasSpreadSentinel<T> =
+  T extends Record<string, any>
+    ? string extends keyof T
+      ? Extract<keyof T, string> extends infer K
+        ? K extends string
+          ? K extends `__SPREAD_SENTINEL__${string}`
+            ? true
+            : false
+          : false
+        : false
+      : false
+    : false
+
+// Helper type to extract the type from a spread object (remove sentinel keys and extract underlying types)
+type ExtractSpreadType<T> =
+  T extends Record<string, any>
+    ? {
+        [K in keyof T as K extends `__SPREAD_SENTINEL__${string}`
+          ? never
+          : K]: T[K] extends Ref<infer U>
+          ? U
+          : T[K] extends RefProxy<infer U>
+            ? U
+            : T[K] extends BasicExpression<infer U>
+              ? U
+              : T[K] extends Record<string, any>
+                ? ExtractSpreadType<T[K]>
+                : T[K]
+      }
+    : T
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
