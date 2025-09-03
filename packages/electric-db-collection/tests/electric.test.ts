@@ -796,7 +796,9 @@ describe(`Electric Integration`, () => {
 
     it(`should support multiple matching strategies in different handlers`, () => {
       const onInsert = vi.fn().mockResolvedValue({ txid: 100 }) // Txid strategy
-      const onUpdate = vi.fn().mockImplementation(() => Promise.resolve({})) // Void strategy
+      const onUpdate = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve({ timeout: 1500 })) // Void strategy with custom timeout
       const onDelete = vi.fn().mockResolvedValue({
         // Custom match strategy
         matchFn: (message: any) =>
@@ -821,6 +823,156 @@ describe(`Electric Integration`, () => {
       expect(options.onInsert).toBeDefined()
       expect(options.onUpdate).toBeDefined()
       expect(options.onDelete).toBeDefined()
+    })
+
+    it(`should cleanup pending matches on timeout without memory leaks`, async () => {
+      const onInsert = vi.fn().mockResolvedValue({
+        matchFn: () => false, // Never matches
+        timeout: 100, // Short timeout for test
+      })
+
+      const config = {
+        id: `test-cleanup`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert that will timeout
+      const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
+
+      // Should timeout and fail
+      await expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for custom match function`
+      )
+
+      // Send a message after timeout - should not cause any side effects
+      // This verifies that the pending match was properly cleaned up
+      expect(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `Timeout Test` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `up-to-date` } },
+        ])
+      }).not.toThrow()
+    })
+
+    it(`should wait for up-to-date after custom match (commit semantics)`, async () => {
+      let matchFound = false
+      let persistenceCompleted = false
+
+      const onInsert = vi.fn().mockImplementation(({ transaction }) => {
+        const item = transaction.mutations[0].modified
+        return Promise.resolve({
+          matchFn: (message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.name === item.name
+            ) {
+              matchFound = true
+              return true
+            }
+            return false
+          },
+          timeout: 5000,
+        })
+      })
+
+      const config = {
+        id: `test-commit-semantics`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert
+      const insertPromise = testCollection.insert({
+        id: 1,
+        name: `Commit Test`,
+      })
+
+      // Set up persistence completion tracking
+      insertPromise.isPersisted.promise.then(() => {
+        persistenceCompleted = true
+      })
+
+      // Give a moment for handler setup
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Send matching message (should match but not complete persistence yet)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Commit Test` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Give time for match to be processed
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify match was found but persistence not yet completed
+      expect(matchFound).toBe(true)
+      expect(persistenceCompleted).toBe(false)
+
+      // Now send up-to-date (should complete persistence)
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      // Wait for persistence to complete
+      await insertPromise.isPersisted.promise
+
+      // Verify persistence completed after up-to-date
+      expect(persistenceCompleted).toBe(true)
+      expect(testCollection.syncedData.has(1)).toBe(true)
+    })
+
+    it(`should support configurable timeout for void strategy`, async () => {
+      const customTimeout = 500 // Custom short timeout
+
+      const onInsert = vi.fn().mockResolvedValue({
+        timeout: customTimeout, // Void strategy with custom timeout
+      })
+
+      const config = {
+        id: `test-void-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert with custom void timeout
+      const startTime = Date.now()
+      const tx = testCollection.insert({ id: 1, name: `Custom Timeout Test` })
+      await tx.isPersisted.promise
+      const endTime = Date.now()
+      const duration = endTime - startTime
+
+      // Should take approximately the custom timeout (500ms), not default 3000ms
+      expect(duration).toBeGreaterThan(450)
+      expect(duration).toBeLessThan(650)
+      expect(onInsert).toHaveBeenCalled()
     })
   })
 

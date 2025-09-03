@@ -46,11 +46,15 @@ export type MatchFunction<T extends Row<unknown>> = (
 
 /**
  * Matching strategies for Electric synchronization
+ * Handlers can return one of three strategies:
+ * - Txid strategy: { txid: number | number[] }
+ * - Custom match strategy: { matchFn: (message) => boolean, timeout?: number }
+ * - Void strategy: { timeout?: number } (when neither txid nor matchFn provided)
  */
 export type MatchingStrategy<T extends Row<unknown> = Row<unknown>> =
-  | { type: `txid`; txid: Txid | Array<Txid> }
-  | { type: `custom`; matchFn: MatchFunction<T>; timeout?: number }
-  | { type: `void` }
+  | { txid: Txid | Array<Txid> }
+  | { matchFn: MatchFunction<T>; timeout?: number }
+  | { timeout?: number }
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -156,14 +160,7 @@ export interface ElectricCollectionConfig<
    */
   onInsert?: (
     params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<
-    | { txid: Txid | Array<Txid> }
-    | {
-        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
-        timeout?: number
-      }
-    | Record<string, never>
-  >
+  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -205,14 +202,7 @@ export interface ElectricCollectionConfig<
    */
   onUpdate?: (
     params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<
-    | { txid: Txid | Array<Txid> }
-    | {
-        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
-        timeout?: number
-      }
-    | Record<string, never>
-  >
+  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -253,14 +243,7 @@ export interface ElectricCollectionConfig<
    */
   onDelete?: (
     params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<
-    | { txid: Txid | Array<Txid> }
-    | {
-        matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
-        timeout?: number
-      }
-    | Record<string, never>
-  >
+  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -328,7 +311,8 @@ export function electricCollectionOptions<
         ) => boolean
         resolve: (value: boolean) => void
         reject: (error: Error) => void
-        timeoutId: NodeJS.Timeout
+        timeoutId: ReturnType<typeof setTimeout>
+        matched: boolean
       }
     >
   >(new Map())
@@ -390,10 +374,22 @@ export function electricCollectionOptions<
     debug(`awaitMatch called with custom function`)
 
     return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        debug(`awaitMatch timed out after %dms`, timeout)
+      const matchId = Math.random().toString(36)
+
+      const cleanupMatch = () => {
+        pendingMatches.setState((current) => {
+          const newMatches = new Map(current)
+          newMatches.delete(matchId)
+          return newMatches
+        })
+      }
+
+      const onTimeout = () => {
+        cleanupMatch()
         reject(new Error(`Timeout waiting for custom match function`))
-      }, timeout)
+      }
+
+      const timeoutId = setTimeout(onTimeout, timeout)
 
       // We need access to the stream messages to check against the match function
       // This will be handled by the sync configuration
@@ -401,9 +397,16 @@ export function electricCollectionOptions<
         message: Message<ResolveType<TExplicit, TSchema, TFallback>>
       ) => {
         if (matchFn(message)) {
-          debug(`awaitMatch found matching message`)
-          clearTimeout(timeoutId)
-          resolve(true)
+          debug(`awaitMatch found matching message, waiting for up-to-date`)
+          // Mark as matched but don't resolve yet - wait for up-to-date
+          pendingMatches.setState((current) => {
+            const newMatches = new Map(current)
+            const existing = newMatches.get(matchId)
+            if (existing) {
+              newMatches.set(matchId, { ...existing, matched: true })
+            }
+            return newMatches
+          })
           return true
         }
         return false
@@ -411,7 +414,6 @@ export function electricCollectionOptions<
 
       // Store the match function for the sync process to use
       // We'll add this to a pending matches store
-      const matchId = Math.random().toString(36)
       pendingMatches.setState((current) => {
         const newMatches = new Map(current)
         newMatches.set(matchId, {
@@ -419,6 +421,7 @@ export function electricCollectionOptions<
           resolve,
           reject,
           timeoutId,
+          matched: false,
         })
         return newMatches
       })
@@ -444,13 +447,7 @@ export function electricCollectionOptions<
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result:
-      | { txid: Txid | Array<Txid> }
-      | {
-          matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>
-          timeout?: number
-        }
-      | Record<string, never>
+    result: MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>
   ): Promise<void> => {
     // Check for txid strategy (backward compatible)
     if (`txid` in result) {
@@ -469,8 +466,9 @@ export function electricCollectionOptions<
       return
     }
 
-    // Default to void strategy (3-second wait) if no specific strategy provided
-    await awaitVoid()
+    // Void strategy with configurable timeout
+    const timeout = result.timeout ?? 3000
+    await awaitVoid(timeout)
   }
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
@@ -546,7 +544,8 @@ function createElectricSync<T extends Row<unknown>>(
           matchFn: (message: Message<T>) => boolean
           resolve: (value: boolean) => void
           reject: (error: Error) => void
-          timeoutId: NodeJS.Timeout
+          timeoutId: ReturnType<typeof setTimeout>
+          matched: boolean
         }
       >
     >
@@ -582,6 +581,17 @@ function createElectricSync<T extends Row<unknown>>(
       abortController.abort()
     }
   }
+
+  // Cleanup pending matches on abort
+  abortController.signal.addEventListener(`abort`, () => {
+    pendingMatches.setState((current) => {
+      current.forEach((match) => {
+        clearTimeout(match.timeoutId)
+        match.reject(new Error(`Stream aborted`))
+      })
+      return new Map() // Clear all pending matches
+    })
+  })
 
   let unsubscribeStream: () => void
 
@@ -626,23 +636,12 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           // Check pending matches against this message
-          const matchesToRemove: Array<string> = []
-          pendingMatches.state.forEach((match, matchId) => {
-            if (match.matchFn(message)) {
-              clearTimeout(match.timeoutId)
-              match.resolve(true)
-              matchesToRemove.push(matchId)
+          // Note: matchFn will mark matches internally, we don't resolve here
+          pendingMatches.state.forEach((match) => {
+            if (!match.matched) {
+              match.matchFn(message)
             }
           })
-
-          // Remove resolved matches
-          if (matchesToRemove.length > 0) {
-            pendingMatches.setState((current) => {
-              const newMatches = new Map(current)
-              matchesToRemove.forEach((id) => newMatches.delete(id))
-              return newMatches
-            })
-          }
 
           if (isChangeMessage(message)) {
             // Check if the message contains schema information
@@ -705,6 +704,26 @@ function createElectricSync<T extends Row<unknown>>(
             newTxids.clear()
             return clonedSeen
           })
+
+          // Resolve all matched pending matches on up-to-date
+          const matchesToResolve: Array<string> = []
+          pendingMatches.state.forEach((match, matchId) => {
+            if (match.matched) {
+              clearTimeout(match.timeoutId)
+              match.resolve(true)
+              matchesToResolve.push(matchId)
+              debug(`awaitMatch resolved on up-to-date for match %s`, matchId)
+            }
+          })
+
+          // Remove resolved matches
+          if (matchesToResolve.length > 0) {
+            pendingMatches.setState((current) => {
+              const newMatches = new Map(current)
+              matchesToResolve.forEach((id) => newMatches.delete(id))
+              return newMatches
+            })
+          }
         }
       })
 

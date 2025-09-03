@@ -1,5 +1,5 @@
 ---
-"@tanstack/electric-db-collection": patch
+"@tanstack/electric-db-collection": minor
 ---
 
 feat: Add flexible matching strategies for electric-db-collection (#402)
