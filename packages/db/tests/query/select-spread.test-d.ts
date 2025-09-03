@@ -2,7 +2,7 @@ import { describe, expectTypeOf, test } from "vitest"
 import { createCollection } from "../../src/collection.js"
 import { createLiveQueryCollection } from "../../src/query/index.js"
 import { mockSyncCollectionOptions } from "../utls.js"
-import { add, upper } from "../../src/query/builder/functions.js"
+import { add, length, upper } from "../../src/query/builder/functions.js"
 
 // Base type used in bug report
 type Message = {
@@ -74,13 +74,37 @@ describe(`Select spread typing`, () => {
         q.from({ message: messagesCollection }).select(({ message }) => ({
           ...message,
           // override user with computed value
-          user: upper(message.user),
+          user: length(message.user), // illogical name, but for the test
         })),
     })
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<Omit<Message, `user`> & { user: string }>
+      Array<Omit<Message, `user`> & { user: number }>
+    >(undefined as any)
+  })
+
+  test(`explicit property wins over spread and preserves type`, () => {
+    const messagesCollection = createMessagesCollection()
+
+    const collection = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q.from({ message: messagesCollection }).select(({ message }) => ({
+          theMessage: {
+            ...message,
+            spam: message.text,
+          }
+        })),
+    })
+
+    type Expected = {
+      theMessage: Message & { spam: string }
+    }
+
+    const results = collection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<Expected>
     >(undefined as any)
   })
 })
