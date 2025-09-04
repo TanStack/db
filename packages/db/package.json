@@ -1,14 +1,15 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.1.4",
+  "version": "0.1.11",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.0.9",
-    "arktype": "^2.1.20"
+    "arktype": "^2.1.20",
+    "temporal-polyfill": "^0.3.0"
   },
   "exports": {
     ".": {

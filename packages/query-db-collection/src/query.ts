@@ -515,7 +515,8 @@ export function queryCollectionOptions<
       TQueryKey
     >(queryClient, observerOptions)
 
-    const actualUnsubscribeFn = localObserver.subscribe((result) => {
+    type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
+    const handleUpdate: UpdateHandler = (result) => {
       if (result.isSuccess) {
         const newItemsArray = result.data
 
@@ -555,12 +556,6 @@ export function queryCollectionOptions<
           return keys1.every((key) => {
             // Skip comparing functions and complex objects deeply
             if (typeof obj1[key] === `function`) return true
-            if (typeof obj1[key] === `object` && obj1[key] !== null) {
-              // For nested objects, just compare references
-              // A more robust solution might do recursive shallow comparison
-              // or let users provide a custom equality function
-              return obj1[key] === obj2[key]
-            }
             return obj1[key] === obj2[key]
           })
         }
@@ -599,7 +594,13 @@ export function queryCollectionOptions<
         // Mark collection as ready even on error to avoid blocking apps
         markReady()
       }
-    })
+    }
+
+    const actualUnsubscribeFn = localObserver.subscribe(handleUpdate)
+
+    // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial
+    // state)
+    handleUpdate(localObserver.getCurrentResult())
 
     return async () => {
       actualUnsubscribeFn()

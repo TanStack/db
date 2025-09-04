@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { Temporal } from "temporal-polyfill"
 import {
   createArrayChangeProxy,
   createChangeProxy,
@@ -1106,6 +1107,41 @@ describe(`Proxy Library`, () => {
       if (objs[0]) {
         expect(objs[0].user.hobbies).toEqual([`reading`, `swimming`])
       }
+    })
+
+    it(`should handle Temporal objects correctly`, () => {
+      const zonedDateTime = Temporal.Now.zonedDateTimeISO()
+      const plainDate = Temporal.PlainDate.from(`2024-01-15`)
+      const duration = Temporal.Duration.from({ hours: 2, minutes: 30 })
+
+      const obj = {
+        appointment: {
+          date: zonedDateTime,
+          reminder: plainDate,
+          duration: duration,
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify the temporal objects
+      proxy.appointment = {
+        date: Temporal.Now.zonedDateTimeISO(),
+        reminder: Temporal.PlainDate.from(`2024-01-16`),
+        duration: Temporal.Duration.from({ hours: 3 }),
+      }
+
+      const changes = getChanges()
+
+      // The changed values should be proper Temporal objects, not empty objects
+      expect(changes.appointment.date).toBeInstanceOf(Temporal.ZonedDateTime)
+      expect(changes.appointment.reminder).toBeInstanceOf(Temporal.PlainDate)
+      expect(changes.appointment.duration).toBeInstanceOf(Temporal.Duration)
+
+      // Original should be unchanged
+      expect(obj.appointment.date).toEqual(zonedDateTime)
+      expect(obj.appointment.reminder).toEqual(plainDate)
+      expect(obj.appointment.duration).toEqual(duration)
     })
 
     it(`should handle Set and Map objects`, () => {

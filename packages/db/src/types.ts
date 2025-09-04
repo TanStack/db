@@ -638,3 +638,77 @@ export type ChangeListener<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > = (changes: Array<ChangeMessage<T, TKey>>) => void
+
+// Adapted from https://github.com/sindresorhus/type-fest
+// MIT License Copyright (c) Sindre Sorhus
+
+type BuiltIns =
+  | null
+  | undefined
+  | string
+  | number
+  | boolean
+  | symbol
+  | bigint
+  | void
+  | Date
+  | RegExp
+
+type HasMultipleCallSignatures<
+  T extends (...arguments_: Array<any>) => unknown,
+> = T extends {
+  (...arguments_: infer A): unknown
+  (...arguments_: infer B): unknown
+}
+  ? B extends A
+    ? A extends B
+      ? false
+      : true
+    : true
+  : false
+
+type WritableMapDeep<MapType extends ReadonlyMap<unknown, unknown>> =
+  MapType extends ReadonlyMap<infer KeyType, infer ValueType>
+    ? Map<WritableDeep<KeyType>, WritableDeep<ValueType>>
+    : MapType
+
+type WritableSetDeep<SetType extends ReadonlySet<unknown>> =
+  SetType extends ReadonlySet<infer ItemType>
+    ? Set<WritableDeep<ItemType>>
+    : SetType
+
+type WritableObjectDeep<ObjectType extends object> = {
+  -readonly [KeyType in keyof ObjectType]: WritableDeep<ObjectType[KeyType]>
+}
+
+type WritableArrayDeep<ArrayType extends ReadonlyArray<unknown>> =
+  ArrayType extends readonly []
+    ? []
+    : ArrayType extends readonly [...infer U, infer V]
+      ? [...WritableArrayDeep<U>, WritableDeep<V>]
+      : ArrayType extends readonly [infer U, ...infer V]
+        ? [WritableDeep<U>, ...WritableArrayDeep<V>]
+        : ArrayType extends ReadonlyArray<infer U>
+          ? Array<WritableDeep<U>>
+          : ArrayType extends Array<infer U>
+            ? Array<WritableDeep<U>>
+            : ArrayType
+
+export type WritableDeep<T> = T extends BuiltIns
+  ? T
+  : T extends (...arguments_: Array<any>) => unknown
+    ? {} extends WritableObjectDeep<T>
+      ? T
+      : HasMultipleCallSignatures<T> extends true
+        ? T
+        : ((...arguments_: Parameters<T>) => ReturnType<T>) &
+            WritableObjectDeep<T>
+    : T extends ReadonlyMap<unknown, unknown>
+      ? WritableMapDeep<T>
+      : T extends ReadonlySet<unknown>
+        ? WritableSetDeep<T>
+        : T extends ReadonlyArray<unknown>
+          ? WritableArrayDeep<T>
+          : T extends object
+            ? WritableObjectDeep<T>
+            : unknown

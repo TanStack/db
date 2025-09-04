@@ -11,7 +11,7 @@ import {
 } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 
 type Person = {
   id: string
@@ -112,6 +112,48 @@ describe(`Query Collections`, () => {
       name: `John Smith`,
       age: 35,
     })
+  })
+
+  it(`should keep stable ref`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const { result, rerender } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
+      )
+    })
+
+    // Wait for collection to sync and state to update
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1) // Only John Smith (age 35)
+    })
+
+    const data1 = result.current.data
+    expect(result.current.data).toHaveLength(1)
+
+    rerender()
+
+    const data2 = result.current.data
+
+    // Passes cause the underlying objects are stable
+    expect(data1).toEqual(data2)
+    expect(data1[0]).toBe(data2[0])
+
+    // Fails cause array isn't
+    expect(data1).toBe(data2)
   })
 
   it(`should be able to query a collection with live updates`, async () => {

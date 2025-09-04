@@ -7,7 +7,7 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { PropRef } from "../ir.js"
+import { PropRef, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
@@ -131,7 +131,8 @@ export function compileQuery(
   if (query.where && query.where.length > 0) {
     // Apply each WHERE condition as a filter (they are ANDed together)
     for (const where of query.where) {
-      const compiledWhere = compileExpression(where)
+      const whereExpression = getWhereExpression(where)
+      const compiledWhere = compileExpression(whereExpression)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return compiledWhere(namespacedRow)
@@ -258,6 +259,7 @@ export function compileQuery(
       rawQuery,
       pipeline,
       query.orderBy,
+      query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       query.limit,
