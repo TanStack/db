@@ -13,7 +13,8 @@ export class DefaultMap<K, V> extends Map<K, V> {
 
   get(key: K): V {
     if (!this.has(key)) {
-      this.set(key, this.defaultValue())
+      // this.set(key, this.defaultValue())
+      return this.defaultValue()
     }
     return super.get(key)!
   }
@@ -161,3 +162,20 @@ export class ObjectIdGenerator {
  * Global instance for cases where a shared object ID space is needed.
  */
 export const globalObjectIdGenerator = new ObjectIdGenerator()
+
+export function* concatIterable<T>(
+  ...iterables: Array<Iterable<T>>
+): Iterable<T> {
+  for (const iterable of iterables) {
+    yield* iterable
+  }
+}
+
+export function* mapIterable<T, U>(
+  it: Iterable<T>,
+  fn: (t: T) => U
+): Iterable<U> {
+  for (const t of it) {
+    yield fn(t)
+  }
+}
