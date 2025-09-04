@@ -119,10 +119,14 @@ describe(`Query Builder Callback Types`, () => {
         )
         .select(({ user, dept }) => {
           // Test cross-table property access
-          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            user.department_id
+          ).toEqualTypeOf<RefLeaf<number> | null>()
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
           expectTypeOf(dept?.name).toEqualTypeOf<RefLeaf<string> | undefined>()
-          expectTypeOf(dept?.budget).toEqualTypeOf<RefLeaf<number> | undefined>()
+          expectTypeOf(dept?.budget).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
 
           return {
             user_name: user.name,
@@ -259,8 +263,12 @@ describe(`Query Builder Callback Types`, () => {
         )
         .where(({ user, dept }) => {
           expectTypeOf(user.active).toEqualTypeOf<RefLeaf<boolean>>()
-          expectTypeOf(dept?.active).toEqualTypeOf<RefLeaf<boolean> | undefined>()
-          expectTypeOf(dept?.budget).toEqualTypeOf<RefLeaf<number> | undefined>()
+          expectTypeOf(dept?.active).toEqualTypeOf<
+            RefLeaf<boolean> | undefined
+          >()
+          expectTypeOf(dept?.budget).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
 
           return and(
             eq(user.active, true),
@@ -277,7 +285,9 @@ describe(`Query Builder Callback Types`, () => {
         .from({ user: usersCollection })
         .join({ dept: departmentsCollection }, ({ user, dept }) => {
           // Test property access for join conditions
-          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            user.department_id
+          ).toEqualTypeOf<RefLeaf<number> | null>()
           expectTypeOf(dept.id).toEqualTypeOf<RefLeaf<number>>()
 
           return eq(user.department_id, dept.id)
@@ -391,7 +401,9 @@ describe(`Query Builder Callback Types`, () => {
         .groupBy(({ user, dept }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
 
           return dept?.location
         })
@@ -405,7 +417,9 @@ describe(`Query Builder Callback Types`, () => {
         .groupBy(({ user }) => user.department_id)
         .having(({ user }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            user.department_id
+          ).toEqualTypeOf<RefLeaf<number> | null>()
 
           return gt(count(user.id), 5)
         })
@@ -417,7 +431,9 @@ describe(`Query Builder Callback Types`, () => {
         .groupBy(({ user }) => user.department_id)
         .having(({ user }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            user.department_id
+          ).toEqualTypeOf<RefLeaf<number> | null>()
           // Test aggregate functions in having
           expectTypeOf(count(user.id)).toEqualTypeOf<Aggregate<number>>()
           expectTypeOf(avg(user.age)).toEqualTypeOf<Aggregate<number>>()
@@ -469,7 +485,9 @@ describe(`Query Builder Callback Types`, () => {
         .having(({ user, dept }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
 
           return and(gt(count(user.id), 3), gt(avg(user.salary), 70000))
         })
@@ -489,7 +507,9 @@ describe(`Query Builder Callback Types`, () => {
         .join({ project: projectsCollection }, ({ user, dept, project }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
           expectTypeOf(project.user_id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(project.department_id).toEqualTypeOf<RefLeaf<number>>()
           return eq(project.user_id, user.id)
@@ -497,7 +517,9 @@ describe(`Query Builder Callback Types`, () => {
         .where(({ user, dept, project }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
           expectTypeOf(project?.user_id).toEqualTypeOf<
             RefLeaf<number> | undefined
           >()
@@ -512,18 +534,26 @@ describe(`Query Builder Callback Types`, () => {
         })
         .groupBy(({ dept }) => {
           expectTypeOf(dept?.id).toEqualTypeOf<RefLeaf<number> | undefined>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
           return dept?.location
         })
         .having(({ user, project }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf(project?.budget).toEqualTypeOf<RefLeaf<number> | undefined>()
+          expectTypeOf(project?.budget).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
           return and(gt(count(user.id), 2), gt(avg(project?.budget), 50000))
         })
         .select(({ user, dept, project }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
-          expectTypeOf(project?.budget).toEqualTypeOf<RefLeaf<number> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
+          expectTypeOf(project?.budget).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
           return {
             location: dept?.location,
             user_count: count(user.id),
@@ -533,7 +563,9 @@ describe(`Query Builder Callback Types`, () => {
           }
         })
         .orderBy(({ dept }) => {
-          expectTypeOf(dept?.location).toEqualTypeOf<RefLeaf<string> | undefined>()
+          expectTypeOf(dept?.location).toEqualTypeOf<
+            RefLeaf<string> | undefined
+          >()
           return dept?.location
         })
     })

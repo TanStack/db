@@ -4,7 +4,10 @@ import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
 import type { RefLeaf } from "./types.js"
 
-type StringRef = RefLeaf<string> | RefLeaf<string | null> | RefLeaf<string | undefined>
+type StringRef =
+  | RefLeaf<string>
+  | RefLeaf<string | null>
+  | RefLeaf<string | undefined>
 type StringRefProxy =
   | RefProxy<string>
   | RefProxy<string | null>

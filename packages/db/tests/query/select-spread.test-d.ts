@@ -90,16 +90,18 @@ describe(`Select spread typing`, () => {
     const collection = createLiveQueryCollection({
       startSync: true,
       query: (q) => {
-        const r = q.from({ message: messagesCollection }).select(({ message }) => {
-          const s = {
+        const r = q
+          .from({ message: messagesCollection })
+          .select(({ message }) => {
+            const s = {
               ...message,
-            theMessage: {
-              ...message,
-              spam: message.text,
+              theMessage: {
+                ...message,
+                spam: message.text,
+              },
             }
-          }
-          return s
-        })
+            return s
+          })
         return r
       },
     })
@@ -108,8 +110,8 @@ describe(`Select spread typing`, () => {
       id: number
       user: string
       text: string
-      theMessage: { 
-        spam: string 
+      theMessage: {
+        spam: string
         id: number
         user: string
         text: string
@@ -117,8 +119,6 @@ describe(`Select spread typing`, () => {
     }
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<Expected>
-    >(undefined as any)
+    expectTypeOf(results).toEqualTypeOf<Array<Expected>>(undefined as any)
   })
 })
