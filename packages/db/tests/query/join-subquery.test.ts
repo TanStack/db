@@ -147,28 +147,6 @@ function createProductsCollection(autoIndex: `off` | `eager` = `eager`) {
       autoIndex,
     })
   )
-  /*
-  return createCollection(
-    queryCollectionOptions({
-      queryClient: queryClient,
-      queryKey: ["products"],
-      queryFn: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1))
-        return sampleProducts
-      },
-      getKey: (item) => item.id,
-      onInsert: async () => {
-        return { refetch: false }
-      },
-      onUpdate: async () => {
-        return { refetch: false }
-      },
-      onDelete: async () => {
-        return { refetch: false }
-      },
-    }) as any
-  )
-  */
 }
 
 function createTrialsCollection(autoIndex: `off` | `eager` = `eager`) {
