@@ -52,7 +52,7 @@ export interface CompilationResult {
 export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
-  collections: Record<string, Collection<any, any, any, any, any>>,
+  collections: Record<string, Collection<any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -320,7 +320,7 @@ export function compileQuery(
 function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
-  collections: Record<string, Collection<any, any, any, any, any>>,
+  collections: Record<string, Collection<any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
