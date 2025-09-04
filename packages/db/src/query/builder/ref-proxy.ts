@@ -97,7 +97,6 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
-        if (prop === `__orderId`) return target.__orderId
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -130,15 +129,6 @@ export function createRefProxy<T extends Record<string, any>>(
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
-
-    // Assign a non-enumerable order id on first creation for this path
-    if (!proxy.__orderId) {
-      Object.defineProperty(proxy, `__orderId`, {
-        value: ++accessId,
-        enumerable: false,
-        configurable: true,
-      })
-    }
 
     cache.set(pathKey, proxy)
     return proxy
@@ -194,7 +184,6 @@ export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
     const expr = new PropRef(value.__path)
-    ;(expr as any).__orderId = (value as any).__orderId
     return expr
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly

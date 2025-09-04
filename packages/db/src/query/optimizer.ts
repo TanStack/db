@@ -781,77 +781,55 @@ function optimizeFromWithTracking(
   return new QueryRefClass(optimizedSubQuery, from.alias)
 }
 
-/**
- * Determines if it's safe to push WHERE clauses into an existing subquery.
- *
- * Pushing WHERE clauses into existing subqueries can break semantics in several cases:
- *
- * 1. **Aggregates**: Pushing predicates before GROUP BY changes what gets aggregated
- * 2. **ORDER BY + LIMIT/OFFSET**: Pushing predicates before sorting+limiting changes the result set
- * 3. **HAVING clauses**: These operate on aggregated data, predicates should not be pushed past them
- * 4. **Functional operations**: fnSelect, fnWhere, fnHaving could have side effects
- *
- * Note: This safety check only applies when pushing WHERE clauses into existing subqueries.
- * Creating new subqueries from collection references is always safe.
- *
- * @param query - The existing subquery to check for safety
- * @returns True if it's safe to push WHERE clauses into this subquery, false otherwise
- *
- * @example
- * ```typescript
- * // UNSAFE: has GROUP BY - pushing WHERE could change aggregation
- * { from: users, groupBy: [dept], select: { count: agg('count', '*') } }
- *
- * // UNSAFE: has ORDER BY + LIMIT - pushing WHERE could change "top 10"
- * { from: users, orderBy: [salary desc], limit: 10 }
- *
- * // SAFE: plain SELECT without aggregates/limits
- * { from: users, select: { id, name } }
- * ```
- */
+function unsafeSelect(
+  query: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  if (!query.select) return false
+
+  return (
+    selectHasAggregates(query.select) ||
+    whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
+  )
+}
+
+function unsafeGroupBy(query: QueryIR): boolean {
+  return !!(query.groupBy && query.groupBy.length > 0)
+}
+
+function unsafeHaving(query: QueryIR): boolean {
+  return !!(query.having && query.having.length > 0)
+}
+
+function unsafeOrderBy(query: QueryIR): boolean {
+  return !!(
+    query.orderBy &&
+    query.orderBy.length > 0 &&
+    (query.limit !== undefined || query.offset !== undefined)
+  )
+}
+
+function unsafeFnSelect(query: QueryIR): boolean {
+  return !!(
+    query.fnSelect ||
+    (query.fnWhere && query.fnWhere.length > 0) ||
+    (query.fnHaving && query.fnHaving.length > 0)
+  )
+}
+
 function isSafeToPushIntoExistingSubquery(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
   outerAlias: string
 ): boolean {
-  // If the subquery has a SELECT clause, block pushdown when the WHERE references
-  // fields that are computed by the subquery's SELECT (non pass-through projections).
-  if (query.select) {
-    if (selectHasAggregates(query.select)) return false
-    if (
-      whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
-    )
-      return false
-  }
-
-  // Check for GROUP BY clause
-  if (query.groupBy && query.groupBy.length > 0) {
-    return false
-  }
-
-  // Check for HAVING clause
-  if (query.having && query.having.length > 0) {
-    return false
-  }
-
-  // Check for ORDER BY with LIMIT or OFFSET (dangerous combination)
-  if (query.orderBy && query.orderBy.length > 0) {
-    if (query.limit !== undefined || query.offset !== undefined) {
-      return false
-    }
-  }
-
-  // Check for functional variants that might have side effects
-  if (
-    query.fnSelect ||
-    (query.fnWhere && query.fnWhere.length > 0) ||
-    (query.fnHaving && query.fnHaving.length > 0)
-  ) {
-    return false
-  }
-
-  // If none of the unsafe conditions are present, it's safe to optimize
-  return true
+  return !(
+    unsafeSelect(query, whereClause, outerAlias) ||
+    unsafeGroupBy(query) ||
+    unsafeHaving(query) ||
+    unsafeOrderBy(query) ||
+    unsafeFnSelect(query)
+  )
 }
 
 /**
@@ -872,6 +850,36 @@ function selectHasAggregates(select: Select): boolean {
     }
   }
   return false
+}
+
+/**
+ * Recursively collects all PropRef references from an expression.
+ *
+ * @param expr - The expression to traverse
+ * @returns Array of PropRef references found in the expression
+ */
+function collectRefs(expr: any): Array<PropRef> {
+  const refs: Array<PropRef> = []
+
+  if (expr == null || typeof expr !== `object`) return refs
+
+  switch (expr.type) {
+    case `ref`:
+      refs.push(expr as PropRef)
+      break
+    case `func`:
+    case `agg`:
+      for (const arg of expr.args ?? []) {
+        refs.push(...collectRefs(arg))
+      }
+      break
+    case `val`:
+      break
+    default:
+      break
+  }
+
+  return refs
 }
 
 /**
@@ -901,24 +909,7 @@ function whereReferencesComputedSelectFields(
     computed.add(key)
   }
 
-  const refs: Array<PropRef> = []
-  function collectRefs(expr: any) {
-    if (expr == null || typeof expr !== `object`) return
-    switch (expr.type) {
-      case `ref`:
-        refs.push(expr as PropRef)
-        break
-      case `func`:
-      case `agg`:
-        for (const arg of expr.args ?? []) collectRefs(arg)
-        break
-      case `val`:
-        break
-      default:
-        break
-    }
-  }
-  collectRefs(whereClause)
+  const refs = collectRefs(whereClause)
 
   for (const ref of refs) {
     const path = (ref as any).path as Array<string>
