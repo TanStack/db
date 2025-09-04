@@ -935,11 +935,6 @@ const uniqueValues = createLiveQueryCollection((q) =>
 // Result might be: ['Engineering', 'Marketing', null]
 ```
 
-### Important Notes
-
-- **Requires Select**: You must use a `select` clause before `distinct`. Attempting to use `distinct` without `select` will throw a `DistinctRequiresSelectError`.
-- **Keying**: Distinct results maintain the same keying behavior as the source collection when possible.
-
 ## Order By, Limit, and Offset
 
 Use `orderBy`, `limit`, and `offset` to control the order and pagination of your results. Ordering is performed incrementally for optimal performance.
