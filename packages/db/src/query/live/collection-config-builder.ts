@@ -8,6 +8,7 @@ import type { Collection } from "../../collection.js"
 import type {
   CollectionConfig,
   KeyedStream,
+  ResolveType,
   ResultStream,
   SyncConfig,
 } from "../../types.js"
@@ -27,6 +28,8 @@ let liveQueryCollectionCounter = 0
 export class CollectionConfigBuilder<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TKey extends string | number = string | number,
+  TSchema = never,
 > {
   private readonly id: string
   readonly query: QueryIR
@@ -39,7 +42,10 @@ export class CollectionConfigBuilder<
   // WeakMap to store the orderBy index for each result
   private readonly orderByIndices = new WeakMap<object, string>()
 
-  private readonly compare?: (val1: TResult, val2: TResult) => number
+  private readonly compare?: (
+    val1: ResolveType<TResult, TSchema>,
+    val2: ResolveType<TResult, TSchema>
+  ) => number
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -49,14 +55,19 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of collection IDs to functions that load keys for that lazy collection
-  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks<TKey>> = {}
   // Set of collection IDs that are lazy collections
   readonly lazyCollections = new Set<string>()
   // Set of collection IDs that include an optimizable ORDER BY clause
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
   constructor(
-    private readonly config: LiveQueryCollectionConfig<TContext, TResult>
+    private readonly config: LiveQueryCollectionConfig<
+      TContext,
+      TResult,
+      TKey,
+      TSchema
+    >
   ) {
     // Generate a unique ID if not provided
     this.id = config.id || `live-query-${++liveQueryCollectionCounter}`
@@ -66,7 +77,9 @@ export class CollectionConfigBuilder<
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
-      this.compare = createOrderByComparator<TResult>(this.orderByIndices)
+      this.compare = createOrderByComparator<ResolveType<TResult, TSchema>>(
+        this.orderByIndices
+      )
     }
 
     // Compile the base pipeline once initially
@@ -74,26 +87,18 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  > {
+  getConfig(): CollectionConfig<TResult, TKey, TSchema> {
+    const { getKey, ...rest } = this.config
     return {
       id: this.id,
-      getKey:
-        this.config.getKey ||
-        ((item) => this.resultKeys.get(item) as string | number),
-      sync: this.getSyncConfig(),
+      getKey: getKey || ((item) => this.resultKeys.get(item) as TKey),
+      sync: this.getSyncConfig() as SyncConfig<
+        ResolveType<TResult, TSchema>,
+        TKey
+      >,
       compare: this.compare,
-      gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
-      schema: this.config.schema,
-      onInsert: this.config.onInsert,
-      onUpdate: this.config.onUpdate,
-      onDelete: this.config.onDelete,
-      startSync: this.config.startSync,
+      gcTime: this.config.gcTime ?? 5000, // 5 seconds by default for live queries
+      ...rest,
     }
   }
 
@@ -106,7 +111,7 @@ export class CollectionConfigBuilder<
   // So this callback would notice that it doesn't have enough rows and load some more.
   // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
   maybeRunGraph(
-    config: Parameters<SyncConfig<TResult, string | number>[`sync`]>[0],
+    config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0],
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
@@ -132,16 +137,14 @@ export class CollectionConfigBuilder<
     }
   }
 
-  private getSyncConfig(): SyncConfig<TResult, string | number> {
+  private getSyncConfig(): SyncConfig<TResult, TKey> {
     return {
       rowUpdateMode: `full`,
       sync: this.syncFn.bind(this),
     }
   }
 
-  private syncFn(
-    config: Parameters<SyncConfig<TResult, string | number>[`sync`]>[0]
-  ) {
+  private syncFn(config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0]) {
     const syncState: SyncState = {
       messagesCount: 0,
       subscribedToAllCollections: false,
@@ -218,7 +221,7 @@ export class CollectionConfigBuilder<
   }
 
   private extendPipelineWithChangeProcessing(
-    config: Parameters<SyncConfig<TResult, string | number>[`sync`]>[0],
+    config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0],
     syncState: SyncState
   ): FullSyncState {
     const { begin, commit } = config
@@ -251,7 +254,7 @@ export class CollectionConfigBuilder<
   }
 
   private applyChanges(
-    config: Parameters<SyncConfig<TResult, string | number>[`sync`]>[0],
+    config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0],
     changes: {
       deletes: number
       inserts: number
@@ -283,7 +286,7 @@ export class CollectionConfigBuilder<
       inserts > deletes ||
       // Just update(s) but the item is already in the collection (so
       // was inserted previously).
-      (inserts === deletes && collection.has(key as string | number))
+      (inserts === deletes && collection.has(key as TKey))
     ) {
       write({
         value,
@@ -316,17 +319,21 @@ export class CollectionConfigBuilder<
   }
 
   private subscribeToAllCollections(
-    config: Parameters<SyncConfig<TResult, string | number>[`sync`]>[0],
+    config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0],
     syncState: FullSyncState
   ) {
     const loaders = Object.entries(this.collections).map(
       ([collectionId, collection]) => {
-        const collectionSubscriber = new CollectionSubscriber(
+        const collectionSubscriber = new CollectionSubscriber<
+          TContext,
+          TResult,
+          TKey
+        >(
           collectionId,
           collection,
           config,
           syncState,
-          this
+          this as unknown as CollectionConfigBuilder<TContext, TResult, TKey>
         )
         collectionSubscriber.subscribe()
 
@@ -349,8 +356,8 @@ export class CollectionConfigBuilder<
   }
 }
 
-function buildQueryFromConfig<TContext extends Context>(
-  config: LiveQueryCollectionConfig<any, any>
+function buildQueryFromConfig<TContext extends Context, TSchema = never>(
+  config: LiveQueryCollectionConfig<TContext, any, any, TSchema>
 ) {
   // Build the query using the provided query builder function or instance
   if (typeof config.query === `function`) {

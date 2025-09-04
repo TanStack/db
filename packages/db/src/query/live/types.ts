@@ -1,5 +1,9 @@
 import type { D2, RootStreamBuilder } from "@tanstack/db-ivm"
-import type { CollectionConfig, ResultStream } from "../../types.js"
+import type {
+  BaseCollectionConfig,
+  ResolveType,
+  ResultStream,
+} from "../../types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "../builder/index.js"
 import type { Context, GetResult } from "../builder/types.js"
 
@@ -49,13 +53,12 @@ export type FullSyncState = Required<SyncState>
 export interface LiveQueryCollectionConfig<
   TContext extends Context,
   TResult extends object = GetResult<TContext> & object,
-> {
-  /**
-   * Unique identifier for the collection
-   * If not provided, defaults to `live-query-${number}` with auto-incrementing number
-   */
-  id?: string
-
+  TKey extends string | number = string | number,
+  TSchema = never,
+> extends Omit<
+    BaseCollectionConfig<TResult, TKey, TSchema>,
+    `compare` | `getKey`
+  > {
   /**
    * Query builder function that defines the live query
    */
@@ -65,53 +68,6 @@ export interface LiveQueryCollectionConfig<
 
   /**
    * Function to extract the key from result items
-   * If not provided, defaults to using the key from the D2 stream
    */
-  getKey?: (item: TResult) => string | number
-
-  /**
-   * Optional schema for validation
-   */
-  schema?: CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  >[`schema`]
-
-  /**
-   * Optional mutation handlers
-   */
-  onInsert?: CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  >[`onInsert`]
-  onUpdate?: CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  >[`onUpdate`]
-  onDelete?: CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  >[`onDelete`]
-
-  /**
-   * Start sync / the query immediately
-   */
-  startSync?: boolean
-
-  /**
-   * GC time for the collection
-   */
-  gcTime?: number
+  getKey?: (item: ResolveType<TResult, TSchema>) => TKey
 }

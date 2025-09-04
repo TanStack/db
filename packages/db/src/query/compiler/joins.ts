@@ -37,9 +37,11 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 import type { BaseIndex } from "../../indexes/base-index.js"
 
-export type LoadKeysFn = (key: Set<string | number>) => void
-export type LazyCollectionCallbacks = {
-  loadKeys: LoadKeysFn
+export type LoadKeysFn<TKey extends string | number> = (key: Set<TKey>) => void
+export type LazyCollectionCallbacks<
+  TKey extends string | number = string | number,
+> = {
+  loadKeys: LoadKeysFn<TKey>
   loadInitialState: () => void
 }
 

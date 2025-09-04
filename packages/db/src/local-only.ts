@@ -11,12 +11,10 @@ import type {
   UtilsRecord,
 } from "./types"
 
-
 /**
  * Configuration interface for Local-only collection options
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
  * @template TKey - The type of the key returned by getKey
  *
  * @remarks
@@ -53,10 +51,9 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
- * @returns Collection options with utilities (currently empty but follows the pattern)
+ * @returns Collection options with utilities
  *
  * @example
  * // Basic local-only collection

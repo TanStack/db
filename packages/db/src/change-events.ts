@@ -47,12 +47,12 @@ export function currentStateAsChanges<
 >(
   collection: CollectionLike<T, TKey>,
   options: CurrentStateAsChangesOptions<T> = {}
-): Array<ChangeMessage<T>> {
+): Array<ChangeMessage<T, TKey>> {
   // Helper function to collect filtered results
   const collectFilteredResults = (
     filterFn?: (value: T) => boolean
-  ): Array<ChangeMessage<T>> => {
-    const result: Array<ChangeMessage<T>> = []
+  ): Array<ChangeMessage<T, TKey>> => {
+    const result: Array<ChangeMessage<T, TKey>> = []
     for (const [key, value] of collection.entries()) {
       // If no filter function is provided, include all items
       if (filterFn?.(value) ?? true) {
@@ -100,7 +100,7 @@ export function currentStateAsChanges<
 
     if (optimizationResult.canOptimize) {
       // Use index optimization
-      const result: Array<ChangeMessage<T>> = []
+      const result: Array<ChangeMessage<T, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
         if (value !== undefined) {
@@ -199,16 +199,19 @@ export function createFilterFunctionFromExpression<T extends object>(
  * @param options - The subscription options containing the where clause
  * @returns A filtered callback function
  */
-export function createFilteredCallback<T extends object>(
-  originalCallback: (changes: Array<ChangeMessage<T>>) => void,
+export function createFilteredCallback<
+  T extends object,
+  TKey extends string | number,
+>(
+  originalCallback: (changes: Array<ChangeMessage<T, TKey>>) => void,
   options: SubscribeChangesOptions<T>
-): (changes: Array<ChangeMessage<T>>) => void {
+): (changes: Array<ChangeMessage<T, TKey>>) => void {
   const filterFn = options.whereExpression
     ? createFilterFunctionFromExpression(options.whereExpression)
     : createFilterFunction(options.where!)
 
-  return (changes: Array<ChangeMessage<T>>) => {
-    const filteredChanges: Array<ChangeMessage<T>> = []
+  return (changes: Array<ChangeMessage<T, TKey>>) => {
+    const filteredChanges: Array<ChangeMessage<T, TKey>> = []
 
     for (const change of changes) {
       if (change.type === `insert`) {

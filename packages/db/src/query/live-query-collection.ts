@@ -33,12 +33,16 @@ import type { Context, GetResult } from "./builder/types.js"
 export function liveQueryCollectionOptions<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TKey extends string | number = string | number,
+  TSchema = never,
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult>
-): CollectionConfig<TResult, string | number, never, TResult, TResult> {
+  config: LiveQueryCollectionConfig<TContext, TResult, TKey, TSchema>
+): CollectionConfig<TResult, TKey, TSchema> {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
-    TResult
+    TResult,
+    TKey,
+    TSchema
   >(config)
   return collectionConfigBuilder.getConfig()
 }
@@ -89,38 +93,59 @@ export function createLiveQueryCollection<
 export function createLiveQueryCollection<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TKey extends string | number = string | number,
+  TSchema = never,
   TUtils extends UtilsRecord = {},
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
+  config: LiveQueryCollectionConfig<TContext, TResult, TKey, TSchema> & {
+    utils?: TUtils
+  }
 ): Collection<TResult, string | number, TUtils>
 
 // Implementation
 export function createLiveQueryCollection<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TKey extends string | number = string | number,
+  TSchema = never,
   TUtils extends UtilsRecord = {},
 >(
   configOrQuery:
-    | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
+    | (LiveQueryCollectionConfig<TContext, TResult, TKey, TSchema> & {
+        utils?: TUtils
+      })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-): Collection<TResult, string | number, TUtils> {
+): Collection<TResult, TKey, TUtils, TSchema> {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
     // Simple query function case
-    const config: LiveQueryCollectionConfig<TContext, TResult> = {
-      query: configOrQuery as (
-        q: InitialQueryBuilder
-      ) => QueryBuilder<TContext>,
-    }
-    const options = liveQueryCollectionOptions<TContext, TResult>(config)
+    const config: LiveQueryCollectionConfig<TContext, TResult, TKey, TSchema> =
+      {
+        query: configOrQuery as (
+          q: InitialQueryBuilder
+        ) => QueryBuilder<TContext>,
+      }
+    const options = liveQueryCollectionOptions<
+      TContext,
+      TResult,
+      TKey,
+      TSchema
+    >(config)
     return bridgeToCreateCollection(options)
   } else {
     // Config object case
     const config = configOrQuery as LiveQueryCollectionConfig<
       TContext,
-      TResult
+      TResult,
+      TKey,
+      TSchema
     > & { utils?: TUtils }
-    const options = liveQueryCollectionOptions<TContext, TResult>(config)
+    const options = liveQueryCollectionOptions<
+      TContext,
+      TResult,
+      TKey,
+      TSchema
+    >(config)
     return bridgeToCreateCollection({
       ...options,
       utils: config.utils,
@@ -134,20 +159,18 @@ export function createLiveQueryCollection<
  */
 function bridgeToCreateCollection<
   TResult extends object,
+  TKey extends string | number = string | number,
+  TSchema = never,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<
-    TResult,
-    string | number,
-    never,
-    TResult,
-    TResult
-  > & { utils?: TUtils }
-): Collection<TResult, string | number, TUtils> {
+  options: CollectionConfig<TResult, TKey, TSchema> & { utils?: TUtils }
+): Collection<TResult, TKey, TUtils, TSchema, TResult> {
   // This is the only place we need a type assertion, hidden from user API
   return createCollection(options as any) as unknown as Collection<
     TResult,
-    string | number,
-    TUtils
+    TKey,
+    TUtils,
+    TSchema,
+    TResult
   >
 }

@@ -61,7 +61,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
     })
   })
@@ -81,13 +81,13 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection works with the options
     const collection = createCollection(options)
-    
+
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
     })
   })
@@ -108,13 +108,13 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection works with the options
     const collection = createCollection(options)
-    
+
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<SchemaType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<SchemaType>()
     })
   })
@@ -136,13 +136,13 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection works with the options
     const collection = createCollection(options)
-    
+
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<FallbackType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<FallbackType>()
     })
   })
@@ -162,13 +162,13 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection works with the options
     const collection = createCollection(options)
-    
+
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
     })
   })
@@ -204,14 +204,13 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection works with the options
     const collection = createCollection(options)
-    
+
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
-    type ItemOf<T> = T extends Array<infer U> ? U : T
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
     })
   })
@@ -313,7 +312,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
   })
 
   it(`should work with schema and infer correct types`, () => {
-    const testSchema = z.object({
+    const testSchemaWithSchema = z.object({
       id: z.string(),
       entityId: z.string(),
       value: z.string(),
@@ -321,8 +320,8 @@ describe(`LocalStorage collection type resolution tests`, () => {
     })
 
     // We can trust that zod infers the correct types for the schema
-    type ExpectedType = z.infer<typeof testSchema>
-    type ExpectedInput = z.input<typeof testSchema>
+    type ExpectedType = z.infer<typeof testSchemaWithSchema>
+    type ExpectedInput = z.input<typeof testSchemaWithSchema>
 
     const collection = createCollection(
       localStorageCollectionOptions({
@@ -330,7 +329,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
         storage: mockStorage,
         storageEventApi: mockStorageEventApi,
         getKey: (item: any) => item.id,
-        schema: testSchema,
+        schema: testSchemaWithSchema,
         onInsert: (params) => {
           expectTypeOf(
             params.transaction.mutations[0].modified
@@ -390,7 +389,9 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     // Test that the collection has the expected methods
     expectTypeOf(collection.insert).toBeFunction()
-    expectTypeOf(collection.get).returns.toEqualTypeOf<SelectUrlType | undefined>()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      SelectUrlType | undefined
+    >()
     expectTypeOf(collection.toArray).toEqualTypeOf<Array<SelectUrlType>>()
 
     // Test insert parameter type
@@ -398,7 +399,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<SelectUrlType>()
 
     // Test update draft type
-    collection.update("test-id", (draft) => {
+    collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<SelectUrlType>()
     })
   })

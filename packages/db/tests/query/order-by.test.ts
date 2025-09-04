@@ -738,10 +738,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ vehicleDocuments: vehicleDocumentCollection })
-              .groupBy((q) => q.vehicleDocuments.vin)
-              .orderBy((q) => q.vehicleDocuments.vin, `asc`)
-              .select((q) => ({
-                vin: q.vehicleDocuments.vin,
+              .groupBy(({ vehicleDocuments }) => vehicleDocuments.vin)
+              .orderBy(({ vehicleDocuments }) => vehicleDocuments.vin, `asc`)
+              .select(({ vehicleDocuments }) => ({
+                vin: vehicleDocuments.vin,
               })),
           startSync: true,
         })
@@ -794,11 +794,14 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ vehicleDocuments: vehicleDocumentCollection })
-              .groupBy((q) => q.vehicleDocuments.vin)
-              .orderBy((q) => max(q.vehicleDocuments.updatedAt), `desc`)
-              .select((q) => ({
-                vin: q.vehicleDocuments.vin,
-                updatedAt: max(q.vehicleDocuments.updatedAt),
+              .groupBy(({ vehicleDocuments }) => vehicleDocuments.vin)
+              .orderBy(
+                ({ vehicleDocuments }) => max(vehicleDocuments.updatedAt),
+                `desc`
+              )
+              .select(({ vehicleDocuments }) => ({
+                vin: vehicleDocuments.vin,
+                updatedAt: max(vehicleDocuments.updatedAt),
               }))
               .offset(0)
               .limit(10),

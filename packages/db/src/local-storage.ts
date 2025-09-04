@@ -18,7 +18,6 @@ import type {
   UtilsRecord,
 } from "./types"
 
-
 /**
  * Storage API interface - subset of DOM Storage that we need
  */
@@ -50,7 +49,7 @@ interface StoredItem<T> {
  * Configuration interface for localStorage collection options
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
+ * @template TKey - The type of the key returned by getKey
  *
  * @remarks
  * Type resolution follows a priority order:
@@ -134,8 +133,8 @@ function generateUuid(): string {
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
- * @param config - Configuration options for the localStorage collection
+ * @template TKey - The type of the key returned by getKey
+ * @param config - Configuration options for the Local-storage collection
  * @returns Collection options with utilities including clearStorage and getStorageSize
  *
  * @example

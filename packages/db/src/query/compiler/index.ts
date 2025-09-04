@@ -53,7 +53,7 @@ export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
   collections: Record<string, Collection<any>>,
-  callbacks: Record<string, LazyCollectionCallbacks>,
+  callbacks: Record<string, LazyCollectionCallbacks<any>>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache = new WeakMap(),

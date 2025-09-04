@@ -2311,7 +2311,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions<T> = {}
-  ): Array<ChangeMessage<T>> {
+  ): Array<ChangeMessage<T, TKey>> {
     return currentStateAsChanges(this, options)
   }
 
@@ -2355,7 +2355,7 @@ export class CollectionImpl<
    * })
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<T>>) => void,
+    callback: (changes: Array<ChangeMessage<T, TKey>>) => void,
     options: SubscribeChangesOptions<T> = {}
   ): () => void {
     // Start sync and track subscriber

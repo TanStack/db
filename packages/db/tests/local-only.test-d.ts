@@ -172,7 +172,6 @@ describe(`LocalOnly Collection Types`, () => {
 
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
-    type ItemOf<T> = T extends Array<infer U> ? U : T
     expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
 
     // Check that the update method accepts the expected input type
