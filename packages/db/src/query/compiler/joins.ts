@@ -208,13 +208,10 @@ function processJoin(
         ? (joinedExpr as PropRef)
         : (mainExpr as PropRef)
 
-    const activeColl =
-      activeCollection === `main` ? collections[mainTableId]! : lazyCollection
-
     const followRefResult = followRef(
       rawQuery,
       lazyCollectionJoinExpr,
-      activeColl
+      lazyCollection
     )!
     const followRefCollection = followRefResult.collection
 
