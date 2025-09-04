@@ -74,7 +74,10 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
-> {
+> extends Omit<
+    CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    `sync` | `onInsert` | `onUpdate` | `onDelete`
+  > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -120,18 +123,6 @@ export interface QueryCollectionConfig<
     Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`staleTime`]
-
-  // Standard Collection configuration properties
-  /** Unique identifier for the collection */
-  id?: string
-  /** Function to extract the unique key from an item */
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`getKey`]
-  /** Schema for validating items */
-  schema?: TSchema
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
-  startSync?: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TQueryFn>
-  >[`startSync`]
 
   // Direct persistence handlers
   /**
