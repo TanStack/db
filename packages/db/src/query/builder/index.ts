@@ -35,7 +35,7 @@ import type {
   MergeContextWithJoinType,
   OrderByCallback,
   OrderByOptions,
-  RefProxyForContext,
+  RefsForContext,
   ResultTypeFromSelect,
   SchemaFromSource,
   SelectObject,
@@ -161,7 +161,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
-    const refProxy = createRefProxy(newAliases) as RefProxyForContext<
+    const refProxy = createRefProxy(newAliases) as RefsForContext<
       MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
 
@@ -333,7 +333,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     const existingWhere = this.query.where || []
@@ -374,7 +374,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     const existingHaving = this.query.having || []
@@ -420,10 +420,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   select<TSelectObject extends SelectObject>(
-    callback: (refs: RefProxyForContext<TContext>) => TSelectObject
+    callback: (refs: RefsForContext<TContext>) => TSelectObject
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const selectObject = callback(refProxy)
     const select = buildNestedSelect(selectObject)
 
@@ -465,7 +465,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const opts: CompareOptions =
@@ -527,7 +527,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   groupBy(callback: GroupByCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const newExpressions = Array.isArray(result)

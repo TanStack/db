@@ -191,7 +191,7 @@ describe(`Query Builder Callback Types`, () => {
   describe(`WHERE callback types`, () => {
     test(`refProxy types in where callback`, () => {
       new Query().from({ user: usersCollection }).where(({ user }) => {
-        // Test that user is the correct PrecomputeRefStructure type in where
+        // Test that user is the correct type in where
         expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
         expectTypeOf(user.active).toEqualTypeOf<RefLeaf<boolean>>()
         expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
