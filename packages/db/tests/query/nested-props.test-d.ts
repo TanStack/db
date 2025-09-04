@@ -7,7 +7,7 @@ import {
   or,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Complex nested type for testing with optional properties
 type Person = {

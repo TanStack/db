@@ -366,7 +366,7 @@ importers:
     dependencies:
       '@tanstack/electric-db-collection':
         specifier: ^0.0.9
-        version: 0.0.9(@electric-sql/client@1.0.0)(typescript@5.8.3)
+        version: 0.0.9(@electric-sql/client@1.0.9)(typescript@5.8.3)
       '@tanstack/query-core':
         specifier: ^5.75.7
         version: 5.83.0
@@ -486,6 +486,9 @@ importers:
       arktype:
         specifier: ^2.1.20
         version: 2.1.20
+      temporal-polyfill:
+        specifier: ^0.3.0
+        version: 0.3.0
 
   packages/db-ivm:
     dependencies:
@@ -515,8 +518,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.0.9
+        version: 1.0.9
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -991,6 +994,9 @@ packages:
 
   '@electric-sql/client@1.0.0':
     resolution: {integrity: sha512-kGiVbBIlMqc/CeJpWZuLjxNkm0836NWxeMtIWH2w5IUK8pUL13hyxg3ZkR7+FlTGhpKuZRiCP5nPOH9D6wbhPw==}
+
+  '@electric-sql/client@1.0.9':
+    resolution: {integrity: sha512-9fLjGww+5mGBJ9o47sizCSkyLixjoA49IRh8jBVxzpDq4EGwv77k54df0hRYWtD4VoBQL+49MyT9KDfE/a5Ygw==}
 
   '@electric-sql/d2mini@0.1.8':
     resolution: {integrity: sha512-ovLncfKvj6fTHA7qqaHt/cOzU/2JvhOw9lySYdZtmnecGv/1IiCH9HFrj6gAie07QLq3mqiNLdjZoDcO4w6Rzg==}
@@ -1729,6 +1735,9 @@ packages:
   '@microsoft/api-extractor@7.47.7':
     resolution: {integrity: sha512-fNiD3G55ZJGhPOBPMKD/enozj8yxJSYyVJWxRWdcUtw842rvthDHJgUWq9gXQTensFlMHv2wGuCjjivPv53j0A==}
     hasBin: true
+
+  '@microsoft/fetch-event-source@2.0.1':
+    resolution: {integrity: sha512-W6CLUJ2eBMw3Rec70qrsEW0jOm/3twwJv21mrmj2yORiaVmVYGS4sSS5yUwvQc1ZlDLYGPnClVWmUUMagKNsfA==}
 
   '@microsoft/tsdoc-config@0.17.1':
     resolution: {integrity: sha512-UtjIFe0C6oYgTnad4q1QP4qXwLhe6tIpNTRStJ2RZEPIkqQPREAwE5spzVxsdn9UaEMUqhh0AqSx3X4nWAKXWw==}
@@ -6731,6 +6740,12 @@ packages:
     resolution: {integrity: sha512-5S7Va8hKfV7W5U6g3aYxXmlPoZVAwUMy9AOKyF2fVuZa2UD3qZjg578OrLRt8PcNN1PleVaL/5/yYATNL0ICUw==}
     engines: {node: '>=18'}
 
+  temporal-polyfill@0.3.0:
+    resolution: {integrity: sha512-qNsTkX9K8hi+FHDfHmf22e/OGuXmfBm9RqNismxBrnSmZVJKegQ+HYYXT+R7Ha8F/YSm2Y34vmzD4cxMu2u95g==}
+
+  temporal-spec@0.3.0:
+    resolution: {integrity: sha512-n+noVpIqz4hYgFSMOSiINNOUOMFtV5cZQNCmmszA6GiVFVRt3G7AqVyhXjhCSmowvQn+NsGn+jMDMKJYHd3bSQ==}
+
   term-size@2.2.1:
     resolution: {integrity: sha512-wK0Ri4fOGjv/XPy8SBHZChl8CM7uMc5VML7SqiQ0zG7+J5Vr+RMQDoHa2CNT6KHUnTGIXH34UDMkPzAUyapBZg==}
     engines: {node: '>=8'}
@@ -7929,6 +7944,12 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.46.1
 
+  '@electric-sql/client@1.0.9':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.46.1
+
   '@electric-sql/d2mini@0.1.8':
     dependencies:
       fractional-indexing: 3.2.0
@@ -8426,6 +8447,8 @@ snapshots:
       typescript: 5.4.2
     transitivePeerDependencies:
       - '@types/node'
+
+  '@microsoft/fetch-event-source@2.0.1': {}
 
   '@microsoft/tsdoc-config@0.17.1':
     dependencies:
@@ -9172,9 +9195,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@tanstack/electric-db-collection@0.0.9(@electric-sql/client@1.0.0)(typescript@5.8.3)':
+  '@tanstack/electric-db-collection@0.0.9(@electric-sql/client@1.0.9)(typescript@5.8.3)':
     dependencies:
-      '@electric-sql/client': 1.0.0
+      '@electric-sql/client': 1.0.9
       '@standard-schema/spec': 1.0.0
       '@tanstack/db': 0.0.27(typescript@5.8.3)
       '@tanstack/store': 0.7.2
@@ -14424,6 +14447,12 @@ snapshots:
       minizlib: 3.0.2
       mkdirp: 3.0.1
       yallist: 5.0.0
+
+  temporal-polyfill@0.3.0:
+    dependencies:
+      temporal-spec: 0.3.0
+
+  temporal-spec@0.3.0: {}
 
   term-size@2.2.1: {}
 

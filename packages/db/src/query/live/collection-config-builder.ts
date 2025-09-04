@@ -49,17 +49,11 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of collection IDs to functions that load keys for that lazy collection
-  readonly lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> =
-    {}
+  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
   readonly lazyCollections = new Set<string>()
   // Set of collection IDs that include an optimizable ORDER BY clause
-  readonly optimizableOrderByCollections: Record<
-    string,
-    OrderByOptimizationInfo
-  > = {}
-
-  private collectionReady = false
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>
@@ -78,10 +72,6 @@ export class CollectionConfigBuilder<
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
-  }
-
-  isCollectionReady() {
-    return this.collectionReady
   }
 
   getConfig(): CollectionConfig<TResult> {
@@ -132,8 +122,6 @@ export class CollectionConfigBuilder<
       // Mark the collection as ready after the first successful run
       if (ready && this.allCollectionsReady()) {
         markReady()
-        // Remember that we marked the collection as ready
-        this.collectionReady = true
       }
     }
   }
@@ -158,10 +146,13 @@ export class CollectionConfigBuilder<
       syncState
     )
 
-    this.subscribeToAllCollections(config, fullSyncState)
+    const loadMoreDataCallbacks = this.subscribeToAllCollections(
+      config,
+      fullSyncState
+    )
 
-    // Initial run
-    this.maybeRunGraph(config, fullSyncState)
+    // Initial run with callback to load more data if needed
+    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
@@ -173,6 +164,11 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.collectionWhereClausesCache = undefined
+
+      // Reset lazy collection state
+      this.lazyCollections.clear()
+      this.optimizableOrderByCollections = {}
+      this.lazyCollectionsCallbacks = {}
     }
   }
 
@@ -315,19 +311,33 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
   ) {
-    Object.entries(this.collections).forEach(([collectionId, collection]) => {
-      const collectionSubscriber = new CollectionSubscriber(
-        collectionId,
-        collection,
-        config,
-        syncState,
-        this
-      )
-      collectionSubscriber.subscribe()
-    })
+    const loaders = Object.entries(this.collections).map(
+      ([collectionId, collection]) => {
+        const collectionSubscriber = new CollectionSubscriber(
+          collectionId,
+          collection,
+          config,
+          syncState,
+          this
+        )
+        collectionSubscriber.subscribe()
+
+        const loadMore =
+          collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+
+        return loadMore
+      }
+    )
+
+    const loadMoreDataCallback = () => {
+      loaders.map((loader) => loader()) // .every((doneLoading) => doneLoading)
+      return true
+    }
 
     // Mark the collections as subscribed in the sync state
     syncState.subscribedToAllCollections = true
+
+    return loadMoreDataCallback
   }
 }
 

@@ -302,8 +302,10 @@ export class SubQueryMustHaveFromClauseError extends QueryBuilderError {
 }
 
 export class InvalidSourceError extends QueryBuilderError {
-  constructor() {
-    super(`Invalid source`)
+  constructor(alias: string) {
+    super(
+      `Invalid source for live query: The value provided for alias "${alias}" is not a Collection or subquery. Live queries only accept Collection instances or subqueries. Please ensure you're passing a valid Collection or QueryBuilder, not a plain array or other data type.`
+    )
   }
 }
 
