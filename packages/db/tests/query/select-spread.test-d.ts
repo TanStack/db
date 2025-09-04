@@ -89,13 +89,19 @@ describe(`Select spread typing`, () => {
 
     const collection = createLiveQueryCollection({
       startSync: true,
-      query: (q) =>
-        q.from({ message: messagesCollection }).select(({ message }) => ({
-          theMessage: {
-            ...message,
-            spam: message.text,
+      query: (q) => {
+        const r = q.from({ message: messagesCollection }).select(({ message }) => {
+          const s = {
+              ...message,
+            theMessage: {
+              ...message,
+              spam: message.text,
+            }
           }
-        })),
+          return s
+        })
+        return r
+      },
     })
 
     type Expected = {

@@ -1,10 +1,7 @@
 import { PropRef, Value } from "../ir.js"
 import type { BasicExpression } from "../ir.js"
+import type { Ref } from "./types.js"
 
-/**
- * Runtime RefProxy interface with internal properties needed for runtime functionality
- * This is structurally compatible with the clean RefProxy type from types.ts
- */
 export interface RefProxy<T = any> {
   /** @internal */
   readonly __refProxy: true
@@ -18,7 +15,14 @@ export interface RefProxy<T = any> {
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
  */
-export type SingleRowRefProxy<T> = RefProxy<T>
+export type SingleRowRefProxy<T> =
+  T extends Record<string, any>
+    ? {
+        [K in keyof T]: T[K] extends Record<string, any>
+          ? SingleRowRefProxy<T[K]> & RefProxy<T[K]>
+          : Ref<T[K]>
+      } & RefProxy<T>
+    : RefProxy<T>
 
 /**
  * Creates a proxy object that records property access paths for a single row
@@ -186,13 +190,12 @@ export function createRefProxy<T extends Record<string, any>>(
  * If it's a RefProxy, creates a Ref, otherwise creates a Value
  */
 export function toExpression<T = any>(value: T): BasicExpression<T>
-export function toExpression<T>(value: RefProxy<T>): BasicExpression<T>
+export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
-    // Carry through the generic type from the ref-proxy's __type
     const expr = new PropRef(value.__path)
     ;(expr as any).__orderId = (value as any).__orderId
-    return expr as unknown as BasicExpression<typeof value.__type>
+    return expr
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (

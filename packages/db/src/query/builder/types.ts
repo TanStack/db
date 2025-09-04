@@ -274,10 +274,12 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
           TSelectObject[K]
         > extends true
           ? ExtractExpressionType<TSelectObject[K]>
-          : TSelectObject[K] extends SpreadableRefProxy<infer T>
-            ? WithoutRefBrand<T>
+          // : TSelectObject[K] extends SpreadableRefProxy<infer T>
+          //   ? WithoutRefBrand<T>
+
+          
             : TSelectObject[K] extends RefProxy<infer T>
-              ? T
+              ? Exact<TSelectObject[K], Ref<T>> extends true ? T : never
               : TSelectObject[K] extends Ref<infer T>
                 ? T
                 : TSelectObject[K] extends Ref<infer T> | undefined
@@ -304,14 +306,16 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
                                           string,
                                           any
                                         >
-                                      ? HasSpreadSentinel<
-                                          TSelectObject[K]
-                                        > extends true
-                                        ? ExtractSpreadType<TSelectObject[K]>
-                                        : ResultTypeFromSelect<TSelectObject[K]>
+                                      ? ResultTypeFromSelect<TSelectObject[K]>
                                       : never
       }>
 >
+
+// Exact ref
+type Exact<A, B> =
+  A extends B ? (B extends A ? true : false) : false;
+
+
 
 // Helper to make a type display better in IDEs
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -718,6 +722,7 @@ type ExtractSpreadType<T> =
           : K]: T[K] extends Ref<infer U>
           ? U
           : T[K] extends RefProxy<infer U>
+
             ? U
             : T[K] extends SpreadableRefProxy<infer U>
               ? WithoutRefBrand<U>
@@ -1055,3 +1060,4 @@ export type WithResult<TContext extends Context, TResult> = Prettify<
 export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {}
+
