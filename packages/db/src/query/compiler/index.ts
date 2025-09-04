@@ -7,12 +7,12 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { Value as ValClass, PropRef, getWhereExpression } from "../ir.js"
+import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
-import { processSelectToResults } from "./select.js"
+import { processSelect } from "./select.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
@@ -173,7 +173,7 @@ export function compileQuery(
       })
     )
   } else if (query.select) {
-    pipeline = processSelectToResults(pipeline, query.select, allInputs)
+    pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create __select_results with the main table data
     pipeline = pipeline.pipe(
@@ -381,7 +381,7 @@ function processFrom(
 function isValue(raw: any): boolean {
   return (
     raw instanceof ValClass ||
-    (raw && typeof raw === "object" && "type" in raw && raw.type === "val")
+    (raw && typeof raw === `object` && `type` in raw && raw.type === `val`)
   )
 }
 
