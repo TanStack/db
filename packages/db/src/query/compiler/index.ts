@@ -7,7 +7,7 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { Value as ValClass,PropRef, getWhereExpression } from "../ir.js"
+import { Value as ValClass, PropRef, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
@@ -270,15 +270,7 @@ export function compileQuery(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from __select_results and include orderBy index
         const raw = (row as any).__select_results
-        const finalResults =
-          raw instanceof ValClass
-            ? raw.value
-            : raw &&
-                typeof raw === `object` &&
-                `type` in raw &&
-                raw.type === `val`
-              ? raw.value
-              : raw
+        const finalResults = unwrapValue(raw)
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       })
     )
@@ -303,15 +295,7 @@ export function compileQuery(
     map(([key, row]) => {
       // Extract the final results from __select_results and return [key, [results, undefined]]
       const raw = (row as any).__select_results
-      const finalResults =
-        raw instanceof ValClass
-          ? raw.value
-          : raw &&
-              typeof raw === `object` &&
-              `type` in raw &&
-              raw.type === `val`
-            ? raw.value
-            : raw
+      const finalResults = unwrapValue(raw)
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
@@ -377,13 +361,7 @@ function processFrom(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
           // Unwrap Value expressions that might have leaked through as the entire row
-          const unwrapped =
-            value &&
-            typeof value === `object` &&
-            `type` in value &&
-            value.type === `val`
-              ? value.value
-              : value
+          const unwrapped = unwrapValue(value)
           return [key, unwrapped] as [unknown, any]
         })
       )
@@ -397,6 +375,19 @@ function processFrom(
     default:
       throw new UnsupportedFromTypeError((from as any).type)
   }
+}
+
+// Helper to check if a value is a Value expression
+function isValue(raw: any): boolean {
+  return (
+    raw instanceof ValClass ||
+    (raw && typeof raw === "object" && "type" in raw && raw.type === "val")
+  )
+}
+
+// Helper to unwrap a Value expression or return the value itself
+function unwrapValue(value: any): any {
+  return isValue(value) ? value.value : value
 }
 
 /**

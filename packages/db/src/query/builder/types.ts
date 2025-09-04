@@ -290,22 +290,16 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
                         ? ExtractRef<TSelectObject[K]> | null
                         : TSelectObject[K] extends Aggregate<infer T>
                           ? T
-                          : TSelectObject[K] extends string
+                          : TSelectObject[K] extends
+                                | string
+                                | number
+                                | boolean
+                                | null
+                                | undefined
                             ? TSelectObject[K]
-                            : TSelectObject[K] extends number
-                              ? TSelectObject[K]
-                              : TSelectObject[K] extends boolean
-                                ? TSelectObject[K]
-                                : TSelectObject[K] extends null
-                                  ? null
-                                  : TSelectObject[K] extends undefined
-                                    ? undefined
-                                    : TSelectObject[K] extends Record<
-                                          string,
-                                          any
-                                        >
-                                      ? ResultTypeFromSelect<TSelectObject[K]>
-                                      : never
+                            : TSelectObject[K] extends Record<string, any>
+                              ? ResultTypeFromSelect<TSelectObject[K]>
+                              : never
       }>
 >
 
@@ -735,21 +729,18 @@ type ExtractSpreadType<T> =
                         ? ExtractExpressionType<T[K]>
                         : T[K] extends Aggregate<infer U>
                           ? U
-                          : T[K] extends string
+                          : T[K] extends
+                                | string
+                                | number
+                                | boolean
+                                | null
+                                | undefined
                             ? T[K]
-                            : T[K] extends number
-                              ? T[K]
-                              : T[K] extends boolean
-                                ? T[K]
-                                : T[K] extends null
-                                  ? null
-                                  : T[K] extends undefined
-                                    ? undefined
-                                    : T[K] extends Record<string, any>
-                                      ? HasSpreadSentinel<T[K]> extends true
-                                        ? ExtractSpreadType<T[K]>
-                                        : ResultTypeFromSelect<T[K]>
-                                      : never
+                            : T[K] extends Record<string, any>
+                              ? HasSpreadSentinel<T[K]> extends true
+                                ? ExtractSpreadType<T[K]>
+                                : ResultTypeFromSelect<T[K]>
+                              : never
       }
     : T
 

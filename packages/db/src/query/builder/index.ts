@@ -425,45 +425,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
     const selectObject = callback(refProxy)
-
-    // Helper to ensure we have a BasicExpression/Aggregate for a value
-    function toExpr(value: any): BasicExpression | Aggregate {
-      if (value === undefined) return toExpression(null)
-      if (isRefProxy(value)) return toExpression(value)
-      if (
-        value instanceof AggregateExpr ||
-        value instanceof FuncExpr ||
-        value instanceof PropRef ||
-        value instanceof ValueExpr
-      ) {
-        return value as BasicExpression | Aggregate
-      }
-      return toExpression(value)
-    }
-
-    function isPlainObject(value: any): value is Record<string, any> {
-      return (
-        value !== null &&
-        typeof value === `object` &&
-        !isExpressionLike(value) &&
-        !value.__refProxy
-      )
-    }
-
-    function buildNestedSelect(obj: any): any {
-      if (!isPlainObject(obj)) return toExpr(obj)
-      const out: Record<string, any> = {}
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
-          // Preserve sentinel key and its value (value is unimportant at compile time)
-          out[k] = v
-          continue
-        }
-        out[k] = buildNestedSelect(v)
-      }
-      return out
-    }
-
     const select = buildNestedSelect(selectObject)
 
     return new BaseQueryBuilder({
@@ -773,6 +734,44 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
     return this.query as QueryIR
   }
+}
+
+// Helper to ensure we have a BasicExpression/Aggregate for a value
+function toExpr(value: any): BasicExpression | Aggregate {
+  if (value === undefined) return toExpression(null)
+  if (isRefProxy(value)) return toExpression(value)
+  if (
+    value instanceof AggregateExpr ||
+    value instanceof FuncExpr ||
+    value instanceof PropRef ||
+    value instanceof ValueExpr
+  ) {
+    return value as BasicExpression | Aggregate
+  }
+  return toExpression(value)
+}
+
+function isPlainObject(value: any): value is Record<string, any> {
+  return (
+    value !== null &&
+    typeof value === `object` &&
+    !isExpressionLike(value) &&
+    !value.__refProxy
+  )
+}
+
+function buildNestedSelect(obj: any): any {
+  if (!isPlainObject(obj)) return toExpr(obj)
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
+      // Preserve sentinel key and its value (value is unimportant at compile time)
+      out[k] = v
+      continue
+    }
+    out[k] = buildNestedSelect(v)
+  }
+  return out
 }
 
 // Internal function to build a query from a callback
