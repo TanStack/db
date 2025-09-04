@@ -276,18 +276,18 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
           ? ExtractExpressionType<TSelectObject[K]>
           : TSelectObject[K] extends SpreadableRefProxy<infer T>
             ? WithoutRefBrand<T>
-            : TSelectObject[K] extends Ref<infer T>
-              ? T
+            : TSelectObject[K] extends Ref<infer _T>
+              ? ExtractRef<TSelectObject[K]>
               : TSelectObject[K] extends RefLeaf<infer T>
                 ? T
                 : TSelectObject[K] extends RefLeaf<infer T> | undefined
                   ? T | undefined
                   : TSelectObject[K] extends RefLeaf<infer T> | null
                     ? T | null
-                    : TSelectObject[K] extends Ref<infer T> | undefined
-                      ? T | undefined
-                      : TSelectObject[K] extends Ref<infer T> | null
-                        ? T | null
+                    : TSelectObject[K] extends Ref<infer _T> | undefined
+                      ? ExtractRef<TSelectObject[K]> | undefined
+                      : TSelectObject[K] extends Ref<infer _T> | null
+                        ? ExtractRef<TSelectObject[K]> | null
                         : TSelectObject[K] extends Aggregate<infer T>
                           ? T
                           : TSelectObject[K] extends string
@@ -311,6 +311,9 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
 
 // Helper to make a type display better in IDEs
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
+
+// Extract Ref or subobject with a spread or a Ref
+type ExtractRef<T> = Simplify<ResultTypeFromSelect<WithoutRefBrand<T>>>
 
 // Helper type to extract the underlying type from various expression types
 type ExtractExpressionType<T> =
