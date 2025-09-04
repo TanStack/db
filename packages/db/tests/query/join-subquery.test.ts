@@ -102,6 +102,20 @@ const sampleUsers: Array<User> = [
   },
 ]
 
+const sampleProducts = [
+  { id: 1, a: `8` },
+  { id: 2, a: `6` },
+  { id: 3, a: `0` },
+  { id: 4, a: `5` },
+]
+
+const sampleTrials = [
+  { id: 1, productId: 1, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 2, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 4, userId: 1, createdAt: null },
+  { id: 3, productId: 3, userId: 2, createdAt: new Date() },
+]
+
 function createIssuesCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Issue>({
@@ -119,6 +133,50 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       id: `join-subquery-test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
+      autoIndex,
+    })
+  )
+}
+
+function createProductsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-products`,
+      getKey: (product) => product.id,
+      initialData: sampleProducts,
+      autoIndex,
+    })
+  )
+  /*
+  return createCollection(
+    queryCollectionOptions({
+      queryClient: queryClient,
+      queryKey: ["products"],
+      queryFn: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        return sampleProducts
+      },
+      getKey: (item) => item.id,
+      onInsert: async () => {
+        return { refetch: false }
+      },
+      onUpdate: async () => {
+        return { refetch: false }
+      },
+      onDelete: async () => {
+        return { refetch: false }
+      },
+    }) as any
+  )
+  */
+}
+
+function createTrialsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-trials`,
+      getKey: (item) => `${item.productId}-${item.userId}`,
+      initialData: sampleTrials,
       autoIndex,
     })
   )
@@ -272,10 +330,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let productsCollection: ReturnType<typeof createProductsCollection>
+      let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        productsCollection = createProductsCollection(autoIndex)
+        trialsCollection = createTrialsCollection(autoIndex)
       })
 
       test(`should use subquery in JOIN clause - inner join`, () => {
@@ -355,6 +417,40 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           issue_status: `open`,
           user_name: undefined,
           user_status: undefined,
+        })
+      })
+
+      test(`should use subquery in JOIN clause - left join for trials`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ product: productsCollection })
+              .join(
+                {
+                  tried: q
+                    .from({ tried: trialsCollection })
+                    .where(({ tried }) => eq(tried.userId, 1)),
+                },
+                ({ tried, product }) => eq(tried.productId, product.id),
+                `left`
+              )
+              .where(({ product }) => eq(product.id, 1))
+              .select(({ product, tried }) => ({
+                product,
+                tried,
+              }))
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toHaveLength(1)
+        expect(results[0]!.product.id).toBe(1)
+        expect(results[0]!.tried).toBeDefined()
+        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]).toEqual({
+          product: { id: 1, a: `8` },
+          tried: sampleTrials[0],
         })
       })
 
