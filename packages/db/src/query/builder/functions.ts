@@ -2,9 +2,9 @@ import { Aggregate, Func } from "../ir"
 import { toExpression } from "./ref-proxy.js"
 import type { BasicExpression } from "../ir"
 import type { RefProxy } from "./ref-proxy.js"
-import type { Ref } from "./types.js"
+import type { RefLeaf } from "./types.js"
 
-type StringRef = Ref<string> | Ref<string | null> | Ref<string | undefined>
+type StringRef = RefLeaf<string> | RefLeaf<string | null> | RefLeaf<string | undefined>
 type StringRefProxy =
   | RefProxy<string>
   | RefProxy<string | null>
@@ -23,7 +23,7 @@ type StringLike =
 
 type ComparisonOperand<T> =
   | RefProxy<T>
-  | Ref<T>
+  | RefLeaf<T>
   | T
   | BasicExpression<T>
   | undefined
@@ -35,13 +35,13 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | null
 
 // Helper type for any expression-like value
-type ExpressionLike = BasicExpression | RefProxy<any> | Ref<any> | any
+type ExpressionLike = BasicExpression | RefProxy<any> | RefLeaf<any> | any
 
 // Helper type to extract the underlying type from various expression types
 type ExtractType<T> =
   T extends RefProxy<infer U>
     ? U
-    : T extends Ref<infer U>
+    : T extends RefLeaf<infer U>
       ? U
       : T extends BasicExpression<infer U>
         ? U

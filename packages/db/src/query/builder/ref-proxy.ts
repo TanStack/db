@@ -1,6 +1,6 @@
 import { PropRef, Value } from "../ir.js"
 import type { BasicExpression } from "../ir.js"
-import type { Ref } from "./types.js"
+import type { RefLeaf } from "./types.js"
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -20,7 +20,7 @@ export type SingleRowRefProxy<T> =
     ? {
         [K in keyof T]: T[K] extends Record<string, any>
           ? SingleRowRefProxy<T[K]> & RefProxy<T[K]>
-          : Ref<T[K]>
+          : RefLeaf<T[K]>
       } & RefProxy<T>
     : RefProxy<T>
 

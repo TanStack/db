@@ -105,7 +105,15 @@ describe(`Select spread typing`, () => {
     })
 
     type Expected = {
-      theMessage: Message & { spam: string }
+      id: number
+      user: string
+      text: string
+      theMessage: { 
+        spam: string 
+        id: number
+        user: string
+        text: string
+      }
     }
 
     const results = collection.toArray

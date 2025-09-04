@@ -202,9 +202,9 @@ export type WhereCallback<TContext extends Context> = (
 type SelectValue =
   | BasicExpression
   | Aggregate
-  | RefProxy
+  | Ref
   | RefProxyFor<any>
-  | Ref<any>
+  | RefLeaf<any>
   | string // String literals
   | number // Numeric literals
   | boolean // Boolean literals
@@ -213,7 +213,7 @@ type SelectValue =
   | { [key: string]: SelectValue }
   | PrecomputeRefStructure<any>
   | SpreadableRefProxy<any> // For spread operations
-  | Array<Ref<any>>
+  | Array<RefLeaf<any>>
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
@@ -274,21 +274,19 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
           TSelectObject[K]
         > extends true
           ? ExtractExpressionType<TSelectObject[K]>
-          // : TSelectObject[K] extends SpreadableRefProxy<infer T>
-          //   ? WithoutRefBrand<T>
-
-          
-            : TSelectObject[K] extends RefProxy<infer T>
-              ? Exact<TSelectObject[K], Ref<T>> extends true ? T : never
-              : TSelectObject[K] extends Ref<infer T>
+          : TSelectObject[K] extends SpreadableRefProxy<infer T>
+            ? WithoutRefBrand<T>
+            : TSelectObject[K] extends Ref<infer T>
+              ? T
+              : TSelectObject[K] extends RefLeaf<infer T>
                 ? T
-                : TSelectObject[K] extends Ref<infer T> | undefined
+                : TSelectObject[K] extends RefLeaf<infer T> | undefined
                   ? T | undefined
-                  : TSelectObject[K] extends Ref<infer T> | null
+                  : TSelectObject[K] extends RefLeaf<infer T> | null
                     ? T | null
-                    : TSelectObject[K] extends RefProxy<infer T> | undefined
+                    : TSelectObject[K] extends Ref<infer T> | undefined
                       ? T | undefined
-                      : TSelectObject[K] extends RefProxy<infer T> | null
+                      : TSelectObject[K] extends Ref<infer T> | null
                         ? T | null
                         : TSelectObject[K] extends Aggregate<infer T>
                           ? T
@@ -311,12 +309,6 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
       }>
 >
 
-// Exact ref
-type Exact<A, B> =
-  A extends B ? (B extends A ? true : false) : false;
-
-
-
 // Helper to make a type display better in IDEs
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
@@ -328,15 +320,18 @@ type ExtractExpressionType<T> =
       ? U
       : T extends Func<infer U>
         ? U
-        : T extends BasicExpression<infer U>
+        : T extends Aggregate<infer U>
           ? U
-          : T
+          : T extends BasicExpression<infer U>
+            ? U
+            : T
 
 // Helper type to check if a type needs expression type extraction
 type NeedsExtraction<T> = T extends
   | PropRef<any>
   | Value<any>
   | Func<any>
+  | Aggregate<any>
   | BasicExpression<any>
   ? true
   : false
@@ -454,17 +449,17 @@ export type RefProxyForContext<TContext extends Context> = {
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
         // Extract the non-undefined and non-null part and place undefined outside
-        RefProxy<NonNullable<TContext[`schema`][K]>> | undefined
+        Ref<NonNullable<TContext[`schema`][K]>> | undefined
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
         // Extract the non-undefined part and place undefined outside
-        RefProxy<NonUndefined<TContext[`schema`][K]>> | undefined
+        Ref<NonUndefined<TContext[`schema`][K]>> | undefined
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part and place null outside
-        RefProxy<NonNull<TContext[`schema`][K]>> | null
+        Ref<NonNull<TContext[`schema`][K]>> | null
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
-        RefProxy<TContext[`schema`][K]>
+        Ref<TContext[`schema`][K]>
 }
 
 /**
@@ -557,26 +552,26 @@ export type PrecomputeRefStructure<T extends Record<string, any>> = {
         ? // Both optional and nullable object: recurse on non-null/non-undefined version, place undefined outside
           PrecomputeRefStructure<NonNullable<T[K]>> | undefined
         : // Both optional and nullable leaf: wrap in Ref, place undefined outside
-          Ref<NonNullable<T[K]>> | undefined
+          RefLeaf<NonNullable<T[K]>> | undefined
       : // T is optional but not nullable
         NonUndefined<T[K]> extends Record<string, any>
         ? // Optional object: recurse on non-undefined version, place undefined outside
           PrecomputeRefStructure<NonUndefined<T[K]>> | undefined
         : // Optional leaf: wrap in Ref, place undefined outside
-          Ref<NonUndefined<T[K]>> | undefined
+          RefLeaf<NonUndefined<T[K]>> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // T is nullable but not optional
         NonNull<T[K]> extends Record<string, any>
         ? // Nullable object: recurse on non-null version, place null outside
           PrecomputeRefStructure<NonNull<T[K]>> | null
         : // Nullable leaf: wrap in Ref, place null outside
-          Ref<NonNull<T[K]>> | null
+          RefLeaf<NonNull<T[K]>> | null
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         T[K] extends Record<string, any>
         ? // Object: recurse to handle nested structure
           PrecomputeRefStructure<T[K]>
         : // Leaf: wrap in Ref (includes exact undefined, exact null, and normal types)
-          Ref<T[K]>
+          RefLeaf<T[K]>
 }
 
 /**
@@ -596,16 +591,16 @@ export type PrecomputeRefStructure<T extends Record<string, any>> = {
  */
 export type RefProxyFor<T> =
   IsExactlyUndefined<T> extends true
-    ? RefProxy<T>
+    ? Ref<T>
     : IsExactlyNull<T> extends true
-      ? RefProxy<T>
+      ? Ref<T>
       : IsOptional<T> extends true
         ? NonUndefined<T> extends Record<string, any>
-          ? RefProxy<NonUndefined<T>> | undefined
-          : Ref<T>
+          ? Ref<NonUndefined<T>> | undefined
+          : RefLeaf<T>
         : T extends Record<string, any>
-          ? RefProxy<T>
-          : Ref<T>
+          ? Ref<T>
+          : RefLeaf<T>
 
 /**
  * RefProxy - The user-facing ref interface for the query builder
@@ -630,27 +625,27 @@ export type RefProxyFor<T> =
  * // No __refProxy, __path, or __type properties visible
  * ```
  */
-export type RefProxy<T = any> = {
+export type Ref<T = any> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
         NonNullable<T[K]> extends Record<string, any>
-        ? RefProxy<NonNullable<T[K]>> | undefined
-        : Ref<NonNullable<T[K]>> | undefined
+        ? Ref<NonNullable<T[K]>> | undefined
+        : RefLeaf<NonNullable<T[K]>> | undefined
       : // Optional only
         NonUndefined<T[K]> extends Record<string, any>
-        ? RefProxy<NonUndefined<T[K]>> | undefined
-        : Ref<NonUndefined<T[K]>> | undefined
+        ? Ref<NonUndefined<T[K]>> | undefined
+        : RefLeaf<NonUndefined<T[K]>> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
         NonNull<T[K]> extends Record<string, any>
-        ? RefProxy<NonNull<T[K]>> | null
-        : Ref<NonNull<T[K]>> | null
+        ? Ref<NonNull<T[K]>> | null
+        : RefLeaf<NonNull<T[K]>> | null
       : // Required
         T[K] extends Record<string, any>
-        ? RefProxy<T[K]>
-        : Ref<T[K]>
-} & Ref<T>
+        ? Ref<T[K]>
+        : RefLeaf<T[K]>
+} & RefLeaf<T>
 
 /**
  * SpreadableRefProxy - Type for spread operations that extracts underlying values
@@ -671,15 +666,15 @@ export type RefProxy<T = any> = {
  * ```
  */
 export type SpreadableRefProxy<T> =
-  T extends Ref<infer U>
+  T extends RefLeaf<infer U>
     ? U
     : T extends Record<string, any>
-      ? T extends RefProxy<infer U>
+      ? T extends Ref<infer U>
         ? U // If T is RefProxy<U>, extract U directly
         : {
-            [K in keyof T]: T[K] extends Ref<infer U>
+            [K in keyof T]: T[K] extends RefLeaf<infer U>
               ? U
-              : T[K] extends RefProxy<infer U>
+              : T[K] extends Ref<infer U>
                 ? SpreadableRefProxy<U>
                 : SpreadableRefProxy<T[K]>
           } & { [RefBrand]?: never } // Remove RefBrand from spread results
@@ -697,7 +692,7 @@ export type SpreadableRefProxy<T> =
  * - No internal properties like __refProxy, __path, __type are visible
  */
 declare const RefBrand: unique symbol
-export type Ref<T = any> = { readonly [RefBrand]?: T }
+export type RefLeaf<T = any> = { readonly [RefBrand]?: T }
 
 // Helper type to remove RefBrand from objects
 type WithoutRefBrand<T> =
@@ -719,20 +714,19 @@ type ExtractSpreadType<T> =
     ? {
         [K in keyof T as K extends `__SPREAD_SENTINEL__${string}`
           ? never
-          : K]: T[K] extends Ref<infer U>
+          : K]: T[K] extends RefLeaf<infer U>
           ? U
-          : T[K] extends RefProxy<infer U>
-
+          : T[K] extends Ref<infer U>
             ? U
             : T[K] extends SpreadableRefProxy<infer U>
               ? WithoutRefBrand<U>
-              : T[K] extends Ref<infer U> | undefined
+              : T[K] extends RefLeaf<infer U> | undefined
                 ? U | undefined
-                : T[K] extends Ref<infer U> | null
+                : T[K] extends RefLeaf<infer U> | null
                   ? U | null
-                  : T[K] extends RefProxy<infer U> | undefined
+                  : T[K] extends Ref<infer U> | undefined
                     ? U | undefined
-                    : T[K] extends RefProxy<infer U> | null
+                    : T[K] extends Ref<infer U> | null
                       ? U | null
                       : NeedsExtraction<T[K]> extends true
                         ? ExtractExpressionType<T[K]>
@@ -1060,4 +1054,3 @@ export type WithResult<TContext extends Context, TResult> = Prettify<
 export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {}
-
