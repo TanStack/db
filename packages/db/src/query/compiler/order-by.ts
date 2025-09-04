@@ -4,9 +4,10 @@ import { PropRef } from "../ir.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
+import { replaceAggregatesByRefs } from "./group-by.js"
 import { followRef } from "./index.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
-import type { OrderByClause, QueryIR } from "../ir.js"
+import type { OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 import type { BaseIndex } from "../../indexes/base-index.js"
@@ -33,16 +34,24 @@ export function processOrderBy(
   rawQuery: QueryIR,
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
+  selectClause: Select,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
-  const compiledOrderBy = orderByClause.map((clause) => ({
-    compiledExpression: compileExpression(clause.expression),
-    compareOptions: clause.compareOptions,
-  }))
+  const compiledOrderBy = orderByClause.map((clause) => {
+    const clauseWithoutAggregates = replaceAggregatesByRefs(
+      clause.expression,
+      selectClause,
+      `__select_results`
+    )
+    return {
+      compiledExpression: compileExpression(clauseWithoutAggregates),
+      compareOptions: clause.compareOptions,
+    }
+  })
 
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { __select_results?: any }) => {

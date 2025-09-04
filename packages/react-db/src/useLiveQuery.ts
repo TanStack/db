@@ -252,6 +252,11 @@ export function useLiveQuery(
         versionRef.current += 1
         onStoreChange()
       })
+      // Collection may be ready and will not receive initial `subscribeChanges()`
+      if (collectionRef.current!.status === `ready`) {
+        versionRef.current += 1
+        onStoreChange()
+      }
       return () => {
         unsubscribe()
       }

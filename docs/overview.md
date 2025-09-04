@@ -82,7 +82,7 @@ Live queries support joins across collections. This allows you to:
 
 Every query returns another collection which can _also_ be queried.
 
-For more details on live queries, see the [Live Queries](live-queries.md) documentation.
+For more details on live queries, see the [Live Queries](../guides/live-queries.md) documentation.
 
 ### Making optimistic mutations
 
@@ -424,9 +424,9 @@ This also works with joins to derive collections from multiple source collection
 
 #### Collection
 
-There is a `Collection` interface in [`../packages/db/src/collection.ts`](../packages/db/src/collection.ts). You can use this to implement your own collection types.
+There is a `Collection` interface in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this to implement your own collection types.
 
-See the existing implementations in [`../packages/db`](../packages/db), [`../packages/query-db-collection`](../packages/query-db-collection), [`../packages/electric-db-collection`](../packages/electric-db-collection) and [`../packages/trailbase-db-collection`](../packages/trailbase-db-collection) for reference.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference.
 
 ### Live queries
 
@@ -504,7 +504,7 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [Live Queries](live-queries.md) documentation for more details.
+See the [Live Queries](../guides/live-queries.md) documentation for more details.
 
 ### Transactional mutators
 
@@ -517,7 +517,11 @@ Transactional mutators allow you to batch and stage local changes across collect
 
 Mutators are created with a `mutationFn`. You can define a single, generic `mutationFn` for your whole app. Or you can define collection or mutation specific functions.
 
-The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored, e.g.:
+The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored.
+
+**Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back before you return, as the optimistic state is dropped when you return from the mutation function. You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`, direct write APIs, or Electric's `utils.awaitTxId()`.
+
+For example:
 
 ```tsx
 import type { MutationFn } from "@tanstack/react-db"
@@ -556,13 +560,19 @@ const addTodo = createOptimisticAction<string>({
       completed: false,
     })
   },
-  mutationFn: async (text) => {
+  mutationFn: async (text, params) => {
     // Persist the todo to your backend
     const response = await fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify({ text, completed: false }),
     })
-    return response.json()
+    const result = await response.json()
+    
+    // IMPORTANT: Ensure server writes have synced back before returning
+    // This ensures the optimistic state can be safely discarded
+    await todoCollection.utils.refetch()
+    
+    return result
   },
 })
 

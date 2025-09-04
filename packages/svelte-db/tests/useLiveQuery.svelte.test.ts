@@ -8,7 +8,7 @@ import {
 } from "@tanstack/db"
 import { flushSync } from "svelte"
 import { useLiveQuery } from "../src/useLiveQuery.svelte.js"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 
 type Person = {
   id: string

@@ -22,7 +22,6 @@ import type {
   BasicExpression,
   JoinClause,
   OrderBy,
-  OrderByClause,
   OrderByDirection,
   QueryIR,
 } from "../ir.js"
@@ -79,7 +78,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       }
       ref = new QueryRef(subQuery, alias)
     } else {
-      throw new InvalidSourceError()
+      throw new InvalidSourceError(alias)
     }
 
     return [alias, ref]
@@ -483,17 +482,23 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
                 : undefined,
           }
 
-    // Create the new OrderBy structure with expression and direction
-    const orderByClause: OrderByClause = {
-      expression: toExpression(result),
-      compareOptions: opts,
+    const makeOrderByClause = (res: any) => {
+      return {
+        expression: toExpression(res),
+        compareOptions: opts,
+      }
     }
+
+    // Create the new OrderBy structure with expression and direction
+    const orderByClauses = Array.isArray(result)
+      ? result.map((r) => makeOrderByClause(r))
+      : [makeOrderByClause(result)]
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
 
     return new BaseQueryBuilder({
       ...this.query,
-      orderBy: [...existingOrderBy, orderByClause],
+      orderBy: [...existingOrderBy, ...orderByClauses],
     }) as any
   }
 

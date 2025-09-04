@@ -15,7 +15,7 @@ import {
   createIndexUsageTracker,
   expectIndexUsage,
   withIndexTracking,
-} from "./utls"
+} from "./utils"
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()

@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createCollection } from "../../src/collection.js"
 import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 import { add, length, upper } from "../../src/query/builder/functions.js"
 
 // Base type used in bug report

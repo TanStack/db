@@ -9,6 +9,11 @@ import type { CreateOptimisticActionsOptions, Transaction } from "./types"
  * The optimistic update is applied via the `onMutate` callback, and the server mutation
  * is executed via the `mutationFn`.
  *
+ * **Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back
+ * before you return, as the optimistic state is dropped when you return from the mutation function.
+ * You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`,
+ * direct write APIs, or Electric's `utils.awaitTxId()`.
+ *
  * @example
  * ```ts
  * const addTodo = createOptimisticAction<string>({
@@ -26,7 +31,13 @@ import type { CreateOptimisticActionsOptions, Transaction } from "./types"
  *       method: 'POST',
  *       body: JSON.stringify({ text, completed: false }),
  *     })
- *     return response.json()
+ *     const result = await response.json()
+ *
+ *     // IMPORTANT: Ensure server writes have synced back before returning
+ *     // This ensures the optimistic state can be safely discarded
+ *     await todoCollection.utils.refetch()
+ *
+ *     return result
  *   }
  * })
  *
