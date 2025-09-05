@@ -153,7 +153,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           )
           .select(({ user, dept }) => ({
             user_name: user.name,
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
             dept_name: dept?.name, // Should be string | undefined due to left join
           })),
     })

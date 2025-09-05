@@ -294,7 +294,7 @@ describe(`Collection Auto-Indexing`, () => {
     })
 
     const unsubscribe3 = autoIndexCollection.subscribeChanges(() => {}, {
-      whereExpression: lte(row.score!, 90),
+      whereExpression: lte(row.score, 90),
     })
 
     // Should have created indexes for each field
@@ -413,7 +413,7 @@ describe(`Collection Auto-Indexing`, () => {
       whereExpression: and(
         eq(row.status, `active`),
         gt(row.age, 25),
-        lte(row.score!, 90)
+        lte(row.score, 90)
       ),
     })
 

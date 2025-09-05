@@ -229,7 +229,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser.name,
+                user_name: activeUser?.name,
                 issue_status: issue.status,
               }))
           },
@@ -373,8 +373,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser.name,
-                user_status: activeUser.status,
+                user_name: activeUser?.name,
+                user_status: activeUser?.status,
               }))
           },
         })

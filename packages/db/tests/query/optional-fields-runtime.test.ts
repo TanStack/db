@@ -166,7 +166,7 @@ describe(`Optional Fields - Runtime Tests`, () => {
           )
           .select(({ user, dept }) => ({
             user_name: user.name,
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
             dept_name: dept?.name, // Should be undefined for Bob
           })),
     })
