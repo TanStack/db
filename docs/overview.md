@@ -276,7 +276,7 @@ import { initClient } from "trailbase"
 const trailBaseClient = initClient(`https://trailbase.io`)
 
 export const todoCollection = createCollection<SelectTodo, Todo>(
-  electricCollectionOptions({
+  trailBaseCollectionOptions({
     id: "todos",
     recordApi: trailBaseClient.records(`todos`),
     getKey: (item) => item.id,
