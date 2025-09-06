@@ -304,6 +304,76 @@ describe(`Operators`, () => {
       expect(latestMessage.getInner()).toEqual(expectedDeleteResult)
     })
 
+    test(`with count (only not-null values)`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        category: string
+        amount: number | null
+      }>()
+      let latestMessage: any = null
+      const messages: Array<MultiSet<any>> = []
+
+      input.pipe(
+        groupBy(
+          (data) => ({
+            category: data.category,
+          }),
+          {
+            countNotNull: count((data) => data.amount),
+            count: count(),
+          }
+        ),
+        output((message) => {
+          latestMessage = message
+          messages.push(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data
+      input.sendData(
+        new MultiSet([
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `B`, amount: 10 }, 1],
+          [{ category: `A`, amount: null }, 1],
+          [{ category: `B`, amount: null }, 1],
+        ])
+      )
+
+      graph.run()
+
+      // Verify we have the latest message
+      expect(latestMessage).not.toBeNull()
+
+      const expectedResult = [
+        [
+          [
+            `{"category":"A"}`,
+            {
+              category: `A`,
+              countNotNull: 1,
+              count: 2,
+            },
+          ],
+          1,
+        ],
+        [
+          [
+            `{"category":"B"}`,
+            {
+              category: `B`,
+              countNotNull: 1,
+              count: 2,
+            },
+          ],
+          1,
+        ],
+      ]
+
+      expect(latestMessage.getInner()).toEqual(expectedResult)
+    })
+
     test(`with avg and count aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{
