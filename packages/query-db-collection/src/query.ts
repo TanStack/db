@@ -301,7 +301,7 @@ export interface QueryCollectionConfig<
 /**
  * Type for the refetch utility function
  */
-export type RefetchFn = () => Promise<void>
+export type RefetchFn = (opts?: { throwOnError?: boolean }) => Promise<void>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -338,7 +338,11 @@ export interface QueryCollectionUtils<
    * Incremented only when query fails completely (not per retry attempt); reset on success.
    */
   errorCount: () => number
-  /** Clear the error state and trigger a refetch of the query */
+  /**
+   * Clear the error state and trigger a refetch of the query
+   * @returns Promise that resolves when the refetch completes successfully
+   * @throws Error if the refetch fails
+   */
   clearError: () => Promise<void>
 }
 
@@ -626,10 +630,15 @@ export function queryCollectionOptions<
    * Refetch the query data
    * @returns Promise that resolves when the refetch is complete
    */
-  const refetch: RefetchFn = () => {
-    return queryClient.refetchQueries({
-      queryKey: queryKey,
-    })
+  const refetch: RefetchFn = (opts) => {
+    return queryClient.refetchQueries(
+      {
+        queryKey: queryKey,
+      },
+      {
+        throwOnError: opts?.throwOnError,
+      }
+    )
   }
 
   // Create write context for manual write operations
@@ -727,7 +736,7 @@ export function queryCollectionOptions<
         lastError = undefined
         errorCount = 0
         lastErrorUpdatedAt = 0
-        return refetch()
+        return refetch({ throwOnError: true })
       },
     },
   }

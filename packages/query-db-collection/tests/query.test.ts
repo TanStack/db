@@ -1711,6 +1711,7 @@ describe(`QueryCollection`, () => {
         .fn()
         .mockRejectedValueOnce(testError)
         .mockResolvedValueOnce(recoveryData)
+        .mockRejectedValueOnce(testError)
 
       const collection = createErrorHandlingTestCollection(
         `clear-error-test`,
@@ -1733,6 +1734,12 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         expect(collection.get(`1`)).toEqual(recoveryData[0])
       })
+
+      // Refetch on rejection should throw an error
+      await expect(collection.utils.clearError()).rejects.toThrow(testError)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount()).toBe(1)
     })
 
     it(`should maintain collection functionality despite errors and persist error state`, async () => {
