@@ -1,5 +1,36 @@
 # @tanstack/db
 
+## 0.1.12
+
+### Patch Changes
+
+- Fixes a bug where optimized joins would miss data ([#501](https://github.com/TanStack/db/pull/501))
+
+## 0.1.11
+
+### Patch Changes
+
+- fix: improve InvalidSourceError message clarity ([#488](https://github.com/TanStack/db/pull/488))
+
+  The InvalidSourceError now provides a clear, actionable error message that:
+  - Explicitly states the problem is passing a non-Collection/non-subquery to a live query
+  - Includes the alias name to help identify which source is problematic
+  - Provides guidance on what should be passed instead (Collection instances or QueryBuilder subqueries)
+
+  This replaces the generic "Invalid source" message with helpful debugging information.
+
+## 0.1.10
+
+### Patch Changes
+
+- Fixed an optimization bug where orderBy clauses using a single-column array were not recognized as optimizable. Queries that order by a single column are now correctly optimized even when specified as an array. ([#477](https://github.com/TanStack/db/pull/477))
+
+- fix an bug where a live query that used joins could become stuck empty when its remounted/resubscribed ([#484](https://github.com/TanStack/db/pull/484))
+
+- fixed a bug where a pending sync transaction could be applied early when an optimistic mutation was resolved or rolled back ([#482](https://github.com/TanStack/db/pull/482))
+
+- Add support for queries to order results based on aggregated values ([#481](https://github.com/TanStack/db/pull/481))
+
 ## 0.1.9
 
 ### Patch Changes

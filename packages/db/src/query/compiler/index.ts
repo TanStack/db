@@ -259,6 +259,7 @@ export function compileQuery(
       rawQuery,
       pipeline,
       query.orderBy,
+      query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       query.limit,
