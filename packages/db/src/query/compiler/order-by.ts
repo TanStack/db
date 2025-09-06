@@ -35,7 +35,7 @@ export function processOrderBy(
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
   selectClause: Select,
-  collection: Collection,
+  collection: Collection<any, any, any, any, any>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   limit?: number,
   offset?: number
