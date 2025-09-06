@@ -18,11 +18,12 @@ import type {
   DeleteMutationFn,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  ResolveInput,
+  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ControlMessage,
   GetExtensions,
@@ -37,50 +38,6 @@ const debug = DebugModule.debug(`ts/db:electric`)
  * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
-
-// The `InferSchemaOutput`, `InferSchemaInput`, `ResolveType` and `ResolveInput` are
-// copied from the `@tanstack/db` package but we modified `InferSchemaOutput`
-// and `InferSchemaInput` slightly to restrict the schema output to `Row<unknown>`
-// This is needed in order for `GetExtensions` to be able to infer the parser
-// extensions type from the schema.
-
-type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T> extends Row<unknown>
-    ? StandardSchemaV1.InferOutput<T>
-    : Record<string, unknown>
-  : Record<string, unknown>
-
-type InferSchemaInput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferInput<T> extends Row<unknown>
-    ? StandardSchemaV1.InferInput<T>
-    : Record<string, unknown>
-  : Record<string, unknown>
-
-export type ResolveInput<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema = never,
-> = [TSchema] extends [never]
-  ? TExplicit extends object
-    ? TExplicit
-    : Record<string, unknown>
-  : TSchema extends StandardSchemaV1
-    ? InferSchemaInput<TSchema>
-    : TExplicit extends object
-      ? TExplicit
-      : Record<string, unknown>
-
-export type ResolveType<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema = never,
-> = [TSchema] extends [never]
-  ? TExplicit extends Row<unknown>
-    ? TExplicit
-    : Record<string, unknown>
-  : TSchema extends StandardSchemaV1
-    ? InferSchemaOutput<TSchema>
-    : TExplicit extends Row<unknown>
-      ? TExplicit
-      : Record<string, unknown>
 
 /**
  * Configuration interface for Electric collection options
@@ -97,7 +54,7 @@ export interface ElectricCollectionConfig<
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<
-    GetExtensions<ResolveType<TExplicit, TSchema>>
+    GetExtensions<ResolveType<TExplicit, TSchema, Row<unknown>>>
   >
 }
 
@@ -148,18 +105,18 @@ export function electricCollectionOptions<
 >(
   config: ElectricCollectionConfig<TExplicit, TKey, TSchema>
 ): CollectionConfig<
-  ResolveType<TExplicit, TSchema>,
+  ResolveType<TExplicit, TSchema, Row<unknown>>,
   TKey,
   TSchema,
-  ResolveInput<TExplicit, TSchema>
+  ResolveInput<TExplicit, TSchema, Row<unknown>>
 > & { utils: ElectricCollectionUtils } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
-  const sync = createElectricSync<ResolveType<TExplicit, TSchema>, TKey>(
-    config.shapeOptions,
-    {
-      seenTxids,
-    }
-  )
+  const sync = createElectricSync<
+    ResolveType<TExplicit, TSchema, Row<unknown>>,
+    TKey
+  >(config.shapeOptions, {
+    seenTxids,
+  })
 
   /**
    * Wait for a specific transaction ID to be synced
@@ -199,7 +156,9 @@ export function electricCollectionOptions<
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
     ? async (
-        params: InsertMutationFnParams<ResolveType<TExplicit, TSchema>>
+        params: InsertMutationFnParams<
+          ResolveType<TExplicit, TSchema, Row<unknown>>
+        >
       ) => {
         // Runtime check (that doesn't follow type)
 
@@ -223,7 +182,9 @@ export function electricCollectionOptions<
 
   const wrappedOnUpdate = config.onUpdate
     ? async (
-        params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema>>
+        params: UpdateMutationFnParams<
+          ResolveType<TExplicit, TSchema, Row<unknown>>
+        >
       ) => {
         // Runtime check (that doesn't follow type)
 
@@ -246,10 +207,12 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnDelete:
-    | DeleteMutationFn<ResolveType<TExplicit, TSchema>>
+    | DeleteMutationFn<ResolveType<TExplicit, TSchema, Row<unknown>>>
     | undefined = config.onDelete
     ? async (
-        params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema>>
+        params: DeleteMutationFnParams<
+          ResolveType<TExplicit, TSchema, Row<unknown>>
+        >
       ) => {
         const handlerResult = await config.onDelete!(params as any)
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
@@ -288,10 +251,10 @@ export function electricCollectionOptions<
       awaitTxId,
     },
   } as CollectionConfig<
-    ResolveType<TExplicit, TSchema>,
+    ResolveType<TExplicit, TSchema, Row<unknown>>,
     TKey,
     TSchema,
-    ResolveInput<TExplicit, TSchema>
+    ResolveInput<TExplicit, TSchema, Row<unknown>>
   > & { utils: ElectricCollectionUtils }
 }
 

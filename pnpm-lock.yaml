@@ -520,9 +520,6 @@ importers:
       '@electric-sql/client':
         specifier: 1.0.9
         version: 1.0.9
-      '@standard-schema/spec':
-        specifier: ^1.0.0
-        version: 1.0.0
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db

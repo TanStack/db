@@ -11,8 +11,11 @@ import type { BasicExpression } from "./query/ir.js"
  *
  * @internal This is used by the type resolution system
  */
-export type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T> extends object
+export type InferSchemaOutput<
+  T,
+  TRestrict = object,
+> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends TRestrict
     ? StandardSchemaV1.InferOutput<T>
     : Record<string, unknown>
   : Record<string, unknown>
@@ -22,8 +25,8 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
  *
  * @internal This is used for collection insert type inference
  */
-export type InferSchemaInput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferInput<T> extends object
+export type InferSchemaInput<T, TRestrict = object> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends TRestrict
     ? StandardSchemaV1.InferInput<T>
     : Record<string, unknown>
   : Record<string, unknown>
@@ -40,13 +43,14 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
 export type ResolveInput<
   TExplicit = Record<string, unknown>,
   TSchema = never,
+  TRestrict = object,
 > = [TSchema] extends [never]
-  ? TExplicit extends object
+  ? TExplicit extends TRestrict
     ? TExplicit
     : Record<string, unknown>
   : TSchema extends StandardSchemaV1
-    ? InferSchemaInput<TSchema>
-    : TExplicit extends object
+    ? InferSchemaInput<TSchema, TRestrict>
+    : TExplicit extends TRestrict
       ? TExplicit
       : Record<string, unknown>
 
@@ -64,13 +68,14 @@ export type ResolveInput<
 export type ResolveType<
   TExplicit = Record<string, unknown>,
   TSchema = never,
+  TRestrict = object,
 > = [TSchema] extends [never]
-  ? TExplicit extends object
+  ? TExplicit extends TRestrict
     ? TExplicit
     : Record<string, unknown>
   : TSchema extends StandardSchemaV1
-    ? InferSchemaOutput<TSchema>
-    : TExplicit extends object
+    ? InferSchemaOutput<TSchema, TRestrict>
+    : TExplicit extends TRestrict
       ? TExplicit
       : Record<string, unknown>
 
