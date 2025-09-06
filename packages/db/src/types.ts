@@ -30,12 +30,10 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
 
 /**
  * Helper type to determine the input type for insert and update operations
- * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
  *
  * Priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema input type (if schema provided)
- * 3. Fallback type TFallback
+ * 1. Schema input type (if schema provided and valid)
+ * 2. Explicit generic TExplicit (if no schema or schema is invalid)
  *
  * @internal This is used for collection insert and update type inference
  */
@@ -54,9 +52,10 @@ export type ResolveInput<
 
 /**
  * Helper type to determine the final type based on priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema output type (if schema provided)
- * 3. Fallback type TFallback
+ *
+ * Priority:
+ * 1. Schema output type (if schema provided and valid)
+ * 2. Explicit generic TExplicit (if no schema or schema is invalid)
  *
  * @remarks
  * This type is used internally to resolve the collection item type based on the provided generics and schema.

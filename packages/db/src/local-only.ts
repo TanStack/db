@@ -13,17 +13,9 @@ import type {
 
 /**
  * Configuration interface for Local-only collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
+ * @template TSchema - The schema type for validation and type inference (highest priority)
  * @template TKey - The type of the key returned by getKey
- *
- * @remarks
- * Type resolution follows a priority order:
- * 1. If you provide an explicit type via generic parameter, it will be used
- * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
- * 3. If neither explicit type nor schema is provided, the fallback type will be used
- *
- * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalOnlyCollectionConfig<
   TExplicit extends object = Record<string, unknown>,
@@ -49,8 +41,8 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * that immediately "syncs" all optimistic changes to the collection, making them permanent.
  * Perfect for local-only data that doesn't need persistence or external synchronization.
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
+ * @template TSchema - The schema type for validation and type inference (highest priority)
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
  * @returns Collection options with utilities

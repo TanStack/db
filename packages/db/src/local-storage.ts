@@ -47,8 +47,8 @@ interface StoredItem<T> {
 
 /**
  * Configuration interface for localStorage collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
+ * @template TSchema - The schema type for validation and type inference (highest priority)
  * @template TKey - The type of the key returned by getKey
  *
  * @remarks
@@ -131,8 +131,8 @@ function generateUuid(): string {
  * This function creates a collection that persists data to localStorage/sessionStorage
  * and synchronizes changes across browser tabs using storage events.
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
+ * @template TSchema - The schema type for validation and type inference (highest priority)
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-storage collection
  * @returns Collection options with utilities including clearStorage and getStorageSize

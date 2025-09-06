@@ -92,11 +92,10 @@ export interface Collection<
 /**
  * Creates a new Collection instance with the given configuration
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
+ * @template TSchema - The schema type for validation and type inference (highest priority)
  * @param options - Collection options with optional utilities
  * @returns A new Collection with utilities exposed both at top level and under .utils
  *
