@@ -13,65 +13,49 @@ import type {
   QueryObserverOptions,
 } from "@tanstack/query-core"
 import type {
+  BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
-  DeleteMutationFn,
   DeleteMutationFnParams,
-  InferSchemaInput,
-  InferSchemaOutput,
-  InsertMutationFn,
   InsertMutationFnParams,
+  ResolveInput,
+  ResolveType,
   SyncConfig,
-  UpdateMutationFn,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
-// QueryFn return type inference helper
-type InferQueryFn<TQueryFn> = TQueryFn extends (
+// Infer the explicit type from the queryFn return type
+type InferExplicit<TQueryFn, TExplicit> = TQueryFn extends (
   context: QueryFunctionContext<any>
 ) => Promise<Array<infer TItem>>
   ? TItem extends object
     ? TItem
-    : Record<string, unknown>
-  : Record<string, unknown>
-
-type ResolveInput<
-  TExplicit extends object | unknown = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TQueryFn = unknown,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? InferQueryFn<TQueryFn>
-    : InferSchemaInput<TSchema>
+    : TExplicit
   : TExplicit
 
-// Type resolution system with priority order (matches electric.ts pattern)
-type ResolveType<
-  TExplicit extends object | unknown = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TQueryFn = unknown,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? InferQueryFn<TQueryFn>
-    : InferSchemaOutput<TSchema>
-  : TExplicit
+// Resolve the item type from the queryFn return type
+type ResolveItemType<TExplicit, TSchema, TQueryFn> = ResolveType<
+  InferExplicit<TQueryFn, TExplicit>,
+  TSchema
+>
 
 /**
  * Configuration options for creating a Query Collection
- * @template TExplicit - The explicit type of items stored in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
+ * @template TExplicit - The explicit type of items in the collection (second priority)
+ * @template TSchema - The schema type for validation and type inference (highest priority)
+ * @template TKey - The type of the key returned by getKey
  * @template TQueryFn - The queryFn type for inferring return type (third priority)
  * @template TError - The type of errors that can occur during queries
  * @template TQueryKey - The type of the query key
  */
 export interface QueryCollectionConfig<
-  TExplicit extends object = object,
-  TSchema extends StandardSchemaV1 = never,
+  TExplicit extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema = never,
   TQueryFn extends (
     context: QueryFunctionContext<any>
   ) => Promise<Array<any>> = (
@@ -79,8 +63,7 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
-  TKey extends string | number = string | number,
-> {
+> extends BaseCollectionConfig<TExplicit, TKey, TSchema> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -90,7 +73,7 @@ export interface QueryCollectionConfig<
     ? TQueryFn
     : (
         context: QueryFunctionContext<TQueryKey>
-      ) => Promise<Array<ResolveType<TExplicit, TSchema, TQueryFn>>>
+      ) => Promise<Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>>
 
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -99,187 +82,33 @@ export interface QueryCollectionConfig<
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
   refetchInterval?: QueryObserverOptions<
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`refetchInterval`]
   retry?: QueryObserverOptions<
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`retry`]
   retryDelay?: QueryObserverOptions<
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`retryDelay`]
   staleTime?: QueryObserverOptions<
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TError,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
-    Array<ResolveType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
+    Array<ResolveItemType<TExplicit, TSchema, TQueryFn>>,
     TQueryKey
   >[`staleTime`]
-
-  // Standard Collection configuration properties
-  /** Unique identifier for the collection */
-  id?: string
-  /** Function to extract the unique key from an item */
-  getKey: (item: ResolveType<TExplicit, TSchema, TQueryFn>) => TKey
-  /** Schema for validating items */
-  schema?: TSchema
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TQueryFn>>[`sync`]
-  startSync?: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TQueryFn>
-  >[`startSync`]
-
-  // Direct persistence handlers
-  /**
-   * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
-   * @example
-   * // Basic query collection insert handler
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   await api.createTodo(newItem)
-   *   // Automatically refetches query after insert
-   * }
-   *
-   * @example
-   * // Insert handler with refetch control
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   await api.createTodo(newItem)
-   *   return { refetch: false } // Skip automatic refetch
-   * }
-   *
-   * @example
-   * // Insert handler with multiple items
-   * onInsert: async ({ transaction }) => {
-   *   const items = transaction.mutations.map(m => m.modified)
-   *   await api.createTodos(items)
-   *   // Will refetch query to get updated data
-   * }
-   *
-   * @example
-   * // Insert handler with error handling
-   * onInsert: async ({ transaction }) => {
-   *   try {
-   *     const newItem = transaction.mutations[0].modified
-   *     await api.createTodo(newItem)
-   *   } catch (error) {
-   *     console.error('Insert failed:', error)
-   *     throw error // Transaction will rollback optimistic changes
-   *   }
-   * }
-   */
-  onInsert?: InsertMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
-
-  /**
-   * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
-   * @example
-   * // Basic query collection update handler
-   * onUpdate: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.original.id, mutation.changes)
-   *   // Automatically refetches query after update
-   * }
-   *
-   * @example
-   * // Update handler with multiple items
-   * onUpdate: async ({ transaction }) => {
-   *   const updates = transaction.mutations.map(m => ({
-   *     id: m.key,
-   *     changes: m.changes
-   *   }))
-   *   await api.updateTodos(updates)
-   *   // Will refetch query to get updated data
-   * }
-   *
-   * @example
-   * // Update handler with manual refetch
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.original.id, mutation.changes)
-   *
-   *   // Manually trigger refetch
-   *   await collection.utils.refetch()
-   *
-   *   return { refetch: false } // Skip automatic refetch
-   * }
-   *
-   * @example
-   * // Update handler with related collection refetch
-   * onUpdate: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.updateTodo(mutation.original.id, mutation.changes)
-   *
-   *   // Refetch related collections when this item changes
-   *   await Promise.all([
-   *     collection.utils.refetch(), // Refetch this collection
-   *     usersCollection.utils.refetch(), // Refetch users
-   *     tagsCollection.utils.refetch() // Refetch tags
-   *   ])
-   *
-   *   return { refetch: false } // Skip automatic refetch since we handled it manually
-   * }
-   */
-  onUpdate?: UpdateMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
-
-  /**
-   * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to void or { refetch?: boolean } to control refetching
-   * @example
-   * // Basic query collection delete handler
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.original.id)
-   *   // Automatically refetches query after delete
-   * }
-   *
-   * @example
-   * // Delete handler with refetch control
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.original.id)
-   *   return { refetch: false } // Skip automatic refetch
-   * }
-   *
-   * @example
-   * // Delete handler with multiple items
-   * onDelete: async ({ transaction }) => {
-   *   const keysToDelete = transaction.mutations.map(m => m.key)
-   *   await api.deleteTodos(keysToDelete)
-   *   // Will refetch query to get updated data
-   * }
-   *
-   * @example
-   * // Delete handler with related collection refetch
-   * onDelete: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.deleteTodo(mutation.original.id)
-   *
-   *   // Refetch related collections when this item is deleted
-   *   await Promise.all([
-   *     collection.utils.refetch(), // Refetch this collection
-   *     usersCollection.utils.refetch(), // Refetch users
-   *     projectsCollection.utils.refetch() // Refetch projects
-   *   ])
-   *
-   *   return { refetch: false } // Skip automatic refetch since we handled it manually
-   * }
-   */
-  onDelete?: DeleteMutationFn<ResolveType<TExplicit, TSchema, TQueryFn>, TKey>
 
   /**
    * Metadata to pass to the query.
@@ -413,8 +242,9 @@ export interface QueryCollectionUtils<
  * )
  */
 export function queryCollectionOptions<
-  TExplicit extends object = object,
-  TSchema extends StandardSchemaV1 = never,
+  TExplicit extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema = never,
   TQueryFn extends (
     context: QueryFunctionContext<any>
   ) => Promise<Array<any>> = (
@@ -422,30 +252,32 @@ export function queryCollectionOptions<
   ) => Promise<Array<any>>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
-  TKey extends string | number = string | number,
-  TInput extends object = ResolveInput<TExplicit, TSchema, TQueryFn>,
+  TInput extends object = ResolveInput<
+    InferExplicit<TQueryFn, TExplicit>,
+    TSchema
+  >,
 >(
   config: QueryCollectionConfig<
     TExplicit,
+    TKey,
     TSchema,
     TQueryFn,
     TError,
-    TQueryKey,
-    TKey
+    TQueryKey
   >
 ): CollectionConfig<
-  ResolveType<TExplicit, TSchema, TQueryFn>,
+  InferExplicit<TQueryFn, TExplicit>,
   TKey,
   TSchema,
   TInput
 > & {
   utils: QueryCollectionUtils<
-    ResolveType<TExplicit, TSchema, TQueryFn>,
+    ResolveItemType<TExplicit, TSchema, TQueryFn>,
     TKey,
     TInput
   >
 } {
-  type TItem = ResolveType<TExplicit, TSchema, TQueryFn>
+  type TItem = ResolveItemType<TExplicit, TSchema, TQueryFn>
 
   const {
     queryKey,
@@ -655,7 +487,7 @@ export function queryCollectionOptions<
   // Create wrapper handlers for direct persistence operations that handle refetching
   const wrappedOnInsert = onInsert
     ? async (params: InsertMutationFnParams<TItem, TKey>) => {
-        const handlerResult = (await onInsert(params)) ?? {}
+        const handlerResult = (await onInsert(params as any)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
 
@@ -669,7 +501,7 @@ export function queryCollectionOptions<
 
   const wrappedOnUpdate = onUpdate
     ? async (params: UpdateMutationFnParams<TItem, TKey>) => {
-        const handlerResult = (await onUpdate(params)) ?? {}
+        const handlerResult = (await onUpdate(params as any)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
 
@@ -683,7 +515,7 @@ export function queryCollectionOptions<
 
   const wrappedOnDelete = onDelete
     ? async (params: DeleteMutationFnParams<TItem, TKey>) => {
-        const handlerResult = (await onDelete(params)) ?? {}
+        const handlerResult = (await onDelete(params as any)) ?? {}
         const shouldRefetch =
           (handlerResult as { refetch?: boolean }).refetch !== false
 

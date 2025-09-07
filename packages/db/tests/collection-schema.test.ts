@@ -882,3 +882,121 @@ describe(`Collection with schema validation`, () => {
     )
   })
 })
+
+describe(`Collection schema callback type tests`, () => {
+  it(`should correctly type all callback parameters with schema`, () => {
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      age: z.number().int().positive(),
+    })
+
+    type ExpectedType = z.infer<typeof userSchema>
+    type ExpectedInput = z.input<typeof userSchema>
+
+    createCollection({
+      getKey: (item) => item.id,
+      schema: userSchema,
+      sync: { sync: () => {} },
+      onInsert: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`modified`)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onUpdate: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`modified`)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        expectTypeOf(mutation).toHaveProperty(`changes`)
+        expectTypeOf(mutation.changes).toEqualTypeOf<Partial<ExpectedInput>>()
+        return Promise.resolve()
+      },
+      onDelete: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`original`)
+        expectTypeOf(mutation.original).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+    })
+  })
+
+  it(`should correctly type callbacks with schema transformations`, () => {
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      created_at: z.string().transform((val) => new Date(val)),
+      updated_at: z.string().transform((val) => new Date(val)),
+    })
+
+    type ExpectedType = z.infer<typeof userSchema>
+
+    createCollection({
+      getKey: (item) => item.id,
+      schema: userSchema,
+      sync: { sync: () => {} },
+      onInsert: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Modified should be the output type (with Date objects)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onUpdate: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Modified should be the output type (with Date objects)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onDelete: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Original should be the output type (with Date objects)
+        expectTypeOf(mutation.original).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+    })
+  })
+
+  it(`should correctly type callbacks with schema defaults`, () => {
+    const userSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+      created_at: z.date().default(() => new Date()),
+      updated_at: z.date().default(() => new Date()),
+    })
+
+    type ExpectedType = z.infer<typeof userSchema>
+    type ExpectedInput = z.input<typeof userSchema>
+
+    createCollection({
+      getKey: (item) => item.id,
+      schema: userSchema,
+      sync: { sync: () => {} },
+      onInsert: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Modified should be the output type (with all fields including defaults)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onUpdate: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Modified should be the output type (with all fields including defaults)
+        expectTypeOf(mutation.modified).toEqualTypeOf<ExpectedType>()
+        // Changes should be the input type (without defaulted fields)
+        expectTypeOf(mutation.changes).toEqualTypeOf<Partial<ExpectedInput>>()
+        return Promise.resolve()
+      },
+      onDelete: (params) => {
+        const mutation = params.transaction.mutations[0]
+        // Original should be the output type (with all fields including defaults)
+        expectTypeOf(mutation.original).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+    })
+  })
+})

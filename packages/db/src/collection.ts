@@ -163,7 +163,7 @@ export interface Collection<
  */
 
 export function createCollection<
-  TExplicit extends object = Record<string, unknown>,
+  TExplicit extends object = never,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
   TSchema = never,
@@ -207,7 +207,7 @@ export function createCollection<
 }
 
 export class CollectionImpl<
-  T extends object = Record<string, unknown>,
+  T extends object = never,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
   TSchema = never,

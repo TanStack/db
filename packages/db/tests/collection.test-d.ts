@@ -96,7 +96,7 @@ describe(`Collection type resolution tests`, () => {
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
 
-    type ExpectedType = ResolveType<unknown, typeof testSchema>
+    type ExpectedType = ResolveType<never, typeof testSchema>
     expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
   })
 
@@ -175,14 +175,8 @@ describe(`Schema Input/Output Type Distinction`, () => {
   })
 
   it(`should handle schema with default values correctly for insert`, () => {
-    type ExpectedOutputType = ResolveType<
-      unknown,
-      typeof userSchemaWithDefaults
-    >
-    type ExpectedInputType = ResolveInput<
-      unknown,
-      typeof userSchemaWithDefaults
-    >
+    type ExpectedOutputType = ResolveType<never, typeof userSchemaWithDefaults>
+    type ExpectedInputType = ResolveInput<never, typeof userSchemaWithDefaults>
 
     const collection = createCollection({
       getKey: (item) => {
@@ -229,8 +223,8 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaTransform,
     })
 
-    type ExpectedInputType = ResolveInput<unknown, typeof userSchemaTransform>
-    type ExpectedOutputType = ResolveType<unknown, typeof userSchemaTransform>
+    type ExpectedInputType = ResolveInput<never, typeof userSchemaTransform>
+    type ExpectedOutputType = ResolveType<never, typeof userSchemaTransform>
     type InsertArg = Parameters<typeof collection.insert>[0]
 
     // Input type should be the raw input (before transformation)
@@ -267,14 +261,8 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaWithDefaults,
     })
 
-    type ExpectedOutputType = ResolveType<
-      unknown,
-      typeof userSchemaWithDefaults
-    >
-    type ExpectedInputType = ResolveInput<
-      unknown,
-      typeof userSchemaWithDefaults
-    >
+    type ExpectedOutputType = ResolveType<never, typeof userSchemaWithDefaults>
+    type ExpectedInputType = ResolveInput<never, typeof userSchemaWithDefaults>
 
     // Input type should not include defaulted fields
     expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
@@ -315,8 +303,8 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaTransform,
     })
 
-    type ExpectedInputType = ResolveInput<unknown, typeof userSchemaTransform>
-    type ExpectedOutputType = ResolveType<unknown, typeof userSchemaTransform>
+    type ExpectedInputType = ResolveInput<never, typeof userSchemaTransform>
+    type ExpectedOutputType = ResolveType<never, typeof userSchemaTransform>
 
     // Input type should be the raw input (before transformation)
     expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
@@ -348,5 +336,53 @@ describe(`Schema Input/Output Type Distinction`, () => {
 
     // Collection items should be ExpectedOutputType
     expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+  })
+})
+
+describe(`Collection callback type tests`, () => {
+  type TypeTestItem = { id: string; value: number; optional?: boolean }
+
+  it(`should correctly type onInsert callback parameters`, () => {
+    createCollection<TypeTestItem>({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      onInsert: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`modified`)
+        expectTypeOf(mutation.modified).toEqualTypeOf<TypeTestItem>()
+        return Promise.resolve()
+      },
+    })
+  })
+
+  it(`should correctly type onUpdate callback parameters`, () => {
+    createCollection<TypeTestItem>({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      onUpdate: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`modified`)
+        expectTypeOf(mutation.modified).toEqualTypeOf<TypeTestItem>()
+        expectTypeOf(mutation).toHaveProperty(`changes`)
+        expectTypeOf(mutation.changes).toEqualTypeOf<Partial<TypeTestItem>>()
+        return Promise.resolve()
+      },
+    })
+  })
+
+  it(`should correctly type onDelete callback parameters`, () => {
+    createCollection<TypeTestItem>({
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+      onDelete: (params) => {
+        expectTypeOf(params.transaction).toHaveProperty(`mutations`)
+        const mutation = params.transaction.mutations[0]
+        expectTypeOf(mutation).toHaveProperty(`original`)
+        expectTypeOf(mutation.original).toEqualTypeOf<TypeTestItem>()
+        return Promise.resolve()
+      },
+    })
   })
 })

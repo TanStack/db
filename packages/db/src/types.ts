@@ -32,52 +32,49 @@ export type InferSchemaInput<T, TRestrict = object> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
- * Helper type to determine the input type for insert and update operations
+ * Helper type to determine the insert input type
+ * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
  *
  * Priority:
- * 1. Schema input type (if schema provided and valid)
- * 2. Explicit generic TExplicit (if no schema or schema is invalid)
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema input type (if schema provided)
+ * 3. Fallback type TFallback
  *
- * @internal This is used for collection insert and update type inference
+ * @internal This is used for collection insert type inference
  */
 export type ResolveInput<
-  TExplicit = Record<string, unknown>,
+  TExplicit = never,
   TSchema = never,
-  TRestrict = object,
-> = [TSchema] extends [never]
-  ? TExplicit extends TRestrict
+  TFallback extends object = Record<string, unknown>,
+> = [TExplicit] extends [never]
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaInput<TSchema>
+  : TExplicit extends object
     ? TExplicit
     : Record<string, unknown>
-  : TSchema extends StandardSchemaV1
-    ? InferSchemaInput<TSchema, TRestrict>
-    : TExplicit extends TRestrict
-      ? TExplicit
-      : Record<string, unknown>
 
 /**
  * Helper type to determine the final type based on priority:
- *
- * Priority:
- * 1. Schema output type (if schema provided and valid)
- * 2. Explicit generic TExplicit (if no schema or schema is invalid)
+ * 1. Explicit generic TExplicit (if not 'unknown')
+ * 2. Schema output type (if schema provided)
+ * 3. Fallback type TFallback
  *
  * @remarks
  * This type is used internally to resolve the collection item type based on the provided generics and schema.
  * Users should not need to use this type directly, but understanding the priority order helps when defining collections.
  */
 export type ResolveType<
-  TExplicit = Record<string, unknown>,
+  TExplicit = never,
   TSchema = never,
-  TRestrict = object,
-> = [TSchema] extends [never]
-  ? TExplicit extends TRestrict
+  TFallback extends object = Record<string, unknown>,
+> = [TExplicit] extends [never]
+  ? [TSchema] extends [never]
+    ? TFallback
+    : InferSchemaOutput<TSchema>
+  : TExplicit extends object
     ? TExplicit
     : Record<string, unknown>
-  : TSchema extends StandardSchemaV1
-    ? InferSchemaOutput<TSchema, TRestrict>
-    : TExplicit extends TRestrict
-      ? TExplicit
-      : Record<string, unknown>
 
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
