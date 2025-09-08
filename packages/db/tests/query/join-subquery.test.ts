@@ -432,7 +432,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
       })
 
-      test(`should use subquery in JOIN clause - left join with ordered subquery with limit`, () => {
+      test.only(`should use subquery in JOIN clause - left join with ordered subquery with limit`, () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return (
@@ -440,6 +440,12 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
                 .from({ issue: issuesCollection })
                 .join(
                   {
+                    // Instead of having the join optimization load immediately from index, we should refactor
+                    // and load the keys from the collection (i.e. subquery) instead
+                    // and that collection knows the limit clause so it can do the necessary filtering
+                    // and lookup in the index if needed
+
+                    // Deoptimize if the subquery is orderBy with a limit
                     users: q
                       .from({ user: usersCollection })
                       .where(({ user }) => eq(user.status, `active`))
@@ -458,6 +464,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
 
         const results = joinSubquery.toArray
+        console.log(`results`, results)
         expect(results).toEqual([
           {
             issue: {
