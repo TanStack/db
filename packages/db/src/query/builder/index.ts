@@ -15,7 +15,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from "../../errors.js"
-import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
+import { createRefProxy, toExpression } from "./ref-proxy.js"
 import type { NamespacedRow } from "../../types.js"
 import type {
   Aggregate,
@@ -744,7 +744,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 // Helper to ensure we have a BasicExpression/Aggregate for a value
 function toExpr(value: any): BasicExpression | Aggregate {
   if (value === undefined) return toExpression(null)
-  if (isRefProxy(value)) return toExpression(value)
   if (
     value instanceof AggregateExpr ||
     value instanceof FuncExpr ||

@@ -183,8 +183,7 @@ export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
-    const expr = new PropRef(value.__path)
-    return expr
+    return new PropRef(value.__path)
   }
   // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
   if (

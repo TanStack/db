@@ -794,24 +794,24 @@ function unsafeSelect(
   )
 }
 
-function unsafeGroupBy(query: QueryIR): boolean {
-  return !!(query.groupBy && query.groupBy.length > 0)
+function unsafeGroupBy(query: QueryIR) {
+  return query.groupBy && query.groupBy.length > 0
 }
 
-function unsafeHaving(query: QueryIR): boolean {
-  return !!(query.having && query.having.length > 0)
+function unsafeHaving(query: QueryIR) {
+  return query.having && query.having.length > 0
 }
 
-function unsafeOrderBy(query: QueryIR): boolean {
-  return !!(
+function unsafeOrderBy(query: QueryIR) {
+  return (
     query.orderBy &&
     query.orderBy.length > 0 &&
     (query.limit !== undefined || query.offset !== undefined)
   )
 }
 
-function unsafeFnSelect(query: QueryIR): boolean {
-  return !!(
+function unsafeFnSelect(query: QueryIR) {
+  return (
     query.fnSelect ||
     (query.fnWhere && query.fnWhere.length > 0) ||
     (query.fnHaving && query.fnHaving.length > 0)
@@ -872,8 +872,6 @@ function collectRefs(expr: any): Array<PropRef> {
       for (const arg of expr.args ?? []) {
         refs.push(...collectRefs(arg))
       }
-      break
-    case `val`:
       break
     default:
       break
