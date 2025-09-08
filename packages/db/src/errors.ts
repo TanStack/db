@@ -408,23 +408,30 @@ export class InvalidJoinConditionSameTableError extends JoinError {
 }
 
 export class InvalidJoinConditionTableMismatchError extends JoinError {
-  constructor(mainTableAlias: string, joinedTableAlias: string) {
+  constructor() {
+    super(`Invalid join condition: expressions must reference table aliases`)
+  }
+}
+
+export class InvalidJoinConditionLeftTableError extends JoinError {
+  constructor(tableAlias: string) {
     super(
-      `Invalid join condition: expressions must reference table aliases "${mainTableAlias}" and "${joinedTableAlias}"`
+      `Invalid join condition: left expression refers to an unavailable table "${tableAlias}"`
     )
   }
 }
 
-export class InvalidJoinConditionWrongTablesError extends JoinError {
-  constructor(
-    leftTableAlias: string,
-    rightTableAlias: string,
-    mainTableAlias: string,
-    joinedTableAlias: string
-  ) {
+export class InvalidJoinConditionRightTableError extends JoinError {
+  constructor(tableAlias: string) {
     super(
-      `Invalid join condition: expressions reference tables "${leftTableAlias}" and "${rightTableAlias}" but join is between "${mainTableAlias}" and "${joinedTableAlias}"`
+      `Invalid join condition: right expression does not refer to the joined table "${tableAlias}"`
     )
+  }
+}
+
+export class InvalidJoinCondition extends JoinError {
+  constructor() {
+    super(`Invalid join condition`)
   }
 }
 

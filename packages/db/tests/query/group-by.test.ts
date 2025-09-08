@@ -277,6 +277,40 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer3?.max_amount).toBe(250)
       })
 
+      test(`group by customer_id with count aggregation (not null only)`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                total: count(orders.id),
+                onlyNotNull: count(orders.sales_rep_id),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3) // 3 customers
+
+        // Customer 1: orders 1, 2, 7 (total: 3, onlyNotNull: 3)
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.total).toBe(3)
+        expect(customer1?.onlyNotNull).toBe(3)
+
+        // Customer 2: orders 3, 4 (total: 2, onlyNotNull: 2)
+        const customer2 = customerSummary.get(2)
+        expect(customer2).toBeDefined()
+        expect(customer2?.total).toBe(2)
+        expect(customer2?.onlyNotNull).toBe(2)
+
+        // Customer 3: orders 5, 6 (total: 2, onlyNotNull: 1)
+        const customer3 = customerSummary.get(3)
+        expect(customer3).toBeDefined()
+        expect(customer3?.total).toBe(2)
+        expect(customer3?.onlyNotNull).toBe(1)
+      })
+
       test(`group by status`, () => {
         const statusSummary = createLiveQueryCollection({
           startSync: true,

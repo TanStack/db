@@ -7,9 +7,11 @@ import {
 } from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
+  InvalidJoinCondition,
+  InvalidJoinConditionLeftTableError,
+  InvalidJoinConditionRightTableError,
   InvalidJoinConditionSameTableError,
   InvalidJoinConditionTableMismatchError,
-  InvalidJoinConditionWrongTablesError,
   JoinCollectionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
@@ -139,10 +141,11 @@ function processJoin(
   )
 
   // Analyze which table each expression refers to and swap if necessary
+  const availableTableAliases = Object.keys(tables)
   const { mainExpr, joinedExpr } = analyzeJoinExpressions(
     joinClause.left,
     joinClause.right,
-    mainTableAlias,
+    availableTableAliases,
     joinedTableAlias
   )
 
@@ -299,53 +302,65 @@ function processJoin(
 
 /**
  * Analyzes join expressions to determine which refers to which table
- * and returns them in the correct order (main table expression first, joined table expression second)
+ * and returns them in the correct order (available table expression first, joined table expression second)
  */
 function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
-  mainTableAlias: string,
+  allAvailableTableAliases: Array<string>,
   joinedTableAlias: string
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
+  // Filter out the joined table alias from the available table aliases
+  const availableTableAliases = allAvailableTableAliases.filter(
+    (alias) => alias !== joinedTableAlias
+  )
+
   const leftTableAlias = getTableAliasFromExpression(left)
   const rightTableAlias = getTableAliasFromExpression(right)
 
-  // If left expression refers to main table and right refers to joined table, keep as is
+  // If left expression refers to an available table and right refers to joined table, keep as is
   if (
-    leftTableAlias === mainTableAlias &&
+    leftTableAlias &&
+    availableTableAliases.includes(leftTableAlias) &&
     rightTableAlias === joinedTableAlias
   ) {
     return { mainExpr: left, joinedExpr: right }
   }
 
-  // If left expression refers to joined table and right refers to main table, swap them
+  // If left expression refers to joined table and right refers to an available table, swap them
   if (
     leftTableAlias === joinedTableAlias &&
-    rightTableAlias === mainTableAlias
+    rightTableAlias &&
+    availableTableAliases.includes(rightTableAlias)
   ) {
     return { mainExpr: right, joinedExpr: left }
   }
 
+  // If one expression doesn't refer to any table, this is an invalid join
+  if (!leftTableAlias || !rightTableAlias) {
+    // For backward compatibility, use the first available table alias in error message
+    throw new InvalidJoinConditionTableMismatchError()
+  }
+
   // If both expressions refer to the same alias, this is an invalid join
   if (leftTableAlias === rightTableAlias) {
-    throw new InvalidJoinConditionSameTableError(leftTableAlias || `unknown`)
+    throw new InvalidJoinConditionSameTableError(leftTableAlias)
   }
 
-  // If one expression doesn't refer to either table, this is an invalid join
-  if (!leftTableAlias || !rightTableAlias) {
-    throw new InvalidJoinConditionTableMismatchError(
-      mainTableAlias,
-      joinedTableAlias
-    )
+  // Left side must refer to an available table
+  // This cannot happen with the query builder as there is no way to build a ref
+  // to an unavailable table, but just in case, but could happen with the IR
+  if (!availableTableAliases.includes(leftTableAlias)) {
+    throw new InvalidJoinConditionLeftTableError(leftTableAlias)
   }
 
-  // If expressions refer to tables not involved in this join, this is an invalid join
-  throw new InvalidJoinConditionWrongTablesError(
-    leftTableAlias,
-    rightTableAlias,
-    mainTableAlias,
-    joinedTableAlias
-  )
+  // Right side must refer to the joined table
+  if (rightTableAlias !== joinedTableAlias) {
+    throw new InvalidJoinConditionRightTableError(joinedTableAlias)
+  }
+
+  // This should not be reachable given the logic above, but just in case
+  throw new InvalidJoinCondition()
 }
 
 /**
