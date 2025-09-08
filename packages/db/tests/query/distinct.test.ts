@@ -707,8 +707,6 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
               .distinct(),
         })
 
-        console.log(distinctJoinedData.toArray)
-
         // There are 3 distinct departments that have active users
         expect(distinctJoinedData.size).toBe(3)
 
