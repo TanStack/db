@@ -432,6 +432,47 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
       })
 
+      test(`should use subquery in JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return (
+              q
+                .from({ issue: issuesCollection })
+                .join(
+                  {
+                    users: q
+                      .from({ user: usersCollection })
+                      .where(({ user }) => eq(user.status, `active`))
+                      .orderBy(({ user }) => user.name, `asc`)
+                      .limit(1),
+                  },
+                  ({ issue, users }) => eq(issue.userId, users.id),
+                  `left`
+                )
+                // When we create the index for the lazy collection, we should not only pass the where clause but also the orderBy and limit clauses
+                .orderBy(({ issue }) => issue.id, `desc`)
+                .limit(1)
+            )
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
+      })
+
       test(`should handle subqueries with SELECT clauses in both FROM and JOIN`, () => {
         const joinQuery = createLiveQueryCollection({
           startSync: true,
