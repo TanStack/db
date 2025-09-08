@@ -439,10 +439,6 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .from({ issue: issuesCollection })
               .join(
                 {
-                  // Instead of having the join optimization load immediately from index, we should refactor
-                  // and load the keys from the collection (i.e. subquery) instead
-                  // and that collection knows the limit clause so it can do the necessary filtering
-                  // and lookup in the index if needed
                   users: q
                     .from({ user: usersCollection })
                     .where(({ user }) => eq(user.status, `active`))
@@ -478,24 +474,21 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
       test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
-            return (
-              q
-                .from({
-                  users: q
-                    .from({ user: usersCollection })
-                    .where(({ user }) => eq(user.status, `active`))
-                    .orderBy(({ user }) => user.name, `asc`)
-                    .limit(1),
-                })
-                .join(
-                  { issue: issuesCollection },
-                  ({ issue, users }) => eq(issue.userId, users.id),
-                  `right`
-                )
-                // When we create the index for the lazy collection, we should not only pass the where clause but also the orderBy and limit clauses
-                .orderBy(({ issue }) => issue.id, `desc`)
-                .limit(1)
-            )
+            return q
+              .from({
+                users: q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+                  .orderBy(({ user }) => user.name, `asc`)
+                  .limit(1),
+              })
+              .join(
+                { issue: issuesCollection },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `right`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
           },
           startSync: true,
         })

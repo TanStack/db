@@ -219,9 +219,6 @@ function processJoin(
           ? (joinedExpr as PropRef)
           : (mainExpr as PropRef)
 
-      console.log(`lazyCollectionJoinExpr`, lazyCollectionJoinExpr)
-      console.log(`joinClause`, joinClause)
-
       const followRefResult = followRef(
         rawQuery,
         lazyCollectionJoinExpr,
