@@ -16,7 +16,7 @@ import type {
 } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
-const { sum, count, avg, min, max } = groupByOperators
+const { sum, count, avg, min, max, list } = groupByOperators
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -342,25 +342,32 @@ function getAggregateFunction(aggExpr: Aggregate) {
   // Pre-compile the value extractor expression
   const compiledExpr = compileExpression(aggExpr.args[0]!)
 
-  // Create a value extractor function for the expression to aggregate
-  const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+  // Create a number only value extractor function for the expression to aggregate
+  const numberExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     const value = compiledExpr(namespacedRow)
     // Ensure we return a number for numeric aggregate functions
     return typeof value === `number` ? value : value != null ? Number(value) : 0
   }
 
+  // Create a generic value extractor function for non-numeric aggregates
+  const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    return compiledExpr(namespacedRow)
+  }
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
-      return sum(valueExtractor)
+      return sum(numberExtractor)
     case `count`:
       return count() // count() doesn't need a value extractor
     case `avg`:
-      return avg(valueExtractor)
+      return avg(numberExtractor)
     case `min`:
-      return min(valueExtractor)
+      return min(numberExtractor)
     case `max`:
-      return max(valueExtractor)
+      return max(numberExtractor)
+    case `list`:
+      return list(valueExtractor)
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
