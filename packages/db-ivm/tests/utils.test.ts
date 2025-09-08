@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { DefaultMap, hash } from "../src/utils.js"
+import { DefaultMap } from "../src/utils.js"
+import { hash } from "../src/hashing/index.js"
 
 describe(`DefaultMap`, () => {
   it(`should return default value for missing keys`, () => {
@@ -28,16 +29,17 @@ describe(`DefaultMap`, () => {
   })
 })
 
+const hashType = `number`
 describe(`hash`, () => {
   describe(`primitive types`, () => {
     it(`should hash null`, () => {
       const result = hash(null)
-      expect(typeof result).toBe(`string`)
+      expect(typeof result).toBe(hashType)
     })
 
     it(`should hash undefined`, () => {
       const result = hash(undefined)
-      expect(typeof result).toBe(`string`)
+      expect(typeof result).toBe(hashType)
     })
 
     it(`should hash strings`, () => {
@@ -46,10 +48,10 @@ describe(`hash`, () => {
       const result3 = hash(`test with spaces`)
       const result4 = hash(`special\nchars\t"`)
 
-      expect(typeof result1).toBe(`string`)
-      expect(typeof result2).toBe(`string`)
-      expect(typeof result3).toBe(`string`)
-      expect(typeof result4).toBe(`string`)
+      expect(typeof result1).toBe(hashType)
+      expect(typeof result2).toBe(hashType)
+      expect(typeof result3).toBe(hashType)
+      expect(typeof result4).toBe(hashType)
 
       // Same strings should have same hash
       expect(hash(`hello`)).toBe(result1)
@@ -64,13 +66,13 @@ describe(`hash`, () => {
       const result6 = hash(-Infinity)
       const result7 = hash(NaN)
 
-      expect(typeof result1).toBe(`string`)
-      expect(typeof result2).toBe(`string`)
-      expect(typeof result3).toBe(`string`)
-      expect(typeof result4).toBe(`string`)
-      expect(typeof result5).toBe(`string`)
-      expect(typeof result6).toBe(`string`)
-      expect(typeof result7).toBe(`string`)
+      expect(typeof result1).toBe(hashType)
+      expect(typeof result2).toBe(hashType)
+      expect(typeof result3).toBe(hashType)
+      expect(typeof result4).toBe(hashType)
+      expect(typeof result5).toBe(hashType)
+      expect(typeof result6).toBe(hashType)
+      expect(typeof result7).toBe(hashType)
 
       // Same numbers should have same hash
       expect(hash(42)).toBe(result1)
@@ -80,8 +82,8 @@ describe(`hash`, () => {
       const result1 = hash(true)
       const result2 = hash(false)
 
-      expect(typeof result1).toBe(`string`)
-      expect(typeof result2).toBe(`string`)
+      expect(typeof result1).toBe(hashType)
+      expect(typeof result2).toBe(hashType)
       expect(result1).not.toBe(result2)
 
       // Same booleans should have same hash
@@ -94,9 +96,9 @@ describe(`hash`, () => {
       const result2 = hash(456n)
       const result3 = hash(123n)
 
-      expect(typeof result1).toBe(`string`)
-      expect(typeof result2).toBe(`string`)
-      expect(typeof result3).toBe(`string`)
+      expect(typeof result1).toBe(hashType)
+      expect(typeof result2).toBe(hashType)
+      expect(typeof result3).toBe(hashType)
       expect(result1).toBe(result3) // Same bigint should have same hash
       expect(result1).not.toBe(result2) // Different bigints should have different hash
     })
@@ -105,17 +107,23 @@ describe(`hash`, () => {
       const sym1 = Symbol(`test`)
       const sym2 = Symbol(`test`)
       const sym3 = Symbol(`different`)
+      const sym4 = Symbol()
+      const sym5 = Symbol()
 
       const result1 = hash(sym1)
       const result2 = hash(sym2)
       const result3 = hash(sym3)
+      const result4 = hash(sym4)
+      const result5 = hash(sym5)
 
-      expect(typeof result1).toBe(`string`)
-      expect(typeof result2).toBe(`string`)
-      expect(typeof result3).toBe(`string`)
-      // Note: Different symbol instances with same description have same string representation
+      expect(typeof result1).toBe(hashType)
+      expect(typeof result2).toBe(hashType)
+      expect(typeof result3).toBe(hashType)
+      // Note: Different symbol instances with same description have same hash
       expect(result1).toBe(result2)
       expect(result1).not.toBe(result3)
+      expect(result4).toBe(result5)
+      expect(result1).not.toBe(result4)
     })
   })
 
@@ -127,8 +135,8 @@ describe(`hash`, () => {
       const hash1 = hash(obj1)
       const hash2 = hash(obj2)
 
-      expect(typeof hash1).toBe(`string`)
-      expect(typeof hash2).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
+      expect(typeof hash2).toBe(hashType)
       // Note: Different key orders might produce different hashes depending on JSON.stringify behavior
     })
 
@@ -141,7 +149,7 @@ describe(`hash`, () => {
       const hash2 = hash(arr2)
       const hash3 = hash(arr3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
       expect(hash1).not.toBe(hash3) // Different content should have different hash
     })
@@ -155,7 +163,7 @@ describe(`hash`, () => {
       const hash2 = hash(date2)
       const hash3 = hash(date3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same date should have same hash
       expect(hash1).not.toBe(hash3) // Different dates should have different hash
     })
@@ -169,9 +177,9 @@ describe(`hash`, () => {
       const hash2 = hash(regex2)
       const hash3 = hash(regex3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same regex should have same hash
-      // Note: RegExp objects serialize to empty objects {}, so they all produce the same hash
+      // Note: RegExp don't have enumerable properties so they all produce the same hash
       expect(hash1).toBe(hash3) // All RegExp objects have the same hash
     })
 
@@ -184,7 +192,7 @@ describe(`hash`, () => {
       const hash2 = hash(nested2)
       const hash3 = hash(nested3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2)
       expect(hash1).not.toBe(hash3)
     })
@@ -204,11 +212,12 @@ describe(`hash`, () => {
       const hash2 = hash(func2)
       const hash3 = hash(func3)
 
-      expect(typeof hash1).toBe(`string`)
-      expect(typeof hash2).toBe(`string`)
-      expect(typeof hash3).toBe(`string`)
-      expect(hash1).toBe(hash2) // Same function definition should have same hash
+      expect(typeof hash1).toBe(hashType)
+      expect(typeof hash2).toBe(hashType)
+      expect(typeof hash3).toBe(hashType)
+      expect(hash1).not.toBe(hash2) // Different function should have different hash
       expect(hash1).not.toBe(hash3) // Different function should have different hash
+      expect(hash1).toBe(hash(func1)) // hashing same function should return same hash
     })
 
     it(`should hash Set objects`, () => {
@@ -220,7 +229,7 @@ describe(`hash`, () => {
       const hash2 = hash(set2)
       const hash3 = hash(set3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
       expect(hash1).not.toBe(hash3) // Different content should have different hash
     })
@@ -244,7 +253,7 @@ describe(`hash`, () => {
       const hash2 = hash(map2)
       const hash3 = hash(map3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same content should have same hash
       expect(hash1).not.toBe(hash3) // Different content should have different hash
     })
@@ -268,7 +277,7 @@ describe(`hash`, () => {
       const hash2 = hash(mapWithBigInt2)
       const hash3 = hash(mapWithBigInt3)
 
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same BigInt content should have same hash
       expect(hash1).not.toBe(hash3) // Different BigInt content should have different hash
 
@@ -283,9 +292,50 @@ describe(`hash`, () => {
       const hash5 = hash(setWithSymbols2)
       const hash6 = hash(setWithSymbols3)
 
-      expect(typeof hash4).toBe(`string`)
+      expect(typeof hash4).toBe(hashType)
       expect(hash4).toBe(hash5) // Same Symbol content should have same hash
       expect(hash4).not.toBe(hash6) // Different Symbol content should have different hash
+    })
+
+    it(`should hash Buffers, Uint8Arrays and File objects by reference`, () => {
+      const buffer1 = Buffer.from([1, 2, 3])
+      const buffer2 = Buffer.from([1, 2, 3])
+      const buffer3 = Buffer.from([1, 2, 3, 4])
+
+      const hash1 = hash(buffer1)
+      const hash2 = hash(buffer2)
+      const hash3 = hash(buffer3)
+
+      expect(typeof hash1).toBe(hashType)
+      expect(hash1).not.toBe(hash2) // Same content but different buffer instances have a different hash because it would be too costly to deeply hash buffers
+      expect(hash1).not.toBe(hash3) // Different Buffer content should have different hash
+      expect(hash1).toBe(hash(buffer1)) // Hashing same buffer should return same hash
+
+      const uint8Array1 = new Uint8Array([1, 2, 3])
+      const uint8Array2 = new Uint8Array([1, 2, 3])
+      const uint8Array3 = new Uint8Array([1, 2, 3, 4])
+
+      const hash4 = hash(uint8Array1)
+      const hash5 = hash(uint8Array2)
+      const hash6 = hash(uint8Array3)
+
+      expect(typeof hash4).toBe(hashType)
+      expect(hash4).not.toBe(hash5) // Same content but different uint8Array instances have a different hash because it would be too costly to deeply hash uint8Arrays
+      expect(hash4).not.toBe(hash6) // Different uint8Array content should have different hash
+      expect(hash4).toBe(hash(uint8Array1)) // Hashing same uint8Array should return same hash
+
+      const file1 = new File([`Hello, world!`], `test.txt`)
+      const file2 = new File([`Hello, world!`], `test.txt`)
+      const file3 = new File([`Hello, world!`], `test.txt`)
+
+      const hash7 = hash(file1)
+      const hash8 = hash(file2)
+      const hash9 = hash(file3)
+
+      expect(typeof hash7).toBe(hashType)
+      expect(hash7).not.toBe(hash8) // Same content but different file instances have a different hash because it would be too costly to deeply hash files
+      expect(hash7).not.toBe(hash9) // Different file content should have different hash
+      expect(hash7).toBe(hash(file1)) // Hashing same file should return same hash
     })
   })
 
@@ -297,7 +347,7 @@ describe(`hash`, () => {
       const hash2 = hash(obj)
 
       expect(hash1).toBe(hash2)
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
     })
 
     it(`should return cached values on subsequent calls`, () => {
@@ -310,7 +360,7 @@ describe(`hash`, () => {
       const hash2 = hash(obj)
 
       expect(hash1).toBe(hash2)
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
     })
 
     it(`should not cache primitive values`, () => {
@@ -319,14 +369,14 @@ describe(`hash`, () => {
       const hash2 = hash(`test`)
 
       expect(hash1).toBe(hash2)
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
     })
   })
 
   describe(`edge cases`, () => {
     it(`should handle empty objects and arrays`, () => {
-      expect(typeof hash({})).toBe(`string`)
-      expect(typeof hash([])).toBe(`string`)
+      expect(typeof hash({})).toBe(hashType)
+      expect(typeof hash([])).toBe(hashType)
       expect(hash({})).not.toBe(hash([]))
     })
 
@@ -338,7 +388,22 @@ describe(`hash`, () => {
       const hash2 = hash(obj2)
 
       expect(hash1).toBe(hash2)
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
+    })
+
+    it(`should distinguish between arrays and maps`, () => {
+      const array = [
+        [1, 2],
+        [3, 4],
+      ] as const
+      const map = new Map(array)
+
+      const hash1 = hash(array)
+      const hash2 = hash(map)
+
+      expect(typeof hash1).toBe(hashType)
+      expect(typeof hash2).toBe(hashType)
+      expect(hash1).not.toBe(hash2)
     })
 
     it(`should handle mixed type arrays`, () => {
@@ -349,7 +414,7 @@ describe(`hash`, () => {
       const hash2 = hash(sameArray)
 
       expect(hash1).toBe(hash2)
-      expect(typeof hash1).toBe(`string`)
+      expect(typeof hash1).toBe(hashType)
     })
 
     it(`should produce consistent hashes for same content`, () => {
@@ -359,6 +424,9 @@ describe(`hash`, () => {
         boolean: true,
         array: [1, 2, 3],
         nested: { inner: `value` },
+        buffer: Buffer.from([1, 2, 3]),
+        uint8Array: new Uint8Array([1, 2, 3]),
+        file: new File([`Hello, world!`], `test.txt`),
       }
 
       // Multiple calls should return the same hash
@@ -366,7 +434,7 @@ describe(`hash`, () => {
       const firstHash = hashes[0]
 
       expect(hashes.every((h) => h === firstHash)).toBe(true)
-      expect(typeof firstHash).toBe(`string`)
+      expect(typeof firstHash).toBe(hashType)
     })
   })
 })

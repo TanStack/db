@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+"@tanstack/db": minor
 ---
 
 ## Enhanced Ref System with Nested Optional Properties
@@ -10,7 +10,7 @@ Comprehensive refactor of the ref system to properly support nested structures a
 
 - **Nested Optional Properties**: Full support for deeply nested optional objects (`employees.profile?.bio`, `orders.customer?.address?.street`)
 - **Enhanced Type Safety**: Optional types now correctly typed as `RefProxy<T> | undefined` with optionality outside the ref
-- **New Query Functions**: Added `isUndefined`, `isNotUndefined`, `isNull`, `isNotNull` for proper null/undefined checks
+- **New Query Functions**: Added `isUndefined`, `isNull` for proper null/undefined checks
 - **Improved JOIN Handling**: Fixed optionality in JOIN operations and multiple GROUP BY support
 
 ### ⚠️ Breaking Changes

@@ -661,6 +661,7 @@ function applyOptimizations(
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
     limit: query.limit,
     offset: query.offset,
+    distinct: query.distinct,
     fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,

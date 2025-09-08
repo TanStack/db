@@ -1,11 +1,11 @@
 import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
 import { StreamBuilder } from "../d2.js"
-import { hash } from "../utils.js"
+import { hash } from "../hashing/index.js"
 import { MultiSet } from "../multiset.js"
+import type { Hash } from "../hashing/index.js"
 import type { DifferenceStreamReader } from "../graph.js"
 import type { IStreamBuilder } from "../types.js"
 
-type HashedValue = string
 type Multiplicity = number
 
 /**
@@ -13,7 +13,7 @@ type Multiplicity = number
  */
 export class DistinctOperator<T> extends UnaryOperator<T> {
   #by: (value: T) => any
-  #values: Map<HashedValue, Multiplicity> // keeps track of the number of times each value has been seen
+  #values: Map<Hash, Multiplicity> // keeps track of the number of times each value has been seen
 
   constructor(
     id: number,
@@ -27,7 +27,7 @@ export class DistinctOperator<T> extends UnaryOperator<T> {
   }
 
   run(): void {
-    const updatedValues = new Map<HashedValue, [Multiplicity, T]>()
+    const updatedValues = new Map<Hash, [Multiplicity, T]>()
 
     // Compute the new multiplicity for each value
     for (const message of this.inputMessages()) {
