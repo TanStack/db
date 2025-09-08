@@ -1345,7 +1345,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       )
     })
 
-    test.only(`should throw error when right side doesn't match joined table`, () => {
+    test(`should throw error when right side doesn't match joined table`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
           id: `test-users-no-refs`,
