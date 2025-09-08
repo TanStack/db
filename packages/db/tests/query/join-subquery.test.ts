@@ -455,7 +455,6 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
 
         const results = joinSubquery.toArray
-        console.log(`results`, results)
         expect(results).toEqual([
           {
             issue: {
@@ -494,7 +493,6 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
 
         const results = joinSubquery.toArray
-        console.log(`results`, results)
         expect(results).toEqual([
           {
             issue: {

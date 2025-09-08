@@ -702,7 +702,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
               )
               .where(({ users }) => eq(users.active, true))
               .select(({ departments }) => ({
-                department: departments.id,
+                department: departments?.id,
               }))
               .distinct(),
         })
