@@ -537,11 +537,24 @@ export type BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema = never,
-> = Omit<CollectionConfig<T, TKey, TSchema>, `sync`>
+  TInput extends object = ResolveInput<T, TSchema>,
+  TResolvedType extends object = ResolveType<T, TSchema>,
+> = Omit<CollectionConfig<T, TKey, TSchema, TInput, TResolvedType>, `sync`>
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>
 >
+
+export type DerivedCollectionConfig<
+  T extends object = any,
+  TKey extends string | number = any,
+  TSchema = any,
+  TInput extends object = ResolveInput<T, TSchema>,
+  TResolvedType extends object = ResolveType<T, TSchema>,
+> = CollectionConfig<T, TKey, TSchema, TInput, TResolvedType> & {
+  __derivedConfig: true
+  __derivedType: T
+}
 
 /**
  * An input row from a collection

@@ -1,6 +1,7 @@
 import type {
   BaseCollectionConfig,
   CollectionConfig,
+  DerivedCollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
@@ -18,10 +19,12 @@ import type {
  * @template TKey - The type of the key returned by getKey
  */
 export interface LocalOnlyCollectionConfig<
-  TExplicit extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
+  TExplicit extends object = never,
+  TKey extends string | number = never,
   TSchema = never,
-> extends BaseCollectionConfig<TExplicit, TKey, TSchema> {
+  TInput extends object = ResolveInput<TExplicit, TSchema>,
+  TResolvedType extends object = ResolveType<TExplicit, TSchema>,
+> extends BaseCollectionConfig<TExplicit, TKey, TSchema, TInput, TResolvedType> {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
@@ -79,18 +82,17 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  *   })
  * )
  */
+
 export function localOnlyCollectionOptions<
-  TExplicit extends object = Record<string, unknown>,
+  TExplicit extends object = never,
   TKey extends string | number = string | number,
   TSchema = never,
 >(
   config: LocalOnlyCollectionConfig<TExplicit, TKey, TSchema>
-): CollectionConfig<
+): DerivedCollectionConfig<
   TExplicit,
   TKey,
-  TSchema,
-  ResolveInput<TExplicit, TSchema>,
-  ResolveType<TExplicit, TSchema>
+  TSchema
 > & {
   utils: LocalOnlyCollectionUtils
 } {
@@ -165,6 +167,8 @@ export function localOnlyCollectionOptions<
     utils: {} as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,
+  } as DerivedCollectionConfig<TExplicit, TKey, TSchema> & {
+    utils: LocalOnlyCollectionUtils
   }
 }
 

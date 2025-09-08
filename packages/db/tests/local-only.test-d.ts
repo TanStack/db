@@ -2,7 +2,6 @@ import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/index"
 import { localOnlyCollectionOptions } from "../src/local-only"
-import type { LocalOnlyCollectionUtils } from "../src/local-only"
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -14,9 +13,9 @@ type ItemOf<T> = T extends Array<infer U> ? U : T
 
 describe(`LocalOnly Collection Types`, () => {
   it(`should have correct return type from localOnlyCollectionOptions`, () => {
-    const options = localOnlyCollectionOptions({
+    const options = localOnlyCollectionOptions<TestItem, number>({
       id: `test-local-only`,
-      getKey: (item: TestItem) => item.id,
+      getKey: (item) => item.id,
     })
 
     // Test that options has the expected structure
@@ -67,11 +66,7 @@ describe(`LocalOnly Collection Types`, () => {
     }
 
     const options = localOnlyCollectionOptions(configWithCallbacks)
-    const collection = createCollection<
-      TestItem,
-      number,
-      LocalOnlyCollectionUtils
-    >(options)
+    const collection = createCollection(options)
 
     // Test that the collection has the essential methods and properties
     expectTypeOf(collection.insert).toBeFunction()
@@ -126,7 +121,63 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(options.getKey).toBeFunction()
   })
 
-  it(`should work with schema and infer correct types`, () => {
+  it(`should work with schema and infer correct types when saved to a variable`, () => {
+    const testSchema = z.object({
+      id: z.string(),
+      entityId: z.string(),
+      value: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    // We can trust that zod infers the correct types for the schema
+    type ExpectedType = z.infer<typeof testSchema>
+    type ExpectedInput = z.input<typeof testSchema>
+
+    const config = localOnlyCollectionOptions({
+      id: `test-with-schema`,
+      getKey: (item) => item.id,
+      schema: testSchema,
+      onInsert: (params) => {
+        expectTypeOf(
+          params.transaction.mutations[0].modified
+        ).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onUpdate: (params) => {
+        expectTypeOf(
+          params.transaction.mutations[0].modified
+        ).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+      onDelete: (params) => {
+        expectTypeOf(
+          params.transaction.mutations[0].modified
+        ).toEqualTypeOf<ExpectedType>()
+        return Promise.resolve()
+      },
+    })
+    const collection = createCollection(config)
+
+    collection.insert({
+      id: `1`,
+      entityId: `1`,
+      value: `1`,
+    })
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
+    })
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+  })
+
+  it(`should work with schema and infer correct types when nested in createCollection`, () => {
     const testSchema = z.object({
       id: z.string(),
       entityId: z.string(),
@@ -141,7 +192,7 @@ describe(`LocalOnly Collection Types`, () => {
     const collection = createCollection(
       localOnlyCollectionOptions({
         id: `test-with-schema`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         schema: testSchema,
         onInsert: (params) => {
           expectTypeOf(

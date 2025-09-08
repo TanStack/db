@@ -39,7 +39,6 @@ import {
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
 import type { Transaction } from "./transactions"
-
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type {
   ChangeListener,
@@ -47,6 +46,7 @@ import type {
   CollectionConfig,
   CollectionStatus,
   CurrentStateAsChangesOptions,
+  DerivedCollectionConfig,
   Fn,
   InsertConfig,
   OperationConfig,
@@ -168,13 +168,46 @@ export function createCollection<
   TUtils extends UtilsRecord = {},
   TSchema = never,
 >(
-  options: CollectionConfig<
-    TExplicit,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema>,
-    ResolveType<TExplicit, TSchema>
-  > & { utils?: TUtils }
+  options: CollectionConfig<TExplicit, TKey, TSchema> & { utils?: TUtils } & {
+    __derivedConfig?: never
+  }
+): Collection<
+  ResolveType<TExplicit, TSchema>,
+  TKey,
+  TUtils,
+  TSchema,
+  ResolveInput<TExplicit, TSchema>
+>
+
+// Overload for when the derived config is used, we infer the types from the config
+export function createCollection<
+  TConfig extends DerivedCollectionConfig,
+  TUtils extends UtilsRecord = {},
+>(
+  options: TConfig & { utils?: TUtils }
+): TConfig extends DerivedCollectionConfig<
+  infer TExplicit,
+  infer TKey,
+  infer TSchema
+>
+  ? TConfig["__derivedType"] extends [never]
+    ? Collection<
+        ResolveType<never, TSchema>,
+        TKey,
+        TUtils,
+        TSchema,
+        ResolveInput<never, TSchema>
+      >
+    : Collection<TExplicit, TKey, TUtils, TSchema, TExplicit>
+  : never
+
+export function createCollection<
+  TExplicit extends object = never,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+  TSchema = never,
+>(
+  options: CollectionConfig<TExplicit, TKey, TSchema> & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema>,
   TKey,
