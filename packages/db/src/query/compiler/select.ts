@@ -20,18 +20,10 @@ type SelectOp =
   | { kind: `field`; alias: string; compiled: (row: NamespacedRow) => any }
 
 /**
- * Recursively unwraps any Value expressions
+ * Unwraps any Value expressions
  */
-function unwrapVals(input: any): any {
+function unwrapVal(input: any): any {
   if (input instanceof ValClass) return input.value
-  if (Array.isArray(input)) return input.map(unwrapVals)
-  if (input && typeof input === `object`) {
-    const out: Record<string, any> = {}
-    for (const [k, v] of Object.entries(input)) {
-      out[k] = unwrapVals(v)
-    }
-    return out
-  }
   return input
 }
 
@@ -51,7 +43,7 @@ function processMerge(
     if (path.length === 0) {
       // Top-level merge
       for (const [k, v] of Object.entries(value)) {
-        selectResults[k] = v
+        selectResults[k] = unwrapVal(v)
       }
     } else {
       for (let i = 0; i < path.length; i++) {
@@ -60,10 +52,8 @@ function processMerge(
           const dest = (cursor[seg] ??= {})
           if (typeof dest === `object`) {
             for (const [k, v] of Object.entries(value)) {
-              dest[k] = v
+              dest[k] = unwrapVal(v)
             }
-          } else {
-            cursor[seg] = { ...value }
           }
         } else {
           const next = cursor[seg]
@@ -99,7 +89,7 @@ function processNonMergeOp(
       }
       cursor = cursor[seg]
     }
-    cursor[path[path.length - 1]!] = op.compiled(namespacedRow)
+    cursor[path[path.length - 1]!] = unwrapVal(op.compiled(namespacedRow))
   }
 }
 
@@ -120,18 +110,16 @@ function processRow(
     }
   }
 
-  const normalizedResults = unwrapVals(selectResults)
-
   // Return the namespaced row with __select_results added
   return [
     key,
     {
       ...namespacedRow,
-      __select_results: normalizedResults,
+      __select_results: selectResults,
     },
   ] as [
     unknown,
-    typeof namespacedRow & { __select_results: typeof normalizedResults },
+    typeof namespacedRow & { __select_results: typeof selectResults },
   ]
 }
 
