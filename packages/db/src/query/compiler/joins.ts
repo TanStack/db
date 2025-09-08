@@ -187,90 +187,109 @@ function processJoin(
   }
 
   if (activeCollection) {
-    // This join can be optimized by having the active collection
-    // dynamically load keys into the lazy collection
-    // based on the value of the joinKey and by looking up
-    // matching rows in the index of the lazy collection
+    // If the lazy collection comes from a subquery that has a limit and/or an offset clause
+    // then we need to deoptimize the join because we don't know which rows are in the result set
+    // since we simply lookup matching keys in the index but the index contains all rows
+    // (not just the ones that pass the limit and offset clauses)
+    const lazyFrom =
+      activeCollection === `main` ? joinClause.from : rawQuery.from
+    const limitedSubquery =
+      lazyFrom.type === `queryRef` &&
+      (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    // Mark the lazy collection as lazy
-    // this Set is passed by the liveQueryCollection to the compiler
-    // such that the liveQueryCollection can check it after compilation
-    // to know which collections are lazy collections
-    lazyCollections.add(lazyCollection.id)
+    if (!limitedSubquery) {
+      // This join can be optimized by having the active collection
+      // dynamically load keys into the lazy collection
+      // based on the value of the joinKey and by looking up
+      // matching rows in the index of the lazy collection
 
-    const activePipeline =
-      activeCollection === `main` ? mainPipeline : joinedPipeline
+      // Mark the lazy collection as lazy
+      // this Set is passed by the liveQueryCollection to the compiler
+      // such that the liveQueryCollection can check it after compilation
+      // to know which collections are lazy collections
+      lazyCollections.add(lazyCollection.id)
 
-    let index: BaseIndex<string | number> | undefined
+      const activePipeline =
+        activeCollection === `main` ? mainPipeline : joinedPipeline
 
-    const lazyCollectionJoinExpr =
-      activeCollection === `main`
-        ? (joinedExpr as PropRef)
-        : (mainExpr as PropRef)
+      let index: BaseIndex<string | number> | undefined
 
-    const followRefResult = followRef(
-      rawQuery,
-      lazyCollectionJoinExpr,
-      lazyCollection
-    )!
-    const followRefCollection = followRefResult.collection
+      const lazyCollectionJoinExpr =
+        activeCollection === `main`
+          ? (joinedExpr as PropRef)
+          : (mainExpr as PropRef)
 
-    const fieldName = followRefResult.path[0]
-    if (fieldName) {
-      ensureIndexForField(fieldName, followRefResult.path, followRefCollection)
-    }
+      console.log(`lazyCollectionJoinExpr`, lazyCollectionJoinExpr)
+      console.log(`joinClause`, joinClause)
 
-    let deoptimized = false
+      const followRefResult = followRef(
+        rawQuery,
+        lazyCollectionJoinExpr,
+        lazyCollection
+      )!
+      const followRefCollection = followRefResult.collection
 
-    const activePipelineWithLoading: IStreamBuilder<
-      [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
-    > = activePipeline.pipe(
-      tap(([joinKey, _]) => {
-        if (deoptimized) {
-          return
-        }
-
-        // Find the index for the path we join on
-        // we need to find the index inside the map operator
-        // because the indexes are only available after the initial sync
-        // so we can't fetch it during compilation
-        index ??= findIndexForField(
-          followRefCollection.indexes,
-          followRefResult.path
+      const fieldName = followRefResult.path[0]
+      if (fieldName) {
+        ensureIndexForField(
+          fieldName,
+          followRefResult.path,
+          followRefCollection
         )
+      }
 
-        // The `callbacks` object is passed by the liveQueryCollection to the compiler.
-        // It contains a function to lazy load keys for each lazy collection
-        // as well as a function to switch back to a regular collection
-        // (useful when there's no index for available for lazily loading the collection)
-        const collectionCallbacks = callbacks[lazyCollection.id]
-        if (!collectionCallbacks) {
-          throw new Error(
-            `Internal error: callbacks for collection are missing in join pipeline. Make sure the live query collection sets them before running the pipeline.`
+      let deoptimized = false
+
+      const activePipelineWithLoading: IStreamBuilder<
+        [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
+      > = activePipeline.pipe(
+        tap(([joinKey, _]) => {
+          if (deoptimized) {
+            return
+          }
+
+          // Find the index for the path we join on
+          // we need to find the index inside the map operator
+          // because the indexes are only available after the initial sync
+          // so we can't fetch it during compilation
+          index ??= findIndexForField(
+            followRefCollection.indexes,
+            followRefResult.path
           )
-        }
 
-        const { loadKeys, loadInitialState } = collectionCallbacks
+          // The `callbacks` object is passed by the liveQueryCollection to the compiler.
+          // It contains a function to lazy load keys for each lazy collection
+          // as well as a function to switch back to a regular collection
+          // (useful when there's no index for available for lazily loading the collection)
+          const collectionCallbacks = callbacks[lazyCollection.id]
+          if (!collectionCallbacks) {
+            throw new Error(
+              `Internal error: callbacks for collection are missing in join pipeline. Make sure the live query collection sets them before running the pipeline.`
+            )
+          }
 
-        if (index && index.supports(`eq`)) {
-          // Use the index to fetch the PKs of the rows in the lazy collection
-          // that match this row from the active collection based on the value of the joinKey
-          const matchingKeys = index.lookup(`eq`, joinKey)
-          // Inform the lazy collection that those keys need to be loaded
-          loadKeys(matchingKeys)
-        } else {
-          // We can't optimize the join because there is no index for the join key
-          // on the lazy collection, so we load the initial state
-          deoptimized = true
-          loadInitialState()
-        }
-      })
-    )
+          const { loadKeys, loadInitialState } = collectionCallbacks
 
-    if (activeCollection === `main`) {
-      mainPipeline = activePipelineWithLoading
-    } else {
-      joinedPipeline = activePipelineWithLoading
+          if (index && index.supports(`eq`)) {
+            // Use the index to fetch the PKs of the rows in the lazy collection
+            // that match this row from the active collection based on the value of the joinKey
+            const matchingKeys = index.lookup(`eq`, joinKey)
+            // Inform the lazy collection that those keys need to be loaded
+            loadKeys(matchingKeys)
+          } else {
+            // We can't optimize the join because there is no index for the join key
+            // on the lazy collection, so we load the initial state
+            deoptimized = true
+            loadInitialState()
+          }
+        })
+      )
+
+      if (activeCollection === `main`) {
+        mainPipeline = activePipelineWithLoading
+      } else {
+        joinedPipeline = activePipelineWithLoading
+      }
     }
   }
 
