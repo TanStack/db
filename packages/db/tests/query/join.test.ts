@@ -723,13 +723,13 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             )
             .join(
               { task: tasksCollection },
-              ({ task, project }) => eq(task.project_id, project.id),
+              ({ task, project }) => eq(task.project_id, project?.id),
               joinType
             )
             .select(({ company, project, task }) => ({
-              company_name: company.name,
-              project_name: project.name,
-              task_name: task.name,
+              company_name: company?.name,
+              project_name: project?.name,
+              task_name: task?.name,
             })),
       })
 
