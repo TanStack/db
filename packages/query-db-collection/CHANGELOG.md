@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 0.2.11
+
+### Patch Changes
+
+- fix: race condition creating a collection from a query that has already loaded ([#495](https://github.com/TanStack/db/pull/495))
+
+- Updated dependencies [[`cc4c34a`](https://github.com/TanStack/db/commit/cc4c34a6b40c81c83aa10c8d00dfc0a3d33c56db)]:
+  - @tanstack/db@0.1.12
+
 ## 0.2.10
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.1.12
+
+### Patch Changes
+
+- Fixes a bug where optimized joins would miss data ([#501](https://github.com/TanStack/db/pull/501))
+
 ## 0.1.11
 
 ### Patch Changes

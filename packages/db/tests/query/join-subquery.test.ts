@@ -102,6 +102,20 @@ const sampleUsers: Array<User> = [
   },
 ]
 
+const sampleProducts = [
+  { id: 1, a: `8` },
+  { id: 2, a: `6` },
+  { id: 3, a: `0` },
+  { id: 4, a: `5` },
+]
+
+const sampleTrials = [
+  { id: 1, productId: 1, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 2, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 4, userId: 1, createdAt: null },
+  { id: 3, productId: 3, userId: 2, createdAt: new Date() },
+]
+
 function createIssuesCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Issue>({
@@ -119,6 +133,28 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       id: `join-subquery-test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
+      autoIndex,
+    })
+  )
+}
+
+function createProductsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-products`,
+      getKey: (product) => product.id,
+      initialData: sampleProducts,
+      autoIndex,
+    })
+  )
+}
+
+function createTrialsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-trials`,
+      getKey: (item) => `${item.productId}-${item.userId}`,
+      initialData: sampleTrials,
       autoIndex,
     })
   )
@@ -272,10 +308,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let productsCollection: ReturnType<typeof createProductsCollection>
+      let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        productsCollection = createProductsCollection(autoIndex)
+        trialsCollection = createTrialsCollection(autoIndex)
       })
 
       test(`should use subquery in JOIN clause - inner join`, () => {
@@ -356,6 +396,118 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           user_name: undefined,
           user_status: undefined,
         })
+      })
+
+      test(`should use subquery in JOIN clause - left join for trials`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ product: productsCollection })
+              .join(
+                {
+                  tried: q
+                    .from({ tried: trialsCollection })
+                    .where(({ tried }) => eq(tried.userId, 1)),
+                },
+                ({ tried, product }) => eq(tried.productId, product.id),
+                `left`
+              )
+              .where(({ product }) => eq(product.id, 1))
+              .select(({ product, tried }) => ({
+                product,
+                tried,
+              }))
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toHaveLength(1)
+        expect(results[0]!.product.id).toBe(1)
+        expect(results[0]!.tried).toBeDefined()
+        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]).toEqual({
+          product: { id: 1, a: `8` },
+          tried: sampleTrials[0],
+        })
+      })
+
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ issue: issuesCollection })
+              .join(
+                {
+                  users: q
+                    .from({ user: usersCollection })
+                    .where(({ user }) => eq(user.status, `active`))
+                    .orderBy(({ user }) => user.name, `asc`)
+                    .limit(1),
+                },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `left`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        console.log(`results`, results)
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
+      })
+
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({
+                users: q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+                  .orderBy(({ user }) => user.name, `asc`)
+                  .limit(1),
+              })
+              .join(
+                { issue: issuesCollection },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `right`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        console.log(`results`, results)
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
       })
 
       test(`should handle subqueries with SELECT clauses in both FROM and JOIN`, () => {

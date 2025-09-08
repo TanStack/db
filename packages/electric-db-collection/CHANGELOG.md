@@ -1,5 +1,12 @@
 # @tanstack/electric-db-collection
 
+## 0.1.13
+
+### Patch Changes
+
+- Updated dependencies [[`cc4c34a`](https://github.com/TanStack/db/commit/cc4c34a6b40c81c83aa10c8d00dfc0a3d33c56db)]:
+  - @tanstack/db@0.1.12
+
 ## 0.1.12
 
 ### Patch Changes

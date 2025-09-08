@@ -4,12 +4,10 @@
   "version": "0.1.2",
   "dependencies": {
     "fractional-indexing": "^3.2.0",
-    "murmurhash-js": "^1.0.0",
     "sorted-btree": "^1.8.1"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@types/murmurhash-js": "^1.0.6",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
