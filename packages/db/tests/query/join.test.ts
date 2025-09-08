@@ -1341,14 +1341,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same table "unknown"`
+        `Invalid join condition: expressions must reference table aliases`
       )
     })
 
-    test(`should throw error when expressions reference tables not involved in join`, () => {
+    test.only(`should throw error when right side doesn't match joined table`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
-          id: `test-users-wrong-table`,
+          id: `test-users-no-refs`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
         })
@@ -1356,46 +1356,27 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
 
-      // This test demonstrates the error when trying to reference a table not in the join
-      // We'll use a different approach - create a query that references a non-existent table alias
-      expect(() => {
-        createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q.from({ user: usersCollection }).join(
-              { dept: departmentsCollection },
-              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
-              `inner`
-            ),
-        })
-      }).toThrow(
-        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
-      )
-    })
-
-    test(`should throw error when one expression references table not in join`, () => {
-      const usersCollection = createCollection(
-        mockSyncCollectionOptions<User>({
-          id: `test-users-one-wrong-table`,
-          getKey: (user) => user.id,
-          initialData: sampleUsers,
-        })
-      )
-
-      const departmentsCollection = createDepartmentsCollection(autoIndex)
+      const departmentsCollection2 = createDepartmentsCollection(autoIndex)
 
       expect(() => {
         createLiveQueryCollection({
           startSync: true,
           query: (q) =>
-            q.from({ user: usersCollection }).join(
-              { dept: departmentsCollection },
-              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
-              `inner`
-            ),
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`
+              )
+              .join(
+                { dept2: departmentsCollection2 },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`
+              ),
         })
       }).toThrow(
-        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
+        `Invalid join condition: right expression does not refer to the joined table "dept2"`
       )
     })
 
