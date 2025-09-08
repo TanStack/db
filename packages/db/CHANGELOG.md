@@ -1,5 +1,71 @@
 # @tanstack/db
 
+## 0.1.12
+
+### Patch Changes
+
+- Fixes a bug where optimized joins would miss data ([#501](https://github.com/TanStack/db/pull/501))
+
+## 0.1.11
+
+### Patch Changes
+
+- fix: improve InvalidSourceError message clarity ([#488](https://github.com/TanStack/db/pull/488))
+
+  The InvalidSourceError now provides a clear, actionable error message that:
+  - Explicitly states the problem is passing a non-Collection/non-subquery to a live query
+  - Includes the alias name to help identify which source is problematic
+  - Provides guidance on what should be passed instead (Collection instances or QueryBuilder subqueries)
+
+  This replaces the generic "Invalid source" message with helpful debugging information.
+
+## 0.1.10
+
+### Patch Changes
+
+- Fixed an optimization bug where orderBy clauses using a single-column array were not recognized as optimizable. Queries that order by a single column are now correctly optimized even when specified as an array. ([#477](https://github.com/TanStack/db/pull/477))
+
+- fix an bug where a live query that used joins could become stuck empty when its remounted/resubscribed ([#484](https://github.com/TanStack/db/pull/484))
+
+- fixed a bug where a pending sync transaction could be applied early when an optimistic mutation was resolved or rolled back ([#482](https://github.com/TanStack/db/pull/482))
+
+- Add support for queries to order results based on aggregated values ([#481](https://github.com/TanStack/db/pull/481))
+
+## 0.1.9
+
+### Patch Changes
+
+- Fix handling of Temporal objects in proxy's deepClone and deepEqual functions ([#434](https://github.com/TanStack/db/pull/434))
+  - Temporal objects (like Temporal.ZonedDateTime) are now properly preserved during cloning instead of being converted to empty objects
+  - Added detection for all Temporal API object types via Symbol.toStringTag
+  - Temporal objects are returned directly from deepClone since they're immutable
+  - Added proper equality checking for Temporal objects using their built-in equals() method
+  - Prevents unnecessary proxy creation for immutable Temporal objects
+
+## 0.1.8
+
+### Patch Changes
+
+- Fix bug that caused initial query results to have too few rows when query has orderBy, limit, and where clauses. ([#461](https://github.com/TanStack/db/pull/461))
+
+- fix disabling of gc by setting `gcTime: 0` on the collection options ([#463](https://github.com/TanStack/db/pull/463))
+
+- docs: electric-collection reference page ([#429](https://github.com/TanStack/db/pull/429))
+
+## 0.1.7
+
+### Patch Changes
+
+- fix a race condition that could result in the initial state of a joined collection being sent to the live query pipeline twice, this would result in incorrect join results. ([#451](https://github.com/TanStack/db/pull/451))
+
+- Refactor live query collection ([#432](https://github.com/TanStack/db/pull/432))
+
+- Fix infinite loop bug with queries that use orderBy clause with a limit ([#450](https://github.com/TanStack/db/pull/450))
+
+- mark item drafts as a `mutable` type ([#408](https://github.com/TanStack/db/pull/408))
+
+- Fix query optimizer to preserve outer join semantics by keeping residual WHERE clauses when pushing predicates to subqueries. ([#442](https://github.com/TanStack/db/pull/442))
+
 ## 0.1.6
 
 ### Patch Changes

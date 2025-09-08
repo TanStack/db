@@ -11,7 +11,7 @@ import {
 } from "@tanstack/db"
 import { createComputed, createRoot, createSignal } from "solid-js"
 import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import type { Accessor } from "solid-js"
 
 type Person = {

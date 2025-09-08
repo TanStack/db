@@ -45,6 +45,11 @@
  * - **Ordering + Limits**: ORDER BY combined with LIMIT/OFFSET (would change result set)
  * - **Functional Operations**: fnSelect, fnWhere, fnHaving (potential side effects)
  *
+ * ### Residual WHERE Clauses
+ * For outer joins (LEFT, RIGHT, FULL), WHERE clauses are copied to subqueries for optimization
+ * but also kept as "residual" clauses in the main query to preserve semantics. This ensures
+ * that NULL values from outer joins are properly filtered according to SQL standards.
+ *
  * The optimizer tracks which clauses were actually optimized and only removes those from the
  * main query. Subquery reuse is handled safely through immutable query copies.
  *
@@ -121,9 +126,12 @@ import {
   CollectionRef as CollectionRefClass,
   Func,
   QueryRef as QueryRefClass,
+  createResidualWhere,
+  getWhereExpression,
+  isResidualWhere,
 } from "./ir.js"
 import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
-import type { BasicExpression, From, QueryIR } from "./ir.js"
+import type { BasicExpression, From, QueryIR, Where } from "./ir.js"
 
 /**
  * Represents a WHERE clause after source analysis
@@ -325,8 +333,13 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
+  // Filter out residual WHERE clauses to prevent them from being optimized again
+  const nonResidualWhereClauses = query.where.filter(
+    (where) => !isResidualWhere(where)
+  )
+
   // Step 1: Split all AND clauses at the root level for granular optimization
-  const splitWhereClauses = splitAndClauses(query.where)
+  const splitWhereClauses = splitAndClauses(nonResidualWhereClauses)
 
   // Step 2: Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
@@ -337,7 +350,20 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Step 4: Apply optimizations by lifting single-source clauses into subqueries
-  return applyOptimizations(query, groupedClauses)
+  const optimizedQuery = applyOptimizations(query, groupedClauses)
+
+  // Add back any residual WHERE clauses that were filtered out
+  const residualWhereClauses = query.where.filter((where) =>
+    isResidualWhere(where)
+  )
+  if (residualWhereClauses.length > 0) {
+    optimizedQuery.where = [
+      ...(optimizedQuery.where || []),
+      ...residualWhereClauses,
+    ]
+  }
+
+  return optimizedQuery
 }
 
 /**
@@ -424,24 +450,33 @@ function isRedundantSubquery(query: QueryIR): boolean {
  * ```
  */
 function splitAndClauses(
-  whereClauses: Array<BasicExpression<boolean>>
+  whereClauses: Array<Where>
 ): Array<BasicExpression<boolean>> {
   const result: Array<BasicExpression<boolean>> = []
 
-  for (const clause of whereClauses) {
-    if (clause.type === `func` && clause.name === `and`) {
-      // Recursively split nested AND clauses to handle complex expressions
-      const splitArgs = splitAndClauses(
-        clause.args as Array<BasicExpression<boolean>>
-      )
-      result.push(...splitArgs)
-    } else {
-      // Preserve non-AND clauses as-is (including OR clauses)
-      result.push(clause)
-    }
+  for (const whereClause of whereClauses) {
+    const clause = getWhereExpression(whereClause)
+    result.push(...splitAndClausesRecursive(clause))
   }
 
   return result
+}
+
+// Helper function for recursive splitting of BasicExpression arrays
+function splitAndClausesRecursive(
+  clause: BasicExpression<boolean>
+): Array<BasicExpression<boolean>> {
+  if (clause.type === `func` && clause.name === `and`) {
+    // Recursively split nested AND clauses to handle complex expressions
+    const result: Array<BasicExpression<boolean>> = []
+    for (const arg of clause.args as Array<BasicExpression<boolean>>) {
+      result.push(...splitAndClausesRecursive(arg))
+    }
+    return result
+  } else {
+    // Preserve non-AND clauses as-is (including OR clauses)
+    return [clause]
+  }
 }
 
 /**
@@ -588,19 +623,32 @@ function applyOptimizations(
       }))
     : undefined
 
-  // Build the remaining WHERE clauses: multi-source + any single-source that weren't optimized
-  const remainingWhereClauses: Array<BasicExpression<boolean>> = []
+  // Build the remaining WHERE clauses: multi-source + residual single-source clauses
+  const remainingWhereClauses: Array<Where> = []
 
   // Add multi-source clauses
   if (groupedClauses.multiSource) {
     remainingWhereClauses.push(groupedClauses.multiSource)
   }
 
-  // Add single-source clauses that weren't actually optimized
+  // Determine if we need residual clauses (when query has outer JOINs)
+  const hasOuterJoins =
+    query.join &&
+    query.join.some(
+      (join) =>
+        join.type === `left` || join.type === `right` || join.type === `full`
+    )
+
+  // Add single-source clauses
   for (const [source, clause] of groupedClauses.singleSource) {
     if (!actuallyOptimized.has(source)) {
+      // Wasn't optimized at all - keep as regular WHERE clause
       remainingWhereClauses.push(clause)
+    } else if (hasOuterJoins) {
+      // Was optimized AND query has outer JOINs - keep as residual WHERE clause
+      remainingWhereClauses.push(createResidualWhere(clause))
     }
+    // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
   // Create a completely new query object to ensure immutability
@@ -612,6 +660,7 @@ function applyOptimizations(
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
     limit: query.limit,
     offset: query.offset,
+    distinct: query.distinct,
     fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
