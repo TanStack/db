@@ -47,9 +47,13 @@ export type ResolveInsertInput<
   ? [TSchema] extends [never]
     ? TFallback
     : InferSchemaInput<TSchema>
-  : TExplicit extends object
-    ? TExplicit
-    : Record<string, unknown>
+  : [TExplicit] extends [never]
+    ? [TSchema] extends [never]
+      ? TFallback
+      : InferSchemaInput<TSchema>
+    : TExplicit extends object
+      ? TExplicit
+      : Record<string, unknown>
 
 /**
  * Helper type to determine the final type based on priority:
@@ -69,9 +73,13 @@ export type ResolveType<
   ? [TSchema] extends [never]
     ? TFallback
     : InferSchemaOutput<TSchema>
-  : TExplicit extends object
-    ? TExplicit
-    : Record<string, unknown>
+  : [TExplicit] extends [never]
+    ? [TSchema] extends [never]
+      ? TFallback
+      : InferSchemaOutput<TSchema>
+    : TExplicit extends object
+      ? TExplicit
+      : Record<string, unknown>
 
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
