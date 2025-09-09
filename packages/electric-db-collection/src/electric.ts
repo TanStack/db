@@ -478,7 +478,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       const { begin, write, commit, markReady, truncate, collection } = params
-      
+
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
