@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.4
+
+### Patch Changes
+
+- Check typeof Buffer before instanceof to avoid ReferenceError in browsers ([#519](https://github.com/TanStack/db/pull/519))
+
 ## 0.1.3
 
 ### Patch Changes

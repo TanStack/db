@@ -1,5 +1,14 @@
 # @tanstack/db
 
+## 0.2.2
+
+### Patch Changes
+
+- fix a bug where a live query with a custom getKey would not update correctly because the source key was being used instead of the custom key for presence checks. ([#521](https://github.com/TanStack/db/pull/521))
+
+- Updated dependencies [[`c11eb51`](https://github.com/TanStack/db/commit/c11eb51fe24bb1c4c8529bcd34467af4e6542c71)]:
+  - @tanstack/db-ivm@0.1.4
+
 ## 0.2.1
 
 ### Patch Changes
