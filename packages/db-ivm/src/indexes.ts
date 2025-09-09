@@ -1,3 +1,4 @@
+import { withSpan } from "@tanstack/db-tracing"
 import { MultiSet } from "./multiset.js"
 import { HashIndex } from "./hashIndex.js"
 import { ValueIndex } from "./valueIndex.js"
@@ -141,36 +142,42 @@ export class Index<K, V> {
   }
 
   join<V2>(other: Index<K, V2>): MultiSet<[K, [V, V2]]> {
-    const result: Array<[[K, [V, V2]], number]> = []
+    return withSpan(
+      `indexes.join`,
+      () => {
+        const result: Array<[[K, [V, V2]], number]> = []
 
-    // We want to iterate over the smaller of the two indexes to reduce the
-    // number of operations we need to do.
-    if (this.size <= other.size) {
-      for (const [key, valueIt] of this.#entriesIterators()) {
-        if (!other.has(key)) continue
-        const otherValues = other.get(key)
-        for (const [val1, mul1] of valueIt) {
-          for (const [val2, mul2] of otherValues) {
-            if (mul1 !== 0 && mul2 !== 0) {
-              result.push([[key, [val1, val2]], mul1 * mul2])
+        // We want to iterate over the smaller of the two indexes to reduce the
+        // number of operations we need to do.
+        if (this.size <= other.size) {
+          for (const [key, valueIt] of this.#entriesIterators()) {
+            if (!other.has(key)) continue
+            const otherValues = other.get(key)
+            for (const [val1, mul1] of valueIt) {
+              for (const [val2, mul2] of otherValues) {
+                if (mul1 !== 0 && mul2 !== 0) {
+                  result.push([[key, [val1, val2]], mul1 * mul2])
+                }
+              }
+            }
+          }
+        } else {
+          for (const [key, otherValueIt] of other.#entriesIterators()) {
+            if (!this.has(key)) continue
+            const values = this.get(key)
+            for (const [val2, mul2] of otherValueIt) {
+              for (const [val1, mul1] of values) {
+                if (mul1 !== 0 && mul2 !== 0) {
+                  result.push([[key, [val1, val2]], mul1 * mul2])
+                }
+              }
             }
           }
         }
-      }
-    } else {
-      for (const [key, otherValueIt] of other.#entriesIterators()) {
-        if (!this.has(key)) continue
-        const values = this.get(key)
-        for (const [val2, mul2] of otherValueIt) {
-          for (const [val1, mul1] of values) {
-            if (mul1 !== 0 && mul2 !== 0) {
-              result.push([[key, [val1, val2]], mul1 * mul2])
-            }
-          }
-        }
-      }
-    }
 
-    return new MultiSet(result)
+        return new MultiSet(result)
+      },
+      { operation: `join` }
+    )
   }
 }

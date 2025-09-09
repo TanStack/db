@@ -1,3 +1,4 @@
+import { withSpan } from "@tanstack/db-tracing"
 import { MurmurHashStream, randomHash } from "./murmur.js"
 import type { Hasher } from "./murmur.js"
 
@@ -21,9 +22,15 @@ const SET_MARKER = randomHash()
 const hashCache = new WeakMap<object, number>()
 
 export function hash(input: any): number {
-  const hasher = new MurmurHashStream()
-  updateHasher(hasher, input)
-  return hasher.digest()
+  return withSpan(
+    `hash`,
+    () => {
+      const hasher = new MurmurHashStream()
+      updateHasher(hasher, input)
+      return hasher.digest()
+    },
+    { operation: `hash` }
+  )
 }
 
 function hashObject(input: object): number {

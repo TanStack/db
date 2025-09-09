@@ -3,6 +3,7 @@
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
   "version": "0.1.3",
   "dependencies": {
+    "@tanstack/db-tracing": "workspace:*",
     "fractional-indexing": "^3.2.0",
     "sorted-btree": "^1.8.1"
   },
