@@ -52,7 +52,7 @@ import type {
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
-  ResolveInsertInput,
+  ResolveInput,
   ResolveType,
   StandardSchema,
   SubscribeChangesOptions,
@@ -173,7 +173,7 @@ export function createCollection<
     ResolveType<unknown, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<unknown, TSchema, TFallback>
+    ResolveInput<unknown, TSchema, TFallback>
   > & {
     schema: TSchema
     utils?: TUtils
@@ -183,7 +183,7 @@ export function createCollection<
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<unknown, TSchema, TFallback>
+  ResolveInput<unknown, TSchema, TFallback>
 >
 
 // Overload for when explicit type is provided with schema - explicit type takes precedence
@@ -198,7 +198,7 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & {
     schema: TSchema
     utils?: TUtils
@@ -208,7 +208,7 @@ export function createCollection<
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 >
 
 // Overload for when explicit type is provided or no schema
@@ -223,14 +223,14 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 >
 
 // Implementation
@@ -245,21 +245,21 @@ export function createCollection<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   > & { utils?: TUtils }
 ): Collection<
   ResolveType<TExplicit, TSchema, TFallback>,
   TKey,
   TUtils,
   TSchema,
-  ResolveInsertInput<TExplicit, TSchema, TFallback>
+  ResolveInput<TExplicit, TSchema, TFallback>
 > {
   const collection = new CollectionImpl<
     ResolveType<TExplicit, TSchema, TFallback>,
     TKey,
     TUtils,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >(options)
 
   // Copy utils to both top level and .utils namespace
@@ -274,7 +274,7 @@ export function createCollection<
     TKey,
     TUtils,
     TSchema,
-    ResolveInsertInput<TExplicit, TSchema, TFallback>
+    ResolveInput<TExplicit, TSchema, TFallback>
   >
 }
 
