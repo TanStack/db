@@ -2,6 +2,7 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import { withSpan } from "@tanstack/db-tracing"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection.js"
@@ -104,15 +105,17 @@ export class CollectionConfigBuilder<
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
-    const { begin, commit, markReady } = config
+    return withSpan('liveQuery.maybeRunGraph', () => {
+      const { begin, commit, markReady } = config
 
-    // We only run the graph if all the collections are ready
-    if (
-      this.allCollectionsReadyOrInitialCommit() &&
-      syncState.subscribedToAllCollections
-    ) {
-      syncState.graph.run()
-      const ready = callback?.() ?? true
+      // We only run the graph if all the collections are ready
+      if (
+        this.allCollectionsReadyOrInitialCommit() &&
+        syncState.subscribedToAllCollections
+      ) {
+        return withSpan('liveQuery.graph.run', () => {
+          syncState.graph.run()
+          const ready = callback?.() ?? true
       // On the initial run, we may need to do an empty commit to ensure that
       // the collection is initialized
       if (syncState.messagesCount === 0) {
@@ -123,7 +126,9 @@ export class CollectionConfigBuilder<
       if (ready && this.allCollectionsReady()) {
         markReady()
       }
-    }
+        }, { collectionId: this.id, operation: 'graph.run' })
+      }
+    }, { collectionId: this.id, operation: 'maybeRunGraph' })
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -134,11 +139,12 @@ export class CollectionConfigBuilder<
   }
 
   private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
-    const syncState: SyncState = {
-      messagesCount: 0,
-      subscribedToAllCollections: false,
-      unsubscribeCallbacks: new Set<() => void>(),
-    }
+    return withSpan('liveQuery.sync', () => {
+      const syncState: SyncState = {
+        messagesCount: 0,
+        subscribedToAllCollections: false,
+        unsubscribeCallbacks: new Set<() => void>(),
+      }
 
     // Extend the pipeline such that it applies the incoming changes to the collection
     const fullSyncState = this.extendPipelineWithChangeProcessing(
@@ -170,6 +176,7 @@ export class CollectionConfigBuilder<
       this.optimizableOrderByCollections = {}
       this.lazyCollectionsCallbacks = {}
     }
+    }, { collectionId: this.id, operation: 'sync' })
   }
 
   private compileBasePipeline() {

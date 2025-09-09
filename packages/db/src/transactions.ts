@@ -5,6 +5,7 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from "./errors"
+import { withSpan, globalTracerRegistry } from "@tanstack/db-tracing"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -128,6 +129,8 @@ class Transaction<T extends object = Record<string, unknown>> {
     error: Error
   }
 
+  private spans: any[] = []
+
   constructor(config: TransactionConfig<T>) {
     if (typeof config.mutationFn === `undefined`) {
       throw new MissingMutationFunctionError()
@@ -141,12 +144,20 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
+    
+    // Start transaction span
+    this.spans = globalTracerRegistry.startSpan('transaction', {
+      transactionId: this.id,
+      operation: 'begin'
+    })
   }
 
   setState(newState: TransactionState) {
     this.state = newState
 
     if (newState === `completed` || newState === `failed`) {
+      // End transaction spans
+      this.spans.forEach(span => span.end())
       removeFromPendingList(this)
     }
   }
@@ -191,11 +202,12 @@ class Transaction<T extends object = Record<string, unknown>> {
    * await tx.commit()
    */
   mutate(callback: () => void): Transaction<T> {
-    if (this.state !== `pending`) {
-      throw new TransactionNotPendingMutateError()
-    }
+    return withSpan('transaction.mutate', () => {
+      if (this.state !== `pending`) {
+        throw new TransactionNotPendingMutateError()
+      }
 
-    registerTransaction(this)
+      registerTransaction(this)
     try {
       callback()
     } finally {
@@ -207,6 +219,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     return this
+    }, { transactionId: this.id, operation: 'mutate' })
   }
 
   applyMutations(mutations: Array<PendingMutation<any>>): void {
@@ -264,12 +277,13 @@ class Transaction<T extends object = Record<string, unknown>> {
    * }
    */
   rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
-    const isSecondaryRollback = config?.isSecondaryRollback ?? false
-    if (this.state === `completed`) {
-      throw new TransactionAlreadyCompletedRollbackError()
-    }
+    return withSpan('transaction.rollback', () => {
+      const isSecondaryRollback = config?.isSecondaryRollback ?? false
+      if (this.state === `completed`) {
+        throw new TransactionAlreadyCompletedRollbackError()
+      }
 
-    this.setState(`failed`)
+      this.setState(`failed`)
 
     // See if there's any other transactions w/ mutations on the same ids
     // and roll them back as well.
@@ -288,6 +302,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.touchCollection()
 
     return this
+    }, { transactionId: this.id, operation: 'rollback' })
   }
 
   // Tell collection that something has changed with the transaction
@@ -347,11 +362,12 @@ class Transaction<T extends object = Record<string, unknown>> {
    * console.log(tx.state) // "completed" or "failed"
    */
   async commit(): Promise<Transaction<T>> {
-    if (this.state !== `pending`) {
-      throw new TransactionNotPendingCommitError()
-    }
+    return withSpan('transaction.commit', async () => {
+      if (this.state !== `pending`) {
+        throw new TransactionNotPendingCommitError()
+      }
 
-    this.setState(`persisting`)
+      this.setState(`persisting`)
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
@@ -385,6 +401,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     return this
+    }, { transactionId: this.id, operation: 'commit' })
   }
 
   /**

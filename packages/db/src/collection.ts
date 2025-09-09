@@ -9,6 +9,7 @@ import { BTreeIndex } from "./indexes/btree-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
 import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
+import { withSpan } from "@tanstack/db-tracing"
 import {
   CollectionInErrorStateError,
   CollectionIsInErrorStateError,
@@ -803,7 +804,8 @@ export class CollectionImpl<
   private recomputeOptimisticState(
     triggeredByUserAction: boolean = false
   ): void {
-    // Skip redundant recalculations when we're in the middle of committing sync transactions
+    return withSpan('collection.recomputeOptimisticState', () => {
+      // Skip redundant recalculations when we're in the middle of committing sync transactions
     if (this.isCommittingSyncTransactions) {
       return
     }
@@ -912,6 +914,7 @@ export class CollectionImpl<
       // Emit all events if no pending sync transactions
       this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
+    }, { collectionId: this.id, operation: 'recomputeOptimisticState' })
   }
 
   /**
@@ -937,7 +940,8 @@ export class CollectionImpl<
     previousDeletes: Set<TKey>,
     events: Array<ChangeMessage<T, TKey>>
   ): void {
-    const allKeys = new Set([
+    return withSpan('collection.collectOptimisticChanges', () => {
+      const allKeys = new Set([
       ...previousUpserts.keys(),
       ...this.optimisticUpserts.keys(),
       ...previousDeletes,
@@ -1003,6 +1007,7 @@ export class CollectionImpl<
         listener([])
       }
     }
+    }, { collectionId: this.id, operation: 'collectOptimisticChanges' })
   }
 
   /**
@@ -1012,7 +1017,8 @@ export class CollectionImpl<
     changes: Array<ChangeMessage<T, TKey>>,
     forceEmit = false
   ): void {
-    // Skip batching for user actions (forceEmit=true) to keep UI responsive
+    return withSpan('collection.emitEvents', () => {
+      // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
       this.batchedEvents.push(...changes)
@@ -1057,6 +1063,7 @@ export class CollectionImpl<
         }
       }
     }
+    }, { collectionId: this.id, operation: 'emitEvents' })
   }
 
   /**
@@ -1186,7 +1193,8 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
+    return withSpan('collection.commitPendingTransactions', () => {
+      // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `persisting`) {
@@ -1532,6 +1540,7 @@ export class CollectionImpl<
         callbacks.forEach((callback) => callback())
       }
     }
+    }, { collectionId: this.id, operation: 'commitPendingTransactions' })
   }
 
   /**
@@ -1613,7 +1622,8 @@ export class CollectionImpl<
     indexCallback: (row: SingleRowRefProxy<T>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
-    this.validateCollectionUsable(`createIndex`)
+    return withSpan('collection.createIndex', () => {
+      this.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
     const singleRowRefProxy = createSingleRowRefProxy<T>()
@@ -1662,6 +1672,7 @@ export class CollectionImpl<
     }
 
     return new IndexProxy(indexId, lazyIndex)
+    }, { collectionId: this.id, operation: 'createIndex' })
   }
 
   /**
@@ -1840,8 +1851,9 @@ export class CollectionImpl<
     data: TInsertInput | Array<TInsertInput>,
     config?: InsertConfig
   ) => {
-    this.validateCollectionUsable(`insert`)
-    const ambientTransaction = getActiveTransaction()
+    return withSpan('collection.insert', () => {
+      this.validateCollectionUsable(`insert`)
+      const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
     if (!ambientTransaction && !this.config.onInsert) {
@@ -1926,6 +1938,7 @@ export class CollectionImpl<
 
       return directOpTransaction
     }
+    }, { collectionId: this.id, operation: 'insert' })
   }
 
   /**
@@ -2001,11 +2014,12 @@ export class CollectionImpl<
       | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
-    if (typeof keys === `undefined`) {
-      throw new MissingUpdateArgumentError()
-    }
+    return withSpan('collection.update', () => {
+      if (typeof keys === `undefined`) {
+        throw new MissingUpdateArgumentError()
+      }
 
-    this.validateCollectionUsable(`update`)
+      this.validateCollectionUsable(`update`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -2157,6 +2171,7 @@ export class CollectionImpl<
     this.recomputeOptimisticState(true)
 
     return directOpTransaction
+    }, { collectionId: this.id, operation: 'update' })
   }
 
   /**
@@ -2193,7 +2208,8 @@ export class CollectionImpl<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
-    this.validateCollectionUsable(`delete`)
+    return withSpan('collection.delete', () => {
+      this.validateCollectionUsable(`delete`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -2272,6 +2288,7 @@ export class CollectionImpl<
     this.recomputeOptimisticState(true)
 
     return directOpTransaction
+    }, { collectionId: this.id, operation: 'delete' })
   }
 
   /**

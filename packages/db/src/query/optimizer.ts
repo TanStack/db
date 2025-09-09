@@ -187,9 +187,12 @@ export interface OptimizationResult {
  * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
  * ```
  */
+import { withSpan } from "@tanstack/db-tracing"
+
 export function optimizeQuery(query: QueryIR): OptimizationResult {
-  // First, extract collection WHERE clauses before optimization
-  const collectionWhereClauses = extractCollectionWhereClauses(query)
+  return withSpan('optimizeQuery', () => {
+    // First, extract collection WHERE clauses before optimization
+    const collectionWhereClauses = extractCollectionWhereClauses(query)
 
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
@@ -214,6 +217,7 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
     optimizedQuery: cleaned,
     collectionWhereClauses,
   }
+  })
 }
 
 /**

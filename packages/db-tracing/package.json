@@ -1,0 +1,30 @@
+{
+  "name": "@tanstack/db-tracing",
+  "version": "0.0.0",
+  "description": "Tracing utilities for TanStack DB",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "tanstack",
+    "db",
+    "tracing",
+    "opentelemetry",
+    "performance"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

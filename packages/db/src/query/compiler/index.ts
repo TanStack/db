@@ -7,6 +7,7 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
+import { withSpan } from "@tanstack/db-tracing"
 import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
@@ -59,7 +60,8 @@ export function compileQuery(
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
-  // Check if the original raw query has already been compiled
+  return withSpan('compileQuery', () => {
+    // Check if the original raw query has already been compiled
   const cachedResult = cache.get(rawQuery)
   if (cachedResult) {
     return cachedResult
@@ -314,6 +316,7 @@ export function compileQuery(
   cache.set(rawQuery, compilationResult)
 
   return compilationResult
+  })
 }
 
 /**

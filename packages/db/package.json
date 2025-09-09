@@ -4,7 +4,8 @@
   "version": "0.2.0",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db-ivm": "workspace:*"
+    "@tanstack/db-ivm": "workspace:*",
+    "@tanstack/db-tracing": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.0.9",
