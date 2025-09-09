@@ -1,4 +1,15 @@
-import murmurhash from "murmurhash-js"
+/**
+ * Simple assertion function for runtime checks.
+ * Throws an error if the condition is false.
+ */
+export function assert(
+  condition: unknown,
+  message?: string
+): asserts condition {
+  if (!condition) {
+    throw new Error(message || `Assertion failed`)
+  }
+}
 
 /**
  * A map that returns a default value for keys that are not present.
@@ -13,7 +24,8 @@ export class DefaultMap<K, V> extends Map<K, V> {
 
   get(key: K): V {
     if (!this.has(key)) {
-      this.set(key, this.defaultValue())
+      // this.set(key, this.defaultValue())
+      return this.defaultValue()
     }
     return super.get(key)!
   }
@@ -43,52 +55,6 @@ export function chunkedArrayPush(array: Array<unknown>, other: Array<unknown>) {
       array.push(...chunk)
     }
   }
-}
-
-const hashCache = new WeakMap()
-
-/**
- * Replacer function for JSON.stringify that converts unsupported types to strings
- */
-function hashReplacer(_key: string, value: any): any {
-  if (typeof value === `bigint`) {
-    return String(value)
-  } else if (typeof value === `symbol`) {
-    return String(value)
-  } else if (typeof value === `function`) {
-    return String(value)
-  } else if (value === undefined) {
-    return `undefined`
-  } else if (value instanceof Map) {
-    return `Map(${JSON.stringify(Array.from(value.entries()), hashReplacer)})`
-  } else if (value instanceof Set) {
-    return `Set(${JSON.stringify(Array.from(value.values()), hashReplacer)})`
-  }
-  return value
-}
-
-/**
- * A hash method that caches the hash of a value in a week map
- */
-export function hash(data: any): string {
-  if (
-    data === null ||
-    data === undefined ||
-    (typeof data !== `object` && typeof data !== `function`)
-  ) {
-    // Can't be cached in the weak map because it's not an object
-    const serialized = JSON.stringify(data, hashReplacer)
-    return murmurhash.murmur3(serialized).toString(16)
-  }
-
-  if (hashCache.has(data)) {
-    return hashCache.get(data)
-  }
-
-  const serialized = JSON.stringify(data, hashReplacer)
-  const hashValue = murmurhash.murmur3(serialized).toString(16)
-  hashCache.set(data, hashValue)
-  return hashValue
 }
 
 export function binarySearch<T>(
@@ -161,3 +127,20 @@ export class ObjectIdGenerator {
  * Global instance for cases where a shared object ID space is needed.
  */
 export const globalObjectIdGenerator = new ObjectIdGenerator()
+
+export function* concatIterable<T>(
+  ...iterables: Array<Iterable<T>>
+): Iterable<T> {
+  for (const iterable of iterables) {
+    yield* iterable
+  }
+}
+
+export function* mapIterable<T, U>(
+  it: Iterable<T>,
+  fn: (t: T) => U
+): Iterable<U> {
+  for (const t of it) {
+    yield fn(t)
+  }
+}

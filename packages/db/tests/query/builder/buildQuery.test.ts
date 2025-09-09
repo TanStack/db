@@ -67,7 +67,7 @@ describe(`buildQuery function`, () => {
         )
         .select(({ employees, departments }) => ({
           employee_name: employees.name,
-          department_name: departments.name,
+          department_name: departments?.name,
         }))
     )
 

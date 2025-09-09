@@ -80,11 +80,24 @@ export class CollectionSubscriber<
     callback?: () => boolean
   ) {
     const input = this.syncState.inputs[this.collectionId]!
-    sendChangesToInput(input, changes, this.collection.config.getKey)
+    const sentChanges = sendChangesToInput(
+      input,
+      changes,
+      this.collection.config.getKey
+    )
+
+    // Do not provide the callback that loads more data
+    // if there's no more data to load
+    // otherwise we end up in an infinite loop trying to load more data
+    const dataLoader = sentChanges > 0 ? callback : undefined
+
+    // We need to call `maybeRunGraph` even if there's no data to load
+    // because we need to mark the collection as ready if it's not already
+    // and that's only done in `maybeRunGraph`
     this.collectionConfigBuilder.maybeRunGraph(
       this.config,
       this.syncState,
-      callback
+      dataLoader
     )
   }
 
@@ -113,6 +126,7 @@ export class CollectionSubscriber<
           // filter out deletes for keys that have not been sent
           continue
         }
+        this.sentKeys.add(change.key)
       }
       newChanges.push(newChange)
     }
@@ -153,12 +167,29 @@ export class CollectionSubscriber<
   private subscribeToMatchingChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
+    // Flag to indicate we have send to whole initial state of the collection
+    // to the pipeline, this is set when there are no indexes that can be used
+    // to filter the changes and so the whole state was requested from the collection
     let loadedInitialState = false
+
+    // Flag to indicate that we have started sending changes to the pipeline.
+    // This is set to true by either the first call to `loadKeys` or when the
+    // query requests the whole initial state in `loadInitialState`.
+    // Until that point we filter out all changes from subscription to the collection.
+    let sendChanges = false
 
     const sendVisibleChanges = (
       changes: Array<ChangeMessage<any, string | number>>
     ) => {
-      this.sendVisibleChangesToPipeline(changes, loadedInitialState)
+      // We filter out changes when sendChanges is false to ensure that we don't send
+      // any changes from the live subscription until the join operator requests either
+      // the initial state or its first key. This is needed otherwise it could receive
+      // changes which are then later subsumed by the initial state (and that would
+      // lead to weird bugs due to the data being received twice).
+      this.sendVisibleChangesToPipeline(
+        sendChanges ? changes : [],
+        loadedInitialState
+      )
     }
 
     const unsubscribe = this.collection.subscribeChanges(sendVisibleChanges, {
@@ -171,6 +202,7 @@ export class CollectionSubscriber<
       ? createFilterFunctionFromExpression(whereExpression)
       : () => true
     const loadKs = (keys: Set<string | number>) => {
+      sendChanges = true
       return this.loadKeys(keys, filterFn)
     }
 
@@ -183,6 +215,7 @@ export class CollectionSubscriber<
         // Make sure we only load the initial state once
         if (loadedInitialState) return
         loadedInitialState = true
+        sendChanges = true
 
         const changes = this.collection.currentStateAsChanges({
           whereExpression,
@@ -196,7 +229,7 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const { offset, limit, comparator } =
+    const { offset, limit, comparator, dataNeeded } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -212,11 +245,18 @@ export class CollectionSubscriber<
       // and filter out changes that are bigger than the biggest value we've sent so far
       // because they can't affect the topK
       const splittedChanges = splitUpdates(changes)
-      const filteredChanges = filterChangesSmallerOrEqualToMax(
-        splittedChanges,
-        comparator,
-        this.biggest
-      )
+      let filteredChanges = splittedChanges
+      if (dataNeeded!() === 0) {
+        // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
+        // because they can never make it into the topK.
+        // However, if the topK isn't full yet, we need to also send changes > maxSentValue
+        // because they will make it into the topK
+        filteredChanges = filterChangesSmallerOrEqualToMax(
+          splittedChanges,
+          comparator,
+          this.biggest
+        )
+      }
       this.sendChangesToPipeline(
         filteredChanges,
         this.loadMoreIfNeeded.bind(this)
@@ -235,11 +275,19 @@ export class CollectionSubscriber<
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  private loadMoreIfNeeded() {
-    const { dataNeeded } =
+  loadMoreIfNeeded() {
+    const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
-      ]!
+      ]
+
+    if (!orderByInfo) {
+      // This query has no orderBy operator
+      // so there's no data to load, just return true
+      return true
+    }
+
+    const { dataNeeded } = orderByInfo
 
     if (!dataNeeded) {
       // This should never happen because the topK operator should always set the size callback
@@ -252,12 +300,15 @@ export class CollectionSubscriber<
     // `dataNeeded` probes the orderBy operator to see if it needs more data
     // if it needs more data, it returns the number of items it needs
     const n = dataNeeded()
+    let noMoreNextItems = false
     if (n > 0) {
-      this.loadNextItems(n)
+      const loadedItems = this.loadNextItems(n)
+      noMoreNextItems = loadedItems === 0
     }
 
     // Indicate that we're done loading data if we didn't need to load more data
-    return n === 0
+    // or there's no more data to load
+    return n === 0 || noMoreNextItems
   }
 
   private sendChangesToPipelineWithTracking(
@@ -289,6 +340,7 @@ export class CollectionSubscriber<
         return { type: `insert`, key, value: this.collection.get(key) }
       })
     this.sendChangesToPipelineWithTracking(nextInserts)
+    return nextInserts.length
   }
 
   private getWhereClauseFromAlias(
@@ -357,7 +409,7 @@ function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
   changes: Iterable<ChangeMessage>,
   getKey: (item: ChangeMessage[`value`]) => any
-) {
+): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {
     const key = getKey(change.value)
@@ -372,6 +424,7 @@ function sendChangesToInput(
     }
   }
   input.sendData(new MultiSet(multiSetArray))
+  return multiSetArray.length
 }
 
 /** Splits updates into a delete of the old value and an insert of the new value */

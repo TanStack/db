@@ -119,7 +119,7 @@ describe(`Subquery Types`, () => {
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser.name,
+          userName: activeUser?.name,
         }))
 
       // Verify the result type
@@ -148,7 +148,7 @@ describe(`Subquery Types`, () => {
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
-          userName: activeUser.name,
+          userName: activeUser?.name,
         }))
 
       // Verify the result type
@@ -250,7 +250,7 @@ describe(`Subquery Types`, () => {
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
-          userName: activeUser.name,
+          userName: activeUser?.name,
         }))
 
       // Verify the result type
@@ -274,7 +274,7 @@ describe(`Subquery Types`, () => {
         )
         .select(({ issue, user }) => ({
           issueId: issue.id,
-          userName: user.name,
+          userName: user?.name,
         }))
 
       // Verify the result type

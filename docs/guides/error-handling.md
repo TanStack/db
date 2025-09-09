@@ -101,7 +101,7 @@ const todoCollection = createCollection({
 
 // Usage - optimistic update will be rolled back if the mutation fails
 try {
-  const tx = await todoCollection.insert({
+  const tx = todoCollection.insert({
     id: "1",
     text: "New todo",
     completed: false,
@@ -523,6 +523,6 @@ const TodoApp = () => {
 
 ## See Also
 
-- [Mutations Guide](./overview.md#mutations) - Learn about optimistic updates and rollbacks
-- [API Reference](./overview.md#api-reference) - Detailed API documentation
+- [API Reference](../../overview.md#api-reference) - Detailed API documentation
+- [Mutations Guide](../../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
 - [TanStack Query Error Handling](https://tanstack.com/query/latest/docs/react/guides/error-handling) - Query-specific error handling

@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -386,7 +386,7 @@ describe(`Join Subquery Types`, () => {
             )
             .select(({ issue, activeUser }) => ({
               issue_title: issue.title,
-              user_name: activeUser.name, // Should now be string | undefined
+              user_name: activeUser?.name, // Should now be string | undefined
               issue_status: issue.status,
             }))
         },

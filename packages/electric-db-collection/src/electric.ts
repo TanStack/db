@@ -477,18 +477,28 @@ function createElectricSync<T extends Row<unknown>>(
         }
       }
 
-      const { begin, write, commit, markReady, truncate } = params
-
+      const { begin, write, commit, markReady, truncate, collection } = params
+      
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
+          // Note that Electric sends a 409 error on a `must-refetch` message, but the
+          // ShapeStream handled this and it will not reach this handler, therefor
+          // this markReady will not be triggers by a `must-refetch`.
           markReady()
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
+          } else {
+            console.error(
+              `An error occurred while syncing collection: ${collection.id}, \n` +
+                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
+                `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
+              errorParams
+            )
           }
 
           return
@@ -542,9 +552,8 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
-            // Commit the truncate transaction immediately
-            commit()
-            transactionStarted = false
+            // Reset hasUpToDate so we continue accumulating changes until next up-to-date
+            hasUpToDate = false
           }
         }
 

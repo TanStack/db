@@ -1,5 +1,68 @@
 # @tanstack/react-db
 
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies [[`33515c6`](https://github.com/TanStack/db/commit/33515c69befc557add2cf828354ee378100f3977)]:
+  - @tanstack/db@0.2.2
+
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies [[`620ebea`](https://github.com/TanStack/db/commit/620ebea96eb3fbeec66701b949de9920c4084c17)]:
+  - @tanstack/db@0.2.1
+
+## 0.1.13
+
+### Patch Changes
+
+- Updated dependencies [[`08303e6`](https://github.com/TanStack/db/commit/08303e645974db97e10b2aca0031abcbce027dd6), [`bafeaa1`](https://github.com/TanStack/db/commit/bafeaa1e9f161ac2200ce86537e442b2aa8e2a5b), [`1814f8c`](https://github.com/TanStack/db/commit/1814f8cc3c0e831c82f8053b86fbbbd737e4f34b), [`31acdf2`](https://github.com/TanStack/db/commit/31acdf2a96411da327f93f0d30fa78d884422969), [`e41ed7e`](https://github.com/TanStack/db/commit/e41ed7e1ff1d94dd3ce0c48b6321f66b8ea044fd), [`51954d8`](https://github.com/TanStack/db/commit/51954d8c5d64291d136159bce293e0ad00a19f88)]:
+  - @tanstack/db@0.2.0
+
+## 0.1.12
+
+### Patch Changes
+
+- Updated dependencies [[`cc4c34a`](https://github.com/TanStack/db/commit/cc4c34a6b40c81c83aa10c8d00dfc0a3d33c56db)]:
+  - @tanstack/db@0.1.12
+
+## 0.1.11
+
+### Patch Changes
+
+- Updated dependencies [[`b869f68`](https://github.com/TanStack/db/commit/b869f68f0109b3126509f202a38855cee38b4276)]:
+  - @tanstack/db@0.1.11
+
+## 0.1.10
+
+### Patch Changes
+
+- Updated dependencies [[`eb8fd18`](https://github.com/TanStack/db/commit/eb8fd18c50ee03b72cb06e4d7ef25f214367950b), [`e59a355`](https://github.com/TanStack/db/commit/e59a3551e75bac9dd166e14c911d9491e3a67b9a), [`074aab0`](https://github.com/TanStack/db/commit/074aab0477a7c55e9e0f19a705b96ed2619e2afb), [`d469c39`](https://github.com/TanStack/db/commit/d469c39a7bdc034fa4fbc533010573b3515f239f)]:
+  - @tanstack/db@0.1.10
+
+## 0.1.9
+
+### Patch Changes
+
+- Updated dependencies [[`d64b4a8`](https://github.com/TanStack/db/commit/d64b4a8b692a213c7ad58faaf66f5f5fd50bef66)]:
+  - @tanstack/db@0.1.9
+
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [[`1c5e206`](https://github.com/TanStack/db/commit/1c5e206d00d0a99f8419f0d00429b5a3c6cdc76e), [`4d20004`](https://github.com/TanStack/db/commit/4d2000488b9b5abf85c05801633297528af0eff6), [`968602e`](https://github.com/TanStack/db/commit/968602e4ffc597eaa559219daf22d6ef6321162a)]:
+  - @tanstack/db@0.1.8
+
+## 0.1.7
+
+### Patch Changes
+
+- Updated dependencies [[`48d0889`](https://github.com/TanStack/db/commit/48d088996a3f18df026aa7d2d1e7f27d1151345b), [`aecbcc3`](https://github.com/TanStack/db/commit/aecbcc32012561f1645df0bdf89a6c259058d888), [`a937f4c`](https://github.com/TanStack/db/commit/a937f4c7a5f4fc20c255e86692c5e2e80d5ebbec), [`3d60fad`](https://github.com/TanStack/db/commit/3d60fadbb9e8a1b62a9bcde947e282d653a2a270), [`79c95a3`](https://github.com/TanStack/db/commit/79c95a36f60087ffc3f9a02b76975c8bdf40acc7)]:
+  - @tanstack/db@0.1.7
+
 ## 0.1.6
 
 ### Patch Changes
