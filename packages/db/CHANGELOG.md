@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.2.1
+
+### Patch Changes
+
+- export the new `isUndefined` and `isNull` query builder functions ([#515](https://github.com/TanStack/db/pull/515))
+
 ## 0.2.0
 
 ### Minor Changes
