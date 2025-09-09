@@ -590,4 +590,60 @@ describe(`createLiveQueryCollection`, () => {
       expect(result.challenge2?.value).toBe(200)
     })
   }
+
+  it(`should handle updates in live queries with custom getKey correctly`, async () => {
+    // Define a type with temporal values
+    type Task = {
+      id: number
+      name: string
+    }
+
+    const initialTask: Task = {
+      id: 1,
+      name: `Test Task`,
+    }
+
+    // Create a collection with temporal values
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-tasks`,
+        getKey: (task) => `source:${task.id}`,
+        initialData: [initialTask],
+      })
+    )
+
+    // Create a live query collection
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ task: taskCollection }),
+      getKey: (task) => `live:${task.id}`, // return a different key from the source
+    })
+
+    await liveQuery.preload()
+
+    // After initial sync, the live query should see the row with the value
+    expect(liveQuery.size).toBe(1)
+    const initialResult = liveQuery.get(`live:1`)
+    expect(initialResult).toBeDefined()
+    expect(initialResult!.name).toBe(`Test Task`)
+
+    // Simulate backend change
+    const updatedTask: Task = {
+      id: 1,
+      name: `Updated Task`,
+    }
+
+    // Update the task in the collection (simulating backend sync)
+    taskCollection.utils.begin()
+    taskCollection.utils.write({
+      type: `update`,
+      value: updatedTask,
+    })
+    taskCollection.utils.commit()
+
+    // The live query should now contain the new value
+    expect(liveQuery.size).toBe(1)
+    const updatedResult = liveQuery.get(`live:1`)
+    expect(updatedResult).toBeDefined()
+    expect(updatedResult!.name).toBe(`Updated Task`)
+  })
 })
