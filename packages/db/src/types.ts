@@ -44,7 +44,7 @@ type IsUnknownOrNever<T> =
  *
  * @internal This is used for collection insert type inference
  */
-export type ResolveInsertInput<
+export type ResolveInput<
   TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
