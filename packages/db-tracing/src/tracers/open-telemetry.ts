@@ -1,10 +1,11 @@
 import type { Span, Tracer } from "../types.js"
+import type { Span as OtelSpan, Tracer as OtelTracer } from "@opentelemetry/api"
 
 export class OpenTelemetryTracer implements Tracer {
-  constructor(private otelTracer: any) {} // Use any for now to avoid OTEL dependency
+  constructor(private otelTracer: OtelTracer) {}
 
   startSpan(name: string, attributes?: Record<string, any>): Span {
-    const span = this.otelTracer.startSpan(name, attributes)
+    const span: OtelSpan = this.otelTracer.startSpan(name, { attributes })
     return {
       name,
       end: () => span.end(),

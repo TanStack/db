@@ -27,6 +27,7 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
+    "@opentelemetry/api": "^1.0.0",
     "typescript": ">=4.7"
   },
   "author": "Sam Willis",
