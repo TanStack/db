@@ -13,7 +13,12 @@ type ItemOf<T> = T extends Array<infer U> ? U : T
 
 describe(`LocalOnly Collection Types`, () => {
   it(`should have correct return type from localOnlyCollectionOptions`, () => {
-    const options = localOnlyCollectionOptions<TestItem, number>({
+    const options = localOnlyCollectionOptions<
+      TestItem,
+      never,
+      Record<string, unknown>,
+      number
+    >({
       id: `test-local-only`,
       getKey: (item) => item.id,
     })
@@ -32,7 +37,12 @@ describe(`LocalOnly Collection Types`, () => {
   })
 
   it(`should be compatible with createCollection`, () => {
-    const options = localOnlyCollectionOptions<TestItem, number>({
+    const options = localOnlyCollectionOptions<
+      TestItem,
+      never,
+      Record<string, unknown>,
+      number
+    >({
       id: `test-local-only`,
       getKey: (item) => item.id,
     })
