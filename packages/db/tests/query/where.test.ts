@@ -11,8 +11,8 @@ import {
   gt,
   gte,
   inArray,
-  isNotNull,
-  isNotUndefined,
+  isNull,
+  isUndefined,
   length,
   like,
   lower,
@@ -1440,7 +1440,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
-                hasAddress: isNotNull(emp.contact?.address),
+                hasAddress: not(isNull(emp.contact?.address)),
               })),
         })
 
@@ -1455,7 +1455,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => isNotUndefined(emp.profile))
+              .where(({ emp }) => not(isUndefined(emp.profile)))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -1528,7 +1528,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => isNotUndefined(emp.contact?.emergency))
+              .where(({ emp }) => not(isUndefined(emp.contact?.emergency)))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -1617,7 +1617,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => isNotUndefined(emp.profile?.skills))
+              .where(({ emp }) => not(isUndefined(emp.profile?.skills)))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,

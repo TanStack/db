@@ -5,8 +5,9 @@ import { createLiveQueryCollection } from "../../src/query/live-query-collection
 import {
   eq,
   gt,
-  isNotUndefined,
+  isUndefined,
   max,
+  not,
 } from "../../src/query/builder/functions.js"
 
 type Person = {
@@ -1709,7 +1710,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .where(({ persons }) => isNotUndefined(persons.address))
+            .where(({ persons }) => not(isUndefined(persons.address)))
             .orderBy(({ persons }) => persons.address?.coordinates.lat, `asc`)
             .select(({ persons }) => ({
               id: persons.id,

@@ -9,10 +9,11 @@ import {
   eq,
   gt,
   gte,
-  isNotUndefined,
+  isUndefined,
   lt,
   max,
   min,
+  not,
   or,
   sum,
 } from "../../src/query/builder/functions.js"
@@ -1097,7 +1098,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => isNotUndefined(orders.customer))
+              .where(({ orders }) => not(isUndefined(orders.customer)))
               .groupBy(({ orders }) => orders.customer?.tier)
               .select(({ orders }) => ({
                 tier: orders.customer?.tier,
@@ -1127,7 +1128,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => isNotUndefined(orders.customer?.address))
+              .where(({ orders }) => not(isUndefined(orders.customer?.address)))
               .groupBy(({ orders }) => orders.customer?.address.state)
               .select(({ orders }) => ({
                 state: orders.customer?.address.state,
@@ -1156,7 +1157,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => isNotUndefined(orders.shipping))
+              .where(({ orders }) => not(isUndefined(orders.shipping)))
               .groupBy(({ orders }) => orders.shipping?.method)
               .select(({ orders }) => ({
                 method: orders.shipping?.method,
@@ -1191,8 +1192,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .from({ orders: ordersCollection })
               .where(({ orders }) =>
                 and(
-                  isNotUndefined(orders.customer),
-                  isNotUndefined(orders.shipping)
+                  not(isUndefined(orders.customer)),
+                  not(isUndefined(orders.shipping))
                 )
               )
               .groupBy(({ orders }) => orders.customer?.tier)
@@ -1231,7 +1232,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) =>
-                isNotUndefined(orders.customer?.preferences)
+                not(isUndefined(orders.customer?.preferences))
               )
               .groupBy(({ orders }) => orders.customer?.preferences.newsletter)
               .select(({ orders }) => ({
@@ -1267,10 +1268,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .groupBy(({ orders }) =>
-                isNotUndefined(orders.shipping?.tracking)
+                not(isUndefined(orders.shipping?.tracking))
               )
               .select(({ orders }) => ({
-                tracking_status: isNotUndefined(orders.shipping?.tracking),
+                tracking_status: not(isUndefined(orders.shipping?.tracking)),
                 order_count: count(orders.id),
                 total_amount: sum(orders.amount),
               })),
@@ -1295,7 +1296,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ orders: ordersCollection })
-              .where(({ orders }) => isNotUndefined(orders.customer))
+              .where(({ orders }) => not(isUndefined(orders.customer)))
               .groupBy(({ orders }) => orders.customer?.tier)
               .select(({ orders }) => ({
                 tier: orders.customer?.tier,

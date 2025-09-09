@@ -230,18 +230,8 @@ export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`isUndefined`, [toExpression(value)])
 }
 
-export function isNotUndefined(
-  value: ExpressionLike
-): BasicExpression<boolean> {
-  return new Func(`isNotUndefined`, [toExpression(value)])
-}
-
 export function isNull(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(`isNull`, [toExpression(value)])
-}
-
-export function isNotNull(value: ExpressionLike): BasicExpression<boolean> {
-  return new Func(`isNotNull`, [toExpression(value)])
 }
 
 export function inArray(
