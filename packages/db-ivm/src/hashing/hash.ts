@@ -54,7 +54,7 @@ function hashObject(input: object): number {
     }
 
     if (
-      input instanceof Buffer ||
+      (typeof Buffer !== `undefined` && input instanceof Buffer) ||
       input instanceof Uint8Array ||
       input instanceof File
     ) {
