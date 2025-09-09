@@ -28,6 +28,11 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
+type IsNever<T> = [T] extends [never] ? true : false
+type IsUnknown<T> = unknown extends T ? true : false
+type IsUnknownOrNever<T> =
+  IsNever<T> extends true ? true : IsUnknown<T> extends true ? true : false
+
 /**
  * Helper type to determine the insert input type
  * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
@@ -43,12 +48,9 @@ export type ResolveInsertInput<
   TExplicit = unknown,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? TFallback
-    : InferSchemaInput<TSchema>
-  : [TExplicit] extends [never]
-    ? [TSchema] extends [never]
+> =
+  IsUnknownOrNever<TExplicit> extends true
+    ? IsUnknownOrNever<TSchema> extends true
       ? TFallback
       : InferSchemaInput<TSchema>
     : TExplicit extends object
@@ -69,12 +71,9 @@ export type ResolveType<
   TExplicit,
   TSchema extends StandardSchemaV1 = never,
   TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? TFallback
-    : InferSchemaOutput<TSchema>
-  : [TExplicit] extends [never]
-    ? [TSchema] extends [never]
+> =
+  IsUnknownOrNever<TExplicit> extends true
+    ? IsUnknownOrNever<TSchema> extends true
       ? TFallback
       : InferSchemaOutput<TSchema>
     : TExplicit extends object
