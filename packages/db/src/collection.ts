@@ -279,22 +279,23 @@ export function createCollection<
 }
 
 export class CollectionImpl<
-  T extends object = Record<string, unknown>,
+  TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+  TInput extends object = TOutput,
 > {
-  public config: CollectionConfig<T, TKey, TSchema, TInsertInput>
+  public config: CollectionConfig<TOutput, TKey, TSchema, TInput>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
-  public pendingSyncedTransactions: Array<PendingSyncedTransaction<T>> = []
-  public syncedData: Map<TKey, T> | SortedMap<TKey, T>
+  public pendingSyncedTransactions: Array<PendingSyncedTransaction<TOutput>> =
+    []
+  public syncedData: Map<TKey, TOutput> | SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
-  public optimisticUpserts = new Map<TKey, T>()
+  public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
 
   // Cached size for performance
@@ -307,8 +308,11 @@ export class CollectionImpl<
   private indexCounter = 0
 
   // Event system
-  private changeListeners = new Set<ChangeListener<T, TKey>>()
-  private changeKeyListeners = new Map<TKey, Set<ChangeListener<T, TKey>>>()
+  private changeListeners = new Set<ChangeListener<TOutput, TKey>>()
+  private changeKeyListeners = new Map<
+    TKey,
+    Set<ChangeListener<TOutput, TKey>>
+  >()
 
   // Utilities namespace
   // This is populated by createCollection
@@ -316,7 +320,7 @@ export class CollectionImpl<
 
   // State used for computing the change events
   private syncedKeys = new Set<TKey>()
-  private preSyncVisibleState = new Map<TKey, T>()
+  private preSyncVisibleState = new Map<TKey, TOutput>()
   private recentlySyncedKeys = new Set<TKey>()
   private hasReceivedFirstCommit = false
   private isCommittingSyncTransactions = false
@@ -326,7 +330,7 @@ export class CollectionImpl<
   private hasBeenReady = false
 
   // Event batching for preventing duplicate emissions during transaction flows
-  private batchedEvents: Array<ChangeMessage<T, TKey>> = []
+  private batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   private shouldBatchEvents = false
 
   // Lifecycle management
@@ -481,7 +485,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<T, TKey, TSchema, TInsertInput>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema, TInput>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
@@ -509,9 +513,9 @@ export class CollectionImpl<
 
     // Set up data storage with optional comparison function
     if (this.config.compare) {
-      this.syncedData = new SortedMap<TKey, T>(this.config.compare)
+      this.syncedData = new SortedMap<TKey, TOutput>(this.config.compare)
     } else {
-      this.syncedData = new Map<TKey, T>()
+      this.syncedData = new Map<TKey, TOutput>()
     }
 
     // Only start sync immediately if explicitly enabled
@@ -549,7 +553,7 @@ export class CollectionImpl<
             deletedKeys: new Set(),
           })
         },
-        write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
+        write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
           const pendingTransaction =
             this.pendingSyncedTransactions[
               this.pendingSyncedTransactions.length - 1
@@ -578,7 +582,7 @@ export class CollectionImpl<
             }
           }
 
-          const message: ChangeMessage<T> = {
+          const message: ChangeMessage<TOutput> = {
             ...messageWithoutKey,
             key,
           }
@@ -831,7 +835,10 @@ export class CollectionImpl<
           switch (mutation.type) {
             case `insert`:
             case `update`:
-              this.optimisticUpserts.set(mutation.key, mutation.modified as T)
+              this.optimisticUpserts.set(
+                mutation.key,
+                mutation.modified as TOutput
+              )
               this.optimisticDeletes.delete(mutation.key)
               break
             case `delete`:
@@ -847,7 +854,7 @@ export class CollectionImpl<
     this._size = this.calculateSize()
 
     // Collect events for changes
-    const events: Array<ChangeMessage<T, TKey>> = []
+    const events: Array<ChangeMessage<TOutput, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
     // Filter out events for recently synced keys to prevent duplicates
@@ -934,9 +941,9 @@ export class CollectionImpl<
    * Collect events for optimistic changes
    */
   private collectOptimisticChanges(
-    previousUpserts: Map<TKey, T>,
+    previousUpserts: Map<TKey, TOutput>,
     previousDeletes: Set<TKey>,
-    events: Array<ChangeMessage<T, TKey>>
+    events: Array<ChangeMessage<TOutput, TKey>>
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -977,9 +984,9 @@ export class CollectionImpl<
    */
   private getPreviousValue(
     key: TKey,
-    previousUpserts: Map<TKey, T>,
+    previousUpserts: Map<TKey, TOutput>,
     previousDeletes: Set<TKey>
-  ): T | undefined {
+  ): TOutput | undefined {
     if (previousDeletes.has(key)) {
       return undefined
     }
@@ -1010,7 +1017,7 @@ export class CollectionImpl<
    * Emit events either immediately or batch them for later emission
    */
   private emitEvents(
-    changes: Array<ChangeMessage<T, TKey>>,
+    changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false
   ): void {
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
@@ -1040,7 +1047,7 @@ export class CollectionImpl<
     // Emit to key-specific listeners
     if (this.changeKeyListeners.size > 0) {
       // Group changes by key, but only for keys that have listeners
-      const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+      const changesByKey = new Map<TKey, Array<ChangeMessage<TOutput, TKey>>>()
       for (const change of eventsToEmit) {
         if (this.changeKeyListeners.has(change.key)) {
           if (!changesByKey.has(change.key)) {
@@ -1063,7 +1070,7 @@ export class CollectionImpl<
   /**
    * Get the current value for a key (virtual derived state)
    */
-  public get(key: TKey): T | undefined {
+  public get(key: TKey): TOutput | undefined {
     // Check if optimistically deleted
     if (this.optimisticDeletes.has(key)) {
       return undefined
@@ -1126,7 +1133,7 @@ export class CollectionImpl<
   /**
    * Get all values (virtual derived state)
    */
-  public *values(): IterableIterator<T> {
+  public *values(): IterableIterator<TOutput> {
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
@@ -1138,7 +1145,7 @@ export class CollectionImpl<
   /**
    * Get all entries (virtual derived state)
    */
-  public *entries(): IterableIterator<[TKey, T]> {
+  public *entries(): IterableIterator<[TKey, TOutput]> {
     for (const key of this.keys()) {
       const value = this.get(key)
       if (value !== undefined) {
@@ -1150,7 +1157,7 @@ export class CollectionImpl<
   /**
    * Get all entries (virtual derived state)
    */
-  public *[Symbol.iterator](): IterableIterator<[TKey, T]> {
+  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
     for (const [key, value] of this.entries()) {
       yield [key, value]
     }
@@ -1160,7 +1167,7 @@ export class CollectionImpl<
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: T, key: TKey, index: number) => void
+    callbackfn: (value: TOutput, key: TKey, index: number) => void
   ): void {
     let index = 0
     for (const [key, value] of this.entries()) {
@@ -1172,7 +1179,7 @@ export class CollectionImpl<
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: T, key: TKey, index: number) => U
+    callbackfn: (value: TOutput, key: TKey, index: number) => U
   ): Array<U> {
     const result: Array<U> = []
     let index = 0
@@ -1215,8 +1222,12 @@ export class CollectionImpl<
         return acc
       },
       {
-        committedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
-        uncommittedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
+        committedSyncedTransactions: [] as Array<
+          PendingSyncedTransaction<TOutput>
+        >,
+        uncommittedSyncedTransactions: [] as Array<
+          PendingSyncedTransaction<TOutput>
+        >,
         hasTruncateSync: false,
       }
     )
@@ -1238,7 +1249,7 @@ export class CollectionImpl<
       let currentVisibleState = this.preSyncVisibleState
       if (currentVisibleState.size === 0) {
         // No pre-captured state, capture it now for pure sync operations
-        currentVisibleState = new Map<TKey, T>()
+        currentVisibleState = new Map<TKey, TOutput>()
         for (const key of changedKeys) {
           const currentValue = this.get(key)
           if (currentValue !== undefined) {
@@ -1247,7 +1258,7 @@ export class CollectionImpl<
         }
       }
 
-      const events: Array<ChangeMessage<T, TKey>> = []
+      const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
       for (const transaction of committedSyncedTransactions) {
@@ -1346,7 +1357,7 @@ export class CollectionImpl<
 
         // Build re-apply sets from ACTIVE optimistic transactions against the new synced base
         // We do not copy maps; we compute intent directly from transactions to avoid drift.
-        const reapplyUpserts = new Map<TKey, T>()
+        const reapplyUpserts = new Map<TKey, TOutput>()
         const reapplyDeletes = new Set<TKey>()
 
         for (const tx of this.transactions.values()) {
@@ -1356,14 +1367,14 @@ export class CollectionImpl<
             const key = mutation.key as TKey
             switch (mutation.type) {
               case `insert`:
-                reapplyUpserts.set(key, mutation.modified as T)
+                reapplyUpserts.set(key, mutation.modified as TOutput)
                 reapplyDeletes.delete(key)
                 break
               case `update`: {
                 const base = this.syncedData.get(key)
                 const next = base
-                  ? (Object.assign({}, base, mutation.changes) as T)
-                  : (mutation.modified as T)
+                  ? (Object.assign({}, base, mutation.changes) as TOutput)
+                  : (mutation.modified as TOutput)
                 reapplyUpserts.set(key, next)
                 reapplyDeletes.delete(key)
                 break
@@ -1401,7 +1412,7 @@ export class CollectionImpl<
 
         // Finally, ensure we do NOT insert keys that have an outstanding optimistic delete.
         if (events.length > 0 && reapplyDeletes.size > 0) {
-          const filtered: Array<ChangeMessage<T, TKey>> = []
+          const filtered: Array<ChangeMessage<TOutput, TKey>> = []
           for (const evt of events) {
             if (evt.type === `insert` && reapplyDeletes.has(evt.key)) {
               continue
@@ -1435,7 +1446,7 @@ export class CollectionImpl<
                 case `update`:
                   this.optimisticUpserts.set(
                     mutation.key,
-                    mutation.modified as T
+                    mutation.modified as TOutput
                   )
                   this.optimisticDeletes.delete(mutation.key)
                   break
@@ -1566,16 +1577,16 @@ export class CollectionImpl<
       })
   }
 
-  private ensureStandardSchema(schema: unknown): StandardSchema<T> {
+  private ensureStandardSchema(schema: unknown): StandardSchema<TOutput> {
     // If the schema already implements the standard-schema interface, return it
     if (schema && `~standard` in (schema as {})) {
-      return schema as StandardSchema<T>
+      return schema as StandardSchema<TOutput>
     }
 
     throw new InvalidSchemaError()
   }
 
-  public getKeyFromItem(item: T): TKey {
+  public getKeyFromItem(item: TOutput): TKey {
     return this.config.getKey(item)
   }
 
@@ -1618,13 +1629,13 @@ export class CollectionImpl<
    * })
    */
   public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
-    indexCallback: (row: SingleRowRefProxy<T>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
     this.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
-    const singleRowRefProxy = createSingleRowRefProxy<T>()
+    const singleRowRefProxy = createSingleRowRefProxy<TOutput>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
@@ -1720,7 +1731,7 @@ export class CollectionImpl<
    * Updates all indexes when the collection changes
    * @private
    */
-  private updateIndexes(changes: Array<ChangeMessage<T, TKey>>): void {
+  private updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
     for (const index of this.resolvedIndexes.values()) {
       for (const change of changes) {
         switch (change.type) {
@@ -1746,8 +1757,8 @@ export class CollectionImpl<
     data: unknown,
     type: `insert` | `update`,
     key?: TKey
-  ): T | never {
-    if (!this.config.schema) return data as T
+  ): TOutput | never {
+    if (!this.config.schema) return data as TOutput
 
     const standardSchema = this.ensureStandardSchema(this.config.schema)
 
@@ -1782,9 +1793,14 @@ export class CollectionImpl<
           throw new SchemaValidationError(type, typedIssues)
         }
 
-        // Return the original update data, not the merged data
-        // We only used the merged data for validation
-        return data as T
+        // Extract only the modified keys from the validated result
+        const validatedMergedData = result.value as TOutput
+        const modifiedKeys = Object.keys(data)
+        const extractedChanges = Object.fromEntries(
+          modifiedKeys.map((k) => [k, validatedMergedData[k as keyof TOutput]])
+        ) as TOutput
+
+        return extractedChanges
       }
     }
 
@@ -1805,7 +1821,7 @@ export class CollectionImpl<
       throw new SchemaValidationError(type, typedIssues)
     }
 
-    return result.value as T
+    return result.value as TOutput
   }
 
   /**
@@ -1844,10 +1860,7 @@ export class CollectionImpl<
    *   console.log('Insert failed:', error)
    * }
    */
-  insert = (
-    data: TInsertInput | Array<TInsertInput>,
-    config?: InsertConfig
-  ) => {
+  insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
     this.validateCollectionUsable(`insert`)
     const ambientTransaction = getActiveTransaction()
 
@@ -1857,7 +1870,7 @@ export class CollectionImpl<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T>> = []
+    const mutations: Array<PendingMutation<TOutput>> = []
 
     // Create mutations for each item
     items.forEach((item) => {
@@ -1871,7 +1884,7 @@ export class CollectionImpl<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T, `insert`> = {
+      const mutation: PendingMutation<TOutput, `insert`> = {
         mutationId: crypto.randomUUID(),
         original: {},
         modified: validatedData,
@@ -1883,7 +1896,7 @@ export class CollectionImpl<
             k,
             validatedData[k as keyof typeof validatedData],
           ])
-        ) as TInsertInput,
+        ) as TInput,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
@@ -1909,16 +1922,16 @@ export class CollectionImpl<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = createTransaction<T>({
+      const directOpTransaction = createTransaction<TOutput>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
-                TInsertInput,
+                TInput,
                 `insert`
               >,
-            collection: this as unknown as Collection<T, TKey, TUtils>,
+            collection: this as unknown as Collection<TOutput, TKey, TUtils>,
           })
         },
       })
@@ -1977,37 +1990,40 @@ export class CollectionImpl<
    */
 
   // Overload 1: Update multiple items with a callback
-  update<TItem extends object = T>(
+  update(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<WritableDeep<TItem>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
-  update<TItem extends object = T>(
+  update(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<WritableDeep<TItem>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
-  update<TItem extends object = T>(
+  update(
     id: TKey | unknown,
-    callback: (draft: WritableDeep<TItem>) => void
+    callback: (draft: WritableDeep<TInput>) => void
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
-  update<TItem extends object = T>(
+  update(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: WritableDeep<TItem>) => void
+    callback: (draft: WritableDeep<TInput>) => void
   ): TransactionType
 
-  update<TItem extends object = T>(
+  update(
     keys: (TKey | unknown) | Array<TKey | unknown>,
     configOrCallback:
-      | ((draft: WritableDeep<TItem> | Array<WritableDeep<TItem>>) => void)
+      | ((draft: WritableDeep<TInput>) => void)
+      | ((drafts: Array<WritableDeep<TInput>>) => void)
       | OperationConfig,
-    maybeCallback?: (draft: TItem | Array<TItem>) => void
+    maybeCallback?:
+      | ((draft: WritableDeep<TInput>) => void)
+      | ((drafts: Array<WritableDeep<TInput>>) => void)
   ) {
     if (typeof keys === `undefined`) {
       throw new MissingUpdateArgumentError()
@@ -2042,25 +2058,25 @@ export class CollectionImpl<
       }
 
       return item
-    }) as unknown as Array<TItem>
+    }) as unknown as Array<TInput>
 
     let changesArray
     if (isArray) {
       // Use the proxy to track changes for all objects
       changesArray = withArrayChangeTracking(
         currentObjects,
-        callback as (draft: Array<TItem>) => void
+        callback as (draft: Array<TInput>) => void
       )
     } else {
       const result = withChangeTracking(
         currentObjects[0]!,
-        callback as (draft: TItem) => void
+        callback as (draft: TInput) => void
       )
       changesArray = [result]
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T, `update`, this>> = keysArray
+    const mutations: Array<PendingMutation<TOutput, `update`, this>> = keysArray
       .map((key, index) => {
         const itemChanges = changesArray[index] // User-provided changes for this specific item
 
@@ -2069,7 +2085,7 @@ export class CollectionImpl<
           return null
         }
 
-        const originalItem = currentObjects[index] as unknown as T
+        const originalItem = currentObjects[index] as unknown as TOutput
         // Validate the user-provided changes for this item
         const validatedUpdatePayload = this.validateData(
           itemChanges,
@@ -2098,7 +2114,16 @@ export class CollectionImpl<
           mutationId: crypto.randomUUID(),
           original: originalItem,
           modified: modifiedItem,
-          changes: validatedUpdatePayload as Partial<T>,
+          // Pick the values from modifiedItem based on what's passed in - this is for cases
+          // where a schema has default values or transforms. The modified data has the extra
+          // default or transformed values but for changes, we just want to show the data that
+          // was actually passed in.
+          changes: Object.fromEntries(
+            Object.keys(itemChanges).map((k) => [
+              k,
+              modifiedItem[k as keyof typeof modifiedItem],
+            ])
+          ) as TInput,
           globalKey,
           key,
           metadata: config.metadata as unknown,
@@ -2113,7 +2138,7 @@ export class CollectionImpl<
           collection: this,
         }
       })
-      .filter(Boolean) as Array<PendingMutation<T, `update`, this>>
+      .filter(Boolean) as Array<PendingMutation<TOutput, `update`, this>>
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
@@ -2140,16 +2165,16 @@ export class CollectionImpl<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = createTransaction<T>({
+    const directOpTransaction = createTransaction<TOutput>({
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
           transaction:
             params.transaction as unknown as TransactionWithMutations<
-              T,
+              TOutput,
               `update`
             >,
-          collection: this as unknown as Collection<T, TKey, TUtils>,
+          collection: this as unknown as Collection<TOutput, TKey, TUtils>,
         })
       },
     })
@@ -2215,14 +2240,14 @@ export class CollectionImpl<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T, `delete`, this>> = []
+    const mutations: Array<PendingMutation<TOutput, `delete`, this>> = []
 
     for (const key of keysArray) {
       if (!this.has(key)) {
         throw new DeleteKeyNotFoundError(key)
       }
       const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T, `delete`, this> = {
+      const mutation: PendingMutation<TOutput, `delete`, this> = {
         mutationId: crypto.randomUUID(),
         original: this.get(key)!,
         modified: this.get(key)!,
@@ -2256,17 +2281,17 @@ export class CollectionImpl<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = createTransaction<T>({
+    const directOpTransaction = createTransaction<TOutput>({
       autoCommit: true,
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
           transaction:
             params.transaction as unknown as TransactionWithMutations<
-              T,
+              TOutput,
               `delete`
             >,
-          collection: this as unknown as Collection<T, TKey, TUtils>,
+          collection: this as unknown as Collection<TOutput, TKey, TUtils>,
         })
       },
     })
@@ -2299,7 +2324,7 @@ export class CollectionImpl<
    * }
    */
   get state() {
-    const result = new Map<TKey, T>()
+    const result = new Map<TKey, TOutput>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
     }
@@ -2312,14 +2337,14 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
-  stateWhenReady(): Promise<Map<TKey, T>> {
+  stateWhenReady(): Promise<Map<TKey, TOutput>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
     }
 
     // Otherwise, wait for the collection to be ready
-    return new Promise<Map<TKey, T>>((resolve) => {
+    return new Promise<Map<TKey, TOutput>>((resolve) => {
       this.onFirstReady(() => {
         resolve(this.state)
       })
@@ -2341,14 +2366,14 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
-  toArrayWhenReady(): Promise<Array<T>> {
+  toArrayWhenReady(): Promise<Array<TOutput>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
     }
 
     // Otherwise, wait for the collection to be ready
-    return new Promise<Array<T>>((resolve) => {
+    return new Promise<Array<TOutput>>((resolve) => {
       this.onFirstReady(() => {
         resolve(this.toArray)
       })
@@ -2374,8 +2399,8 @@ export class CollectionImpl<
    * })
    */
   public currentStateAsChanges(
-    options: CurrentStateAsChangesOptions<T> = {}
-  ): Array<ChangeMessage<T>> {
+    options: CurrentStateAsChangesOptions<TOutput> = {}
+  ): Array<ChangeMessage<TOutput>> {
     return currentStateAsChanges(this, options)
   }
 
@@ -2419,8 +2444,8 @@ export class CollectionImpl<
    * })
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<T>>) => void,
-    options: SubscribeChangesOptions<T> = {}
+    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
+    options: SubscribeChangesOptions<TOutput> = {}
   ): () => void {
     // Start sync and track subscriber
     this.addSubscriber()
@@ -2459,7 +2484,7 @@ export class CollectionImpl<
    */
   public subscribeChangesKey(
     key: TKey,
-    listener: ChangeListener<T, TKey>,
+    listener: ChangeListener<TOutput, TKey>,
     { includeInitialState = false }: { includeInitialState?: boolean } = {}
   ): () => void {
     // Start sync and track subscriber
