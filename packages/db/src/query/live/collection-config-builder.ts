@@ -275,7 +275,7 @@ export class CollectionConfigBuilder<
       inserts > deletes ||
       // Just update(s) but the item is already in the collection (so
       // was inserted previously).
-      (inserts === deletes && collection.has(key as string | number))
+      (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
     ) {
       write({
         value,
