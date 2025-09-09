@@ -592,7 +592,6 @@ describe(`createLiveQueryCollection`, () => {
   }
 
   it(`should handle updates in live queries with custom getKey correctly`, async () => {
-    // Define a type with temporal values
     type Task = {
       id: number
       name: string
@@ -603,7 +602,6 @@ describe(`createLiveQueryCollection`, () => {
       name: `Test Task`,
     }
 
-    // Create a collection with temporal values
     const taskCollection = createCollection(
       mockSyncCollectionOptions<Task>({
         id: `test-tasks`,
@@ -612,7 +610,6 @@ describe(`createLiveQueryCollection`, () => {
       })
     )
 
-    // Create a live query collection
     const liveQuery = createLiveQueryCollection({
       query: (q) => q.from({ task: taskCollection }),
       getKey: (task) => `live:${task.id}`, // return a different key from the source
