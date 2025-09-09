@@ -1,3 +1,4 @@
+import { withSpan } from "@tanstack/db-tracing"
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
 import { deepEquals } from "./utils"
 import { SortedMap } from "./SortedMap"
@@ -9,7 +10,6 @@ import { BTreeIndex } from "./indexes/btree-index.js"
 import { IndexProxy, LazyIndexWrapper } from "./indexes/lazy-index.js"
 import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { createTransaction, getActiveTransaction } from "./transactions"
-import { withSpan } from "@tanstack/db-tracing"
 import {
   CollectionInErrorStateError,
   CollectionIsInErrorStateError,
@@ -804,117 +804,128 @@ export class CollectionImpl<
   private recomputeOptimisticState(
     triggeredByUserAction: boolean = false
   ): void {
-    return withSpan('collection.recomputeOptimisticState', () => {
-      // Skip redundant recalculations when we're in the middle of committing sync transactions
-    if (this.isCommittingSyncTransactions) {
-      return
-    }
+    return withSpan(
+      `collection.recomputeOptimisticState`,
+      () => {
+        // Skip redundant recalculations when we're in the middle of committing sync transactions
+        if (this.isCommittingSyncTransactions) {
+          return
+        }
 
-    const previousState = new Map(this.optimisticUpserts)
-    const previousDeletes = new Set(this.optimisticDeletes)
+        const previousState = new Map(this.optimisticUpserts)
+        const previousDeletes = new Set(this.optimisticDeletes)
 
-    // Clear current optimistic state
-    this.optimisticUpserts.clear()
-    this.optimisticDeletes.clear()
+        // Clear current optimistic state
+        this.optimisticUpserts.clear()
+        this.optimisticDeletes.clear()
 
-    const activeTransactions: Array<Transaction<any>> = []
+        const activeTransactions: Array<Transaction<any>> = []
 
-    for (const transaction of this.transactions.values()) {
-      if (![`completed`, `failed`].includes(transaction.state)) {
-        activeTransactions.push(transaction)
-      }
-    }
-
-    // Apply active transactions only (completed transactions are handled by sync operations)
-    for (const transaction of activeTransactions) {
-      for (const mutation of transaction.mutations) {
-        if (mutation.collection === this && mutation.optimistic) {
-          switch (mutation.type) {
-            case `insert`:
-            case `update`:
-              this.optimisticUpserts.set(mutation.key, mutation.modified as T)
-              this.optimisticDeletes.delete(mutation.key)
-              break
-            case `delete`:
-              this.optimisticUpserts.delete(mutation.key)
-              this.optimisticDeletes.add(mutation.key)
-              break
+        for (const transaction of this.transactions.values()) {
+          if (![`completed`, `failed`].includes(transaction.state)) {
+            activeTransactions.push(transaction)
           }
         }
-      }
-    }
 
-    // Update cached size
-    this._size = this.calculateSize()
-
-    // Collect events for changes
-    const events: Array<ChangeMessage<T, TKey>> = []
-    this.collectOptimisticChanges(previousState, previousDeletes, events)
-
-    // Filter out events for recently synced keys to prevent duplicates
-    // BUT: Only filter out events that are actually from sync operations
-    // New user transactions should NOT be filtered even if the key was recently synced
-    const filteredEventsBySyncStatus = events.filter((event) => {
-      if (!this.recentlySyncedKeys.has(event.key)) {
-        return true // Key not recently synced, allow event through
-      }
-
-      // Key was recently synced - allow if this is a user-triggered action
-      if (triggeredByUserAction) {
-        return true
-      }
-
-      // Otherwise filter out duplicate sync events
-      return false
-    })
-
-    // Filter out redundant delete events if there are pending sync transactions
-    // that will immediately restore the same data, but only for completed transactions
-    // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
-    if (this.pendingSyncedTransactions.length > 0 && !triggeredByUserAction) {
-      const pendingSyncKeys = new Set<TKey>()
-
-      // Collect keys from pending sync operations
-      for (const transaction of this.pendingSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          pendingSyncKeys.add(operation.key as TKey)
-        }
-      }
-
-      // Only filter out delete events for keys that:
-      // 1. Have pending sync operations AND
-      // 2. Are from completed transactions (being cleaned up)
-      const filteredEvents = filteredEventsBySyncStatus.filter((event) => {
-        if (event.type === `delete` && pendingSyncKeys.has(event.key)) {
-          // Check if this delete is from clearing optimistic state of completed transactions
-          // We can infer this by checking if we have no remaining optimistic mutations for this key
-          const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
-            tx.mutations.some(
-              (m) => m.collection === this && m.key === event.key
-            )
-          )
-
-          if (!hasActiveOptimisticMutation) {
-            return false // Skip this delete event as sync will restore the data
+        // Apply active transactions only (completed transactions are handled by sync operations)
+        for (const transaction of activeTransactions) {
+          for (const mutation of transaction.mutations) {
+            if (mutation.collection === this && mutation.optimistic) {
+              switch (mutation.type) {
+                case `insert`:
+                case `update`:
+                  this.optimisticUpserts.set(
+                    mutation.key,
+                    mutation.modified as T
+                  )
+                  this.optimisticDeletes.delete(mutation.key)
+                  break
+                case `delete`:
+                  this.optimisticUpserts.delete(mutation.key)
+                  this.optimisticDeletes.add(mutation.key)
+                  break
+              }
+            }
           }
         }
-        return true
-      })
 
-      // Update indexes for the filtered events
-      if (filteredEvents.length > 0) {
-        this.updateIndexes(filteredEvents)
-      }
-      this.emitEvents(filteredEvents, triggeredByUserAction)
-    } else {
-      // Update indexes for all events
-      if (filteredEventsBySyncStatus.length > 0) {
-        this.updateIndexes(filteredEventsBySyncStatus)
-      }
-      // Emit all events if no pending sync transactions
-      this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
-    }
-    }, { collectionId: this.id, operation: 'recomputeOptimisticState' })
+        // Update cached size
+        this._size = this.calculateSize()
+
+        // Collect events for changes
+        const events: Array<ChangeMessage<T, TKey>> = []
+        this.collectOptimisticChanges(previousState, previousDeletes, events)
+
+        // Filter out events for recently synced keys to prevent duplicates
+        // BUT: Only filter out events that are actually from sync operations
+        // New user transactions should NOT be filtered even if the key was recently synced
+        const filteredEventsBySyncStatus = events.filter((event) => {
+          if (!this.recentlySyncedKeys.has(event.key)) {
+            return true // Key not recently synced, allow event through
+          }
+
+          // Key was recently synced - allow if this is a user-triggered action
+          if (triggeredByUserAction) {
+            return true
+          }
+
+          // Otherwise filter out duplicate sync events
+          return false
+        })
+
+        // Filter out redundant delete events if there are pending sync transactions
+        // that will immediately restore the same data, but only for completed transactions
+        // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
+        if (
+          this.pendingSyncedTransactions.length > 0 &&
+          !triggeredByUserAction
+        ) {
+          const pendingSyncKeys = new Set<TKey>()
+
+          // Collect keys from pending sync operations
+          for (const transaction of this.pendingSyncedTransactions) {
+            for (const operation of transaction.operations) {
+              pendingSyncKeys.add(operation.key as TKey)
+            }
+          }
+
+          // Only filter out delete events for keys that:
+          // 1. Have pending sync operations AND
+          // 2. Are from completed transactions (being cleaned up)
+          const filteredEvents = filteredEventsBySyncStatus.filter((event) => {
+            if (event.type === `delete` && pendingSyncKeys.has(event.key)) {
+              // Check if this delete is from clearing optimistic state of completed transactions
+              // We can infer this by checking if we have no remaining optimistic mutations for this key
+              const hasActiveOptimisticMutation = activeTransactions.some(
+                (tx) =>
+                  tx.mutations.some(
+                    (m) => m.collection === this && m.key === event.key
+                  )
+              )
+
+              if (!hasActiveOptimisticMutation) {
+                return false // Skip this delete event as sync will restore the data
+              }
+            }
+            return true
+          })
+
+          // Update indexes for the filtered events
+          if (filteredEvents.length > 0) {
+            this.updateIndexes(filteredEvents)
+          }
+          this.emitEvents(filteredEvents, triggeredByUserAction)
+        } else {
+          // Update indexes for all events
+          if (filteredEventsBySyncStatus.length > 0) {
+            this.updateIndexes(filteredEventsBySyncStatus)
+          }
+          // Emit all events if no pending sync transactions
+          this.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
+        }
+      },
+      { collectionId: this.id, operation: `recomputeOptimisticState` }
+    )
   }
 
   /**
@@ -940,39 +951,47 @@ export class CollectionImpl<
     previousDeletes: Set<TKey>,
     events: Array<ChangeMessage<T, TKey>>
   ): void {
-    return withSpan('collection.collectOptimisticChanges', () => {
-      const allKeys = new Set([
-      ...previousUpserts.keys(),
-      ...this.optimisticUpserts.keys(),
-      ...previousDeletes,
-      ...this.optimisticDeletes,
-    ])
+    return withSpan(
+      `collection.collectOptimisticChanges`,
+      () => {
+        const allKeys = new Set([
+          ...previousUpserts.keys(),
+          ...this.optimisticUpserts.keys(),
+          ...previousDeletes,
+          ...this.optimisticDeletes,
+        ])
 
-    for (const key of allKeys) {
-      const currentValue = this.get(key)
-      const previousValue = this.getPreviousValue(
-        key,
-        previousUpserts,
-        previousDeletes
-      )
+        for (const key of allKeys) {
+          const currentValue = this.get(key)
+          const previousValue = this.getPreviousValue(
+            key,
+            previousUpserts,
+            previousDeletes
+          )
 
-      if (previousValue !== undefined && currentValue === undefined) {
-        events.push({ type: `delete`, key, value: previousValue })
-      } else if (previousValue === undefined && currentValue !== undefined) {
-        events.push({ type: `insert`, key, value: currentValue })
-      } else if (
-        previousValue !== undefined &&
-        currentValue !== undefined &&
-        previousValue !== currentValue
-      ) {
-        events.push({
-          type: `update`,
-          key,
-          value: currentValue,
-          previousValue,
-        })
-      }
-    }
+          if (previousValue !== undefined && currentValue === undefined) {
+            events.push({ type: `delete`, key, value: previousValue })
+          } else if (
+            previousValue === undefined &&
+            currentValue !== undefined
+          ) {
+            events.push({ type: `insert`, key, value: currentValue })
+          } else if (
+            previousValue !== undefined &&
+            currentValue !== undefined &&
+            previousValue !== currentValue
+          ) {
+            events.push({
+              type: `update`,
+              key,
+              value: currentValue,
+              previousValue,
+            })
+          }
+        }
+      },
+      { collectionId: this.id, operation: `collectOptimisticChanges` }
+    )
   }
 
   /**
@@ -1007,7 +1026,6 @@ export class CollectionImpl<
         listener([])
       }
     }
-    }, { collectionId: this.id, operation: 'collectOptimisticChanges' })
   }
 
   /**
@@ -1017,53 +1035,57 @@ export class CollectionImpl<
     changes: Array<ChangeMessage<T, TKey>>,
     forceEmit = false
   ): void {
-    return withSpan('collection.emitEvents', () => {
-      // Skip batching for user actions (forceEmit=true) to keep UI responsive
-    if (this.shouldBatchEvents && !forceEmit) {
-      // Add events to the batch
-      this.batchedEvents.push(...changes)
-      return
-    }
+    return withSpan(
+      `collection.emitEvents`,
+      () => {
+        // Skip batching for user actions (forceEmit=true) to keep UI responsive
+        if (this.shouldBatchEvents && !forceEmit) {
+          // Add events to the batch
+          this.batchedEvents.push(...changes)
+          return
+        }
 
-    // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
-    let eventsToEmit = changes
+        // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
+        let eventsToEmit = changes
 
-    // If we have batched events and this is a forced emit, combine them
-    if (this.batchedEvents.length > 0 && forceEmit) {
-      eventsToEmit = [...this.batchedEvents, ...changes]
-      this.batchedEvents = []
-      this.shouldBatchEvents = false
-    }
+        // If we have batched events and this is a forced emit, combine them
+        if (this.batchedEvents.length > 0 && forceEmit) {
+          eventsToEmit = [...this.batchedEvents, ...changes]
+          this.batchedEvents = []
+          this.shouldBatchEvents = false
+        }
 
-    if (eventsToEmit.length === 0) return
+        if (eventsToEmit.length === 0) return
 
-    // Emit to all listeners
-    for (const listener of this.changeListeners) {
-      listener(eventsToEmit)
-    }
+        // Emit to all listeners
+        for (const listener of this.changeListeners) {
+          listener(eventsToEmit)
+        }
 
-    // Emit to key-specific listeners
-    if (this.changeKeyListeners.size > 0) {
-      // Group changes by key, but only for keys that have listeners
-      const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
-      for (const change of eventsToEmit) {
-        if (this.changeKeyListeners.has(change.key)) {
-          if (!changesByKey.has(change.key)) {
-            changesByKey.set(change.key, [])
+        // Emit to key-specific listeners
+        if (this.changeKeyListeners.size > 0) {
+          // Group changes by key, but only for keys that have listeners
+          const changesByKey = new Map<TKey, Array<ChangeMessage<T, TKey>>>()
+          for (const change of eventsToEmit) {
+            if (this.changeKeyListeners.has(change.key)) {
+              if (!changesByKey.has(change.key)) {
+                changesByKey.set(change.key, [])
+              }
+              changesByKey.get(change.key)!.push(change)
+            }
           }
-          changesByKey.get(change.key)!.push(change)
-        }
-      }
 
-      // Emit batched changes to each key's listeners
-      for (const [key, keyChanges] of changesByKey) {
-        const keyListeners = this.changeKeyListeners.get(key)!
-        for (const listener of keyListeners) {
-          listener(keyChanges)
+          // Emit batched changes to each key's listeners
+          for (const [key, keyChanges] of changesByKey) {
+            const keyListeners = this.changeKeyListeners.get(key)!
+            for (const listener of keyListeners) {
+              listener(keyChanges)
+            }
+          }
         }
-      }
-    }
-    }, { collectionId: this.id, operation: 'emitEvents' })
+      },
+      { collectionId: this.id, operation: `emitEvents` }
+    )
   }
 
   /**
@@ -1193,354 +1215,366 @@ export class CollectionImpl<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
-    return withSpan('collection.commitPendingTransactions', () => {
-      // Check if there are any persisting transaction
-    let hasPersistingTransaction = false
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `persisting`) {
-        hasPersistingTransaction = true
-        break
-      }
-    }
-
-    // pending synced transactions could be either `committed` or still open.
-    // we only want to process `committed` transactions here
-    const {
-      committedSyncedTransactions,
-      uncommittedSyncedTransactions,
-      hasTruncateSync,
-    } = this.pendingSyncedTransactions.reduce(
-      (acc, t) => {
-        if (t.committed) {
-          acc.committedSyncedTransactions.push(t)
-          if (t.truncate === true) {
-            acc.hasTruncateSync = true
-          }
-        } else {
-          acc.uncommittedSyncedTransactions.push(t)
-        }
-        return acc
-      },
-      {
-        committedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
-        uncommittedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
-        hasTruncateSync: false,
-      }
-    )
-
-    if (!hasPersistingTransaction || hasTruncateSync) {
-      // Set flag to prevent redundant optimistic state recalculations
-      this.isCommittingSyncTransactions = true
-
-      // First collect all keys that will be affected by sync operations
-      const changedKeys = new Set<TKey>()
-      for (const transaction of committedSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
-        }
-      }
-
-      // Use pre-captured state if available (from optimistic scenarios),
-      // otherwise capture current state (for pure sync scenarios)
-      let currentVisibleState = this.preSyncVisibleState
-      if (currentVisibleState.size === 0) {
-        // No pre-captured state, capture it now for pure sync operations
-        currentVisibleState = new Map<TKey, T>()
-        for (const key of changedKeys) {
-          const currentValue = this.get(key)
-          if (currentValue !== undefined) {
-            currentVisibleState.set(key, currentValue)
+    return withSpan(
+      `collection.commitPendingTransactions`,
+      () => {
+        // Check if there are any persisting transaction
+        let hasPersistingTransaction = false
+        for (const transaction of this.transactions.values()) {
+          if (transaction.state === `persisting`) {
+            hasPersistingTransaction = true
+            break
           }
         }
-      }
 
-      const events: Array<ChangeMessage<T, TKey>> = []
-      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
-
-      for (const transaction of committedSyncedTransactions) {
-        // Handle truncate operations first
-        if (transaction.truncate) {
-          // TRUNCATE PHASE
-          // 1) Emit a delete for every currently-synced key so downstream listeners/indexes
-          //    observe a clear-before-rebuild. We intentionally skip keys already in
-          //    optimisticDeletes because their delete was previously emitted by the user.
-          for (const key of this.syncedData.keys()) {
-            if (this.optimisticDeletes.has(key)) continue
-            const previousValue =
-              this.optimisticUpserts.get(key) || this.syncedData.get(key)
-            if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
-            }
-          }
-
-          // 2) Clear the authoritative synced base. Subsequent server ops in this
-          //    same commit will rebuild the base atomically.
-          this.syncedData.clear()
-          this.syncedMetadata.clear()
-          this.syncedKeys.clear()
-        }
-
-        for (const operation of transaction.operations) {
-          const key = operation.key as TKey
-          this.syncedKeys.add(key)
-
-          // Update metadata
-          switch (operation.type) {
-            case `insert`:
-              this.syncedMetadata.set(key, operation.metadata)
-              break
-            case `update`:
-              this.syncedMetadata.set(
-                key,
-                Object.assign(
-                  {},
-                  this.syncedMetadata.get(key),
-                  operation.metadata
-                )
-              )
-              break
-            case `delete`:
-              this.syncedMetadata.delete(key)
-              break
-          }
-
-          // Update synced data
-          switch (operation.type) {
-            case `insert`:
-              this.syncedData.set(key, operation.value)
-              break
-            case `update`: {
-              if (rowUpdateMode === `partial`) {
-                const updatedValue = Object.assign(
-                  {},
-                  this.syncedData.get(key),
-                  operation.value
-                )
-                this.syncedData.set(key, updatedValue)
-              } else {
-                this.syncedData.set(key, operation.value)
+        // pending synced transactions could be either `committed` or still open.
+        // we only want to process `committed` transactions here
+        const {
+          committedSyncedTransactions,
+          uncommittedSyncedTransactions,
+          hasTruncateSync,
+        } = this.pendingSyncedTransactions.reduce(
+          (acc, t) => {
+            if (t.committed) {
+              acc.committedSyncedTransactions.push(t)
+              if (t.truncate === true) {
+                acc.hasTruncateSync = true
               }
-              break
+            } else {
+              acc.uncommittedSyncedTransactions.push(t)
             }
-            case `delete`:
-              this.syncedData.delete(key)
-              break
+            return acc
+          },
+          {
+            committedSyncedTransactions: [] as Array<
+              PendingSyncedTransaction<T>
+            >,
+            uncommittedSyncedTransactions: [] as Array<
+              PendingSyncedTransaction<T>
+            >,
+            hasTruncateSync: false,
           }
-        }
-      }
+        )
 
-      // After applying synced operations, if this commit included a truncate,
-      // re-apply optimistic mutations on top of the fresh synced base. This ensures
-      // the UI preserves local intent while respecting server rebuild semantics.
-      // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      if (hasTruncateSync) {
-        // Avoid duplicating keys that were inserted/updated by synced operations in this commit
-        const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of committedSyncedTransactions) {
-          for (const op of t.operations) {
-            if (op.type === `insert` || op.type === `update`) {
-              syncedInsertedOrUpdatedKeys.add(op.key as TKey)
-            }
-          }
-        }
+        if (!hasPersistingTransaction || hasTruncateSync) {
+          // Set flag to prevent redundant optimistic state recalculations
+          this.isCommittingSyncTransactions = true
 
-        // Build re-apply sets from ACTIVE optimistic transactions against the new synced base
-        // We do not copy maps; we compute intent directly from transactions to avoid drift.
-        const reapplyUpserts = new Map<TKey, T>()
-        const reapplyDeletes = new Set<TKey>()
-
-        for (const tx of this.transactions.values()) {
-          if ([`completed`, `failed`].includes(tx.state)) continue
-          for (const mutation of tx.mutations) {
-            if (mutation.collection !== this || !mutation.optimistic) continue
-            const key = mutation.key as TKey
-            switch (mutation.type) {
-              case `insert`:
-                reapplyUpserts.set(key, mutation.modified as T)
-                reapplyDeletes.delete(key)
-                break
-              case `update`: {
-                const base = this.syncedData.get(key)
-                const next = base
-                  ? (Object.assign({}, base, mutation.changes) as T)
-                  : (mutation.modified as T)
-                reapplyUpserts.set(key, next)
-                reapplyDeletes.delete(key)
-                break
-              }
-              case `delete`:
-                reapplyUpserts.delete(key)
-                reapplyDeletes.add(key)
-                break
+          // First collect all keys that will be affected by sync operations
+          const changedKeys = new Set<TKey>()
+          for (const transaction of committedSyncedTransactions) {
+            for (const operation of transaction.operations) {
+              changedKeys.add(operation.key as TKey)
             }
           }
-        }
 
-        // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
-        // If the server also inserted/updated the same key in this batch, override that value
-        // with the optimistic value to preserve local intent.
-        for (const [key, value] of reapplyUpserts) {
-          if (reapplyDeletes.has(key)) continue
-          if (syncedInsertedOrUpdatedKeys.has(key)) {
-            let foundInsert = false
-            for (let i = events.length - 1; i >= 0; i--) {
-              const evt = events[i]!
-              if (evt.key === key && evt.type === `insert`) {
-                evt.value = value
-                foundInsert = true
-                break
+          // Use pre-captured state if available (from optimistic scenarios),
+          // otherwise capture current state (for pure sync scenarios)
+          let currentVisibleState = this.preSyncVisibleState
+          if (currentVisibleState.size === 0) {
+            // No pre-captured state, capture it now for pure sync operations
+            currentVisibleState = new Map<TKey, T>()
+            for (const key of changedKeys) {
+              const currentValue = this.get(key)
+              if (currentValue !== undefined) {
+                currentVisibleState.set(key, currentValue)
               }
             }
-            if (!foundInsert) {
-              events.push({ type: `insert`, key, value })
-            }
-          } else {
-            events.push({ type: `insert`, key, value })
           }
-        }
 
-        // Finally, ensure we do NOT insert keys that have an outstanding optimistic delete.
-        if (events.length > 0 && reapplyDeletes.size > 0) {
-          const filtered: Array<ChangeMessage<T, TKey>> = []
-          for (const evt of events) {
-            if (evt.type === `insert` && reapplyDeletes.has(evt.key)) {
-              continue
+          const events: Array<ChangeMessage<T, TKey>> = []
+          const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+          for (const transaction of committedSyncedTransactions) {
+            // Handle truncate operations first
+            if (transaction.truncate) {
+              // TRUNCATE PHASE
+              // 1) Emit a delete for every currently-synced key so downstream listeners/indexes
+              //    observe a clear-before-rebuild. We intentionally skip keys already in
+              //    optimisticDeletes because their delete was previously emitted by the user.
+              for (const key of this.syncedData.keys()) {
+                if (this.optimisticDeletes.has(key)) continue
+                const previousValue =
+                  this.optimisticUpserts.get(key) || this.syncedData.get(key)
+                if (previousValue !== undefined) {
+                  events.push({ type: `delete`, key, value: previousValue })
+                }
+              }
+
+              // 2) Clear the authoritative synced base. Subsequent server ops in this
+              //    same commit will rebuild the base atomically.
+              this.syncedData.clear()
+              this.syncedMetadata.clear()
+              this.syncedKeys.clear()
             }
-            filtered.push(evt)
-          }
-          events.length = 0
-          events.push(...filtered)
-        }
 
-        // Ensure listeners are active before emitting this critical batch
-        if (!this.isReady()) {
-          this.setStatus(`ready`)
-        }
-      }
+            for (const operation of transaction.operations) {
+              const key = operation.key as TKey
+              this.syncedKeys.add(key)
 
-      // Maintain optimistic state appropriately
-      // Clear optimistic state since sync operations will now provide the authoritative data.
-      // Any still-active user transactions will be re-applied below in recompute.
-      this.optimisticUpserts.clear()
-      this.optimisticDeletes.clear()
-
-      // Reset flag and recompute optimistic state for any remaining active transactions
-      this.isCommittingSyncTransactions = false
-      for (const transaction of this.transactions.values()) {
-        if (![`completed`, `failed`].includes(transaction.state)) {
-          for (const mutation of transaction.mutations) {
-            if (mutation.collection === this && mutation.optimistic) {
-              switch (mutation.type) {
+              // Update metadata
+              switch (operation.type) {
                 case `insert`:
+                  this.syncedMetadata.set(key, operation.metadata)
+                  break
                 case `update`:
-                  this.optimisticUpserts.set(
-                    mutation.key,
-                    mutation.modified as T
+                  this.syncedMetadata.set(
+                    key,
+                    Object.assign(
+                      {},
+                      this.syncedMetadata.get(key),
+                      operation.metadata
+                    )
                   )
-                  this.optimisticDeletes.delete(mutation.key)
                   break
                 case `delete`:
-                  this.optimisticUpserts.delete(mutation.key)
-                  this.optimisticDeletes.add(mutation.key)
+                  this.syncedMetadata.delete(key)
+                  break
+              }
+
+              // Update synced data
+              switch (operation.type) {
+                case `insert`:
+                  this.syncedData.set(key, operation.value)
+                  break
+                case `update`: {
+                  if (rowUpdateMode === `partial`) {
+                    const updatedValue = Object.assign(
+                      {},
+                      this.syncedData.get(key),
+                      operation.value
+                    )
+                    this.syncedData.set(key, updatedValue)
+                  } else {
+                    this.syncedData.set(key, operation.value)
+                  }
+                  break
+                }
+                case `delete`:
+                  this.syncedData.delete(key)
                   break
               }
             }
           }
-        }
-      }
 
-      // Check for redundant sync operations that match completed optimistic operations
-      const completedOptimisticOps = new Map<TKey, any>()
+          // After applying synced operations, if this commit included a truncate,
+          // re-apply optimistic mutations on top of the fresh synced base. This ensures
+          // the UI preserves local intent while respecting server rebuild semantics.
+          // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
+          if (hasTruncateSync) {
+            // Avoid duplicating keys that were inserted/updated by synced operations in this commit
+            const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+            for (const t of committedSyncedTransactions) {
+              for (const op of t.operations) {
+                if (op.type === `insert` || op.type === `update`) {
+                  syncedInsertedOrUpdatedKeys.add(op.key as TKey)
+                }
+              }
+            }
 
-      for (const transaction of this.transactions.values()) {
-        if (transaction.state === `completed`) {
-          for (const mutation of transaction.mutations) {
-            if (mutation.collection === this && changedKeys.has(mutation.key)) {
-              completedOptimisticOps.set(mutation.key, {
-                type: mutation.type,
-                value: mutation.modified,
-              })
+            // Build re-apply sets from ACTIVE optimistic transactions against the new synced base
+            // We do not copy maps; we compute intent directly from transactions to avoid drift.
+            const reapplyUpserts = new Map<TKey, T>()
+            const reapplyDeletes = new Set<TKey>()
+
+            for (const tx of this.transactions.values()) {
+              if ([`completed`, `failed`].includes(tx.state)) continue
+              for (const mutation of tx.mutations) {
+                if (mutation.collection !== this || !mutation.optimistic)
+                  continue
+                const key = mutation.key as TKey
+                switch (mutation.type) {
+                  case `insert`:
+                    reapplyUpserts.set(key, mutation.modified as T)
+                    reapplyDeletes.delete(key)
+                    break
+                  case `update`: {
+                    const base = this.syncedData.get(key)
+                    const next = base
+                      ? (Object.assign({}, base, mutation.changes) as T)
+                      : (mutation.modified as T)
+                    reapplyUpserts.set(key, next)
+                    reapplyDeletes.delete(key)
+                    break
+                  }
+                  case `delete`:
+                    reapplyUpserts.delete(key)
+                    reapplyDeletes.add(key)
+                    break
+                }
+              }
+            }
+
+            // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
+            // If the server also inserted/updated the same key in this batch, override that value
+            // with the optimistic value to preserve local intent.
+            for (const [key, value] of reapplyUpserts) {
+              if (reapplyDeletes.has(key)) continue
+              if (syncedInsertedOrUpdatedKeys.has(key)) {
+                let foundInsert = false
+                for (let i = events.length - 1; i >= 0; i--) {
+                  const evt = events[i]!
+                  if (evt.key === key && evt.type === `insert`) {
+                    evt.value = value
+                    foundInsert = true
+                    break
+                  }
+                }
+                if (!foundInsert) {
+                  events.push({ type: `insert`, key, value })
+                }
+              } else {
+                events.push({ type: `insert`, key, value })
+              }
+            }
+
+            // Finally, ensure we do NOT insert keys that have an outstanding optimistic delete.
+            if (events.length > 0 && reapplyDeletes.size > 0) {
+              const filtered: Array<ChangeMessage<T, TKey>> = []
+              for (const evt of events) {
+                if (evt.type === `insert` && reapplyDeletes.has(evt.key)) {
+                  continue
+                }
+                filtered.push(evt)
+              }
+              events.length = 0
+              events.push(...filtered)
+            }
+
+            // Ensure listeners are active before emitting this critical batch
+            if (!this.isReady()) {
+              this.setStatus(`ready`)
             }
           }
-        }
-      }
 
-      // Now check what actually changed in the final visible state
-      for (const key of changedKeys) {
-        const previousVisibleValue = currentVisibleState.get(key)
-        const newVisibleValue = this.get(key) // This returns the new derived state
+          // Maintain optimistic state appropriately
+          // Clear optimistic state since sync operations will now provide the authoritative data.
+          // Any still-active user transactions will be re-applied below in recompute.
+          this.optimisticUpserts.clear()
+          this.optimisticDeletes.clear()
 
-        // Check if this sync operation is redundant with a completed optimistic operation
-        const completedOp = completedOptimisticOps.get(key)
-        const isRedundantSync =
-          completedOp &&
-          newVisibleValue !== undefined &&
-          deepEquals(completedOp.value, newVisibleValue)
+          // Reset flag and recompute optimistic state for any remaining active transactions
+          this.isCommittingSyncTransactions = false
+          for (const transaction of this.transactions.values()) {
+            if (![`completed`, `failed`].includes(transaction.state)) {
+              for (const mutation of transaction.mutations) {
+                if (mutation.collection === this && mutation.optimistic) {
+                  switch (mutation.type) {
+                    case `insert`:
+                    case `update`:
+                      this.optimisticUpserts.set(
+                        mutation.key,
+                        mutation.modified as T
+                      )
+                      this.optimisticDeletes.delete(mutation.key)
+                      break
+                    case `delete`:
+                      this.optimisticUpserts.delete(mutation.key)
+                      this.optimisticDeletes.add(mutation.key)
+                      break
+                  }
+                }
+              }
+            }
+          }
 
-        if (!isRedundantSync) {
-          if (
-            previousVisibleValue === undefined &&
-            newVisibleValue !== undefined
-          ) {
-            events.push({
-              type: `insert`,
-              key,
-              value: newVisibleValue,
-            })
-          } else if (
-            previousVisibleValue !== undefined &&
-            newVisibleValue === undefined
-          ) {
-            events.push({
-              type: `delete`,
-              key,
-              value: previousVisibleValue,
-            })
-          } else if (
-            previousVisibleValue !== undefined &&
-            newVisibleValue !== undefined &&
-            !deepEquals(previousVisibleValue, newVisibleValue)
-          ) {
-            events.push({
-              type: `update`,
-              key,
-              value: newVisibleValue,
-              previousValue: previousVisibleValue,
-            })
+          // Check for redundant sync operations that match completed optimistic operations
+          const completedOptimisticOps = new Map<TKey, any>()
+
+          for (const transaction of this.transactions.values()) {
+            if (transaction.state === `completed`) {
+              for (const mutation of transaction.mutations) {
+                if (
+                  mutation.collection === this &&
+                  changedKeys.has(mutation.key)
+                ) {
+                  completedOptimisticOps.set(mutation.key, {
+                    type: mutation.type,
+                    value: mutation.modified,
+                  })
+                }
+              }
+            }
+          }
+
+          // Now check what actually changed in the final visible state
+          for (const key of changedKeys) {
+            const previousVisibleValue = currentVisibleState.get(key)
+            const newVisibleValue = this.get(key) // This returns the new derived state
+
+            // Check if this sync operation is redundant with a completed optimistic operation
+            const completedOp = completedOptimisticOps.get(key)
+            const isRedundantSync =
+              completedOp &&
+              newVisibleValue !== undefined &&
+              deepEquals(completedOp.value, newVisibleValue)
+
+            if (!isRedundantSync) {
+              if (
+                previousVisibleValue === undefined &&
+                newVisibleValue !== undefined
+              ) {
+                events.push({
+                  type: `insert`,
+                  key,
+                  value: newVisibleValue,
+                })
+              } else if (
+                previousVisibleValue !== undefined &&
+                newVisibleValue === undefined
+              ) {
+                events.push({
+                  type: `delete`,
+                  key,
+                  value: previousVisibleValue,
+                })
+              } else if (
+                previousVisibleValue !== undefined &&
+                newVisibleValue !== undefined &&
+                !deepEquals(previousVisibleValue, newVisibleValue)
+              ) {
+                events.push({
+                  type: `update`,
+                  key,
+                  value: newVisibleValue,
+                  previousValue: previousVisibleValue,
+                })
+              }
+            }
+          }
+
+          // Update cached size after synced data changes
+          this._size = this.calculateSize()
+
+          // Update indexes for all events before emitting
+          if (events.length > 0) {
+            this.updateIndexes(events)
+          }
+
+          // End batching and emit all events (combines any batched events with sync events)
+          this.emitEvents(events, true)
+
+          this.pendingSyncedTransactions = uncommittedSyncedTransactions
+
+          // Clear the pre-sync state since sync operations are complete
+          this.preSyncVisibleState.clear()
+
+          // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
+          Promise.resolve().then(() => {
+            this.recentlySyncedKeys.clear()
+          })
+
+          // Call any registered one-time commit listeners
+          if (!this.hasReceivedFirstCommit) {
+            this.hasReceivedFirstCommit = true
+            const callbacks = [...this.onFirstReadyCallbacks]
+            this.onFirstReadyCallbacks = []
+            callbacks.forEach((callback) => callback())
           }
         }
-      }
-
-      // Update cached size after synced data changes
-      this._size = this.calculateSize()
-
-      // Update indexes for all events before emitting
-      if (events.length > 0) {
-        this.updateIndexes(events)
-      }
-
-      // End batching and emit all events (combines any batched events with sync events)
-      this.emitEvents(events, true)
-
-      this.pendingSyncedTransactions = uncommittedSyncedTransactions
-
-      // Clear the pre-sync state since sync operations are complete
-      this.preSyncVisibleState.clear()
-
-      // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
-      Promise.resolve().then(() => {
-        this.recentlySyncedKeys.clear()
-      })
-
-      // Call any registered one-time commit listeners
-      if (!this.hasReceivedFirstCommit) {
-        this.hasReceivedFirstCommit = true
-        const callbacks = [...this.onFirstReadyCallbacks]
-        this.onFirstReadyCallbacks = []
-        callbacks.forEach((callback) => callback())
-      }
-    }
-    }, { collectionId: this.id, operation: 'commitPendingTransactions' })
+      },
+      { collectionId: this.id, operation: `commitPendingTransactions` }
+    )
   }
 
   /**
@@ -1622,57 +1656,62 @@ export class CollectionImpl<
     indexCallback: (row: SingleRowRefProxy<T>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
-    return withSpan('collection.createIndex', () => {
-      this.validateCollectionUsable(`createIndex`)
+    return withSpan(
+      `collection.createIndex`,
+      () => {
+        this.validateCollectionUsable(`createIndex`)
 
-    const indexId = ++this.indexCounter
-    const singleRowRefProxy = createSingleRowRefProxy<T>()
-    const indexExpression = indexCallback(singleRowRefProxy)
-    const expression = toExpression(indexExpression)
+        const indexId = ++this.indexCounter
+        const singleRowRefProxy = createSingleRowRefProxy<T>()
+        const indexExpression = indexCallback(singleRowRefProxy)
+        const expression = toExpression(indexExpression)
 
-    // Default to BTreeIndex if no type specified
-    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
+        // Default to BTreeIndex if no type specified
+        const resolver =
+          config.indexType ?? (BTreeIndex as unknown as TResolver)
 
-    // Create lazy wrapper
-    const lazyIndex = new LazyIndexWrapper<TKey>(
-      indexId,
-      expression,
-      config.name,
-      resolver,
-      config.options,
-      this.entries()
+        // Create lazy wrapper
+        const lazyIndex = new LazyIndexWrapper<TKey>(
+          indexId,
+          expression,
+          config.name,
+          resolver,
+          config.options,
+          this.entries()
+        )
+
+        this.lazyIndexes.set(indexId, lazyIndex)
+
+        // For BTreeIndex, resolve immediately and synchronously
+        if ((resolver as unknown) === BTreeIndex) {
+          try {
+            const resolvedIndex = lazyIndex.getResolved()
+            this.resolvedIndexes.set(indexId, resolvedIndex)
+          } catch (error) {
+            console.warn(`Failed to resolve BTreeIndex:`, error)
+          }
+        } else if (typeof resolver === `function` && resolver.prototype) {
+          // Other synchronous constructors - resolve immediately
+          try {
+            const resolvedIndex = lazyIndex.getResolved()
+            this.resolvedIndexes.set(indexId, resolvedIndex)
+          } catch {
+            // Fallback to async resolution
+            this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+              console.warn(`Failed to resolve single index:`, error)
+            })
+          }
+        } else if (this.isIndexesResolved) {
+          // Async loader but indexes are already resolved - resolve this one
+          this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+            console.warn(`Failed to resolve single index:`, error)
+          })
+        }
+
+        return new IndexProxy(indexId, lazyIndex)
+      },
+      { collectionId: this.id, operation: `createIndex` }
     )
-
-    this.lazyIndexes.set(indexId, lazyIndex)
-
-    // For BTreeIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === BTreeIndex) {
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch (error) {
-        console.warn(`Failed to resolve BTreeIndex:`, error)
-      }
-    } else if (typeof resolver === `function` && resolver.prototype) {
-      // Other synchronous constructors - resolve immediately
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch {
-        // Fallback to async resolution
-        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-          console.warn(`Failed to resolve single index:`, error)
-        })
-      }
-    } else if (this.isIndexesResolved) {
-      // Async loader but indexes are already resolved - resolve this one
-      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-        console.warn(`Failed to resolve single index:`, error)
-      })
-    }
-
-    return new IndexProxy(indexId, lazyIndex)
-    }, { collectionId: this.id, operation: 'createIndex' })
   }
 
   /**
@@ -1851,94 +1890,102 @@ export class CollectionImpl<
     data: TInsertInput | Array<TInsertInput>,
     config?: InsertConfig
   ) => {
-    return withSpan('collection.insert', () => {
-      this.validateCollectionUsable(`insert`)
-      const ambientTransaction = getActiveTransaction()
+    return withSpan(
+      `collection.insert`,
+      () => {
+        this.validateCollectionUsable(`insert`)
+        const ambientTransaction = getActiveTransaction()
 
-    // If no ambient transaction exists, check for an onInsert handler early
-    if (!ambientTransaction && !this.config.onInsert) {
-      throw new MissingInsertHandlerError()
-    }
+        // If no ambient transaction exists, check for an onInsert handler early
+        if (!ambientTransaction && !this.config.onInsert) {
+          throw new MissingInsertHandlerError()
+        }
 
-    const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<T>> = []
+        const items = Array.isArray(data) ? data : [data]
+        const mutations: Array<PendingMutation<T>> = []
 
-    // Create mutations for each item
-    items.forEach((item) => {
-      // Validate the data against the schema if one exists
-      const validatedData = this.validateData(item, `insert`)
+        // Create mutations for each item
+        items.forEach((item) => {
+          // Validate the data against the schema if one exists
+          const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection
-      const key = this.getKeyFromItem(validatedData)
-      if (this.has(key)) {
-        throw new DuplicateKeyError(key)
-      }
-      const globalKey = this.generateGlobalKey(key, item)
+          // Check if an item with this ID already exists in the collection
+          const key = this.getKeyFromItem(validatedData)
+          if (this.has(key)) {
+            throw new DuplicateKeyError(key)
+          }
+          const globalKey = this.generateGlobalKey(key, item)
 
-      const mutation: PendingMutation<T, `insert`> = {
-        mutationId: crypto.randomUUID(),
-        original: {},
-        modified: validatedData,
-        // Pick the values from validatedData based on what's passed in - this is for cases
-        // where a schema has default values. The validated data has the extra default
-        // values but for changes, we just want to show the data that was actually passed in.
-        changes: Object.fromEntries(
-          Object.keys(item).map((k) => [
-            k,
-            validatedData[k as keyof typeof validatedData],
-          ])
-        ) as TInsertInput,
-        globalKey,
-        key,
-        metadata: config?.metadata as unknown,
-        syncMetadata: this.config.sync.getSyncMetadata?.() || {},
-        optimistic: config?.optimistic ?? true,
-        type: `insert`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        collection: this,
-      }
+          const mutation: PendingMutation<T, `insert`> = {
+            mutationId: crypto.randomUUID(),
+            original: {},
+            modified: validatedData,
+            // Pick the values from validatedData based on what's passed in - this is for cases
+            // where a schema has default values. The validated data has the extra default
+            // values but for changes, we just want to show the data that was actually passed in.
+            changes: Object.fromEntries(
+              Object.keys(item).map((k) => [
+                k,
+                validatedData[k as keyof typeof validatedData],
+              ])
+            ) as TInsertInput,
+            globalKey,
+            key,
+            metadata: config?.metadata as unknown,
+            syncMetadata: this.config.sync.getSyncMetadata?.() || {},
+            optimistic: config?.optimistic ?? true,
+            type: `insert`,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            collection: this,
+          }
 
-      mutations.push(mutation)
-    })
+          mutations.push(mutation)
+        })
 
-    // If an ambient transaction exists, use it
-    if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
+        // If an ambient transaction exists, use it
+        if (ambientTransaction) {
+          ambientTransaction.applyMutations(mutations)
 
-      this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.scheduleTransactionCleanup(ambientTransaction)
-      this.recomputeOptimisticState(true)
+          this.transactions.set(ambientTransaction.id, ambientTransaction)
+          this.scheduleTransactionCleanup(ambientTransaction)
+          this.recomputeOptimisticState(true)
 
-      return ambientTransaction
-    } else {
-      // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = createTransaction<T>({
-        mutationFn: async (params) => {
-          // Call the onInsert handler with the transaction and collection
-          return await this.config.onInsert!({
-            transaction:
-              params.transaction as unknown as TransactionWithMutations<
-                TInsertInput,
-                `insert`
-              >,
-            collection: this as unknown as Collection<T, TKey, TUtils>,
+          return ambientTransaction
+        } else {
+          // Create a new transaction with a mutation function that calls the onInsert handler
+          const directOpTransaction = createTransaction<T>({
+            mutationFn: async (params) => {
+              // Call the onInsert handler with the transaction and collection
+              return await this.config.onInsert!({
+                transaction:
+                  params.transaction as unknown as TransactionWithMutations<
+                    TInsertInput,
+                    `insert`
+                  >,
+                collection: this as unknown as Collection<
+                  TInsertInput,
+                  TKey,
+                  TUtils
+                >,
+              })
+            },
           })
-        },
-      })
 
-      // Apply mutations to the new transaction
-      directOpTransaction.applyMutations(mutations)
-      directOpTransaction.commit()
+          // Apply mutations to the new transaction
+          directOpTransaction.applyMutations(mutations)
+          directOpTransaction.commit()
 
-      // Add the transaction to the collection's transactions store
-      this.transactions.set(directOpTransaction.id, directOpTransaction)
-      this.scheduleTransactionCleanup(directOpTransaction)
-      this.recomputeOptimisticState(true)
+          // Add the transaction to the collection's transactions store
+          this.transactions.set(directOpTransaction.id, directOpTransaction)
+          this.scheduleTransactionCleanup(directOpTransaction)
+          this.recomputeOptimisticState(true)
 
-      return directOpTransaction
-    }
-    }, { collectionId: this.id, operation: 'insert' })
+          return directOpTransaction
+        }
+      },
+      { collectionId: this.id, operation: `insert` }
+    )
   }
 
   /**
@@ -2014,164 +2061,173 @@ export class CollectionImpl<
       | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
-    return withSpan('collection.update', () => {
-      if (typeof keys === `undefined`) {
-        throw new MissingUpdateArgumentError()
-      }
-
-      this.validateCollectionUsable(`update`)
-
-    const ambientTransaction = getActiveTransaction()
-
-    // If no ambient transaction exists, check for an onUpdate handler early
-    if (!ambientTransaction && !this.config.onUpdate) {
-      throw new MissingUpdateHandlerError()
-    }
-
-    const isArray = Array.isArray(keys)
-    const keysArray = isArray ? keys : [keys]
-
-    if (isArray && keysArray.length === 0) {
-      throw new NoKeysPassedToUpdateError()
-    }
-
-    const callback =
-      typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
-    const config =
-      typeof configOrCallback === `function` ? {} : configOrCallback
-
-    // Get the current objects or empty objects if they don't exist
-    const currentObjects = keysArray.map((key) => {
-      const item = this.get(key)
-      if (!item) {
-        throw new UpdateKeyNotFoundError(key)
-      }
-
-      return item
-    }) as unknown as Array<TItem>
-
-    let changesArray
-    if (isArray) {
-      // Use the proxy to track changes for all objects
-      changesArray = withArrayChangeTracking(
-        currentObjects,
-        callback as (draft: Array<TItem>) => void
-      )
-    } else {
-      const result = withChangeTracking(
-        currentObjects[0]!,
-        callback as (draft: TItem) => void
-      )
-      changesArray = [result]
-    }
-
-    // Create mutations for each object that has changes
-    const mutations: Array<PendingMutation<T, `update`, this>> = keysArray
-      .map((key, index) => {
-        const itemChanges = changesArray[index] // User-provided changes for this specific item
-
-        // Skip items with no changes
-        if (!itemChanges || Object.keys(itemChanges).length === 0) {
-          return null
+    return withSpan(
+      `collection.update`,
+      () => {
+        if (typeof keys === `undefined`) {
+          throw new MissingUpdateArgumentError()
         }
 
-        const originalItem = currentObjects[index] as unknown as T
-        // Validate the user-provided changes for this item
-        const validatedUpdatePayload = this.validateData(
-          itemChanges,
-          `update`,
-          key
-        )
+        this.validateCollectionUsable(`update`)
 
-        // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
-          originalItem,
-          validatedUpdatePayload
-        )
+        const ambientTransaction = getActiveTransaction()
 
-        // Check if the ID of the item is being changed
-        const originalItemId = this.getKeyFromItem(originalItem)
-        const modifiedItemId = this.getKeyFromItem(modifiedItem)
-
-        if (originalItemId !== modifiedItemId) {
-          throw new KeyUpdateNotAllowedError(originalItemId, modifiedItemId)
+        // If no ambient transaction exists, check for an onUpdate handler early
+        if (!ambientTransaction && !this.config.onUpdate) {
+          throw new MissingUpdateHandlerError()
         }
 
-        const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
+        const isArray = Array.isArray(keys)
+        const keysArray = isArray ? keys : [keys]
 
-        return {
-          mutationId: crypto.randomUUID(),
-          original: originalItem,
-          modified: modifiedItem,
-          changes: validatedUpdatePayload as Partial<T>,
-          globalKey,
-          key,
-          metadata: config.metadata as unknown,
-          syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
-            string,
-            unknown
-          >,
-          optimistic: config.optimistic ?? true,
-          type: `update`,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          collection: this,
+        if (isArray && keysArray.length === 0) {
+          throw new NoKeysPassedToUpdateError()
         }
-      })
-      .filter(Boolean) as Array<PendingMutation<T, `update`, this>>
 
-    // If no changes were made, return an empty transaction early
-    if (mutations.length === 0) {
-      const emptyTransaction = createTransaction({
-        mutationFn: async () => {},
-      })
-      emptyTransaction.commit()
-      // Schedule cleanup for empty transaction
-      this.scheduleTransactionCleanup(emptyTransaction)
-      return emptyTransaction
-    }
+        const callback =
+          typeof configOrCallback === `function`
+            ? configOrCallback
+            : maybeCallback!
+        const config =
+          typeof configOrCallback === `function` ? {} : configOrCallback
 
-    // If an ambient transaction exists, use it
-    if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
+        // Get the current objects or empty objects if they don't exist
+        const currentObjects = keysArray.map((key) => {
+          const item = this.get(key)
+          if (!item) {
+            throw new UpdateKeyNotFoundError(key)
+          }
 
-      this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.scheduleTransactionCleanup(ambientTransaction)
-      this.recomputeOptimisticState(true)
+          return item
+        }) as unknown as Array<TItem>
 
-      return ambientTransaction
-    }
+        let changesArray
+        if (isArray) {
+          // Use the proxy to track changes for all objects
+          changesArray = withArrayChangeTracking(
+            currentObjects,
+            callback as (draft: Array<TItem>) => void
+          )
+        } else {
+          const result = withChangeTracking(
+            currentObjects[0]!,
+            callback as (draft: TItem) => void
+          )
+          changesArray = [result]
+        }
 
-    // No need to check for onUpdate handler here as we've already checked at the beginning
+        // Create mutations for each object that has changes
+        const mutations: Array<PendingMutation<T, `update`, this>> = keysArray
+          .map((key, index) => {
+            const itemChanges = changesArray[index] // User-provided changes for this specific item
 
-    // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = createTransaction<T>({
-      mutationFn: async (params) => {
-        // Call the onUpdate handler with the transaction and collection
-        return this.config.onUpdate!({
-          transaction:
-            params.transaction as unknown as TransactionWithMutations<
-              T,
-              `update`
-            >,
-          collection: this as unknown as Collection<T, TKey, TUtils>,
+            // Skip items with no changes
+            if (!itemChanges || Object.keys(itemChanges).length === 0) {
+              return null
+            }
+
+            const originalItem = currentObjects[index] as unknown as T
+            // Validate the user-provided changes for this item
+            const validatedUpdatePayload = this.validateData(
+              itemChanges,
+              `update`,
+              key
+            )
+
+            // Construct the full modified item by applying the validated update payload to the original item
+            const modifiedItem = Object.assign(
+              {},
+              originalItem,
+              validatedUpdatePayload
+            )
+
+            // Check if the ID of the item is being changed
+            const originalItemId = this.getKeyFromItem(originalItem)
+            const modifiedItemId = this.getKeyFromItem(modifiedItem)
+
+            if (originalItemId !== modifiedItemId) {
+              throw new KeyUpdateNotAllowedError(originalItemId, modifiedItemId)
+            }
+
+            const globalKey = this.generateGlobalKey(
+              modifiedItemId,
+              modifiedItem
+            )
+
+            return {
+              mutationId: crypto.randomUUID(),
+              original: originalItem,
+              modified: modifiedItem,
+              changes: validatedUpdatePayload as Partial<T>,
+              globalKey,
+              key,
+              metadata: config.metadata as unknown,
+              syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
+                string,
+                unknown
+              >,
+              optimistic: config.optimistic ?? true,
+              type: `update`,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              collection: this,
+            }
+          })
+          .filter(Boolean) as Array<PendingMutation<T, `update`, this>>
+
+        // If no changes were made, return an empty transaction early
+        if (mutations.length === 0) {
+          const emptyTransaction = createTransaction({
+            mutationFn: async () => {},
+          })
+          emptyTransaction.commit()
+          // Schedule cleanup for empty transaction
+          this.scheduleTransactionCleanup(emptyTransaction)
+          return emptyTransaction
+        }
+
+        // If an ambient transaction exists, use it
+        if (ambientTransaction) {
+          ambientTransaction.applyMutations(mutations)
+
+          this.transactions.set(ambientTransaction.id, ambientTransaction)
+          this.scheduleTransactionCleanup(ambientTransaction)
+          this.recomputeOptimisticState(true)
+
+          return ambientTransaction
+        }
+
+        // No need to check for onUpdate handler here as we've already checked at the beginning
+
+        // Create a new transaction with a mutation function that calls the onUpdate handler
+        const directOpTransaction = createTransaction<T>({
+          mutationFn: async (params) => {
+            // Call the onUpdate handler with the transaction and collection
+            return this.config.onUpdate!({
+              transaction:
+                params.transaction as unknown as TransactionWithMutations<
+                  T,
+                  `update`
+                >,
+              collection: this as unknown as Collection<T, TKey, TUtils>,
+            })
+          },
         })
+
+        // Apply mutations to the new transaction
+        directOpTransaction.applyMutations(mutations)
+        directOpTransaction.commit()
+
+        // Add the transaction to the collection's transactions store
+
+        this.transactions.set(directOpTransaction.id, directOpTransaction)
+        this.scheduleTransactionCleanup(directOpTransaction)
+        this.recomputeOptimisticState(true)
+
+        return directOpTransaction
       },
-    })
-
-    // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
-    directOpTransaction.commit()
-
-    // Add the transaction to the collection's transactions store
-
-    this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.scheduleTransactionCleanup(directOpTransaction)
-    this.recomputeOptimisticState(true)
-
-    return directOpTransaction
-    }, { collectionId: this.id, operation: 'update' })
+      { collectionId: this.id, operation: `update` }
+    )
   }
 
   /**
@@ -2208,87 +2264,91 @@ export class CollectionImpl<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
-    return withSpan('collection.delete', () => {
-      this.validateCollectionUsable(`delete`)
+    return withSpan(
+      `collection.delete`,
+      () => {
+        this.validateCollectionUsable(`delete`)
 
-    const ambientTransaction = getActiveTransaction()
+        const ambientTransaction = getActiveTransaction()
 
-    // If no ambient transaction exists, check for an onDelete handler early
-    if (!ambientTransaction && !this.config.onDelete) {
-      throw new MissingDeleteHandlerError()
-    }
+        // If no ambient transaction exists, check for an onDelete handler early
+        if (!ambientTransaction && !this.config.onDelete) {
+          throw new MissingDeleteHandlerError()
+        }
 
-    if (Array.isArray(keys) && keys.length === 0) {
-      throw new NoKeysPassedToDeleteError()
-    }
+        if (Array.isArray(keys) && keys.length === 0) {
+          throw new NoKeysPassedToDeleteError()
+        }
 
-    const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<PendingMutation<T, `delete`, this>> = []
+        const keysArray = Array.isArray(keys) ? keys : [keys]
+        const mutations: Array<PendingMutation<T, `delete`, this>> = []
 
-    for (const key of keysArray) {
-      if (!this.has(key)) {
-        throw new DeleteKeyNotFoundError(key)
-      }
-      const globalKey = this.generateGlobalKey(key, this.get(key)!)
-      const mutation: PendingMutation<T, `delete`, this> = {
-        mutationId: crypto.randomUUID(),
-        original: this.get(key)!,
-        modified: this.get(key)!,
-        changes: this.get(key)!,
-        globalKey,
-        key,
-        metadata: config?.metadata as unknown,
-        syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
-          string,
-          unknown
-        >,
-        optimistic: config?.optimistic ?? true,
-        type: `delete`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        collection: this,
-      }
-
-      mutations.push(mutation)
-    }
-
-    // If an ambient transaction exists, use it
-    if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
-
-      this.transactions.set(ambientTransaction.id, ambientTransaction)
-      this.scheduleTransactionCleanup(ambientTransaction)
-      this.recomputeOptimisticState(true)
-
-      return ambientTransaction
-    }
-
-    // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = createTransaction<T>({
-      autoCommit: true,
-      mutationFn: async (params) => {
-        // Call the onDelete handler with the transaction and collection
-        return this.config.onDelete!({
-          transaction:
-            params.transaction as unknown as TransactionWithMutations<
-              T,
-              `delete`
+        for (const key of keysArray) {
+          if (!this.has(key)) {
+            throw new DeleteKeyNotFoundError(key)
+          }
+          const globalKey = this.generateGlobalKey(key, this.get(key)!)
+          const mutation: PendingMutation<T, `delete`, this> = {
+            mutationId: crypto.randomUUID(),
+            original: this.get(key)!,
+            modified: this.get(key)!,
+            changes: this.get(key)!,
+            globalKey,
+            key,
+            metadata: config?.metadata as unknown,
+            syncMetadata: (this.syncedMetadata.get(key) || {}) as Record<
+              string,
+              unknown
             >,
-          collection: this as unknown as Collection<T, TKey, TUtils>,
+            optimistic: config?.optimistic ?? true,
+            type: `delete`,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            collection: this,
+          }
+
+          mutations.push(mutation)
+        }
+
+        // If an ambient transaction exists, use it
+        if (ambientTransaction) {
+          ambientTransaction.applyMutations(mutations)
+
+          this.transactions.set(ambientTransaction.id, ambientTransaction)
+          this.scheduleTransactionCleanup(ambientTransaction)
+          this.recomputeOptimisticState(true)
+
+          return ambientTransaction
+        }
+
+        // Create a new transaction with a mutation function that calls the onDelete handler
+        const directOpTransaction = createTransaction<T>({
+          autoCommit: true,
+          mutationFn: async (params) => {
+            // Call the onDelete handler with the transaction and collection
+            return this.config.onDelete!({
+              transaction:
+                params.transaction as unknown as TransactionWithMutations<
+                  T,
+                  `delete`
+                >,
+              collection: this as unknown as Collection<T, TKey, TUtils>,
+            })
+          },
         })
+
+        // Apply mutations to the new transaction
+        directOpTransaction.applyMutations(mutations)
+        directOpTransaction.commit()
+
+        this.transactions.set(directOpTransaction.id, directOpTransaction)
+        this.scheduleTransactionCleanup(directOpTransaction)
+        this.recomputeOptimisticState(true)
+
+        return directOpTransaction
       },
-    })
-
-    // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
-    directOpTransaction.commit()
-
-    this.transactions.set(directOpTransaction.id, directOpTransaction)
-    this.scheduleTransactionCleanup(directOpTransaction)
-    this.recomputeOptimisticState(true)
-
-    return directOpTransaction
-    }, { collectionId: this.id, operation: 'delete' })
+      { collectionId: this.id, operation: `delete` }
+    )
   }
 
   /**

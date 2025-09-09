@@ -1,8 +1,11 @@
-export { globalTracerRegistry } from './registry.js'
-export { withSpan, withSpanAsync } from './withSpan.js'
-export { PerformanceMarkTracer } from './tracers/performance-mark.js'
-export { OpenTelemetryTracer } from './tracers/open-telemetry.js'
-export type { Tracer, Span, TracingConfig } from './types.js'
+import { globalTracerRegistry } from "./registry.js"
+import type { Tracer } from "./types.js"
+
+export { globalTracerRegistry } from "./registry.js"
+export { withSpan, withSpanAsync } from "./withSpan.js"
+export { PerformanceMarkTracer } from "./tracers/performance-mark.js"
+export { OpenTelemetryTracer } from "./tracers/open-telemetry.js"
+export type { Tracer, Span, TracingConfig } from "./types.js"
 
 // Convenience functions
 export function setTracingEnabled(enabled: boolean) {

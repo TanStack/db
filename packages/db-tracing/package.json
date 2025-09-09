@@ -1,20 +1,42 @@
 {
   "name": "@tanstack/db-tracing",
-  "version": "0.0.0",
   "description": "Tracing utilities for TanStack DB",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
+  "version": "0.0.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@vitest/coverage-istanbul": "^3.0.9"
+  },
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.6.3",
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "author": "Sam Willis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/db-tracing"
+  },
+  "homepage": "https://tanstack.com/db",
   "keywords": [
     "tanstack",
     "db",
@@ -22,9 +44,13 @@
     "opentelemetry",
     "performance"
   ],
-  "license": "MIT",
-  "dependencies": {},
-  "devDependencies": {
-    "typescript": "^5.8.2"
-  }
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
 }

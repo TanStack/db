@@ -1,3 +1,4 @@
+import { globalTracerRegistry, withSpan } from "@tanstack/db-tracing"
 import { createDeferred } from "./deferred"
 import {
   MissingMutationFunctionError,
@@ -5,7 +6,6 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from "./errors"
-import { withSpan, globalTracerRegistry } from "@tanstack/db-tracing"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -129,7 +129,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     error: Error
   }
 
-  private spans: any[] = []
+  private spans: Array<any> = []
 
   constructor(config: TransactionConfig<T>) {
     if (typeof config.mutationFn === `undefined`) {
@@ -144,11 +144,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     this.createdAt = new Date()
     this.sequenceNumber = sequenceNumber++
     this.metadata = config.metadata ?? {}
-    
+
     // Start transaction span
-    this.spans = globalTracerRegistry.startSpan('transaction', {
+    this.spans = globalTracerRegistry.startSpan(`transaction`, {
       transactionId: this.id,
-      operation: 'begin'
+      operation: `begin`,
     })
   }
 
@@ -157,7 +157,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (newState === `completed` || newState === `failed`) {
       // End transaction spans
-      this.spans.forEach(span => span.end())
+      this.spans.forEach((span) => span.end())
       removeFromPendingList(this)
     }
   }
@@ -202,24 +202,28 @@ class Transaction<T extends object = Record<string, unknown>> {
    * await tx.commit()
    */
   mutate(callback: () => void): Transaction<T> {
-    return withSpan('transaction.mutate', () => {
-      if (this.state !== `pending`) {
-        throw new TransactionNotPendingMutateError()
-      }
+    return withSpan(
+      `transaction.mutate`,
+      () => {
+        if (this.state !== `pending`) {
+          throw new TransactionNotPendingMutateError()
+        }
 
-      registerTransaction(this)
-    try {
-      callback()
-    } finally {
-      unregisterTransaction(this)
-    }
+        registerTransaction(this)
+        try {
+          callback()
+        } finally {
+          unregisterTransaction(this)
+        }
 
-    if (this.autoCommit) {
-      this.commit()
-    }
+        if (this.autoCommit) {
+          this.commit()
+        }
 
-    return this
-    }, { transactionId: this.id, operation: 'mutate' })
+        return this
+      },
+      { transactionId: this.id, operation: `mutate` }
+    )
   }
 
   applyMutations(mutations: Array<PendingMutation<any>>): void {
@@ -277,32 +281,36 @@ class Transaction<T extends object = Record<string, unknown>> {
    * }
    */
   rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
-    return withSpan('transaction.rollback', () => {
-      const isSecondaryRollback = config?.isSecondaryRollback ?? false
-      if (this.state === `completed`) {
-        throw new TransactionAlreadyCompletedRollbackError()
-      }
+    return withSpan(
+      `transaction.rollback`,
+      () => {
+        const isSecondaryRollback = config?.isSecondaryRollback ?? false
+        if (this.state === `completed`) {
+          throw new TransactionAlreadyCompletedRollbackError()
+        }
 
-      this.setState(`failed`)
+        this.setState(`failed`)
 
-    // See if there's any other transactions w/ mutations on the same ids
-    // and roll them back as well.
-    if (!isSecondaryRollback) {
-      const mutationIds = new Set()
-      this.mutations.forEach((m) => mutationIds.add(m.globalKey))
-      for (const t of transactions) {
-        t.state === `pending` &&
-          t.mutations.some((m) => mutationIds.has(m.globalKey)) &&
-          t.rollback({ isSecondaryRollback: true })
-      }
-    }
+        // See if there's any other transactions w/ mutations on the same ids
+        // and roll them back as well.
+        if (!isSecondaryRollback) {
+          const mutationIds = new Set()
+          this.mutations.forEach((m) => mutationIds.add(m.globalKey))
+          for (const t of transactions) {
+            t.state === `pending` &&
+              t.mutations.some((m) => mutationIds.has(m.globalKey)) &&
+              t.rollback({ isSecondaryRollback: true })
+          }
+        }
 
-    // Reject the promise
-    this.isPersisted.reject(this.error?.error)
-    this.touchCollection()
+        // Reject the promise
+        this.isPersisted.reject(this.error?.error)
+        this.touchCollection()
 
-    return this
-    }, { transactionId: this.id, operation: 'rollback' })
+        return this
+      },
+      { transactionId: this.id, operation: `rollback` }
+    )
   }
 
   // Tell collection that something has changed with the transaction
@@ -362,46 +370,50 @@ class Transaction<T extends object = Record<string, unknown>> {
    * console.log(tx.state) // "completed" or "failed"
    */
   async commit(): Promise<Transaction<T>> {
-    return withSpan('transaction.commit', async () => {
-      if (this.state !== `pending`) {
-        throw new TransactionNotPendingCommitError()
-      }
+    return withSpan(
+      `transaction.commit`,
+      async () => {
+        if (this.state !== `pending`) {
+          throw new TransactionNotPendingCommitError()
+        }
 
-      this.setState(`persisting`)
+        this.setState(`persisting`)
 
-    if (this.mutations.length === 0) {
-      this.setState(`completed`)
-      this.isPersisted.resolve(this)
+        if (this.mutations.length === 0) {
+          this.setState(`completed`)
+          this.isPersisted.resolve(this)
 
-      return this
-    }
+          return this
+        }
 
-    // Run mutationFn
-    try {
-      // At this point we know there's at least one mutation
-      // We've already verified mutations is non-empty, so this cast is safe
-      // Use a direct type assertion instead of object spreading to preserve the original type
-      await this.mutationFn({
-        transaction: this as unknown as TransactionWithMutations<T>,
-      })
+        // Run mutationFn
+        try {
+          // At this point we know there's at least one mutation
+          // We've already verified mutations is non-empty, so this cast is safe
+          // Use a direct type assertion instead of object spreading to preserve the original type
+          await this.mutationFn({
+            transaction: this as unknown as TransactionWithMutations<T>,
+          })
 
-      this.setState(`completed`)
-      this.touchCollection()
+          this.setState(`completed`)
+          this.touchCollection()
 
-      this.isPersisted.resolve(this)
-    } catch (error) {
-      // Update transaction with error information
-      this.error = {
-        message: error instanceof Error ? error.message : String(error),
-        error: error instanceof Error ? error : new Error(String(error)),
-      }
+          this.isPersisted.resolve(this)
+        } catch (error) {
+          // Update transaction with error information
+          this.error = {
+            message: error instanceof Error ? error.message : String(error),
+            error: error instanceof Error ? error : new Error(String(error)),
+          }
 
-      // rollback the transaction
-      return this.rollback()
-    }
+          // rollback the transaction
+          return this.rollback()
+        }
 
-    return this
-    }, { transactionId: this.id, operation: 'commit' })
+        return this
+      },
+      { transactionId: this.id, operation: `commit` }
+    )
   }
 
   /**

@@ -120,6 +120,7 @@
  * transformed into a D2Mini pipeline.
  */
 
+import { withSpan } from "@tanstack/db-tracing"
 import { deepEquals } from "../utils.js"
 import { CannotCombineEmptyExpressionListError } from "../errors.js"
 import {
@@ -133,6 +134,30 @@ import {
 } from "./ir.js"
 import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
 import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
+
+/**
+ * Main query optimizer entry point that lifts WHERE clauses into subqueries.
+ *
+ * This function implements multi-level predicate pushdown optimization by recursively
+ * moving WHERE clauses through nested subqueries to get them as close to the data
+ * sources as possible, then removing redundant subqueries.
+ *
+ * @param query - The QueryIR to optimize
+ * @returns An OptimizationResult with the optimized query and collection WHERE clause mapping
+ *
+ * @example
+ * ```typescript
+ * const originalQuery = {
+ *   from: new CollectionRef(users, 'u'),
+ *   join: [{ from: new CollectionRef(posts, 'p'), ... }],
+ *   where: [eq(u.dept_id, 1), gt(p.views, 100)]
+ * }
+ *
+ * const { optimizedQuery, collectionWhereClauses } = optimizeQuery(originalQuery)
+ * // Result: Single-source clauses moved to deepest possible subqueries
+ * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
+ * ```
+ */
 
 /**
  * Represents a WHERE clause after source analysis
@@ -164,59 +189,34 @@ export interface OptimizationResult {
   collectionWhereClauses: Map<string, BasicExpression<boolean>>
 }
 
-/**
- * Main query optimizer entry point that lifts WHERE clauses into subqueries.
- *
- * This function implements multi-level predicate pushdown optimization by recursively
- * moving WHERE clauses through nested subqueries to get them as close to the data
- * sources as possible, then removing redundant subqueries.
- *
- * @param query - The QueryIR to optimize
- * @returns An OptimizationResult with the optimized query and collection WHERE clause mapping
- *
- * @example
- * ```typescript
- * const originalQuery = {
- *   from: new CollectionRef(users, 'u'),
- *   join: [{ from: new CollectionRef(posts, 'p'), ... }],
- *   where: [eq(u.dept_id, 1), gt(p.views, 100)]
- * }
- *
- * const { optimizedQuery, collectionWhereClauses } = optimizeQuery(originalQuery)
- * // Result: Single-source clauses moved to deepest possible subqueries
- * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
- * ```
- */
-import { withSpan } from "@tanstack/db-tracing"
-
 export function optimizeQuery(query: QueryIR): OptimizationResult {
-  return withSpan('optimizeQuery', () => {
+  return withSpan(`optimizeQuery`, () => {
     // First, extract collection WHERE clauses before optimization
     const collectionWhereClauses = extractCollectionWhereClauses(query)
 
-  // Apply multi-level predicate pushdown with iterative convergence
-  let optimized = query
-  let previousOptimized: QueryIR | undefined
-  let iterations = 0
-  const maxIterations = 10 // Prevent infinite loops
+    // Apply multi-level predicate pushdown with iterative convergence
+    let optimized = query
+    let previousOptimized: QueryIR | undefined
+    let iterations = 0
+    const maxIterations = 10 // Prevent infinite loops
 
-  // Keep optimizing until no more changes occur or max iterations reached
-  while (
-    iterations < maxIterations &&
-    !deepEquals(optimized, previousOptimized)
-  ) {
-    previousOptimized = optimized
-    optimized = applyRecursiveOptimization(optimized)
-    iterations++
-  }
+    // Keep optimizing until no more changes occur or max iterations reached
+    while (
+      iterations < maxIterations &&
+      !deepEquals(optimized, previousOptimized)
+    ) {
+      previousOptimized = optimized
+      optimized = applyRecursiveOptimization(optimized)
+      iterations++
+    }
 
-  // Remove redundant subqueries
-  const cleaned = removeRedundantSubqueries(optimized)
+    // Remove redundant subqueries
+    const cleaned = removeRedundantSubqueries(optimized)
 
-  return {
-    optimizedQuery: cleaned,
-    collectionWhereClauses,
-  }
+    return {
+      optimizedQuery: cleaned,
+      collectionWhereClauses,
+    }
   })
 }
 

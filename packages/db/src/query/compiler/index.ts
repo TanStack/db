@@ -1,4 +1,5 @@
 import { distinct, filter, map } from "@tanstack/db-ivm"
+import { withSpan } from "@tanstack/db-tracing"
 import { optimizeQuery } from "../optimizer.js"
 import {
   CollectionInputNotFoundError,
@@ -7,7 +8,6 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { withSpan } from "@tanstack/db-tracing"
 import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
@@ -60,221 +60,249 @@ export function compileQuery(
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
-  return withSpan('compileQuery', () => {
+  return withSpan(`compileQuery`, () => {
     // Check if the original raw query has already been compiled
-  const cachedResult = cache.get(rawQuery)
-  if (cachedResult) {
-    return cachedResult
-  }
+    const cachedResult = cache.get(rawQuery)
+    if (cachedResult) {
+      return cachedResult
+    }
 
-  // Optimize the query before compilation
-  const { optimizedQuery: query, collectionWhereClauses } =
-    optimizeQuery(rawQuery)
+    // Optimize the query before compilation
+    const { optimizedQuery: query, collectionWhereClauses } =
+      optimizeQuery(rawQuery)
 
-  // Create mapping from optimized query to original for caching
-  queryMapping.set(query, rawQuery)
-  mapNestedQueries(query, rawQuery, queryMapping)
+    // Create mapping from optimized query to original for caching
+    queryMapping.set(query, rawQuery)
+    mapNestedQueries(query, rawQuery, queryMapping)
 
-  // Create a copy of the inputs map to avoid modifying the original
-  const allInputs = { ...inputs }
+    // Create a copy of the inputs map to avoid modifying the original
+    const allInputs = { ...inputs }
 
-  // Create a map of table aliases to inputs
-  const tables: Record<string, KeyedStream> = {}
+    // Create a map of table aliases to inputs
+    const tables: Record<string, KeyedStream> = {}
 
-  // Process the FROM clause to get the main table
-  const {
-    alias: mainTableAlias,
-    input: mainInput,
-    collectionId: mainCollectionId,
-  } = processFrom(
-    query.from,
-    allInputs,
-    collections,
-    callbacks,
-    lazyCollections,
-    optimizableOrderByCollections,
-    cache,
-    queryMapping
-  )
-  tables[mainTableAlias] = mainInput
-
-  // Prepare the initial pipeline with the main table wrapped in its alias
-  let pipeline: NamespacedAndKeyedStream = mainInput.pipe(
-    map(([key, row]) => {
-      // Initialize the record with a nested structure
-      const ret = [key, { [mainTableAlias]: row }] as [
-        string,
-        Record<string, typeof row>,
-      ]
-      return ret
-    })
-  )
-
-  // Process JOIN clauses if they exist
-  if (query.join && query.join.length > 0) {
-    pipeline = processJoins(
-      pipeline,
-      query.join,
-      tables,
-      mainCollectionId,
-      mainTableAlias,
+    // Process the FROM clause to get the main table
+    const {
+      alias: mainTableAlias,
+      input: mainInput,
+      collectionId: mainCollectionId,
+    } = processFrom(
+      query.from,
       allInputs,
-      cache,
-      queryMapping,
       collections,
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
-      rawQuery
+      cache,
+      queryMapping
     )
-  }
+    tables[mainTableAlias] = mainInput
 
-  // Process the WHERE clause if it exists
-  if (query.where && query.where.length > 0) {
-    // Apply each WHERE condition as a filter (they are ANDed together)
-    for (const where of query.where) {
-      const whereExpression = getWhereExpression(where)
-      const compiledWhere = compileExpression(whereExpression)
+    // Prepare the initial pipeline with the main table wrapped in its alias
+    let pipeline: NamespacedAndKeyedStream = mainInput.pipe(
+      map(([key, row]) => {
+        // Initialize the record with a nested structure
+        const ret = [key, { [mainTableAlias]: row }] as [
+          string,
+          Record<string, typeof row>,
+        ]
+        return ret
+      })
+    )
+
+    // Process JOIN clauses if they exist
+    if (query.join && query.join.length > 0) {
+      pipeline = processJoins(
+        pipeline,
+        query.join,
+        tables,
+        mainCollectionId,
+        mainTableAlias,
+        allInputs,
+        cache,
+        queryMapping,
+        collections,
+        callbacks,
+        lazyCollections,
+        optimizableOrderByCollections,
+        rawQuery
+      )
+    }
+
+    // Process the WHERE clause if it exists
+    if (query.where && query.where.length > 0) {
+      // Apply each WHERE condition as a filter (they are ANDed together)
+      for (const where of query.where) {
+        const whereExpression = getWhereExpression(where)
+        const compiledWhere = compileExpression(whereExpression)
+        pipeline = pipeline.pipe(
+          filter(([_key, namespacedRow]) => {
+            return compiledWhere(namespacedRow)
+          })
+        )
+      }
+    }
+
+    // Process functional WHERE clauses if they exist
+    if (query.fnWhere && query.fnWhere.length > 0) {
+      for (const fnWhere of query.fnWhere) {
+        pipeline = pipeline.pipe(
+          filter(([_key, namespacedRow]) => {
+            return fnWhere(namespacedRow)
+          })
+        )
+      }
+    }
+
+    if (query.distinct && !query.fnSelect && !query.select) {
+      throw new DistinctRequiresSelectError()
+    }
+
+    // Process the SELECT clause early - always create __select_results
+    // This eliminates duplication and allows for DISTINCT implementation
+    if (query.fnSelect) {
+      // Handle functional select - apply the function to transform the row
       pipeline = pipeline.pipe(
-        filter(([_key, namespacedRow]) => {
-          return compiledWhere(namespacedRow)
+        map(([key, namespacedRow]) => {
+          const selectResults = query.fnSelect!(namespacedRow)
+          return [
+            key,
+            {
+              ...namespacedRow,
+              __select_results: selectResults,
+            },
+          ] as [string, typeof namespacedRow & { __select_results: any }]
+        })
+      )
+    } else if (query.select) {
+      pipeline = processSelect(pipeline, query.select, allInputs)
+    } else {
+      // If no SELECT clause, create __select_results with the main table data
+      pipeline = pipeline.pipe(
+        map(([key, namespacedRow]) => {
+          const selectResults =
+            !query.join && !query.groupBy
+              ? namespacedRow[mainTableAlias]
+              : namespacedRow
+
+          return [
+            key,
+            {
+              ...namespacedRow,
+              __select_results: selectResults,
+            },
+          ] as [string, typeof namespacedRow & { __select_results: any }]
         })
       )
     }
-  }
 
-  // Process functional WHERE clauses if they exist
-  if (query.fnWhere && query.fnWhere.length > 0) {
-    for (const fnWhere of query.fnWhere) {
-      pipeline = pipeline.pipe(
-        filter(([_key, namespacedRow]) => {
-          return fnWhere(namespacedRow)
-        })
-      )
-    }
-  }
-
-  if (query.distinct && !query.fnSelect && !query.select) {
-    throw new DistinctRequiresSelectError()
-  }
-
-  // Process the SELECT clause early - always create __select_results
-  // This eliminates duplication and allows for DISTINCT implementation
-  if (query.fnSelect) {
-    // Handle functional select - apply the function to transform the row
-    pipeline = pipeline.pipe(
-      map(([key, namespacedRow]) => {
-        const selectResults = query.fnSelect!(namespacedRow)
-        return [
-          key,
-          {
-            ...namespacedRow,
-            __select_results: selectResults,
-          },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
-      })
-    )
-  } else if (query.select) {
-    pipeline = processSelect(pipeline, query.select, allInputs)
-  } else {
-    // If no SELECT clause, create __select_results with the main table data
-    pipeline = pipeline.pipe(
-      map(([key, namespacedRow]) => {
-        const selectResults =
-          !query.join && !query.groupBy
-            ? namespacedRow[mainTableAlias]
-            : namespacedRow
-
-        return [
-          key,
-          {
-            ...namespacedRow,
-            __select_results: selectResults,
-          },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
-      })
-    )
-  }
-
-  // Process the GROUP BY clause if it exists
-  if (query.groupBy && query.groupBy.length > 0) {
-    pipeline = processGroupBy(
-      pipeline,
-      query.groupBy,
-      query.having,
-      query.select,
-      query.fnHaving
-    )
-  } else if (query.select) {
-    // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
-    const hasAggregates = Object.values(query.select).some(
-      (expr) => expr.type === `agg`
-    )
-    if (hasAggregates) {
-      // Handle implicit single-group aggregation
+    // Process the GROUP BY clause if it exists
+    if (query.groupBy && query.groupBy.length > 0) {
       pipeline = processGroupBy(
         pipeline,
-        [], // Empty group by means single group
+        query.groupBy,
         query.having,
         query.select,
         query.fnHaving
       )
+    } else if (query.select) {
+      // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
+      const hasAggregates = Object.values(query.select).some(
+        (expr) => expr.type === `agg`
+      )
+      if (hasAggregates) {
+        // Handle implicit single-group aggregation
+        pipeline = processGroupBy(
+          pipeline,
+          [], // Empty group by means single group
+          query.having,
+          query.select,
+          query.fnHaving
+        )
+      }
     }
-  }
 
-  // Process the HAVING clause if it exists (only applies after GROUP BY)
-  if (query.having && (!query.groupBy || query.groupBy.length === 0)) {
-    // Check if we have aggregates in SELECT that would trigger implicit grouping
-    const hasAggregates = query.select
-      ? Object.values(query.select).some((expr) => expr.type === `agg`)
-      : false
+    // Process the HAVING clause if it exists (only applies after GROUP BY)
+    if (query.having && (!query.groupBy || query.groupBy.length === 0)) {
+      // Check if we have aggregates in SELECT that would trigger implicit grouping
+      const hasAggregates = query.select
+        ? Object.values(query.select).some((expr) => expr.type === `agg`)
+        : false
 
-    if (!hasAggregates) {
-      throw new HavingRequiresGroupByError()
+      if (!hasAggregates) {
+        throw new HavingRequiresGroupByError()
+      }
     }
-  }
 
-  // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
-  if (
-    query.fnHaving &&
-    query.fnHaving.length > 0 &&
-    (!query.groupBy || query.groupBy.length === 0)
-  ) {
-    // If there's no GROUP BY but there are fnHaving clauses, apply them as filters
-    for (const fnHaving of query.fnHaving) {
-      pipeline = pipeline.pipe(
-        filter(([_key, namespacedRow]) => {
-          return fnHaving(namespacedRow)
+    // Process functional HAVING clauses outside of GROUP BY (treat as additional WHERE filters)
+    if (
+      query.fnHaving &&
+      query.fnHaving.length > 0 &&
+      (!query.groupBy || query.groupBy.length === 0)
+    ) {
+      // If there's no GROUP BY but there are fnHaving clauses, apply them as filters
+      for (const fnHaving of query.fnHaving) {
+        pipeline = pipeline.pipe(
+          filter(([_key, namespacedRow]) => {
+            return fnHaving(namespacedRow)
+          })
+        )
+      }
+    }
+
+    // Process the DISTINCT clause if it exists
+    if (query.distinct) {
+      pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
+    }
+
+    // Process orderBy parameter if it exists
+    if (query.orderBy && query.orderBy.length > 0) {
+      const orderedPipeline = processOrderBy(
+        rawQuery,
+        pipeline,
+        query.orderBy,
+        query.select || {},
+        collections[mainCollectionId]!,
+        optimizableOrderByCollections,
+        query.limit,
+        query.offset
+      )
+
+      // Final step: extract the __select_results and include orderBy index
+      const resultPipeline = orderedPipeline.pipe(
+        map(([key, [row, orderByIndex]]) => {
+          // Extract the final results from __select_results and include orderBy index
+          const raw = (row as any).__select_results
+          const finalResults = unwrapValue(raw)
+          return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
         })
       )
+
+      const result = resultPipeline
+      // Cache the result before returning (use original query as key)
+      const compilationResult = {
+        collectionId: mainCollectionId,
+        pipeline: result,
+        collectionWhereClauses,
+      }
+      cache.set(rawQuery, compilationResult)
+
+      return compilationResult
+    } else if (query.limit !== undefined || query.offset !== undefined) {
+      // If there's a limit or offset without orderBy, throw an error
+      throw new LimitOffsetRequireOrderByError()
     }
-  }
 
-  // Process the DISTINCT clause if it exists
-  if (query.distinct) {
-    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
-  }
-
-  // Process orderBy parameter if it exists
-  if (query.orderBy && query.orderBy.length > 0) {
-    const orderedPipeline = processOrderBy(
-      rawQuery,
-      pipeline,
-      query.orderBy,
-      query.select || {},
-      collections[mainCollectionId]!,
-      optimizableOrderByCollections,
-      query.limit,
-      query.offset
-    )
-
-    // Final step: extract the __select_results and include orderBy index
-    const resultPipeline = orderedPipeline.pipe(
-      map(([key, [row, orderByIndex]]) => {
-        // Extract the final results from __select_results and include orderBy index
+    // Final step: extract the __select_results and return tuple format (no orderBy)
+    const resultPipeline: ResultStream = pipeline.pipe(
+      map(([key, row]) => {
+        // Extract the final results from __select_results and return [key, [results, undefined]]
         const raw = (row as any).__select_results
         const finalResults = unwrapValue(raw)
-        return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
+        return [key, [finalResults, undefined]] as [
+          unknown,
+          [any, string | undefined],
+        ]
       })
     )
 
@@ -288,34 +316,6 @@ export function compileQuery(
     cache.set(rawQuery, compilationResult)
 
     return compilationResult
-  } else if (query.limit !== undefined || query.offset !== undefined) {
-    // If there's a limit or offset without orderBy, throw an error
-    throw new LimitOffsetRequireOrderByError()
-  }
-
-  // Final step: extract the __select_results and return tuple format (no orderBy)
-  const resultPipeline: ResultStream = pipeline.pipe(
-    map(([key, row]) => {
-      // Extract the final results from __select_results and return [key, [results, undefined]]
-      const raw = (row as any).__select_results
-      const finalResults = unwrapValue(raw)
-      return [key, [finalResults, undefined]] as [
-        unknown,
-        [any, string | undefined],
-      ]
-    })
-  )
-
-  const result = resultPipeline
-  // Cache the result before returning (use original query as key)
-  const compilationResult = {
-    collectionId: mainCollectionId,
-    pipeline: result,
-    collectionWhereClauses,
-  }
-  cache.set(rawQuery, compilationResult)
-
-  return compilationResult
   })
 }
 
