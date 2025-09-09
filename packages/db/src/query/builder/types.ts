@@ -71,7 +71,9 @@ export type ContextSchema = Record<string, unknown>
  * Example: `{ users: usersCollection, orders: ordersCollection }`
  */
 export type Source = {
-  [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
+  [alias: string]:
+    | CollectionImpl<any, any, any, any, any>
+    | QueryBuilder<Context>
 }
 
 /**
@@ -88,7 +90,7 @@ export type Source = {
  */
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? ResolveType<U, TSchema, U>
+    ? ResolveType<U, TSchema>
     : never
 
 /**

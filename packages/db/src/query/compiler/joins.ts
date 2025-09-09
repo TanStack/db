@@ -39,9 +39,11 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 import type { BaseIndex } from "../../indexes/base-index.js"
 
-export type LoadKeysFn = (key: Set<string | number>) => void
-export type LazyCollectionCallbacks = {
-  loadKeys: LoadKeysFn
+export type LoadKeysFn<TKey extends string | number> = (key: Set<TKey>) => void
+export type LazyCollectionCallbacks<
+  TKey extends string | number = string | number,
+> = {
+  loadKeys: LoadKeysFn<TKey>
   loadInitialState: () => void
 }
 
@@ -57,7 +59,7 @@ export function processJoins(
   allInputs: Record<string, KeyedStream>,
   cache: QueryCache,
   queryMapping: QueryMapping,
-  collections: Record<string, Collection>,
+  collections: Record<string, Collection<any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -98,7 +100,7 @@ function processJoin(
   allInputs: Record<string, KeyedStream>,
   cache: QueryCache,
   queryMapping: QueryMapping,
-  collections: Record<string, Collection>,
+  collections: Record<string, Collection<any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -395,7 +397,7 @@ function getTableAliasFromExpression(expr: BasicExpression): string | null {
 function processJoinSource(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
-  collections: Record<string, Collection>,
+  collections: Record<string, Collection<any>>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,

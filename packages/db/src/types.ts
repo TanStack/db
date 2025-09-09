@@ -11,8 +11,11 @@ import type { BasicExpression } from "./query/ir.js"
  *
  * @internal This is used by the type resolution system
  */
-export type InferSchemaOutput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferOutput<T> extends object
+export type InferSchemaOutput<
+  T,
+  TRestrict = object,
+> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends TRestrict
     ? StandardSchemaV1.InferOutput<T>
     : Record<string, unknown>
   : Record<string, unknown>
@@ -22,8 +25,8 @@ export type InferSchemaOutput<T> = T extends StandardSchemaV1
  *
  * @internal This is used for collection insert type inference
  */
-export type InferSchemaInput<T> = T extends StandardSchemaV1
-  ? StandardSchemaV1.InferInput<T> extends object
+export type InferSchemaInput<T, TRestrict = object> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<T> extends TRestrict
     ? StandardSchemaV1.InferInput<T>
     : Record<string, unknown>
   : Record<string, unknown>
@@ -39,11 +42,11 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
  *
  * @internal This is used for collection insert type inference
  */
-export type ResolveInsertInput<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
+export type ResolveInput<
+  TExplicit = never,
+  TSchema = never,
   TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
+> = [TExplicit] extends [never]
   ? [TSchema] extends [never]
     ? TFallback
     : InferSchemaInput<TSchema>
@@ -62,10 +65,10 @@ export type ResolveInsertInput<
  * Users should not need to use this type directly, but understanding the priority order helps when defining collections.
  */
 export type ResolveType<
-  TExplicit,
-  TSchema extends StandardSchemaV1 = never,
+  TExplicit = never,
+  TSchema = never,
   TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
+> = [TExplicit] extends [never]
   ? [TSchema] extends [never]
     ? TFallback
     : InferSchemaOutput<TSchema>
@@ -350,13 +353,14 @@ export type CollectionStatus =
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+  TSchema = never,
+  _TInput extends object = ResolveInput<T, TSchema>,
+  TResolvedType extends object = ResolveType<T, TSchema>,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
   id?: string
-  sync: SyncConfig<T, TKey>
+  sync: SyncConfig<TResolvedType, TKey>
   schema?: TSchema
   /**
    * Function to extract the ID from an object
@@ -367,7 +371,7 @@ export interface CollectionConfig<
    * // For a collection with a 'uuid' field as the primary key
    * getKey: (item) => item.uuid
    */
-  getKey: (item: T) => TKey
+  getKey: (item: TResolvedType) => TKey
   /**
    * Time in milliseconds after which the collection will be garbage collected
    * when it has no active subscribers. Defaults to 5 minutes (300000ms).
@@ -397,7 +401,7 @@ export interface CollectionConfig<
    * // For a collection with a 'createdAt' field
    * compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
    */
-  compare?: (x: T, y: T) => number
+  compare?: (x: TResolvedType, y: TResolvedType) => number
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
@@ -439,7 +443,7 @@ export interface CollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<TInsertInput, TKey>
+  onInsert?: InsertMutationFn<TResolvedType, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -483,7 +487,7 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey>
+  onUpdate?: UpdateMutationFn<TResolvedType, TKey>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
@@ -526,12 +530,31 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey>
+  onDelete?: DeleteMutationFn<TResolvedType, TKey>
 }
+
+export type BaseCollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema = never,
+  TInput extends object = ResolveInput<T, TSchema>,
+  TResolvedType extends object = ResolveType<T, TSchema>,
+> = Omit<CollectionConfig<T, TKey, TSchema, TInput, TResolvedType>, `sync`>
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>
 >
+
+export type DerivedCollectionConfig<
+  T extends object = any,
+  TKey extends string | number = any,
+  TSchema = any,
+  TInput extends object = ResolveInput<T, TSchema>,
+  TResolvedType extends object = ResolveType<T, TSchema>,
+> = CollectionConfig<T, TKey, TSchema, TInput, TResolvedType> & {
+  __derivedConfig: true
+  __derivedType: T
+}
 
 /**
  * An input row from a collection

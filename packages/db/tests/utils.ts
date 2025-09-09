@@ -218,7 +218,9 @@ export function mockSyncCollectionOptions<
     },
   }
 
-  const options: CollectionConfig<T> & { utils: typeof utils } = {
+  const options: CollectionConfig<T, string | number, never, T, T> & {
+    utils: typeof utils
+  } = {
     sync: {
       sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
         begin = params.begin
@@ -307,7 +309,9 @@ export function mockSyncCollectionOptionsNoInitialState<
     },
   }
 
-  const options: CollectionConfig<T> & { utils: typeof utils } = {
+  const options: CollectionConfig<T, string | number, never, T, T> & {
+    utils: typeof utils
+  } = {
     sync: {
       sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
         begin = params.begin

@@ -12,19 +12,24 @@ import type { CollectionConfigBuilder } from "./collection-config-builder.js"
 export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TKey extends string | number = string | number,
 > {
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
-  private sentKeys = new Set<string | number>()
+  private sentKeys = new Set<TKey>()
 
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
   constructor(
     private collectionId: string,
-    private collection: Collection,
-    private config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    private collection: Collection<TResult, TKey>,
+    private config: Parameters<SyncConfig<TResult, TKey>[`sync`]>[0],
     private syncState: FullSyncState,
-    private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
+    private collectionConfigBuilder: CollectionConfigBuilder<
+      TContext,
+      TResult,
+      TKey
+    >
   ) {}
 
   subscribe() {
@@ -106,7 +111,7 @@ export class CollectionSubscriber<
   // for keys that have not been sent to the pipeline yet
   // and filter out deletes for keys that have not been sent
   private sendVisibleChangesToPipeline = (
-    changes: Array<ChangeMessage<any, string | number>>,
+    changes: Array<ChangeMessage<any, TKey>>,
     loadedInitialState: boolean
   ) => {
     if (loadedInitialState) {
@@ -134,10 +139,7 @@ export class CollectionSubscriber<
     return this.sendChangesToPipeline(newChanges)
   }
 
-  private loadKeys(
-    keys: Iterable<string | number>,
-    filterFn: (item: object) => boolean
-  ) {
+  private loadKeys(keys: Iterable<TKey>, filterFn: (item: object) => boolean) {
     for (const key of keys) {
       // Only load the key once
       if (this.sentKeys.has(key)) continue
@@ -178,9 +180,7 @@ export class CollectionSubscriber<
     // Until that point we filter out all changes from subscription to the collection.
     let sendChanges = false
 
-    const sendVisibleChanges = (
-      changes: Array<ChangeMessage<any, string | number>>
-    ) => {
+    const sendVisibleChanges = (changes: Array<ChangeMessage<any, TKey>>) => {
       // We filter out changes when sendChanges is false to ensure that we don't send
       // any changes from the live subscription until the join operator requests either
       // the initial state or its first key. This is needed otherwise it could receive
@@ -201,7 +201,7 @@ export class CollectionSubscriber<
     const filterFn = whereExpression
       ? createFilterFunctionFromExpression(whereExpression)
       : () => true
-    const loadKs = (keys: Set<string | number>) => {
+    const loadKs = (keys: Set<TKey>) => {
       sendChanges = true
       return this.loadKeys(keys, filterFn)
     }
@@ -239,7 +239,7 @@ export class CollectionSubscriber<
     this.loadNextItems(offset + limit)
 
     const sendChangesInRange = (
-      changes: Iterable<ChangeMessage<any, string | number>>
+      changes: Iterable<ChangeMessage<any, TKey>>
     ) => {
       // Split live updates into a delete of the old value and an insert of the new value
       // and filter out changes that are bigger than the biggest value we've sent so far
@@ -312,7 +312,7 @@ export class CollectionSubscriber<
   }
 
   private sendChangesToPipelineWithTracking(
-    changes: Iterable<ChangeMessage<any, string | number>>
+    changes: Iterable<ChangeMessage<any, TKey>>
   ) {
     const { comparator } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
@@ -335,10 +335,15 @@ export class CollectionSubscriber<
       : biggestSentRow
     // Take the `n` items after the biggest sent value
     const nextOrderedKeys = index.take(n, biggestSentValue)
-    const nextInserts: Array<ChangeMessage<any, string | number>> =
-      nextOrderedKeys.map((key) => {
-        return { type: `insert`, key, value: this.collection.get(key) }
-      })
+    const nextInserts: Array<ChangeMessage<any, TKey>> = nextOrderedKeys.map(
+      (key) => {
+        return {
+          type: `insert`,
+          key: key as TKey,
+          value: this.collection.get(key as TKey),
+        }
+      }
+    )
     this.sendChangesToPipelineWithTracking(nextInserts)
     return nextInserts.length
   }
@@ -355,7 +360,7 @@ export class CollectionSubscriber<
   }
 
   private *trackSentValues(
-    changes: Iterable<ChangeMessage<any, string | number>>,
+    changes: Iterable<ChangeMessage<any, TKey>>,
     comparator: (a: any, b: any) => number
   ) {
     for (const change of changes) {
@@ -405,10 +410,10 @@ function findCollectionAlias(
 /**
  * Helper function to send changes to a D2 input stream
  */
-function sendChangesToInput(
+function sendChangesToInput<TKey extends string | number>(
   input: RootStreamBuilder<unknown>,
-  changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any
+  changes: Iterable<ChangeMessage<any, TKey>>,
+  getKey: (item: ChangeMessage<any, TKey>[`value`]) => TKey
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {

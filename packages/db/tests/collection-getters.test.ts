@@ -5,16 +5,18 @@ import type { CollectionImpl } from "../src/collection"
 import type { ChangeMessage, CollectionConfig } from "../src/types"
 
 describe(`Collection getters`, () => {
-  let collection: CollectionImpl
+  let collection: CollectionImpl<any, any, any, any, any>
   let mockSync: {
     sync: (params: {
-      collection: CollectionImpl
+      collection: CollectionImpl<any, any, any, any, any>
       begin: () => void
-      write: (message: ChangeMessage) => void
+      write: (message: Omit<ChangeMessage, `key`>) => void
       commit: () => void
+      markReady: () => void
+      truncate: () => void
     }) => void
   }
-  let config: CollectionConfig
+  let config: CollectionConfig<any, any, any, any, any>
 
   beforeEach(() => {
     mockSync = {
