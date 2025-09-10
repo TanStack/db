@@ -45,50 +45,27 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-type ResolveType<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  unknown extends GetExtensions<TExplicit>
-    ? [TSchema] extends [never]
-      ? TFallback
-      : InferSchemaOutput<TSchema>
-    : TExplicit
-
 /**
  * Configuration interface for Electric collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
- *
- * @remarks
- * Type resolution follows a priority order:
- * 1. If you provide an explicit type via generic parameter, it will be used
- * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
- * 3. If neither explicit type nor schema is provided, the fallback type will be used
- *
- * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * @template T - The type of items in the collection
+ * @template TSchema - The schema type for validation
  */
 export interface ElectricCollectionConfig<
-  TExplicit extends Row<unknown> = Row<unknown>,
+  T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
 > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  shapeOptions: ShapeStreamOptions<
-    GetExtensions<ResolveType<TExplicit, TSchema, TFallback>>
-  >
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>
 
   /**
    * All standard Collection configuration properties
    */
   id?: string
   schema?: TSchema
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
+  getKey: CollectionConfig<T, string | number, TSchema>[`getKey`]
+  sync?: CollectionConfig<T, string | number, TSchema>[`sync`]
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -139,7 +116,7 @@ export interface ElectricCollectionConfig<
    * }
    */
   onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: InsertMutationFnParams<T>
   ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
@@ -187,7 +164,7 @@ export interface ElectricCollectionConfig<
    * }
    */
   onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: UpdateMutationFnParams<T>
   ) => Promise<{ txid: Txid | Array<Txid> }>
 
   /**
@@ -244,7 +221,7 @@ export interface ElectricCollectionConfig<
    *
    */
   onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
+    params: DeleteMutationFnParams<T>
   ) => Promise<{ txid: Txid | Array<Txid> }>
 }
 
@@ -282,24 +259,46 @@ export interface ElectricCollectionUtils extends UtilsRecord {
 /**
  * Creates Electric collection options for use with a standard Collection
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template T - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the Electric collection
  * @returns Collection options with utilities
  */
-export function electricCollectionOptions<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
->(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
+
+// Overload for when schema is provided
+export function electricCollectionOptions<T extends StandardSchemaV1>(
+  config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
+    schema: T
+  }
+): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema: T
+}
+
+// Overload for when no schema is provided
+export function electricCollectionOptions<T extends Row<unknown>>(
+  config: ElectricCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, string | number> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: never // no schema in the result
+}
+
+export function electricCollectionOptions(
+  config: ElectricCollectionConfig<any, any>
+): CollectionConfig<any, string | number, any> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: any
+} {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
-  const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
-    config.shapeOptions,
-    {
-      seenTxids,
-    }
-  )
+  const sync = createElectricSync<any>(config.shapeOptions, {
+    seenTxids,
+  })
 
   /**
    * Wait for a specific transaction ID to be synced
@@ -338,11 +337,7 @@ export function electricCollectionOptions<
 
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
-    ? async (
-        params: InsertMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: InsertMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onInsert!(params)) ?? {}
@@ -364,11 +359,7 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (
-        params: UpdateMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: UpdateMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
         // eslint-disable-next-line
         const handlerResult = (await config.onUpdate!(params)) ?? {}
@@ -390,11 +381,7 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (
-        params: DeleteMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: DeleteMutationFnParams<any>) => {
         const handlerResult = await config.onDelete!(params)
         if (!handlerResult.txid) {
           throw new ElectricDeleteHandlerMustReturnTxIdError()
