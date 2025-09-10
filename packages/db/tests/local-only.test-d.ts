@@ -12,13 +12,8 @@ interface TestItem extends Record<string, unknown> {
 type ItemOf<T> = T extends Array<infer U> ? U : T
 
 describe(`LocalOnly Collection Types`, () => {
-  it(`should have correct return type from localOnlyCollectionOptions`, () => {
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      Record<string, unknown>,
-      number
-    >({
+  it(`should have correct return type from localOnlyCollectionOptions with explicit type`, () => {
+    const options = localOnlyCollectionOptions<TestItem, number>({
       id: `test-local-only`,
       getKey: (item) => item.id,
     })
@@ -36,15 +31,29 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(options.getKey).returns.toEqualTypeOf<number>()
   })
 
-  it(`should be compatible with createCollection`, () => {
-    const options = localOnlyCollectionOptions<
-      TestItem,
-      never,
-      Record<string, unknown>,
-      number
-    >({
+  it(`should have correct return type from localOnlyCollectionOptions with type inferred from getKey`, () => {
+    const options = localOnlyCollectionOptions({
       id: `test-local-only`,
-      getKey: (item) => item.id,
+      getKey: (item: TestItem) => item.id,
+    })
+
+    // Test that options has the expected structure
+    expectTypeOf(options).toHaveProperty(`sync`)
+    expectTypeOf(options).toHaveProperty(`onInsert`)
+    expectTypeOf(options).toHaveProperty(`onUpdate`)
+    expectTypeOf(options).toHaveProperty(`onDelete`)
+    expectTypeOf(options).toHaveProperty(`utils`)
+    expectTypeOf(options).toHaveProperty(`getKey`)
+
+    // Test that getKey returns the correct type
+    expectTypeOf(options.getKey).parameter(0).toEqualTypeOf<TestItem>()
+    expectTypeOf(options.getKey).returns.toEqualTypeOf<number>()
+  })
+
+  it(`should be compatible with createCollection`, () => {
+    const options = localOnlyCollectionOptions({
+      id: `test-local-only`,
+      getKey: (item: TestItem) => item.id,
     })
 
     const collection = createCollection(options)
