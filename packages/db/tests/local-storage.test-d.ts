@@ -7,7 +7,6 @@ import type {
   StorageApi,
   StorageEventApi,
 } from "../src/local-storage"
-import type { ResolveType } from "../src/types"
 
 type ItemOf<T> = T extends Array<infer U> ? U : T
 
@@ -74,10 +73,8 @@ describe(`LocalStorage collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<ExplicitType, never>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
 
     // Test that the collection works with the options
     const collection = createCollection(options)
@@ -101,10 +98,8 @@ describe(`LocalStorage collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<unknown, typeof testSchema>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[SchemaType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
 
     // Test that the collection works with the options
     const collection = createCollection(options)
@@ -129,10 +124,8 @@ describe(`LocalStorage collection type resolution tests`, () => {
 
     const options = localStorageCollectionOptions<FallbackType>(config)
 
-    type ExpectedType = ResolveType<FallbackType, never>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[FallbackType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<FallbackType>()
 
     // Test that the collection works with the options
     const collection = createCollection(options)
@@ -155,10 +148,8 @@ describe(`LocalStorage collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<ExplicitType, never>
     // The getKey function should have the resolved type (explicit type should win)
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
 
     // Test that the collection works with the options
     const collection = createCollection(options)

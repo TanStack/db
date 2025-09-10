@@ -8,7 +8,6 @@ import type {
   Value,
 } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
-import type { ResolveType } from "../../types.js"
 
 /**
  * Context - The central state container for query builder operations
@@ -77,19 +76,11 @@ export type Source = {
 /**
  * InferCollectionType - Extracts the TypeScript type from a CollectionImpl
  *
- * This helper ensures we get the same type that would be used when creating
- * the collection itself. It uses the internal `ResolveType` logic to maintain
- * consistency between collection creation and query type inference.
- *
- * The complex generic parameters extract:
- * - U: The base document type
- * - TSchema: The schema definition
- * - The resolved type combines these with any transforms
+ * This helper ensures we get the same type that was used when creating the collection itself.
+ * This can be an explicit type passed by the user or the schema output type.
  */
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? ResolveType<U, TSchema, U>
-    : never
+  T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema

@@ -1,7 +1,7 @@
 import { assertType, describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection"
-import type { OperationConfig, ResolveInput, ResolveType } from "../src/types"
+import type { OperationConfig } from "../src/types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 describe(`Collection.update type tests`, () => {
@@ -95,9 +95,6 @@ describe(`Collection type resolution tests`, () => {
 
     type Param = Parameters<typeof _collection.insert>[0]
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<SchemaType>()
-
-    type ExpectedType = ResolveType<never, typeof testSchema>
-    expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
   })
 
   it(`should automatically infer type from Zod schema with optional fields`, () => {
@@ -175,8 +172,12 @@ describe(`Schema Input/Output Type Distinction`, () => {
   })
 
   it(`should handle schema with default values correctly for insert`, () => {
-    type ExpectedOutputType = ResolveType<never, typeof userSchemaWithDefaults>
-    type ExpectedInputType = ResolveInput<never, typeof userSchemaWithDefaults>
+    type ExpectedOutputType = StandardSchemaV1.InferOutput<
+      typeof userSchemaWithDefaults
+    >
+    type ExpectedInputType = StandardSchemaV1.InferInput<
+      typeof userSchemaWithDefaults
+    >
 
     const collection = createCollection({
       getKey: (item) => {
@@ -223,8 +224,12 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaTransform,
     })
 
-    type ExpectedInputType = ResolveInput<never, typeof userSchemaTransform>
-    type ExpectedOutputType = ResolveType<never, typeof userSchemaTransform>
+    type ExpectedInputType = StandardSchemaV1.InferInput<
+      typeof userSchemaTransform
+    >
+    type ExpectedOutputType = StandardSchemaV1.InferOutput<
+      typeof userSchemaTransform
+    >
     type InsertArg = Parameters<typeof collection.insert>[0]
 
     // Input type should be the raw input (before transformation)
@@ -261,8 +266,12 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaWithDefaults,
     })
 
-    type ExpectedOutputType = ResolveType<never, typeof userSchemaWithDefaults>
-    type ExpectedInputType = ResolveInput<never, typeof userSchemaWithDefaults>
+    type ExpectedOutputType = StandardSchemaV1.InferOutput<
+      typeof userSchemaWithDefaults
+    >
+    type ExpectedInputType = StandardSchemaV1.InferInput<
+      typeof userSchemaWithDefaults
+    >
 
     // Input type should not include defaulted fields
     expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
@@ -303,8 +312,12 @@ describe(`Schema Input/Output Type Distinction`, () => {
       schema: userSchemaTransform,
     })
 
-    type ExpectedInputType = ResolveInput<never, typeof userSchemaTransform>
-    type ExpectedOutputType = ResolveType<never, typeof userSchemaTransform>
+    type ExpectedInputType = StandardSchemaV1.InferInput<
+      typeof userSchemaTransform
+    >
+    type ExpectedOutputType = StandardSchemaV1.InferOutput<
+      typeof userSchemaTransform
+    >
 
     // Input type should be the raw input (before transformation)
     expectTypeOf<ExpectedInputType>().toEqualTypeOf<{
