@@ -9,9 +9,11 @@ import {
   eq,
   gt,
   gte,
+  isUndefined,
   lt,
   max,
   min,
+  not,
   or,
   sum,
 } from "../../src/query/builder/functions.js"
@@ -27,6 +29,32 @@ type Order = {
   quantity: number
   discount: number
   sales_rep_id: number | null
+  customer?: {
+    name: string
+    tier: `bronze` | `silver` | `gold` | `platinum`
+    address: {
+      city: string
+      state: string
+      country: string
+    }
+    preferences: {
+      newsletter: boolean
+      marketing: boolean
+    }
+  }
+  shipping?: {
+    method: string
+    cost: number
+    address: {
+      street: string
+      city: string
+      zipCode: string
+    }
+    tracking?: {
+      number: string
+      status: string
+    }
+  }
 }
 
 // Sample order data
@@ -41,6 +69,32 @@ const sampleOrders: Array<Order> = [
     quantity: 2,
     discount: 0,
     sales_rep_id: 1,
+    customer: {
+      name: `John Doe`,
+      tier: `gold`,
+      address: {
+        city: `New York`,
+        state: `NY`,
+        country: `USA`,
+      },
+      preferences: {
+        newsletter: true,
+        marketing: false,
+      },
+    },
+    shipping: {
+      method: `express`,
+      cost: 15.99,
+      address: {
+        street: `123 Main St`,
+        city: `New York`,
+        zipCode: `10001`,
+      },
+      tracking: {
+        number: `TRK123456`,
+        status: `delivered`,
+      },
+    },
   },
   {
     id: 2,
@@ -52,6 +106,28 @@ const sampleOrders: Array<Order> = [
     quantity: 1,
     discount: 10,
     sales_rep_id: 1,
+    customer: {
+      name: `John Doe`,
+      tier: `gold`,
+      address: {
+        city: `New York`,
+        state: `NY`,
+        country: `USA`,
+      },
+      preferences: {
+        newsletter: true,
+        marketing: false,
+      },
+    },
+    shipping: {
+      method: `standard`,
+      cost: 5.99,
+      address: {
+        street: `123 Main St`,
+        city: `New York`,
+        zipCode: `10001`,
+      },
+    },
   },
   {
     id: 3,
@@ -63,6 +139,28 @@ const sampleOrders: Array<Order> = [
     quantity: 3,
     discount: 5,
     sales_rep_id: 2,
+    customer: {
+      name: `Jane Smith`,
+      tier: `silver`,
+      address: {
+        city: `Los Angeles`,
+        state: `CA`,
+        country: `USA`,
+      },
+      preferences: {
+        newsletter: false,
+        marketing: true,
+      },
+    },
+    shipping: {
+      method: `standard`,
+      cost: 7.99,
+      address: {
+        street: `456 Oak Ave`,
+        city: `Los Angeles`,
+        zipCode: `90210`,
+      },
+    },
   },
   {
     id: 4,
@@ -178,6 +276,40 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer3?.avg_amount).toBe(162.5) // (250+75)/2
         expect(customer3?.min_amount).toBe(75)
         expect(customer3?.max_amount).toBe(250)
+      })
+
+      test(`group by customer_id with count aggregation (not null only)`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                total: count(orders.id),
+                onlyNotNull: count(orders.sales_rep_id),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3) // 3 customers
+
+        // Customer 1: orders 1, 2, 7 (total: 3, onlyNotNull: 3)
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.total).toBe(3)
+        expect(customer1?.onlyNotNull).toBe(3)
+
+        // Customer 2: orders 3, 4 (total: 2, onlyNotNull: 2)
+        const customer2 = customerSummary.get(2)
+        expect(customer2).toBeDefined()
+        expect(customer2?.total).toBe(2)
+        expect(customer2?.onlyNotNull).toBe(2)
+
+        // Customer 3: orders 5, 6 (total: 2, onlyNotNull: 1)
+        const customer3 = customerSummary.get(3)
+        expect(customer3).toBeDefined()
+        expect(customer3?.total).toBe(2)
+        expect(customer3?.onlyNotNull).toBe(1)
       })
 
       test(`group by status`, () => {
@@ -950,6 +1082,277 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer1?.avg_quantity).toBeCloseTo(1.67, 2)
         expect(customer1?.min_quantity).toBe(1)
         expect(customer1?.max_quantity).toBe(2)
+      })
+    })
+
+    describe(`Nested Object GroupBy`, () => {
+      let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        ordersCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`group by nested object properties`, () => {
+        const tierSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) => not(isUndefined(orders.customer)))
+              .groupBy(({ orders }) => orders.customer?.tier)
+              .select(({ orders }) => ({
+                tier: orders.customer?.tier,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+                avg_amount: avg(orders.amount),
+              })),
+        })
+
+        const results = tierSummary.toArray
+        expect(results).toHaveLength(2) // gold and silver
+
+        const goldTier = results.find((r) => r.tier === `gold`)
+        expect(goldTier).toBeDefined()
+        expect(goldTier?.order_count).toBe(2) // Orders 1 and 2
+        expect(goldTier?.total_amount).toBe(300) // 100 + 200
+
+        const silverTier = results.find((r) => r.tier === `silver`)
+        expect(silverTier).toBeDefined()
+        expect(silverTier?.order_count).toBe(1) // Order 3
+        expect(silverTier?.total_amount).toBe(150)
+      })
+
+      test(`group by deeply nested properties`, () => {
+        const stateSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) => not(isUndefined(orders.customer?.address)))
+              .groupBy(({ orders }) => orders.customer?.address.state)
+              .select(({ orders }) => ({
+                state: orders.customer?.address.state,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+              })),
+        })
+
+        const results = stateSummary.toArray
+        expect(results).toHaveLength(2) // NY and CA
+
+        const nyOrders = results.find((r) => r.state === `NY`)
+        expect(nyOrders).toBeDefined()
+        expect(nyOrders?.order_count).toBe(2) // Orders from New York
+        expect(nyOrders?.total_amount).toBe(300) // 100 + 200
+
+        const caOrders = results.find((r) => r.state === `CA`)
+        expect(caOrders).toBeDefined()
+        expect(caOrders?.order_count).toBe(1) // Order from Los Angeles
+        expect(caOrders?.total_amount).toBe(150)
+      })
+
+      test(`group by shipping method with nested aggregation`, () => {
+        const shippingSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) => not(isUndefined(orders.shipping)))
+              .groupBy(({ orders }) => orders.shipping?.method)
+              .select(({ orders }) => ({
+                method: orders.shipping?.method,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+                avg_shipping_cost: avg(orders.shipping?.cost),
+                total_shipping_cost: sum(orders.shipping?.cost),
+              })),
+        })
+
+        const results = shippingSummary.toArray
+        expect(results).toHaveLength(2) // express and standard
+
+        const expressOrders = results.find((r) => r.method === `express`)
+        expect(expressOrders).toBeDefined()
+        expect(expressOrders?.order_count).toBe(1) // Order 1
+        expect(expressOrders?.total_amount).toBe(100)
+        expect(expressOrders?.avg_shipping_cost).toBe(15.99)
+
+        const standardOrders = results.find((r) => r.method === `standard`)
+        expect(standardOrders).toBeDefined()
+        expect(standardOrders?.order_count).toBe(2) // Orders 2 and 3
+        expect(standardOrders?.total_amount).toBe(350) // 200 + 150
+        expect(standardOrders?.avg_shipping_cost).toBeCloseTo(6.99, 2) // (5.99 + 7.99) / 2
+      })
+
+      test(`group by multiple nested properties`, () => {
+        const complexGrouping = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) =>
+                and(
+                  not(isUndefined(orders.customer)),
+                  not(isUndefined(orders.shipping))
+                )
+              )
+              .groupBy(({ orders }) => orders.customer?.tier)
+              .groupBy(({ orders }) => orders.shipping?.method)
+              .select(({ orders }) => ({
+                tier: orders.customer?.tier,
+                method: orders.shipping?.method,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+              })),
+        })
+
+        const results = complexGrouping.toArray
+        expect(results.length).toBeGreaterThan(0)
+
+        // Should have groups for each tier-method combination
+        const goldExpress = results.find(
+          (r) => r.tier === `gold` && r.method === `express`
+        )
+        expect(goldExpress).toBeDefined()
+        expect(goldExpress?.order_count).toBe(1)
+        expect(goldExpress?.total_amount).toBe(100)
+
+        const goldStandard = results.find(
+          (r) => r.tier === `gold` && r.method === `standard`
+        )
+        expect(goldStandard).toBeDefined()
+        expect(goldStandard?.order_count).toBe(1)
+        expect(goldStandard?.total_amount).toBe(200)
+      })
+
+      test(`group by with nested boolean properties`, () => {
+        const preferenceSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) =>
+                not(isUndefined(orders.customer?.preferences))
+              )
+              .groupBy(({ orders }) => orders.customer?.preferences.newsletter)
+              .select(({ orders }) => ({
+                newsletter_subscribed: orders.customer?.preferences.newsletter,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+                avg_amount: avg(orders.amount),
+              })),
+        })
+
+        const results = preferenceSummary.toArray
+        expect(results).toHaveLength(2) // true and false
+
+        const subscribedUsers = results.find(
+          (r) => r.newsletter_subscribed === true
+        )
+        expect(subscribedUsers).toBeDefined()
+        expect(subscribedUsers?.order_count).toBe(2) // Orders from John Doe (gold tier)
+        expect(subscribedUsers?.total_amount).toBe(300) // 100 + 200
+
+        const unsubscribedUsers = results.find(
+          (r) => r.newsletter_subscribed === false
+        )
+        expect(unsubscribedUsers).toBeDefined()
+        expect(unsubscribedUsers?.order_count).toBe(1) // Order from Jane Smith
+        expect(unsubscribedUsers?.total_amount).toBe(150)
+      })
+
+      test(`group by with conditional nested properties`, () => {
+        const trackingSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) =>
+                not(isUndefined(orders.shipping?.tracking))
+              )
+              .select(({ orders }) => ({
+                tracking_status: not(isUndefined(orders.shipping?.tracking)),
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+              })),
+        })
+
+        const results = trackingSummary.toArray
+        expect(results).toHaveLength(2) // tracked and untracked
+
+        const tracked = results.find((r) => r.tracking_status === true)
+        expect(tracked).toBeDefined()
+        expect(tracked?.order_count).toBe(1) // Only order 1 has tracking
+        expect(tracked?.total_amount).toBe(100)
+
+        const untracked = results.find((r) => r.tracking_status === false)
+        expect(untracked).toBeDefined()
+        expect(untracked?.order_count).toBeGreaterThan(0) // Orders without tracking + orders without shipping
+      })
+
+      test(`handles live updates with nested group by`, () => {
+        const tierSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .where(({ orders }) => not(isUndefined(orders.customer)))
+              .groupBy(({ orders }) => orders.customer?.tier)
+              .select(({ orders }) => ({
+                tier: orders.customer?.tier,
+                order_count: count(orders.id),
+                total_amount: sum(orders.amount),
+              })),
+        })
+
+        // Initial state
+        let results = tierSummary.toArray
+        const initialGoldCount =
+          results.find((r) => r.tier === `gold`)?.order_count || 0
+
+        // Add a new order for a platinum customer
+        const newOrder: Order = {
+          id: 999,
+          customer_id: 999,
+          amount: 500,
+          status: `completed`,
+          date: `2023-03-01`,
+          product_category: `luxury`,
+          quantity: 1,
+          discount: 0,
+          sales_rep_id: 1,
+          customer: {
+            name: `Premium Customer`,
+            tier: `platinum`,
+            address: {
+              city: `Miami`,
+              state: `FL`,
+              country: `USA`,
+            },
+            preferences: {
+              newsletter: true,
+              marketing: true,
+            },
+          },
+        }
+
+        ordersCollection.utils.begin()
+        ordersCollection.utils.write({
+          type: `insert`,
+          value: newOrder,
+        })
+        ordersCollection.utils.commit()
+
+        // Should now have a platinum tier group
+        results = tierSummary.toArray
+        const platinumTier = results.find((r) => r.tier === `platinum`)
+        expect(platinumTier).toBeDefined()
+        expect(platinumTier?.order_count).toBe(1)
+        expect(platinumTier?.total_amount).toBe(500)
+
+        // Gold tier should remain unchanged
+        const goldTier = results.find((r) => r.tier === `gold`)
+        expect(goldTier?.order_count).toBe(initialGoldCount)
       })
     })
   })
