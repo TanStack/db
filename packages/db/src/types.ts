@@ -28,58 +28,6 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-type IsNever<T> = [T] extends [never] ? true : false
-type IsUnknown<T> = unknown extends T ? true : false
-type IsUnknownOrNever<T> =
-  IsNever<T> extends true ? true : IsUnknown<T> extends true ? true : false
-
-/**
- * Helper type to determine the insert input type
- * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
- *
- * Priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema input type (if schema provided)
- * 3. Fallback type TFallback
- *
- * @internal This is used for collection insert type inference
- */
-export type ResolveInput<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  IsUnknownOrNever<TExplicit> extends true
-    ? IsUnknownOrNever<TSchema> extends true
-      ? TFallback
-      : InferSchemaInput<TSchema>
-    : TExplicit extends object
-      ? TExplicit
-      : Record<string, unknown>
-
-/**
- * Helper type to determine the final type based on priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema output type (if schema provided)
- * 3. Fallback type TFallback
- *
- * @remarks
- * This type is used internally to resolve the collection item type based on the provided generics and schema.
- * Users should not need to use this type directly, but understanding the priority order helps when defining collections.
- */
-export type ResolveType<
-  TExplicit,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  IsUnknownOrNever<TExplicit> extends true
-    ? IsUnknownOrNever<TSchema> extends true
-      ? TFallback
-      : InferSchemaOutput<TSchema>
-    : TExplicit extends object
-      ? TExplicit
-      : Record<string, unknown>
-
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -362,7 +310,6 @@ export interface CollectionConfig<
   // then it would conflict with the overloads of createCollection which
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
-  TInsertInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.

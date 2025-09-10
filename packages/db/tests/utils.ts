@@ -218,7 +218,7 @@ export function mockSyncCollectionOptions<
     },
   }
 
-  const options: CollectionConfig<T, string | number, never, T> & {
+  const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils
   } = {
     sync: {
@@ -309,7 +309,7 @@ export function mockSyncCollectionOptionsNoInitialState<
     },
   }
 
-  const options: CollectionConfig<T, string | number, never, T> & {
+  const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils
   } = {
     sync: {
