@@ -528,13 +528,13 @@ describe(`Collection Auto-Indexing`, () => {
       status: `active`,
       createdAt: new Date(),
     })
-
+    console.log(tracker.stats.queriesExecuted)
     expect(tracker.stats.queriesExecuted).toEqual([
       {
         type: `index`,
-        operation: `eq`,
+        operation: `in`,
         field: `id2`,
-        value: `other2`,
+        value: [`other2`],
       },
     ])
 
@@ -651,9 +651,9 @@ describe(`Collection Auto-Indexing`, () => {
     expect(tracker.stats.queriesExecuted).toEqual([
       {
         type: `index`,
-        operation: `eq`,
+        operation: `in`,
         field: `id2`,
-        value: `other2`,
+        value: [`other2`],
       },
     ])
 
