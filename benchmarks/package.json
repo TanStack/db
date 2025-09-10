@@ -1,0 +1,28 @@
+{
+  "description": "Benchmarks for TanStack DB",
+  "version": "0.0.1",
+  "type": "module",
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.50.0",
+    "@opentelemetry/sdk-node": "^0.50.0",
+    "@tanstack/db": "latest",
+    "@tanstack/db-tracing": "workspace:*",
+    "dotenv": "^17.2.2",
+    "tsx": "^4.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "benchmark": "tsx initial-load.ts",
+    "benchmark:small": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(5, 25, 100))\"",
+    "benchmark:medium": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(25, 125, 500))\"",
+    "benchmark:large": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(50, 250, 1000))\"",
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  }
+}

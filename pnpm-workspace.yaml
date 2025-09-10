@@ -1,6 +1,7 @@
 packages:
   - "packages/**"
   - "examples/**"
+  - "benchmarks"
 catalog:
   "@changesets/cli": ^2.28.1
   "@electric-sql/client": 1.0.0

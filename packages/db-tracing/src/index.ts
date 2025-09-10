@@ -5,6 +5,7 @@ export { globalTracerRegistry } from "./registry.js"
 export { withSpan, withSpanAsync } from "./withSpan.js"
 export { PerformanceMarkTracer } from "./tracers/performance-mark.js"
 export { OpenTelemetryTracer } from "./tracers/open-telemetry.js"
+export { createHoneycombTracer, setupHoneycombFromEnv } from "./tracers/honeycomb.js"
 export type { Tracer, Span, TracingConfig } from "./types.js"
 
 // Convenience functions

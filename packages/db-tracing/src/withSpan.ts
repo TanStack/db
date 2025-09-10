@@ -1,4 +1,5 @@
 import { globalTracerRegistry } from "./registry.js"
+import { context, trace } from "@opentelemetry/api"
 
 export function withSpan<T>(
   name: string,
@@ -6,9 +7,18 @@ export function withSpan<T>(
   attributes?: Record<string, any>
 ): T {
   const spans = globalTracerRegistry.startSpan(name, attributes)
+  if (spans.length === 0) {
+    // No tracing enabled, just run the function
+    return fn()
+  }
+
   try {
-    const result = fn()
-    return result
+    // Activate the span context for OpenTelemetry tracers
+    const otelSpan = spans.find(span => span.span) as any
+    if (otelSpan?.span) {
+      return context.with(trace.setSpan(context.active(), otelSpan.span), fn)
+    }
+    return fn()
   } finally {
     spans.forEach((span) => span.end())
   }
@@ -20,9 +30,18 @@ export async function withSpanAsync<T>(
   attributes?: Record<string, any>
 ): Promise<T> {
   const spans = globalTracerRegistry.startSpan(name, attributes)
+  if (spans.length === 0) {
+    // No tracing enabled, just run the function
+    return await fn()
+  }
+
   try {
-    const result = await fn()
-    return result
+    // Activate the span context for OpenTelemetry tracers
+    const otelSpan = spans.find(span => span.span) as any
+    if (otelSpan?.span) {
+      return await context.with(trace.setSpan(context.active(), otelSpan.span), fn)
+    }
+    return await fn()
   } finally {
     spans.forEach((span) => span.end())
   }
