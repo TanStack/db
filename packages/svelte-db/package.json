@@ -6,12 +6,12 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/package": "^2.4.0",
-    "@sveltejs/vite-plugin-svelte": "^6.1.0",
-    "@vitest/coverage-istanbul": "^3.0.9",
-    "publint": "^0.3.2",
-    "svelte": "^5.28.6",
-    "svelte-check": "^4.3.0"
+    "@sveltejs/package": "^2.5.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.0",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "publint": "^0.3.12",
+    "svelte": "^5.38.8",
+    "svelte-check": "^4.3.1"
   },
   "exports": {
     ".": {

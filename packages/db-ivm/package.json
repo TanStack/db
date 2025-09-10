@@ -8,7 +8,7 @@
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {

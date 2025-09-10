@@ -7,8 +7,8 @@
     "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
-    "@vitest/coverage-istanbul": "^3.0.9",
-    "arktype": "^2.1.20",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "arktype": "^2.1.22",
     "temporal-polyfill": "^0.3.0"
   },
   "exports": {
