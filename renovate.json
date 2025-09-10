@@ -88,9 +88,5 @@
     "reviewers": ["@kylemathews"]
   },
   "labels": ["dependencies"],
-  "ignorePaths": [
-    "**/node_modules/**",
-    "**/.output/**",
-    "**/dist/**"
-  ]
+  "ignorePaths": ["**/node_modules/**", "**/.output/**", "**/dist/**"]
 }
