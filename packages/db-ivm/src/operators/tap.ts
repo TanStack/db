@@ -8,23 +8,21 @@ import type { MultiSet } from "../multiset.js"
  * Operator that applies a function to each element in the input stream
  */
 export class TapOperator<T> extends LinearUnaryOperator<T, T> {
-  #f: (data: T) => void
+  #f: (data: MultiSet<T>) => void
 
   constructor(
     id: number,
     inputA: DifferenceStreamReader<T>,
     output: DifferenceStreamWriter<T>,
-    f: (data: T) => void
+    f: (data: MultiSet<T>) => void
   ) {
     super(id, inputA, output)
     this.#f = f
   }
 
   inner(collection: MultiSet<T>): MultiSet<T> {
-    return collection.map((data) => {
-      this.#f(data)
-      return data
-    })
+    this.#f(collection)
+    return collection
   }
 }
 
@@ -34,7 +32,7 @@ export class TapOperator<T> extends LinearUnaryOperator<T, T> {
  * @param f - The function to invoke on each element
  * @returns The input stream
  */
-export function tap<T>(f: (data: T) => void): PipedOperator<T, T> {
+export function tap<T>(f: (data: MultiSet<T>) => void): PipedOperator<T, T> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,

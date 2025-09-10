@@ -1,6 +1,19 @@
 import { globalTracerRegistry } from "./registry.js"
 import { context, trace } from "@opentelemetry/api"
 
+/**
+ * Wraps a callback function to preserve the current OpenTelemetry context
+ * This is useful for async callbacks that need to maintain tracing context
+ */
+export function withCurrentContext<TArgs extends any[], TReturn>(
+  callback: (...args: TArgs) => TReturn
+): (...args: TArgs) => TReturn {
+  const currentContext = context.active()
+  return (...args: TArgs) => {
+    return context.with(currentContext, () => callback(...args))
+  }
+}
+
 export function withSpan<T>(
   name: string,
   fn: () => T,
@@ -12,11 +25,14 @@ export function withSpan<T>(
     return fn()
   }
 
+
   try {
     // Activate the span context for OpenTelemetry tracers
     const otelSpan = spans.find(span => span.span) as any
     if (otelSpan?.span) {
-      return context.with(trace.setSpan(context.active(), otelSpan.span), fn)
+      // Create a new context with this span as the active span
+      const newContext = trace.setSpan(context.active(), otelSpan.span)
+      return context.with(newContext, fn)
     }
     return fn()
   } finally {
@@ -39,7 +55,9 @@ export async function withSpanAsync<T>(
     // Activate the span context for OpenTelemetry tracers
     const otelSpan = spans.find(span => span.span) as any
     if (otelSpan?.span) {
-      return await context.with(trace.setSpan(context.active(), otelSpan.span), fn)
+      // Create a new context with this span as the active span
+      const newContext = trace.setSpan(context.active(), otelSpan.span)
+      return await context.with(newContext, fn)
     }
     return await fn()
   } finally {

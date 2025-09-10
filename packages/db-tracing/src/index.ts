@@ -2,7 +2,7 @@ import { globalTracerRegistry } from "./registry.js"
 import type { Tracer } from "./types.js"
 
 export { globalTracerRegistry } from "./registry.js"
-export { withSpan, withSpanAsync } from "./withSpan.js"
+export { withSpan, withSpanAsync, withCurrentContext } from "./withSpan.js"
 export { PerformanceMarkTracer } from "./tracers/performance-mark.js"
 export { OpenTelemetryTracer } from "./tracers/open-telemetry.js"
 export { createHoneycombTracer, setupHoneycombFromEnv } from "./tracers/honeycomb.js"

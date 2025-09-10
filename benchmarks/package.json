@@ -18,7 +18,8 @@
     "typescript": "^5.0.0"
   },
   "scripts": {
-    "benchmark": "tsx initial-load.ts",
+    "benchmark": "tsx --trace-gc --trace-gc-verbose initial-load.ts",
+    "benchmark:interactive": "tsx --inspect initial-load.ts --interactive",
     "benchmark:small": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(5, 25, 100))\"",
     "benchmark:medium": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(25, 125, 500))\"",
     "benchmark:large": "tsx -e \"import('./initial-load.ts').then(m => m.benchmarkInitialLoad(50, 250, 1000))\"",

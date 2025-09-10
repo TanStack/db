@@ -1,13 +1,24 @@
 import type { Span, Tracer } from "../types.js"
 import type { Span as OtelSpan, Tracer as OtelTracer } from "@opentelemetry/api"
-import { context } from "@opentelemetry/api"
+import { context, trace } from "@opentelemetry/api"
 
 export class OpenTelemetryTracer implements Tracer {
   constructor(private otelTracer: OtelTracer) {}
 
   startSpan(name: string, attributes?: Record<string, any>): Span {
-    // Use the current active context to ensure proper parent-child relationships
-    const span: OtelSpan = this.otelTracer.startSpan(name, { attributes }, context.active())
+    const activeContext = context.active()
+    const activeSpan = trace.getSpan(activeContext)
+    
+    let span: OtelSpan
+    
+    if (activeSpan) {
+      // There's an active span, create a child span
+      span = this.otelTracer.startSpan(name, { attributes }, activeContext)
+    } else {
+      // No active span, create a root span with no parent context
+      span = this.otelTracer.startSpan(name, { attributes })
+    }
+    
     return {
       name,
       end: () => span.end(),

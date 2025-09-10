@@ -1,5 +1,4 @@
 import * as opentelemetry from "@opentelemetry/sdk-node"
-import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node"
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { trace } from "@opentelemetry/api"
 import { OpenTelemetryTracer } from "./open-telemetry.js"
@@ -31,13 +30,14 @@ export async function createHoneycombTracer(config: HoneycombConfig): Promise<Tr
   const sdk = new opentelemetry.NodeSDK({
     traceExporter,
     instrumentations: [
-      getNodeAutoInstrumentations({
-        // we recommend disabling fs autoinstrumentation since it can be noisy
-        // and expensive during startup
-        "@opentelemetry/instrumentation-fs": {
-          enabled: false,
-        },
-      }),
+      // Disable all auto-instrumentations to prevent implicit root spans
+      // getNodeAutoInstrumentations({
+      //   // we recommend disabling fs autoinstrumentation since it can be noisy
+      //   // and expensive during startup
+      //   "@opentelemetry/instrumentation-fs": {
+      //     enabled: false,
+      //   },
+      // }),
     ],
     serviceName,
   })

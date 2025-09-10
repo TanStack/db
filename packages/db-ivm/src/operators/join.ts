@@ -38,48 +38,63 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
       () => {
         const deltaA = new Index<K, V1>()
         const deltaB = new Index<K, V2>()
+        withSpan(
+          `operator.join.processInputA`,
+          () => {
+            // Process input A - process ALL messages, not just the first one
+            const messagesA = this.inputAMessages()
+            for (const message of messagesA) {
+              const multiSetMessage = message as unknown as MultiSet<[K, V1]>
+              for (const [item, multiplicity] of multiSetMessage.getInner()) {
+                const [key, value] = item
+                deltaA.addValue(key, [value, multiplicity])
+              }
+            }
+          },
+          { operatorId: this.id }
+        )
+        withSpan(
+          `operator.join.processInputB`,
+          () => {
+            // Process input B - process ALL messages, not just the first one
+            const messagesB = this.inputBMessages()
+            for (const message of messagesB) {
+              const multiSetMessage = message as unknown as MultiSet<[K, V2]>
+              for (const [item, multiplicity] of multiSetMessage.getInner()) {
+                const [key, value] = item
+                deltaB.addValue(key, [value, multiplicity])
+              }
+            }
+          },
+          { operatorId: this.id }
+        )
+        withSpan(
+          `operator.join.processResults`,
+          () => {
+            // Process results
+            const results = new MultiSet<[K, [V1, V2]]>()
 
-        // Process input A - process ALL messages, not just the first one
-        const messagesA = this.inputAMessages()
-        for (const message of messagesA) {
-          const multiSetMessage = message as unknown as MultiSet<[K, V1]>
-          for (const [item, multiplicity] of multiSetMessage.getInner()) {
-            const [key, value] = item
-            deltaA.addValue(key, [value, multiplicity])
-          }
-        }
+            // Join deltaA with existing indexB
+            results.extend(deltaA.join(this.#indexB))
 
-        // Process input B - process ALL messages, not just the first one
-        const messagesB = this.inputBMessages()
-        for (const message of messagesB) {
-          const multiSetMessage = message as unknown as MultiSet<[K, V2]>
-          for (const [item, multiplicity] of multiSetMessage.getInner()) {
-            const [key, value] = item
-            deltaB.addValue(key, [value, multiplicity])
-          }
-        }
+            // Append deltaA to indexA
+            this.#indexA.append(deltaA)
 
-        // Process results
-        const results = new MultiSet<[K, [V1, V2]]>()
+            // Join existing indexA with deltaB
+            results.extend(this.#indexA.join(deltaB))
 
-        // Join deltaA with existing indexB
-        results.extend(deltaA.join(this.#indexB))
+            // Send results
+            if (results.getInner().length > 0) {
+              this.output.sendData(results)
+            }
 
-        // Append deltaA to indexA
-        this.#indexA.append(deltaA)
-
-        // Join existing indexA with deltaB
-        results.extend(this.#indexA.join(deltaB))
-
-        // Send results
-        if (results.getInner().length > 0) {
-          this.output.sendData(results)
-        }
-
-        // Append deltaB to indexB
-        this.#indexB.append(deltaB)
+            // Append deltaB to indexB
+            this.#indexB.append(deltaB)
+          },
+          { operatorId: this.id }
+        )
       },
-      { operatorId: this.id, operatorName: `join` }
+      { operatorId: this.id }
     )
   }
 }

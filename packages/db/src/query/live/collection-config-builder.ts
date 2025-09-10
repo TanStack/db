@@ -1,5 +1,5 @@
 import { D2, output } from "@tanstack/db-ivm"
-import { withSpan } from "@tanstack/db-tracing"
+import { withSpan, withCurrentContext } from "@tanstack/db-tracing"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
@@ -341,8 +341,9 @@ export class CollectionConfigBuilder<
         )
         collectionSubscriber.subscribe()
 
-        const loadMore =
+        const loadMore = withCurrentContext(
           collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+        )
 
         return loadMore
       }

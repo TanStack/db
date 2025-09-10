@@ -88,57 +88,69 @@ export class Index<K, V> {
   }
 
   addValue(key: K, value: [V, number]): void {
-    const containedInValueIndex = this.#valueIndex.has(key)
-    const containedInHashIndex = this.#hashIndex.has(key)
+    return withSpan(
+      `indexes.addValue`,
+      () => {
+        const containedInValueIndex = this.#valueIndex.has(key)
+        const containedInHashIndex = this.#hashIndex.has(key)
 
-    if (containedInHashIndex && containedInValueIndex) {
-      throw new Error(
-        `Key ${key} is contained in both the value index and the hash index. This should never happen because they should have disjoint keysets.`
-      )
-    }
+        if (containedInHashIndex && containedInValueIndex) {
+          throw new Error(
+            `Key ${key} is contained in both the value index and the hash index. This should never happen because they should have disjoint keysets.`
+          )
+        }
 
-    if (!containedInValueIndex && !containedInHashIndex) {
-      // This is the first time we see the key
-      // Add it to the value index
-      this.#valueIndex.addValue(key, value)
-      return
-    }
+        if (!containedInValueIndex && !containedInHashIndex) {
+          // This is the first time we see the key
+          // Add it to the value index
+          this.#valueIndex.addValue(key, value)
+          return
+        }
 
-    if (containedInValueIndex) {
-      // This key is already in the value index
-      // It could be that it's the same value or a different one
-      // If it's a different value we will need to remove the key from the value index
-      // and add the key and its two values to the hash index
-      try {
-        this.#valueIndex.addValue(key, value)
-      } catch {
-        // This is a different value, need to move the key to the hash index
-        const existingValue = this.#valueIndex.get(key)!
-        this.#valueIndex.delete(key)
-        this.#hashIndex.addValue(key, existingValue)
-        this.#hashIndex.addValue(key, value)
-      }
-      return
-    }
+        if (containedInValueIndex) {
+          // This key is already in the value index
+          // It could be that it's the same value or a different one
+          // If it's a different value we will need to remove the key from the value index
+          // and add the key and its two values to the hash index
+          try {
+            this.#valueIndex.addValue(key, value)
+          } catch {
+            // This is a different value, need to move the key to the hash index
+            const existingValue = this.#valueIndex.get(key)!
+            this.#valueIndex.delete(key)
+            this.#hashIndex.addValue(key, existingValue)
+            this.#hashIndex.addValue(key, value)
+          }
+          return
+        }
 
-    if (containedInHashIndex) {
-      // This key is already in the hash index so it already has two or more values.
-      // However, this new value and multiplicity could cause an existing value to be removed
-      // and lead to the key having only a single value in which case we need to move it back to the value index
-      const singleRemainingValue = this.#hashIndex.addValue(key, value)
-      if (singleRemainingValue) {
-        // The key only has a single remaining value so we need to move it back to the value index
-        this.#hashIndex.delete(key)
-        this.#valueIndex.addValue(key, singleRemainingValue)
-      }
-      return
-    }
+        if (containedInHashIndex) {
+          // This key is already in the hash index so it already has two or more values.
+          // However, this new value and multiplicity could cause an existing value to be removed
+          // and lead to the key having only a single value in which case we need to move it back to the value index
+          const singleRemainingValue = this.#hashIndex.addValue(key, value)
+          if (singleRemainingValue) {
+            // The key only has a single remaining value so we need to move it back to the value index
+            this.#hashIndex.delete(key)
+            this.#valueIndex.addValue(key, singleRemainingValue)
+          }
+          return
+        }
+      },
+      { operation: `addValue` }
+    )
   }
 
   append(other: Index<K, V>): void {
-    for (const [key, value] of other.#entries()) {
-      this.addValue(key, value)
-    }
+    return withSpan(
+      `indexes.append`,
+      () => {
+        for (const [key, value] of other.#entries()) {
+          this.addValue(key, value)
+        }
+      },
+      { operation: `append` }
+    )
   }
 
   join<V2>(other: Index<K, V2>): MultiSet<[K, [V, V2]]> {

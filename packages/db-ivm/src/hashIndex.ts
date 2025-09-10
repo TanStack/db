@@ -1,6 +1,7 @@
 import { DefaultMap } from "./utils.js"
 import { hash } from "./hashing/index.js"
 import type { Hash } from "./hashing/index.js"
+import { withSpan } from "@tanstack/db-tracing"
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
@@ -73,22 +74,29 @@ export class HashIndex<K, V> {
    * In that case, we return the single remaining value.
    */
   addValue(key: K, value: [V, number]): [V, number] | void {
-    const [val, multiplicity] = value
-    const valueMap = this.#inner.get(key)
-    const valueHash = hash(val)
-    const [, existingMultiplicity] = valueMap.get(valueHash)
-    const newMultiplicity = existingMultiplicity + multiplicity
-    if (multiplicity !== 0) {
-      if (newMultiplicity === 0) {
-        valueMap.delete(valueHash)
-        if (valueMap.size === 1) {
-          // Signal that the key only has a single remaining value
-          return valueMap.entries().next().value![1]
+    return withSpan(
+      `hashIndex.addValue`,
+      () => {
+        const [val, multiplicity] = value
+        const valueMap = this.#inner.get(key)
+        const valueHash = hash(val)
+        const [, existingMultiplicity] = valueMap.get(valueHash)
+        const newMultiplicity = existingMultiplicity + multiplicity
+        if (multiplicity !== 0) {
+          if (newMultiplicity === 0) {
+            valueMap.delete(valueHash)
+            if (valueMap.size === 1) {
+              // Signal that the key only has a single remaining value
+              return valueMap.entries().next().value![1]
+            }
+          } else {
+            valueMap.set(valueHash, [val, newMultiplicity])
+          }
         }
-      } else {
-        valueMap.set(valueHash, [val, newMultiplicity])
-      }
-    }
-    this.#inner.set(key, valueMap)
+        this.#inner.set(key, valueMap)
+        return
+      },
+      { operation: `addValue` }
+    )
   }
 }
