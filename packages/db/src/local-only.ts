@@ -1,7 +1,6 @@
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
-  InferSchemaInput,
   InferSchemaOutput,
   InsertMutationFnParams,
   OperationType,
@@ -130,7 +129,7 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T, InferSchemaInput<T>> & {
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
   utils: LocalOnlyCollectionUtils
   schema: T
 }
@@ -144,14 +143,14 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey, never, T> & {
+): CollectionConfig<T, TKey, never> & {
   utils: LocalOnlyCollectionUtils
   schema?: never // no schema in the result
 }
 
 export function localOnlyCollectionOptions(
   config: LocalOnlyCollectionConfig<any, any, string | number>
-): CollectionConfig<any, string | number, any, any> & {
+): CollectionConfig<any, string | number, any> & {
   utils: LocalOnlyCollectionUtils
   schema?: StandardSchemaV1
 } {

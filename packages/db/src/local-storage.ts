@@ -9,7 +9,6 @@ import {
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
-  InferSchemaInput,
   InferSchemaOutput,
   InsertMutationFnParams,
   SyncConfig,
@@ -206,7 +205,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T, InferSchemaInput<T>> & {
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema: T
@@ -221,7 +220,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey, never, T> & {
+): CollectionConfig<T, TKey, never> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
@@ -229,7 +228,7 @@ export function localStorageCollectionOptions<
 
 export function localStorageCollectionOptions(
   config: LocalStorageCollectionConfig<any, any, string | number>
-): Omit<CollectionConfig<any, string | number, any, any>, `id`> & {
+): Omit<CollectionConfig<any, string | number, any>, `id`> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: StandardSchemaV1
