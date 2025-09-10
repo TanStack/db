@@ -930,8 +930,8 @@ describe(`Collection schema callback type tests`, () => {
       id: z.string(),
       name: z.string(),
       email: z.string().email(),
-      created_at: z.string().transform((val) => new Date(val)),
-      updated_at: z.string().transform((val) => new Date(val)),
+      created_at: z.date().or(z.string().transform((val) => new Date(val))),
+      updated_at: z.date().or(z.string().transform((val) => new Date(val))),
     })
 
     type ExpectedType = z.infer<typeof userSchema>
