@@ -165,12 +165,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<
-    InferSchemaOutput<T>,
-    TKey,
-    T,
-    InferSchemaInput<T>
-  > & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
   }
@@ -183,7 +178,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<T, TKey, never, T> & {
+  options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   }
@@ -191,7 +186,7 @@ export function createCollection<
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any, any> & {
+  options: CollectionConfig<any, string | number, any> & {
     schema?: StandardSchemaV1
     utils?: UtilsRecord
   }
@@ -217,7 +212,7 @@ export class CollectionImpl<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  public config: CollectionConfig<TOutput, TKey, TSchema, TInput>
+  public config: CollectionConfig<TOutput, TKey, TSchema>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -417,7 +412,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema, TInput>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
