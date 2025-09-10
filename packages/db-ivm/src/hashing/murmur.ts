@@ -20,6 +20,12 @@ export interface Hasher {
   digest: () => number
 }
 
+// Allocate these once, outside the hot path
+const buf = new ArrayBuffer(8)
+// dv and u8 are 2 different views on the same buffer `buf`
+const dv = new DataView(buf)
+const u8 = new Uint8Array(buf)
+
 /**
  * This implementation of Murmur hash uses a random initial seed and random markers.
  * This means that hashes aren't deterministic across app restarts.
@@ -82,10 +88,15 @@ export class MurmurHashStream implements Hasher {
         }
         return
       case `number`:
-        this._writeByte(chunk & 0xff)
-        this._writeByte((chunk >>> 8) & 0xff)
-        this._writeByte((chunk >>> 16) & 0xff)
-        this._writeByte((chunk >>> 24) & 0xff)
+        dv.setFloat64(0, chunk, true) // fixed little-endian
+        this._writeByte(u8[0]!)
+        this._writeByte(u8[1]!)
+        this._writeByte(u8[2]!)
+        this._writeByte(u8[3]!)
+        this._writeByte(u8[4]!)
+        this._writeByte(u8[5]!)
+        this._writeByte(u8[6]!)
+        this._writeByte(u8[7]!)
         return
       case `bigint`: {
         let value = chunk
