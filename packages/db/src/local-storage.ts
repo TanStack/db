@@ -9,9 +9,9 @@ import {
 import type {
   CollectionConfig,
   DeleteMutationFnParams,
+  InferSchemaInput,
+  InferSchemaOutput,
   InsertMutationFnParams,
-  ResolveInput,
-  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -47,7 +47,7 @@ interface StoredItem<T> {
 
 /**
  * Configuration interface for localStorage collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template T - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  *
@@ -60,9 +60,9 @@ interface StoredItem<T> {
  * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
  */
 export interface LocalStorageCollectionConfig<
-  TExplicit = unknown,
+  T extends object = object,
   TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
 > {
   /**
    * The key to use for storing the collection data in localStorage/sessionStorage
@@ -86,35 +86,29 @@ export interface LocalStorageCollectionConfig<
    */
   id?: string
   schema?: TSchema
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
+  getKey: CollectionConfig<T, TKey, TSchema>[`getKey`]
+  sync?: CollectionConfig<T, TKey, TSchema>[`sync`]
 
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
-  onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<any>
+  onInsert?: (params: InsertMutationFnParams<T>) => Promise<any>
 
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
-  onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<any>
+  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<any>
 
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
    * @returns Promise resolving to any value
    */
-  onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<any>
+  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<any>
 }
 
 /**
@@ -203,26 +197,43 @@ function generateUuid(): string {
  *   })
  * )
  */
+
+// Overload for when schema is provided
 export function localStorageCollectionOptions<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
+  T extends StandardSchemaV1,
+  TKey extends string | number = string | number,
 >(
-  config: LocalStorageCollectionConfig<TExplicit, TSchema, TFallback>
-): Omit<
-  CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    string | number,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >,
-  `id`
-> & {
+  config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
+    schema: T
+  }
+): CollectionConfig<InferSchemaOutput<T>, TKey, T, InferSchemaInput<T>> & {
   id: string
   utils: LocalStorageCollectionUtils
-} {
-  type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
+  schema: T
+}
 
+// Overload for when no schema is provided
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function localStorageCollectionOptions<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
+  config: LocalStorageCollectionConfig<T, never, TKey> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, TKey, never, T> & {
+  id: string
+  utils: LocalStorageCollectionUtils
+  schema?: never // no schema in the result
+}
+
+export function localStorageCollectionOptions(
+  config: LocalStorageCollectionConfig<any, any, string | number>
+): Omit<CollectionConfig<any, string | number, any, any>, `id`> & {
+  id: string
+  utils: LocalStorageCollectionUtils
+  schema?: StandardSchemaV1
+} {
   // Validate required parameters
   if (!config.storageKey) {
     throw new StorageKeyRequiredError()
@@ -246,10 +257,10 @@ export function localStorageCollectionOptions<
   }
 
   // Track the last known state to detect changes
-  const lastKnownData = new Map<string | number, StoredItem<ResolvedType>>()
+  const lastKnownData = new Map<string | number, StoredItem<any>>()
 
   // Create the sync configuration
-  const sync = createLocalStorageSync<ResolvedType>(
+  const sync = createLocalStorageSync<any>(
     config.storageKey,
     storage,
     storageEventApi,
@@ -272,11 +283,11 @@ export function localStorageCollectionOptions<
    * @param dataMap - Map of items with version tracking to save to storage
    */
   const saveToStorage = (
-    dataMap: Map<string | number, StoredItem<ResolvedType>>
+    dataMap: Map<string | number, StoredItem<any>>
   ): void => {
     try {
       // Convert Map to object format for storage
-      const objectData: Record<string, StoredItem<ResolvedType>> = {}
+      const objectData: Record<string, StoredItem<any>> = {}
       dataMap.forEach((storedItem, key) => {
         objectData[String(key)] = storedItem
       })
@@ -311,9 +322,7 @@ export function localStorageCollectionOptions<
    * Create wrapper handlers for direct persistence operations that perform actual storage operations
    * Wraps the user's onInsert handler to also save changes to localStorage
    */
-  const wrappedOnInsert = async (
-    params: InsertMutationFnParams<ResolvedType>
-  ) => {
+  const wrappedOnInsert = async (params: InsertMutationFnParams<any>) => {
     // Validate that all values in the transaction can be JSON serialized
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(mutation.modified, `insert`)
@@ -327,15 +336,12 @@ export function localStorageCollectionOptions<
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<ResolvedType>(
-      config.storageKey,
-      storage
-    )
+    const currentData = loadFromStorage<any>(config.storageKey, storage)
 
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
       const key = config.getKey(mutation.modified)
-      const storedItem: StoredItem<ResolvedType> = {
+      const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
@@ -351,9 +357,7 @@ export function localStorageCollectionOptions<
     return handlerResult
   }
 
-  const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<ResolvedType>
-  ) => {
+  const wrappedOnUpdate = async (params: UpdateMutationFnParams<any>) => {
     // Validate that all values in the transaction can be JSON serialized
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(mutation.modified, `update`)
@@ -367,15 +371,12 @@ export function localStorageCollectionOptions<
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<ResolvedType>(
-      config.storageKey,
-      storage
-    )
+    const currentData = loadFromStorage<any>(config.storageKey, storage)
 
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
       const key = config.getKey(mutation.modified)
-      const storedItem: StoredItem<ResolvedType> = {
+      const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
@@ -391,9 +392,7 @@ export function localStorageCollectionOptions<
     return handlerResult
   }
 
-  const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<ResolvedType>
-  ) => {
+  const wrappedOnDelete = async (params: DeleteMutationFnParams<any>) => {
     // Call the user handler BEFORE persisting changes (if provided)
     let handlerResult: any = {}
     if (config.onDelete) {
@@ -402,15 +401,12 @@ export function localStorageCollectionOptions<
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<ResolvedType>(
-      config.storageKey,
-      storage
-    )
+    const currentData = loadFromStorage<any>(config.storageKey, storage)
 
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // For delete operations, mutation.original contains the full object
-      const key = config.getKey(mutation.original as ResolvedType)
+      const key = config.getKey(mutation.original)
       currentData.delete(key)
     })
 
