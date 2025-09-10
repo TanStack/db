@@ -220,7 +220,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey, never> & {
+): CollectionConfig<T, TKey> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
