@@ -1,3 +1,4 @@
+import { withSpan } from "@tanstack/db-tracing"
 import { MultiSet } from "./multiset.js"
 import type { MultiSetArray } from "./multiset.js"
 import type {
@@ -61,7 +62,8 @@ export abstract class Operator<T> implements IOperator<T> {
   constructor(
     public id: number,
     inputs: Array<DifferenceStreamReader<T>>,
-    output: DifferenceStreamWriter<T>
+    output: DifferenceStreamWriter<T>,
+    public name?: string
   ) {
     this.inputs = inputs
     this.output = output
@@ -84,9 +86,10 @@ export abstract class UnaryOperator<Tin, Tout = Tin> extends Operator<
   constructor(
     public id: number,
     inputA: DifferenceStreamReader<Tin>,
-    output: DifferenceStreamWriter<Tout>
+    output: DifferenceStreamWriter<Tout>,
+    name?: string
   ) {
-    super(id, [inputA], output)
+    super(id, [inputA], output, name)
   }
 
   inputMessages(): Array<MultiSet<Tin>> {
@@ -103,9 +106,10 @@ export abstract class BinaryOperator<T> extends Operator<T> {
     public id: number,
     inputA: DifferenceStreamReader<T>,
     inputB: DifferenceStreamReader<T>,
-    output: DifferenceStreamWriter<T>
+    output: DifferenceStreamWriter<T>,
+    name?: string
   ) {
-    super(id, [inputA, inputB], output)
+    super(id, [inputA, inputB], output, name)
   }
 
   inputAMessages(): Array<MultiSet<T>> {
@@ -124,8 +128,14 @@ export abstract class LinearUnaryOperator<T, U> extends UnaryOperator<T | U> {
   abstract inner(collection: MultiSet<T | U>): MultiSet<U>
 
   run(): void {
-    for (const message of this.inputMessages()) {
-      this.output.sendData(this.inner(message))
-    }
+    return withSpan(
+      `operator.${this.name || `unknown`}`,
+      () => {
+        for (const message of this.inputMessages()) {
+          this.output.sendData(this.inner(message))
+        }
+      },
+      { operatorId: this.id, operatorName: this.name }
+    )
   }
 }

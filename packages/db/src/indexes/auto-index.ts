@@ -47,7 +47,7 @@ export function ensureIndexForField<
 
   // Create a new index for this field using the collection's createIndex method
   try {
-    collection.createIndex((row) => (row as any)[fieldName], {
+    collection.createIndex((row) => row[fieldName], {
       name: `auto_${fieldName}`,
       indexType: BTreeIndex,
       options: compareFn ? { compareFn } : {},

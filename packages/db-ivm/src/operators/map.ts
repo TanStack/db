@@ -16,7 +16,7 @@ export class MapOperator<T, U> extends LinearUnaryOperator<T, U> {
     output: DifferenceStreamWriter<U>,
     f: (data: T) => U
   ) {
-    super(id, inputA, output)
+    super(id, inputA, output, `map`)
     this.#f = f
   }
 

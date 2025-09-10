@@ -243,7 +243,7 @@ function processJoin(
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
-        tap(([joinKey, _]) => {
+        tap((data) => {
           if (deoptimized) {
             return
           }
@@ -270,10 +270,11 @@ function processJoin(
 
           const { loadKeys, loadInitialState } = collectionCallbacks
 
-          if (index && index.supports(`eq`)) {
+          if (index && index.supports(`in`)) {
             // Use the index to fetch the PKs of the rows in the lazy collection
             // that match this row from the active collection based on the value of the joinKey
-            const matchingKeys = index.lookup(`eq`, joinKey)
+            const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
+            const matchingKeys = index.lookup(`in`, joinKeys)
             // Inform the lazy collection that those keys need to be loaded
             loadKeys(matchingKeys)
           } else {

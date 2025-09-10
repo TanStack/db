@@ -1,4 +1,5 @@
 import { D2, output } from "@tanstack/db-ivm"
+import { withSpan, withCurrentContext } from "@tanstack/db-tracing"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
@@ -104,26 +105,38 @@ export class CollectionConfigBuilder<
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
-    const { begin, commit, markReady } = config
+    return withSpan(
+      `liveQuery.maybeRunGraph`,
+      () => {
+        const { begin, commit, markReady } = config
 
-    // We only run the graph if all the collections are ready
-    if (
-      this.allCollectionsReadyOrInitialCommit() &&
-      syncState.subscribedToAllCollections
-    ) {
-      syncState.graph.run()
-      const ready = callback?.() ?? true
-      // On the initial run, we may need to do an empty commit to ensure that
-      // the collection is initialized
-      if (syncState.messagesCount === 0) {
-        begin()
-        commit()
-      }
-      // Mark the collection as ready after the first successful run
-      if (ready && this.allCollectionsReady()) {
-        markReady()
-      }
-    }
+        // We only run the graph if all the collections are ready
+        if (
+          this.allCollectionsReadyOrInitialCommit() &&
+          syncState.subscribedToAllCollections
+        ) {
+          return withSpan(
+            `liveQuery.graph.run`,
+            () => {
+              syncState.graph.run()
+              const ready = callback?.() ?? true
+              // On the initial run, we may need to do an empty commit to ensure that
+              // the collection is initialized
+              if (syncState.messagesCount === 0) {
+                begin()
+                commit()
+              }
+              // Mark the collection as ready after the first successful run
+              if (ready && this.allCollectionsReady()) {
+                markReady()
+              }
+            },
+            { collectionId: this.id, operation: `graph.run` }
+          )
+        }
+      },
+      { collectionId: this.id, operation: `maybeRunGraph` }
+    )
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -134,42 +147,48 @@ export class CollectionConfigBuilder<
   }
 
   private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
-    const syncState: SyncState = {
-      messagesCount: 0,
-      subscribedToAllCollections: false,
-      unsubscribeCallbacks: new Set<() => void>(),
-    }
+    return withSpan(
+      `liveQuery.sync`,
+      () => {
+        const syncState: SyncState = {
+          messagesCount: 0,
+          subscribedToAllCollections: false,
+          unsubscribeCallbacks: new Set<() => void>(),
+        }
 
-    // Extend the pipeline such that it applies the incoming changes to the collection
-    const fullSyncState = this.extendPipelineWithChangeProcessing(
-      config,
-      syncState
+        // Extend the pipeline such that it applies the incoming changes to the collection
+        const fullSyncState = this.extendPipelineWithChangeProcessing(
+          config,
+          syncState
+        )
+
+        const loadMoreDataCallbacks = this.subscribeToAllCollections(
+          config,
+          fullSyncState
+        )
+
+        // Initial run with callback to load more data if needed
+        this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+
+        // Return the unsubscribe function
+        return () => {
+          syncState.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
+
+          // Reset caches so a fresh graph/pipeline is compiled on next start
+          // This avoids reusing a finalized D2 graph across GC restarts
+          this.graphCache = undefined
+          this.inputsCache = undefined
+          this.pipelineCache = undefined
+          this.collectionWhereClausesCache = undefined
+
+          // Reset lazy collection state
+          this.lazyCollections.clear()
+          this.optimizableOrderByCollections = {}
+          this.lazyCollectionsCallbacks = {}
+        }
+      },
+      { collectionId: this.id, operation: `sync` }
     )
-
-    const loadMoreDataCallbacks = this.subscribeToAllCollections(
-      config,
-      fullSyncState
-    )
-
-    // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
-
-    // Return the unsubscribe function
-    return () => {
-      syncState.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
-
-      // Reset caches so a fresh graph/pipeline is compiled on next start
-      // This avoids reusing a finalized D2 graph across GC restarts
-      this.graphCache = undefined
-      this.inputsCache = undefined
-      this.pipelineCache = undefined
-      this.collectionWhereClausesCache = undefined
-
-      // Reset lazy collection state
-      this.lazyCollections.clear()
-      this.optimizableOrderByCollections = {}
-      this.lazyCollectionsCallbacks = {}
-    }
   }
 
   private compileBasePipeline() {
@@ -322,8 +341,9 @@ export class CollectionConfigBuilder<
         )
         collectionSubscriber.subscribe()
 
-        const loadMore =
+        const loadMore = withCurrentContext(
           collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+        )
 
         return loadMore
       }

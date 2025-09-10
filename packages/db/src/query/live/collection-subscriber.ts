@@ -1,6 +1,7 @@
 import { MultiSet } from "@tanstack/db-ivm"
 import { createFilterFunctionFromExpression } from "../../change-events.js"
 import { convertToBasicExpression } from "../compiler/expressions.js"
+import { withCurrentContext } from "@tanstack/db-tracing"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection.js"
@@ -138,6 +139,7 @@ export class CollectionSubscriber<
     keys: Iterable<string | number>,
     filterFn: (item: object) => boolean
   ) {
+    const changes: Array<ChangeMessage<any, string | number>> = []
     for (const key of keys) {
       // Only load the key once
       if (this.sentKeys.has(key)) continue
@@ -145,15 +147,18 @@ export class CollectionSubscriber<
       const value = this.collection.get(key)
       if (value !== undefined && filterFn(value)) {
         this.sentKeys.add(key)
-        this.sendChangesToPipeline([{ type: `insert`, key, value }])
+        changes.push({ type: `insert`, key, value })
       }
+    }
+    if (changes.length > 0) {
+      this.sendChangesToPipeline(changes)
     }
   }
 
   private subscribeToAllChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const sendChangesToPipeline = this.sendChangesToPipeline.bind(this)
+    const sendChangesToPipeline = withCurrentContext(this.sendChangesToPipeline.bind(this))
     const unsubscribe = this.collection.subscribeChanges(
       sendChangesToPipeline,
       {
@@ -178,7 +183,7 @@ export class CollectionSubscriber<
     // Until that point we filter out all changes from subscription to the collection.
     let sendChanges = false
 
-    const sendVisibleChanges = (
+    const sendVisibleChanges = withCurrentContext((
       changes: Array<ChangeMessage<any, string | number>>
     ) => {
       // We filter out changes when sendChanges is false to ensure that we don't send
@@ -190,7 +195,7 @@ export class CollectionSubscriber<
         sendChanges ? changes : [],
         loadedInitialState
       )
-    }
+    })
 
     const unsubscribe = this.collection.subscribeChanges(sendVisibleChanges, {
       whereExpression,
@@ -210,8 +215,8 @@ export class CollectionSubscriber<
     // This is used by the join operator to dynamically load matching keys from the lazy collection
     // or to get the full initial state of the collection if there's no index for the join key
     this.collectionConfigBuilder.lazyCollectionsCallbacks[this.collectionId] = {
-      loadKeys: loadKs,
-      loadInitialState: () => {
+      loadKeys: withCurrentContext(loadKs),
+      loadInitialState: withCurrentContext(() => {
         // Make sure we only load the initial state once
         if (loadedInitialState) return
         loadedInitialState = true
@@ -221,7 +226,7 @@ export class CollectionSubscriber<
           whereExpression,
         })
         this.sendChangesToPipeline(changes)
-      },
+      }),
     }
     return unsubscribe
   }
@@ -238,7 +243,7 @@ export class CollectionSubscriber<
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
     this.loadNextItems(offset + limit)
 
-    const sendChangesInRange = (
+    const sendChangesInRange = withCurrentContext((
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
       // Split live updates into a delete of the old value and an insert of the new value
@@ -261,7 +266,7 @@ export class CollectionSubscriber<
         filteredChanges,
         this.loadMoreIfNeeded.bind(this)
       )
-    }
+    })
 
     // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
     // values that are bigger don't need to be sent because they can't affect the topK

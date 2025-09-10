@@ -1,4 +1,5 @@
 import { hash } from "./hashing/index.js"
+import { withSpan } from "@tanstack/db-tracing"
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
@@ -45,27 +46,33 @@ export class ValueIndex<K, V> {
   }
 
   addValue(key: K, v: [V, number]): void {
-    const [value, multiplicity] = v
+    return withSpan(
+      `valueIndex.addValue`,
+      () => {
+        const [value, multiplicity] = v
 
-    if (multiplicity === 0) {
-      return
-    }
+        if (multiplicity === 0) {
+          return
+        }
 
-    if (this.has(key)) {
-      const [currValue, currMultiplicity] = this.get(key)!
-      if (hash(value) === hash(currValue)) {
-        // Update the multiplicity
-        this.#setMultiplicity(key, value, currMultiplicity + multiplicity)
-        return
-      }
-      // Different value, not allowed.
-      // ValueIndex only supports one value per key.
-      throw new Error(
-        `Cannot add value for key ${key} because it already exists in ValueIndex with a different value`
-      )
-    }
+        if (this.has(key)) {
+          const [currValue, currMultiplicity] = this.get(key)!
+          if (hash(value) === hash(currValue)) {
+            // Update the multiplicity
+            this.#setMultiplicity(key, value, currMultiplicity + multiplicity)
+            return
+          }
+          // Different value, not allowed.
+          // ValueIndex only supports one value per key.
+          throw new Error(
+            `Cannot add value for key ${key} because it already exists in ValueIndex with a different value`
+          )
+        }
 
-    this.#inner.set(key, [value, multiplicity])
+        this.#inner.set(key, [value, multiplicity])
+      },
+      { operation: `addValue` }
+    )
   }
 
   #setMultiplicity(key: K, value: V, multiplicity: number): void {

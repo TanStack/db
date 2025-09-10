@@ -1,14 +1,13 @@
 {
-  "name": "@tanstack/db-ivm",
-  "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
-  "version": "0.1.4",
-  "dependencies": {
-    "@tanstack/db-tracing": "workspace:*",
-    "fractional-indexing": "^3.2.0",
-    "sorted-btree": "^1.8.1"
-  },
+  "name": "@tanstack/db-tracing",
+  "description": "Tracing utilities for TanStack DB",
+  "version": "0.0.0",
+  "dependencies": {},
   "devDependencies": {
-    "@types/debug": "^4.1.12",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.50.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.50.0",
     "@vitest/coverage-istanbul": "^3.0.9"
   },
   "exports": {
@@ -32,6 +31,10 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.50.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.50.0",
     "typescript": ">=4.7"
   },
   "author": "Sam Willis",
@@ -39,16 +42,15 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TanStack/db.git",
-    "directory": "packages/db-ivm"
+    "directory": "packages/db-tracing"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
-    "electric",
-    "sql",
-    "optimistic",
-    "typescript",
-    "ivm",
-    "differential-dataflow"
+    "tanstack",
+    "db",
+    "tracing",
+    "opentelemetry",
+    "performance"
   ],
   "scripts": {
     "build": "vite build",
