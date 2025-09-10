@@ -1,0 +1,96 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":separateMajorReleases",
+    ":combinePatchMinorReleases",
+    ":ignoreUnstable",
+    ":updateNotScheduled",
+    ":automergeDisabled",
+    "group:monorepos",
+    "group:recommended",
+    "workarounds:all"
+  ],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["before 4am on Monday"],
+  "prCreation": "not-pending",
+  "prConcurrentLimit": 3,
+  "branchConcurrentLimit": 5,
+  "commitMessagePrefix": "chore:",
+  "semanticCommits": "enabled",
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard",
+  "assignees": ["@kylemathews"],
+  "reviewers": ["@kylemathews"],
+  "packageRules": [
+    {
+      "description": "Group TanStack packages together",
+      "matchPackagePatterns": ["^@tanstack/"],
+      "groupName": "TanStack packages",
+      "automerge": false
+    },
+    {
+      "description": "Group TypeScript and related packages",
+      "matchPackagePatterns": ["typescript", "@types/"],
+      "groupName": "TypeScript",
+      "automerge": false
+    },
+    {
+      "description": "Group ESLint packages",
+      "matchPackagePatterns": ["eslint", "@eslint/", "@typescript-eslint/"],
+      "groupName": "ESLint",
+      "automerge": false
+    },
+    {
+      "description": "Group Vite packages",
+      "matchPackagePatterns": ["vite", "@vitejs/", "vitest"],
+      "groupName": "Vite ecosystem",
+      "automerge": false
+    },
+    {
+      "description": "Group React packages",
+      "matchPackagePatterns": ["react", "@types/react"],
+      "groupName": "React",
+      "automerge": false
+    },
+    {
+      "description": "Auto-merge patch releases for dev dependencies",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Weekly schedule for major updates",
+      "matchUpdateTypes": ["major"],
+      "schedule": ["before 4am on Monday"],
+      "reviewers": ["@kylemathews"]
+    },
+    {
+      "description": "Pin pnpm version updates",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["pnpm"],
+      "rangeStrategy": "pin"
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 4am on Monday"],
+    "automerge": true,
+    "automergeType": "pr"
+  },
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "assignees": ["@kylemathews"],
+    "reviewers": ["@kylemathews"]
+  },
+  "labels": ["dependencies"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/.output/**",
+    "**/dist/**"
+  ]
+}
