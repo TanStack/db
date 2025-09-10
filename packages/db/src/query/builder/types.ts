@@ -837,7 +837,7 @@ type IsPlainObject<T> = T extends unknown
         ? false
         : true
     : false
-  : never
+  : false
 
 /**
  * JsBuiltIns - List of JavaScript built-ins
