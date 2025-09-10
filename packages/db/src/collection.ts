@@ -48,12 +48,12 @@ import type {
   CollectionStatus,
   CurrentStateAsChangesOptions,
   Fn,
+  InferSchemaInput,
+  InferSchemaOutput,
   InsertConfig,
   OperationConfig,
   OptimisticChangeMessage,
   PendingMutation,
-  ResolveInput,
-  ResolveType,
   StandardSchema,
   SubscribeChangesOptions,
   Transaction as TransactionType,
@@ -91,11 +91,9 @@ export interface Collection<
 /**
  * Creates a new Collection instance with the given configuration
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template T - The schema type if a schema is provided, otherwise the type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param options - Collection options with optional utilities
  * @returns A new Collection with utilities exposed both at top level and under .utils
  *
@@ -159,123 +157,57 @@ export interface Collection<
  *   sync: { sync: () => {} }
  * })
  *
- * // Note: You can provide an explicit type, a schema, or both. When both are provided, the explicit type takes precedence.
  */
 
-// Overload for when schema is provided - infers schema type
+// Overload for when schema is provided
 export function createCollection<
-  TSchema extends StandardSchemaV1,
+  T extends StandardSchemaV1,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TFallback extends object = Record<string, unknown>,
 >(
   options: CollectionConfig<
-    ResolveType<unknown, TSchema, TFallback>,
+    InferSchemaOutput<T>,
     TKey,
-    TSchema,
-    ResolveInput<unknown, TSchema, TFallback>
+    T,
+    InferSchemaInput<T>
   > & {
-    schema: TSchema
+    schema: T
     utils?: TUtils
   }
-): Collection<
-  ResolveType<unknown, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<unknown, TSchema, TFallback>
->
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>>
 
-// Overload for when explicit type is provided with schema - explicit type takes precedence
+// Overload for when no schema is provided
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
 export function createCollection<
-  TExplicit extends object,
+  T extends object,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
 >(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  > & {
-    schema: TSchema
+  options: CollectionConfig<T, TKey, never, T> & {
+    schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   }
-): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
->
-
-// Overload for when explicit type is provided or no schema
-export function createCollection<
-  TExplicit = unknown,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
->(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  > & { utils?: TUtils }
-): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
->
+): Collection<T, TKey, TUtils, never, T>
 
 // Implementation
-export function createCollection<
-  TExplicit = unknown,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TFallback extends object = Record<string, unknown>,
->(
-  options: CollectionConfig<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  > & { utils?: TUtils }
-): Collection<
-  ResolveType<TExplicit, TSchema, TFallback>,
-  TKey,
-  TUtils,
-  TSchema,
-  ResolveInput<TExplicit, TSchema, TFallback>
-> {
-  const collection = new CollectionImpl<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TUtils,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >(options)
+export function createCollection(
+  options: CollectionConfig<any, string | number, any, any> & {
+    schema?: StandardSchemaV1
+    utils?: UtilsRecord
+  }
+): Collection<any, string | number, UtilsRecord, any, any> {
+  const collection = new CollectionImpl<any, string | number, any, any, any>(
+    options
+  )
 
   // Copy utils to both top level and .utils namespace
   if (options.utils) {
     collection.utils = { ...options.utils }
   } else {
-    collection.utils = {} as TUtils
+    collection.utils = {}
   }
 
-  return collection as Collection<
-    ResolveType<TExplicit, TSchema, TFallback>,
-    TKey,
-    TUtils,
-    TSchema,
-    ResolveInput<TExplicit, TSchema, TFallback>
-  >
+  return collection
 }
 
 export class CollectionImpl<
