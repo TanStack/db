@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.1.17
+
+### Patch Changes
+
+- fix AbortController re-initialization after a collection is garbage collected ([#523](https://github.com/TanStack/db/pull/523))
+
 ## 0.1.16
 
 ### Patch Changes
