@@ -3,6 +3,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   OperationType,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
@@ -142,7 +143,12 @@ export function localOnlyCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> & {
+): CollectionConfig<
+  ResolveType<TExplicit, TSchema, TFallback>,
+  TKey,
+  TSchema,
+  ResolveInput<TExplicit, TSchema, TFallback>
+> & {
   utils: LocalOnlyCollectionUtils
 } {
   type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>

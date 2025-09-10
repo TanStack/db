@@ -10,6 +10,7 @@ import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  ResolveInput,
   ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
@@ -208,7 +209,15 @@ export function localStorageCollectionOptions<
   TFallback extends object = Record<string, unknown>,
 >(
   config: LocalStorageCollectionConfig<TExplicit, TSchema, TFallback>
-): Omit<CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>, `id`> & {
+): Omit<
+  CollectionConfig<
+    ResolveType<TExplicit, TSchema, TFallback>,
+    string | number,
+    TSchema,
+    ResolveInput<TExplicit, TSchema, TFallback>
+  >,
+  `id`
+> & {
   id: string
   utils: LocalStorageCollectionUtils
 } {
