@@ -76,6 +76,8 @@ describe(`hash`, () => {
 
       // Same numbers should have same hash
       expect(hash(42)).toBe(result1)
+      expect(hash(2.0)).not.toBe(hash(2.5))
+      expect(hash(3.14159)).toBe(result4)
     })
 
     it(`should hash booleans`, () => {
