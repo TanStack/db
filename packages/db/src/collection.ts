@@ -1860,7 +1860,7 @@ export class CollectionImpl<
           return await this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
-                TInput,
+                TOutput,
                 `insert`
               >,
             collection: this as unknown as Collection<TOutput, TKey, TUtils>,

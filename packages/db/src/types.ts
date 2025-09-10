@@ -357,7 +357,11 @@ export type CollectionStatus =
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
+  // Let TSchema default to `never` such that if a user provides T explicitly and no schema
+  // then TSchema will be `never` otherwise if it would default to StandardSchemaV1
+  // then it would conflict with the overloads of createCollection which
+  // requires either T to be provided or a schema to be provided but not both!
+  TSchema extends StandardSchemaV1 = never,
   TInsertInput extends object = T,
 > {
   // If an id isn't passed in, a UUID will be
@@ -446,7 +450,7 @@ export interface CollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<TInsertInput, TKey>
+  onInsert?: InsertMutationFn<T, TKey>
 
   /**
    * Optional asynchronous handler function called before an update operation
