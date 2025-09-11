@@ -2,19 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection"
 import type { CollectionImpl } from "../src/collection"
-import type { ChangeMessage, CollectionConfig } from "../src/types"
+import type { SyncConfig } from "../src/types"
+
+type Item = { id: string; name: string }
 
 describe(`Collection getters`, () => {
-  let collection: CollectionImpl
-  let mockSync: {
-    sync: (params: {
-      collection: CollectionImpl
-      begin: () => void
-      write: (message: ChangeMessage) => void
-      commit: () => void
-    }) => void
-  }
-  let config: CollectionConfig
+  let collection: CollectionImpl<Item>
+  let mockSync: SyncConfig<Item>
 
   beforeEach(() => {
     mockSync = {
@@ -33,9 +27,9 @@ describe(`Collection getters`, () => {
       }),
     }
 
-    config = {
+    const config = {
       id: `test-collection`,
-      getKey: (val) => val.id as string,
+      getKey: (val: Item) => val.id,
       sync: mockSync,
       startSync: true,
     }
@@ -68,7 +62,7 @@ describe(`Collection getters`, () => {
       // Create a createCollection with no initial data
       const emptyCollection = createCollection({
         id: `empty-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -440,7 +434,7 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         startSync: true,
         sync: delayedSyncMock,
       })
@@ -501,7 +495,7 @@ describe(`Collection getters`, () => {
 
       const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         startSync: true,
         sync: delayedSyncMock,
       })
