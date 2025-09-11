@@ -72,7 +72,7 @@ describe.each([
 ])(`Electric Collection with Live Query - %s`, (description, autoIndex) => {
   let electricCollection: Collection<
     User,
-    number,
+    string | number,
     ElectricCollectionUtils,
     StandardSchemaV1<unknown, unknown>,
     User
@@ -97,13 +97,15 @@ describe.each([
           table: `users`,
         },
       },
-      startSync: true,
       getKey: (user: User) => user.id,
       autoIndex,
     }
 
     const options = electricCollectionOptions(config)
-    return createCollection(options)
+    return createCollection({
+      ...options,
+      startSync: true,
+    })
   }
 
   function simulateInitialSync(users: Array<User> = sampleUsers) {
@@ -278,7 +280,7 @@ describe.each([
     // Test that live queries properly transition to ready state when must-refetch
     // occurs during the initial sync of the source Electric collection
 
-    let testSubscriber: (messages: Array<Message<User>>) => void
+    let testSubscriber: (messages: Array<Message<User>>) => void = () => {}
     vi.clearAllMocks()
     mockSubscribe.mockImplementation((callback) => {
       testSubscriber = callback
@@ -286,8 +288,8 @@ describe.each([
     })
 
     // Create Electric collection
-    const testElectricCollection = createCollection(
-      electricCollectionOptions({
+    const testElectricCollection = createCollection({
+      ...electricCollectionOptions({
         id: `initial-sync-collection`,
         shapeOptions: {
           url: `http://test-url`,
@@ -295,11 +297,11 @@ describe.each([
             table: `users`,
           },
         },
-        startSync: true,
         getKey: (user: User) => user.id,
-        autoIndex,
-      })
-    )
+      }),
+      autoIndex,
+      startSync: true,
+    })
 
     // Send initial data but don't complete sync (no up-to-date)
     testSubscriber([
@@ -334,6 +336,6 @@ describe.each([
 
     // Both Electric collection and live query should be ready
     expect(testElectricCollection.status).toBe(`ready`)
-    expect(liveQuery.status).toBe(`ready`) // This currently fails - live query stuck in loading
+    expect(liveQuery.status).toBe(`ready`)
   })
 })
