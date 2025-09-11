@@ -1,4 +1,5 @@
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InferSchemaOutput,
@@ -20,46 +21,15 @@ export interface LocalOnlyCollectionConfig<
   T extends object = object,
   TSchema extends StandardSchemaV1 = never,
   TKey extends string | number = string | number,
-> {
-  /**
-   * Standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: (item: T) => TKey
-
+> extends Omit<
+    BaseCollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils>,
+    `gcTime` | `startSync`
+  > {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
    */
   initialData?: Array<T>
-
-  /**
-   * Optional asynchronous handler function called after an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onInsert?: (
-    params: InsertMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onUpdate?: (
-    params: UpdateMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onDelete?: (
-    params: DeleteMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
-  ) => Promise<any>
 }
 
 /**

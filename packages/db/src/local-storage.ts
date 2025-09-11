@@ -7,6 +7,7 @@ import {
   StorageKeyRequiredError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InferSchemaOutput,
@@ -54,7 +55,7 @@ export interface LocalStorageCollectionConfig<
   T extends object = object,
   TSchema extends StandardSchemaV1 = never,
   TKey extends string | number = string | number,
-> {
+> extends BaseCollectionConfig<T, TKey, TSchema> {
   /**
    * The key to use for storing the collection data in localStorage/sessionStorage
    */
@@ -71,35 +72,6 @@ export interface LocalStorageCollectionConfig<
    * Can be any object that implements addEventListener/removeEventListener for storage events
    */
   storageEventApi?: StorageEventApi
-
-  /**
-   * Collection identifier (defaults to "local-collection:{storageKey}" if not provided)
-   */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<T, TKey, TSchema>[`getKey`]
-  sync?: CollectionConfig<T, TKey, TSchema>[`sync`]
-
-  /**
-   * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onInsert?: (params: InsertMutationFnParams<T>) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<any>
 }
 
 /**
