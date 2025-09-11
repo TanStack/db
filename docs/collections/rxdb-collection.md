@@ -22,8 +22,10 @@ The `@tanstack/rxdb-db-collection` package allows you to create collections that
 
 ## 1. Installation
 
+Install the RXDB collection packages along with your preferred framework integration.
+
 ```bash
-npm install @tanstack/rxdb-db-collection rxdb @tanstack/db
+npm install @tanstack/rxdb-db-collection rxdb @tanstack/react-db
 ```
 
 
@@ -86,7 +88,7 @@ const replicationState = replicateRxCollection({
 ### 4. Wrap the RxDB collection with TanStack DB
 
 ```ts
-import { createCollection } from '@tanstack/db'
+import { createCollection } from '@tanstack/react-db'
 import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
 
 const todosCollection = createCollection(
