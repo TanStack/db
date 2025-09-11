@@ -149,7 +149,6 @@ export class App {
     query: ({ params, q }) =>
       q
         .from({ todo: todosCollection })
-        .where(({ todo }) => eq(todo.completed, false))
         .where(({ todo }) => eq(todo.projectID, params.projectID)),
   });
 
