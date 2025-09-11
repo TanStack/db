@@ -110,21 +110,26 @@ describe(`QueryBuilder.groupBy`, () => {
     expect(builtQuery.select).toBeDefined()
   })
 
-  it(`overrides previous group by clauses`, () => {
+  it(`accumulates multiple group by clauses`, () => {
     const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
       .groupBy(({ employees }) => employees.department_id)
-      .groupBy(({ employees }) => employees.active) // This should override
+      .groupBy(({ employees }) => employees.active) // This should accumulate
       .select(({ employees }) => ({
+        department_id: employees.department_id,
         active: employees.active,
         count: count(employees.id),
       }))
 
     const builtQuery = getQueryIR(query)
     expect(builtQuery.groupBy).toBeDefined()
-    expect(builtQuery.groupBy).toHaveLength(1)
+    expect(builtQuery.groupBy).toHaveLength(2)
     expect((builtQuery.groupBy![0] as any).path).toEqual([
+      `employees`,
+      `department_id`,
+    ])
+    expect((builtQuery.groupBy![1] as any).path).toEqual([
       `employees`,
       `active`,
     ])

@@ -1,17 +1,17 @@
 {
   "name": "@tanstack/electric-db-collection",
   "description": "ElectricSQL collection for TanStack DB",
-  "version": "0.1.11",
+  "version": "0.1.18",
   "dependencies": {
     "@electric-sql/client": "1.0.9",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.7.0",
+    "@tanstack/store": "^0.7.5",
     "debug": "^4.4.1"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {

@@ -349,12 +349,17 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return typeof value === `number` ? value : value != null ? Number(value) : 0
   }
 
+  // Create a raw value extractor function for the expression to aggregate
+  const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    return compiledExpr(namespacedRow)
+  }
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
       return sum(valueExtractor)
     case `count`:
-      return count() // count() doesn't need a value extractor
+      return count(rawValueExtractor)
     case `avg`:
       return avg(valueExtractor)
     case `min`:

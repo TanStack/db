@@ -25,6 +25,8 @@ export {
   inArray,
   like,
   ilike,
+  isUndefined,
+  isNull,
   // Functions
   upper,
   lower,

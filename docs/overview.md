@@ -277,7 +277,7 @@ import { initClient } from "trailbase"
 const trailBaseClient = initClient(`https://trailbase.io`)
 
 export const todoCollection = createCollection<SelectTodo, Todo>(
-  electricCollectionOptions({
+  trailBaseCollectionOptions({
     id: "todos",
     recordApi: trailBaseClient.records(`todos`),
     getKey: (item) => item.id,
@@ -564,7 +564,11 @@ Transactional mutators allow you to batch and stage local changes across collect
 
 Mutators are created with a `mutationFn`. You can define a single, generic `mutationFn` for your whole app. Or you can define collection or mutation specific functions.
 
-The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored, e.g.:
+The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored.
+
+**Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back before you return, as the optimistic state is dropped when you return from the mutation function. You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`, direct write APIs, or Electric's `utils.awaitTxId()`.
+
+For example:
 
 ```tsx
 import type { MutationFn } from "@tanstack/react-db"
@@ -603,13 +607,19 @@ const addTodo = createOptimisticAction<string>({
       completed: false,
     })
   },
-  mutationFn: async (text) => {
+  mutationFn: async (text, params) => {
     // Persist the todo to your backend
     const response = await fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify({ text, completed: false }),
     })
-    return response.json()
+    const result = await response.json()
+    
+    // IMPORTANT: Ensure server writes have synced back before returning
+    // This ensures the optimistic state can be safely discarded
+    await todoCollection.utils.refetch()
+    
+    return result
   },
 })
 

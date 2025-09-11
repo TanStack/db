@@ -1603,4 +1603,33 @@ describe(`QueryCollection`, () => {
     expect(collection.size).toBe(0)
     expect(collection.status).toBe(`ready`)
   })
+
+  it(`should read the state of a query that is already ready`, async () => {
+    // Populate the query cache, so the query will immediately be loaded
+    const queryKey = [`raceConditionTest`]
+    const initialItems: Array<TestItem> = [
+      { id: `1`, name: `Cached Item 1` },
+      { id: `2`, name: `Cached Item 2` },
+    ]
+    const queryFn = vi.fn().mockReturnValue(initialItems)
+    await queryClient.prefetchQuery({ queryKey, queryFn })
+
+    // The collection should immediately be ready
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 60000, // uses the prefetched value without a refetch
+      })
+    )
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(2)
+    expect(Array.from(collection.values())).toEqual(
+      expect.arrayContaining(initialItems)
+    )
+  })
 })
