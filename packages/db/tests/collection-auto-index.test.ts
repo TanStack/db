@@ -528,7 +528,7 @@ describe(`Collection Auto-Indexing`, () => {
       status: `active`,
       createdAt: new Date(),
     })
-    console.log(tracker.stats.queriesExecuted)
+
     expect(tracker.stats.queriesExecuted).toEqual([
       {
         type: `index`,
