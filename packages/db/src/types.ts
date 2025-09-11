@@ -259,19 +259,22 @@ export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
  * Collection status values for lifecycle management
@@ -311,6 +314,7 @@ export interface BaseCollectionConfig<
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = Record<string, Fn>,
+  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -397,7 +401,7 @@ export interface BaseCollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<T, TKey, TUtils>
+  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -441,7 +445,7 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey, TUtils>
+  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
@@ -484,7 +488,7 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey, TUtils>
+  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
 }
 
 export interface CollectionConfig<
