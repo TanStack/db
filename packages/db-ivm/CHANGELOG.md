@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.5
+
+### Patch Changes
+
+- Fix bug where different numbers would hash to the same value. This caused distinct not to work properly. ([#525](https://github.com/TanStack/db/pull/525))
+
 ## 0.1.4
 
 ### Patch Changes

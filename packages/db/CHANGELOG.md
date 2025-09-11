@@ -1,5 +1,14 @@
 # @tanstack/db
 
+## 0.2.3
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`a9878ad`](https://github.com/TanStack/db/commit/a9878ad58b71c3a2d10c03d75179a793bccf4ffc)]:
+  - @tanstack/db-ivm@0.1.5
+
 ## 0.2.2
 
 ### Patch Changes

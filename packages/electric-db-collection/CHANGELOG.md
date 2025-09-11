@@ -1,5 +1,14 @@
 # @tanstack/electric-db-collection
 
+## 0.1.18
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`b162556`](https://github.com/TanStack/db/commit/b1625565df44b0824501297f7ef14ae1cd450b49)]:
+  - @tanstack/db@0.2.3
+
 ## 0.1.17
 
 ### Patch Changes
