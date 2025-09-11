@@ -93,6 +93,10 @@
         {
           "label": "Query Collection",
           "to": "collections/query-collection"
+        },
+        {
+          "label": "Electric Collection",
+          "to": "collections/electric-collection"
         }
       ]
     },

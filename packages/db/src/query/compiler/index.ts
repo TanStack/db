@@ -7,12 +7,12 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from "../../errors.js"
-import { PropRef } from "../ir.js"
+import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
 import { compileExpression } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
-import { processSelectToResults } from "./select.js"
+import { processSelect } from "./select.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
@@ -131,7 +131,8 @@ export function compileQuery(
   if (query.where && query.where.length > 0) {
     // Apply each WHERE condition as a filter (they are ANDed together)
     for (const where of query.where) {
-      const compiledWhere = compileExpression(where)
+      const whereExpression = getWhereExpression(where)
+      const compiledWhere = compileExpression(whereExpression)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return compiledWhere(namespacedRow)
@@ -172,7 +173,7 @@ export function compileQuery(
       })
     )
   } else if (query.select) {
-    pipeline = processSelectToResults(pipeline, query.select, allInputs)
+    pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
     // If no SELECT clause, create __select_results with the main table data
     pipeline = pipeline.pipe(
@@ -258,6 +259,7 @@ export function compileQuery(
       rawQuery,
       pipeline,
       query.orderBy,
+      query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       query.limit,
@@ -268,7 +270,8 @@ export function compileQuery(
     const resultPipeline = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from __select_results and include orderBy index
-        const finalResults = (row as any).__select_results
+        const raw = (row as any).__select_results
+        const finalResults = unwrapValue(raw)
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       })
     )
@@ -292,7 +295,8 @@ export function compileQuery(
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
       // Extract the final results from __select_results and return [key, [results, undefined]]
-      const finalResults = (row as any).__select_results
+      const raw = (row as any).__select_results
+      const finalResults = unwrapValue(raw)
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
@@ -357,7 +361,9 @@ function processFrom(
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
-          return [key, value] as [unknown, any]
+          // Unwrap Value expressions that might have leaked through as the entire row
+          const unwrapped = unwrapValue(value)
+          return [key, unwrapped] as [unknown, any]
         })
       )
 
@@ -370,6 +376,19 @@ function processFrom(
     default:
       throw new UnsupportedFromTypeError((from as any).type)
   }
+}
+
+// Helper to check if a value is a Value expression
+function isValue(raw: any): boolean {
+  return (
+    raw instanceof ValClass ||
+    (raw && typeof raw === `object` && `type` in raw && raw.type === `val`)
+  )
+}
+
+// Helper to unwrap a Value expression or return the value itself
+function unwrapValue(value: any): any {
+  return isValue(value) ? value.value : value
 }
 
 /**

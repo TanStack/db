@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import {
+  concat,
   createLiveQueryCollection,
   eq,
   gt,
   upper,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample user type for tests
 type User = {
@@ -15,18 +16,81 @@ type User = {
   age: number
   email: string
   active: boolean
+  profile?: {
+    bio: string
+    avatar: string
+    preferences: {
+      notifications: boolean
+      theme: `light` | `dark`
+    }
+  }
+  address?: {
+    street: string
+    city: string
+    country: string
+    coordinates: {
+      lat: number
+      lng: number
+    }
+  }
 }
 
 // Sample data for tests
 const sampleUsers: Array<User> = [
-  { id: 1, name: `Alice`, age: 25, email: `alice@example.com`, active: true },
-  { id: 2, name: `Bob`, age: 19, email: `bob@example.com`, active: true },
+  {
+    id: 1,
+    name: `Alice`,
+    age: 25,
+    email: `alice@example.com`,
+    active: true,
+    profile: {
+      bio: `Software engineer with 5 years experience`,
+      avatar: `https://example.com/alice.jpg`,
+      preferences: {
+        notifications: true,
+        theme: `dark`,
+      },
+    },
+    address: {
+      street: `123 Main St`,
+      city: `New York`,
+      country: `USA`,
+      coordinates: {
+        lat: 40.7128,
+        lng: -74.006,
+      },
+    },
+  },
+  {
+    id: 2,
+    name: `Bob`,
+    age: 19,
+    email: `bob@example.com`,
+    active: true,
+    profile: {
+      bio: `Junior developer`,
+      avatar: `https://example.com/bob.jpg`,
+      preferences: {
+        notifications: false,
+        theme: `light`,
+      },
+    },
+  },
   {
     id: 3,
     name: `Charlie`,
     age: 30,
     email: `charlie@example.com`,
     active: false,
+    address: {
+      street: `456 Oak Ave`,
+      city: `San Francisco`,
+      country: `USA`,
+      coordinates: {
+        lat: 37.7749,
+        lng: -122.4194,
+      },
+    },
   },
   { id: 4, name: `Dave`, age: 22, email: `dave@example.com`, active: true },
 ]
@@ -714,6 +778,293 @@ function createBasicTests(autoIndex: `off` | `eager`) {
 
       expect(liveCollection.size).toBe(3)
       expect(liveCollection.get(5)).toBeUndefined()
+    })
+
+    test(`should query nested object properties`, () => {
+      const usersWithProfiles = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) =>
+              eq(user.profile?.bio, `Software engineer with 5 years experience`)
+            )
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              bio: user.profile?.bio,
+            })),
+      })
+
+      expect(usersWithProfiles.size).toBe(1)
+      expect(usersWithProfiles.get(1)).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        bio: `Software engineer with 5 years experience`,
+      })
+
+      // Query deeply nested properties
+      const darkThemeUsers = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.profile?.preferences.theme, `dark`))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              theme: user.profile?.preferences.theme,
+            })),
+      })
+
+      expect(darkThemeUsers.size).toBe(1)
+      expect(darkThemeUsers.get(1)).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        theme: `dark`,
+      })
+    })
+
+    test(`should select nested object properties`, () => {
+      const nestedSelectCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            preferences: user.profile?.preferences,
+            city: user.address?.city,
+            coordinates: user.address?.coordinates,
+          })),
+      })
+
+      const results = nestedSelectCollection.toArray
+      expect(results).toHaveLength(4)
+
+      // Check Alice has all nested properties
+      const alice = results.find((u) => u.id === 1)
+      expect(alice).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        preferences: {
+          notifications: true,
+          theme: `dark`,
+        },
+        city: `New York`,
+        coordinates: {
+          lat: 40.7128,
+          lng: -74.006,
+        },
+      })
+
+      // Check Bob has profile but no address
+      const bob = results.find((u) => u.id === 2)
+      expect(bob).toMatchObject({
+        id: 2,
+        name: `Bob`,
+        preferences: {
+          notifications: false,
+          theme: `light`,
+        },
+      })
+      expect(bob?.city).toBeUndefined()
+      expect(bob?.coordinates).toBeUndefined()
+
+      // Check Charlie has address but no profile
+      const charlie = results.find((u) => u.id === 3)
+      expect(charlie).toMatchObject({
+        id: 3,
+        name: `Charlie`,
+        city: `San Francisco`,
+        coordinates: {
+          lat: 37.7749,
+          lng: -122.4194,
+        },
+      })
+      expect(charlie?.preferences).toBeUndefined()
+
+      // Check Dave has neither
+      const dave = results.find((u) => u.id === 4)
+      expect(dave).toMatchObject({
+        id: 4,
+        name: `Dave`,
+      })
+      expect(dave?.preferences).toBeUndefined()
+      expect(dave?.city).toBeUndefined()
+    })
+
+    test(`should handle updates to nested object properties`, () => {
+      const profileCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            theme: user.profile?.preferences.theme,
+            notifications: user.profile?.preferences.notifications,
+          })),
+      })
+
+      expect(profileCollection.size).toBe(4) // All users, but some will have undefined values
+
+      // Update Bob's theme
+      const bob = sampleUsers.find((u) => u.id === 2)!
+      const updatedBob = {
+        ...bob,
+        profile: {
+          ...bob.profile!,
+          preferences: {
+            ...bob.profile!.preferences,
+            theme: `dark` as const,
+          },
+        },
+      }
+
+      usersCollection.utils.begin()
+      usersCollection.utils.write({
+        type: `update`,
+        value: updatedBob,
+      })
+      usersCollection.utils.commit()
+
+      expect(profileCollection.get(2)).toMatchObject({
+        id: 2,
+        name: `Bob`,
+        theme: `dark`,
+        notifications: false,
+      })
+
+      // Add profile to Dave
+      const dave = sampleUsers.find((u) => u.id === 4)!
+      const daveWithProfile = {
+        ...dave,
+        profile: {
+          bio: `Full stack developer`,
+          avatar: `https://example.com/dave.jpg`,
+          preferences: {
+            notifications: true,
+            theme: `light` as const,
+          },
+        },
+      }
+
+      usersCollection.utils.begin()
+      usersCollection.utils.write({
+        type: `update`,
+        value: daveWithProfile,
+      })
+      usersCollection.utils.commit()
+
+      expect(profileCollection.size).toBe(4) // All users
+      expect(profileCollection.get(4)).toMatchObject({
+        id: 4,
+        name: `Dave`,
+        theme: `light`,
+        notifications: true,
+      })
+
+      // Remove profile from Bob
+      const bobWithoutProfile = {
+        ...updatedBob,
+        profile: undefined,
+      }
+
+      usersCollection.utils.begin()
+      usersCollection.utils.write({
+        type: `update`,
+        value: bobWithoutProfile,
+      })
+      usersCollection.utils.commit()
+
+      expect(profileCollection.size).toBe(4) // All users still there, Bob will have undefined values
+      expect(profileCollection.get(2)).toMatchObject({
+        id: 2,
+        name: `Bob`,
+        theme: undefined,
+        notifications: undefined,
+      })
+    })
+
+    test(`should filter based on deeply nested properties`, () => {
+      const nyUsers = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.address?.city, `New York`))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              lat: user.address?.coordinates.lat,
+              lng: user.address?.coordinates.lng,
+            })),
+      })
+
+      expect(nyUsers.size).toBe(1)
+      expect(nyUsers.get(1)).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        lat: 40.7128,
+        lng: -74.006,
+      })
+
+      // Test with numeric comparison on nested property
+      const northernUsers = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => gt(user.address?.coordinates.lat, 38))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              city: user.address?.city,
+            })),
+      })
+
+      expect(northernUsers.size).toBe(1) // Only Alice (NY)
+      expect(northernUsers.get(1)).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        city: `New York`,
+      })
+    })
+
+    test(`should handle computed fields with nested properties`, () => {
+      const computedCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q.from({ user: usersCollection }).select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            city: user.address?.city,
+            country: user.address?.country,
+            hasNotifications: user.profile?.preferences.notifications,
+            profileSummary: concat(upper(user.name), ` - `, user.profile?.bio),
+          })),
+      })
+
+      const results = computedCollection.toArray
+      expect(results).toHaveLength(4)
+
+      const alice = results.find((u) => u.id === 1)
+      expect(alice).toMatchObject({
+        id: 1,
+        name: `Alice`,
+        city: `New York`,
+        country: `USA`,
+        hasNotifications: true,
+        profileSummary: `ALICE - Software engineer with 5 years experience`,
+      })
+
+      const dave = results.find((u) => u.id === 4)
+      expect(dave).toMatchObject({
+        id: 4,
+        name: `Dave`,
+      })
+      expect(dave?.city).toBeUndefined()
+      expect(dave?.country).toBeUndefined()
+      expect(dave?.hasNotifications).toBeUndefined()
     })
   })
 }

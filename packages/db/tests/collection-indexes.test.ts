@@ -13,7 +13,7 @@ import {
   lte,
   or,
 } from "../src/query/builder/functions"
-import { expectIndexUsage, withIndexTracking } from "./utls"
+import { expectIndexUsage, withIndexTracking } from "./utils"
 import type { Collection } from "../src/collection"
 import type { MutationFn, PendingMutation } from "../src/types"
 
@@ -861,7 +861,7 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query only on fields without indexes (name and score fields don't have indexes)
         const result = collection.currentStateAsChanges({
-          where: (row) => and(eq(row.name, `Alice`), eq(row.score!, 95)),
+          where: (row) => and(eq(row.name, `Alice`), eq(row.score, 95)),
         })
 
         expect(result).toHaveLength(1) // Alice

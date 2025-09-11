@@ -1169,8 +1169,8 @@ describe(`Collection.subscribeChanges`, () => {
     f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
     f.commit()
 
-    // Expect delete then insert with optimistic value
-    expect(changeEvents.length).toBe(2)
+    // Expect delete, insert with optimistic value, and an empty event from markReady
+    expect(changeEvents.length).toBe(3)
     expect(changeEvents[0]).toEqual({
       type: `delete`,
       key: 1,

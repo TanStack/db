@@ -3,7 +3,7 @@ import { z } from "zod"
 import { type } from "arktype"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample user type for tests
 type User = {
@@ -113,6 +113,8 @@ describe(`Query Basic Types`, () => {
             id: user.id,
             name: user.name,
             isAdult: user.age,
+            literalConst: `one` as const,
+            literal: `one`,
           })),
     })
 
@@ -122,6 +124,8 @@ describe(`Query Basic Types`, () => {
         id: number
         name: string
         isAdult: number
+        literalConst: `one`
+        literal: string
       }>
     >()
   })

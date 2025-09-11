@@ -1,5 +1,27 @@
 # @tanstack/db-ivm
 
+## 0.1.5
+
+### Patch Changes
+
+- Fix bug where different numbers would hash to the same value. This caused distinct not to work properly. ([#525](https://github.com/TanStack/db/pull/525))
+
+## 0.1.4
+
+### Patch Changes
+
+- Check typeof Buffer before instanceof to avoid ReferenceError in browsers ([#519](https://github.com/TanStack/db/pull/519))
+
+## 0.1.3
+
+### Patch Changes
+
+- fix count aggregate function (evaluate only not null field values like SQL count) ([#453](https://github.com/TanStack/db/pull/453))
+
+- Hybrid index implementation to track values and their multiplicities ([#489](https://github.com/TanStack/db/pull/489))
+
+- Replace JSON.stringify based hash function by structural hashing function. ([#491](https://github.com/TanStack/db/pull/491))
+
 ## 0.1.2
 
 ### Patch Changes

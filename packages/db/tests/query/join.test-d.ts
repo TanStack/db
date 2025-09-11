@@ -3,7 +3,7 @@ import { z } from "zod"
 import { type } from "arktype"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample data types for join type testing
 type User = {
@@ -209,8 +209,8 @@ describe(`Join Types - Type Safety`, () => {
           )
           .select(({ user, dept }) => ({
             userName: user.name,
-            deptName: dept.name, // This should still be accessible in select
-            deptBudget: dept.budget,
+            deptName: dept?.name, // This should still be accessible in select
+            deptBudget: dept?.budget,
           })),
     })
 
@@ -383,8 +383,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .select(({ user, dept }) => ({
             userName: user.name,
-            deptName: dept.name, // This should be string | undefined due to left join
-            deptBudget: dept.budget,
+            deptName: dept?.name, // This should be string | undefined due to left join
+            deptBudget: dept?.budget,
           })),
     })
 
@@ -457,7 +457,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .join(
             { project: projectsCollection },
-            ({ dept, project }) => eq(dept.id, project.department_id),
+            ({ dept, project }) => eq(dept?.id, project.department_id),
             `inner`
           ),
     })
@@ -687,7 +687,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
-            authorName: user.name, // This will be string | undefined due to left join
+            authorName: user?.name, // This will be string | undefined due to left join
           })),
     })
 
@@ -835,7 +835,7 @@ describe(`Join with ArkType Schemas`, () => {
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
-            authorName: user.name, // This will be string | undefined due to left join
+            authorName: user?.name, // This will be string | undefined due to left join
           })),
     })
 

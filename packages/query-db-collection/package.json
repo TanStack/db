@@ -1,14 +1,14 @@
 {
   "name": "@tanstack/query-db-collection",
   "description": "TanStack Query collection for TanStack DB",
-  "version": "0.2.3",
+  "version": "0.2.15",
   "dependencies": {
-    "@tanstack/db": "workspace:*",
-    "@standard-schema/spec": "^1.0.0"
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@tanstack/query-core": "^5.0.5",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@tanstack/query-core": "^5.87.4",
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {

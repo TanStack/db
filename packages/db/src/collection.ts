@@ -1,4 +1,5 @@
 import { withArrayChangeTracking, withChangeTracking } from "./proxy"
+import { deepEquals } from "./utils"
 import { SortedMap } from "./SortedMap"
 import {
   createSingleRowRefProxy,
@@ -58,6 +59,7 @@ import type {
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
+  WritableDeep,
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
@@ -66,6 +68,7 @@ interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
+  deletedKeys: Set<string | number>
 }
 
 /**
@@ -392,12 +395,13 @@ export class CollectionImpl<
         const callbacks = [...this.onFirstReadyCallbacks]
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
-
-        // to notify subscribers (like LiveQueryCollection) that the collection is ready
-        if (this.changeListeners.size > 0) {
-          this.emitEmptyReadyEvent()
-        }
       }
+    }
+
+    // Always notify dependents when markReady is called, after status is set
+    // This ensures live queries get notified when their dependencies become ready
+    if (this.changeListeners.size > 0) {
+      this.emitEmptyReadyEvent()
     }
   }
 
@@ -542,6 +546,7 @@ export class CollectionImpl<
           this.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
+            deletedKeys: new Set(),
           })
         },
         write: (messageWithoutKey: Omit<ChangeMessage<T>, `key`>) => {
@@ -560,9 +565,8 @@ export class CollectionImpl<
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
             const insertingIntoExistingSynced = this.syncedData.has(key)
-            const hasPendingDeleteForKey = pendingTransaction.operations.some(
-              (op) => op.key === key && op.type === `delete`
-            )
+            const hasPendingDeleteForKey =
+              pendingTransaction.deletedKeys.has(key)
             const isTruncateTransaction = pendingTransaction.truncate === true
             // Allow insert after truncate in the same transaction even if it existed in syncedData
             if (
@@ -579,6 +583,10 @@ export class CollectionImpl<
             key,
           }
           pendingTransaction.operations.push(message)
+
+          if (messageWithoutKey.type === `delete`) {
+            pendingTransaction.deletedKeys.add(key)
+          }
         },
         commit: () => {
           const pendingTransaction =
@@ -619,6 +627,7 @@ export class CollectionImpl<
 
           // Clear all operations from the current transaction
           pendingTransaction.operations = []
+          pendingTransaction.deletedKeys.clear()
 
           // Mark the transaction as a truncate operation. During commit, this triggers:
           // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
@@ -739,6 +748,12 @@ export class CollectionImpl<
     }
 
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
+
+    // If gcTime is 0, GC is disabled
+    if (gcTime === 0) {
+      return
+    }
+
     this.gcTimeoutId = setTimeout(() => {
       if (this.activeSubscribersCount === 0) {
         this.cleanup()
@@ -777,7 +792,6 @@ export class CollectionImpl<
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
-      this.activeSubscribersCount = 0
       this.startGCTimer()
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
@@ -1182,8 +1196,29 @@ export class CollectionImpl<
       }
     }
 
-    const hasTruncateSync = this.pendingSyncedTransactions.some(
-      (t) => t.truncate === true
+    // pending synced transactions could be either `committed` or still open.
+    // we only want to process `committed` transactions here
+    const {
+      committedSyncedTransactions,
+      uncommittedSyncedTransactions,
+      hasTruncateSync,
+    } = this.pendingSyncedTransactions.reduce(
+      (acc, t) => {
+        if (t.committed) {
+          acc.committedSyncedTransactions.push(t)
+          if (t.truncate === true) {
+            acc.hasTruncateSync = true
+          }
+        } else {
+          acc.uncommittedSyncedTransactions.push(t)
+        }
+        return acc
+      },
+      {
+        committedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
+        uncommittedSyncedTransactions: [] as Array<PendingSyncedTransaction<T>>,
+        hasTruncateSync: false,
+      }
     )
 
     if (!hasPersistingTransaction || hasTruncateSync) {
@@ -1192,7 +1227,7 @@ export class CollectionImpl<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
         }
@@ -1215,7 +1250,7 @@ export class CollectionImpl<
       const events: Array<ChangeMessage<T, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
-      for (const transaction of this.pendingSyncedTransactions) {
+      for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
@@ -1236,6 +1271,13 @@ export class CollectionImpl<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+
+          // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
+          //    are compared against the post-truncate state (undefined) rather than pre-truncate state
+          //    This ensures that re-inserted keys are emitted as INSERT events, not UPDATE events
+          for (const key of changedKeys) {
+            currentVisibleState.delete(key)
+          }
         }
 
         for (const operation of transaction.operations) {
@@ -1291,13 +1333,10 @@ export class CollectionImpl<
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
-      const hadTruncate = this.pendingSyncedTransactions.some(
-        (t) => t.truncate === true
-      )
-      if (hadTruncate) {
+      if (hasTruncateSync) {
         // Avoid duplicating keys that were inserted/updated by synced operations in this commit
         const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of this.pendingSyncedTransactions) {
+        for (const t of committedSyncedTransactions) {
           for (const op of t.operations) {
             if (op.type === `insert` || op.type === `update`) {
               syncedInsertedOrUpdatedKeys.add(op.key as TKey)
@@ -1436,7 +1475,7 @@ export class CollectionImpl<
         const isRedundantSync =
           completedOp &&
           newVisibleValue !== undefined &&
-          this.deepEqual(completedOp.value, newVisibleValue)
+          deepEquals(completedOp.value, newVisibleValue)
 
         if (!isRedundantSync) {
           if (
@@ -1460,7 +1499,7 @@ export class CollectionImpl<
           } else if (
             previousVisibleValue !== undefined &&
             newVisibleValue !== undefined &&
-            !this.deepEqual(previousVisibleValue, newVisibleValue)
+            !deepEquals(previousVisibleValue, newVisibleValue)
           ) {
             events.push({
               type: `update`,
@@ -1483,7 +1522,7 @@ export class CollectionImpl<
       // End batching and emit all events (combines any batched events with sync events)
       this.emitEvents(events, true)
 
-      this.pendingSyncedTransactions = []
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions
 
       // Clear the pre-sync state since sync operations are complete
       this.preSyncVisibleState.clear()
@@ -1701,29 +1740,6 @@ export class CollectionImpl<
         }
       }
     }
-  }
-
-  private deepEqual(a: any, b: any): boolean {
-    if (a === b) return true
-    if (a == null || b == null) return false
-    if (typeof a !== typeof b) return false
-
-    if (typeof a === `object`) {
-      if (Array.isArray(a) !== Array.isArray(b)) return false
-
-      const keysA = Object.keys(a)
-      const keysB = Object.keys(b)
-      if (keysA.length !== keysB.length) return false
-
-      const keysBSet = new Set(keysB)
-      for (const key of keysA) {
-        if (!keysBSet.has(key)) return false
-        if (!this.deepEqual(a[key], b[key])) return false
-      }
-      return true
-    }
-
-    return false
   }
 
   public validateData(
@@ -1963,32 +1979,34 @@ export class CollectionImpl<
   // Overload 1: Update multiple items with a callback
   update<TItem extends object = T>(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<WritableDeep<TItem>>) => void
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update<TItem extends object = T>(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<TItem>) => void
+    callback: (drafts: Array<WritableDeep<TItem>>) => void
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
-    callback: (draft: TItem) => void
+    callback: (draft: WritableDeep<TItem>) => void
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update<TItem extends object = T>(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: TItem) => void
+    callback: (draft: WritableDeep<TItem>) => void
   ): TransactionType
 
   update<TItem extends object = T>(
     keys: (TKey | unknown) | Array<TKey | unknown>,
-    configOrCallback: ((draft: TItem | Array<TItem>) => void) | OperationConfig,
+    configOrCallback:
+      | ((draft: WritableDeep<TItem> | Array<WritableDeep<TItem>>) => void)
+      | OperationConfig,
     maybeCallback?: (draft: TItem | Array<TItem>) => void
   ) {
     if (typeof keys === `undefined`) {

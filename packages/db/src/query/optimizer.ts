@@ -45,6 +45,11 @@
  * - **Ordering + Limits**: ORDER BY combined with LIMIT/OFFSET (would change result set)
  * - **Functional Operations**: fnSelect, fnWhere, fnHaving (potential side effects)
  *
+ * ### Residual WHERE Clauses
+ * For outer joins (LEFT, RIGHT, FULL), WHERE clauses are copied to subqueries for optimization
+ * but also kept as "residual" clauses in the main query to preserve semantics. This ensures
+ * that NULL values from outer joins are properly filtered according to SQL standards.
+ *
  * The optimizer tracks which clauses were actually optimized and only removes those from the
  * main query. Subquery reuse is handled safely through immutable query copies.
  *
@@ -120,10 +125,14 @@ import { CannotCombineEmptyExpressionListError } from "../errors.js"
 import {
   CollectionRef as CollectionRefClass,
   Func,
+  PropRef,
   QueryRef as QueryRefClass,
+  createResidualWhere,
+  getWhereExpression,
+  isResidualWhere,
 } from "./ir.js"
 import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
-import type { BasicExpression, From, QueryIR } from "./ir.js"
+import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
 
 /**
  * Represents a WHERE clause after source analysis
@@ -325,8 +334,13 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
+  // Filter out residual WHERE clauses to prevent them from being optimized again
+  const nonResidualWhereClauses = query.where.filter(
+    (where) => !isResidualWhere(where)
+  )
+
   // Step 1: Split all AND clauses at the root level for granular optimization
-  const splitWhereClauses = splitAndClauses(query.where)
+  const splitWhereClauses = splitAndClauses(nonResidualWhereClauses)
 
   // Step 2: Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
@@ -337,7 +351,20 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Step 4: Apply optimizations by lifting single-source clauses into subqueries
-  return applyOptimizations(query, groupedClauses)
+  const optimizedQuery = applyOptimizations(query, groupedClauses)
+
+  // Add back any residual WHERE clauses that were filtered out
+  const residualWhereClauses = query.where.filter((where) =>
+    isResidualWhere(where)
+  )
+  if (residualWhereClauses.length > 0) {
+    optimizedQuery.where = [
+      ...(optimizedQuery.where || []),
+      ...residualWhereClauses,
+    ]
+  }
+
+  return optimizedQuery
 }
 
 /**
@@ -424,24 +451,33 @@ function isRedundantSubquery(query: QueryIR): boolean {
  * ```
  */
 function splitAndClauses(
-  whereClauses: Array<BasicExpression<boolean>>
+  whereClauses: Array<Where>
 ): Array<BasicExpression<boolean>> {
   const result: Array<BasicExpression<boolean>> = []
 
-  for (const clause of whereClauses) {
-    if (clause.type === `func` && clause.name === `and`) {
-      // Recursively split nested AND clauses to handle complex expressions
-      const splitArgs = splitAndClauses(
-        clause.args as Array<BasicExpression<boolean>>
-      )
-      result.push(...splitArgs)
-    } else {
-      // Preserve non-AND clauses as-is (including OR clauses)
-      result.push(clause)
-    }
+  for (const whereClause of whereClauses) {
+    const clause = getWhereExpression(whereClause)
+    result.push(...splitAndClausesRecursive(clause))
   }
 
   return result
+}
+
+// Helper function for recursive splitting of BasicExpression arrays
+function splitAndClausesRecursive(
+  clause: BasicExpression<boolean>
+): Array<BasicExpression<boolean>> {
+  if (clause.type === `func` && clause.name === `and`) {
+    // Recursively split nested AND clauses to handle complex expressions
+    const result: Array<BasicExpression<boolean>> = []
+    for (const arg of clause.args as Array<BasicExpression<boolean>>) {
+      result.push(...splitAndClausesRecursive(arg))
+    }
+    return result
+  } else {
+    // Preserve non-AND clauses as-is (including OR clauses)
+    return [clause]
+  }
 }
 
 /**
@@ -588,19 +624,32 @@ function applyOptimizations(
       }))
     : undefined
 
-  // Build the remaining WHERE clauses: multi-source + any single-source that weren't optimized
-  const remainingWhereClauses: Array<BasicExpression<boolean>> = []
+  // Build the remaining WHERE clauses: multi-source + residual single-source clauses
+  const remainingWhereClauses: Array<Where> = []
 
   // Add multi-source clauses
   if (groupedClauses.multiSource) {
     remainingWhereClauses.push(groupedClauses.multiSource)
   }
 
-  // Add single-source clauses that weren't actually optimized
+  // Determine if we need residual clauses (when query has outer JOINs)
+  const hasOuterJoins =
+    query.join &&
+    query.join.some(
+      (join) =>
+        join.type === `left` || join.type === `right` || join.type === `full`
+    )
+
+  // Add single-source clauses
   for (const [source, clause] of groupedClauses.singleSource) {
     if (!actuallyOptimized.has(source)) {
+      // Wasn't optimized at all - keep as regular WHERE clause
       remainingWhereClauses.push(clause)
+    } else if (hasOuterJoins) {
+      // Was optimized AND query has outer JOINs - keep as residual WHERE clause
+      remainingWhereClauses.push(createResidualWhere(clause))
     }
+    // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
   // Create a completely new query object to ensure immutability
@@ -612,6 +661,7 @@ function applyOptimizations(
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
     limit: query.limit,
     offset: query.offset,
+    distinct: query.distinct,
     fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
@@ -715,7 +765,7 @@ function optimizeFromWithTracking(
   // SAFETY CHECK: Only check safety when pushing WHERE clauses into existing subqueries
   // We need to be careful about pushing WHERE clauses into subqueries that already have
   // aggregates, HAVING, or ORDER BY + LIMIT since that could change their semantics
-  if (!isSafeToPushIntoExistingSubquery(from.query)) {
+  if (!isSafeToPushIntoExistingSubquery(from.query, whereClause, from.alias)) {
     // Return a copy without optimization to maintain immutability
     // Do NOT mark as optimized since we didn't actually optimize it
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
@@ -732,73 +782,143 @@ function optimizeFromWithTracking(
   return new QueryRefClass(optimizedSubQuery, from.alias)
 }
 
-/**
- * Determines if it's safe to push WHERE clauses into an existing subquery.
- *
- * Pushing WHERE clauses into existing subqueries can break semantics in several cases:
- *
- * 1. **Aggregates**: Pushing predicates before GROUP BY changes what gets aggregated
- * 2. **ORDER BY + LIMIT/OFFSET**: Pushing predicates before sorting+limiting changes the result set
- * 3. **HAVING clauses**: These operate on aggregated data, predicates should not be pushed past them
- * 4. **Functional operations**: fnSelect, fnWhere, fnHaving could have side effects
- *
- * Note: This safety check only applies when pushing WHERE clauses into existing subqueries.
- * Creating new subqueries from collection references is always safe.
- *
- * @param query - The existing subquery to check for safety
- * @returns True if it's safe to push WHERE clauses into this subquery, false otherwise
- *
- * @example
- * ```typescript
- * // UNSAFE: has GROUP BY - pushing WHERE could change aggregation
- * { from: users, groupBy: [dept], select: { count: agg('count', '*') } }
- *
- * // UNSAFE: has ORDER BY + LIMIT - pushing WHERE could change "top 10"
- * { from: users, orderBy: [salary desc], limit: 10 }
- *
- * // SAFE: plain SELECT without aggregates/limits
- * { from: users, select: { id, name } }
- * ```
- */
-function isSafeToPushIntoExistingSubquery(query: QueryIR): boolean {
-  // Check for aggregates in SELECT clause
-  if (query.select) {
-    const hasAggregates = Object.values(query.select).some(
-      (expr) => expr.type === `agg`
-    )
-    if (hasAggregates) {
-      return false
-    }
-  }
+function unsafeSelect(
+  query: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  if (!query.select) return false
 
-  // Check for GROUP BY clause
-  if (query.groupBy && query.groupBy.length > 0) {
-    return false
-  }
+  return (
+    selectHasAggregates(query.select) ||
+    whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
+  )
+}
 
-  // Check for HAVING clause
-  if (query.having && query.having.length > 0) {
-    return false
-  }
+function unsafeGroupBy(query: QueryIR) {
+  return query.groupBy && query.groupBy.length > 0
+}
 
-  // Check for ORDER BY with LIMIT or OFFSET (dangerous combination)
-  if (query.orderBy && query.orderBy.length > 0) {
-    if (query.limit !== undefined || query.offset !== undefined) {
-      return false
-    }
-  }
+function unsafeHaving(query: QueryIR) {
+  return query.having && query.having.length > 0
+}
 
-  // Check for functional variants that might have side effects
-  if (
+function unsafeOrderBy(query: QueryIR) {
+  return (
+    query.orderBy &&
+    query.orderBy.length > 0 &&
+    (query.limit !== undefined || query.offset !== undefined)
+  )
+}
+
+function unsafeFnSelect(query: QueryIR) {
+  return (
     query.fnSelect ||
     (query.fnWhere && query.fnWhere.length > 0) ||
     (query.fnHaving && query.fnHaving.length > 0)
-  ) {
-    return false
+  )
+}
+
+function isSafeToPushIntoExistingSubquery(
+  query: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  return !(
+    unsafeSelect(query, whereClause, outerAlias) ||
+    unsafeGroupBy(query) ||
+    unsafeHaving(query) ||
+    unsafeOrderBy(query) ||
+    unsafeFnSelect(query)
+  )
+}
+
+/**
+ * Detects whether a SELECT projection contains any aggregate expressions.
+ * Recursively traverses nested select objects.
+ *
+ * @param select - The SELECT object from the IR
+ * @returns True if any field is an aggregate, false otherwise
+ */
+function selectHasAggregates(select: Select): boolean {
+  for (const value of Object.values(select)) {
+    if (typeof value === `object`) {
+      const v: any = value
+      if (v.type === `agg`) return true
+      if (!(`type` in v)) {
+        if (selectHasAggregates(v as unknown as Select)) return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Recursively collects all PropRef references from an expression.
+ *
+ * @param expr - The expression to traverse
+ * @returns Array of PropRef references found in the expression
+ */
+function collectRefs(expr: any): Array<PropRef> {
+  const refs: Array<PropRef> = []
+
+  if (expr == null || typeof expr !== `object`) return refs
+
+  switch (expr.type) {
+    case `ref`:
+      refs.push(expr as PropRef)
+      break
+    case `func`:
+    case `agg`:
+      for (const arg of expr.args ?? []) {
+        refs.push(...collectRefs(arg))
+      }
+      break
+    default:
+      break
   }
 
-  // If none of the unsafe conditions are present, it's safe to optimize
-  return true
+  return refs
+}
+
+/**
+ * Determines whether the provided WHERE clause references fields that are
+ * computed by a subquery SELECT rather than pass-through properties.
+ *
+ * If true, pushing the WHERE clause into the subquery could change semantics
+ * (since computed fields do not necessarily exist at the subquery input level),
+ * so predicate pushdown must be avoided.
+ *
+ * @param select - The subquery SELECT map
+ * @param whereClause - The WHERE expression to analyze
+ * @param outerAlias - The alias of the subquery in the outer query
+ * @returns True if WHERE references computed fields, otherwise false
+ */
+function whereReferencesComputedSelectFields(
+  select: Select,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  // Build a set of computed field names at the top-level of the subquery output
+  const computed = new Set<string>()
+  for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    if (value instanceof PropRef) continue
+    // Nested object or non-PropRef expression counts as computed
+    computed.add(key)
+  }
+
+  const refs = collectRefs(whereClause)
+
+  for (const ref of refs) {
+    const path = (ref as any).path as Array<string>
+    if (!Array.isArray(path) || path.length < 2) continue
+    const alias = path[0]
+    const field = path[1] as string
+    if (alias !== outerAlias) continue
+    if (computed.has(field)) return true
+  }
+  return false
 }
 
 /**
