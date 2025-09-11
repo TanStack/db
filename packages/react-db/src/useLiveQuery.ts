@@ -1,5 +1,9 @@
 import { useRef, useSyncExternalStore } from "react"
-import { createLiveQueryCollection } from "@tanstack/db"
+import {
+  BaseQueryBuilder,
+  CollectionImpl,
+  createLiveQueryCollection,
+} from "@tanstack/db"
 import type {
   Collection,
   CollectionStatus,
@@ -9,6 +13,8 @@ import type {
   LiveQueryCollectionConfig,
   QueryBuilder,
 } from "@tanstack/db"
+
+const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 
 /**
  * Create a live query using a query function
@@ -60,7 +66,7 @@ import type {
  *   </ul>
  * )
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   deps?: Array<unknown>
@@ -69,6 +75,98 @@ export function useLiveQuery<TContext extends Context>(
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
+
+// Overload 2: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<unknown>
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: Array<GetResult<TContext>> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: CollectionStatus | undefined
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
+
+// Overload 3: Accept query function that can return LiveQueryCollectionConfig
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
+  deps?: Array<unknown>
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: Array<GetResult<TContext>> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: CollectionStatus | undefined
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
+
+// Overload 4: Accept query function that can return Collection
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => Collection<TResult, TKey, TUtils> | undefined | null,
+  deps?: Array<unknown>
+): {
+  state: Map<TKey, TResult> | undefined
+  data: Array<TResult> | undefined
+  collection: Collection<TResult, TKey, TUtils> | undefined
+  status: CollectionStatus | undefined
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+}
+
+// Overload 5: Accept query function that can return all types
+export function useLiveQuery<
+  TContext extends Context,
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) =>
+    | QueryBuilder<TContext>
+    | LiveQueryCollectionConfig<TContext>
+    | Collection<TResult, TKey, TUtils>
+    | undefined
+    | null,
+  deps?: Array<unknown>
+): {
+  state:
+    | Map<string | number, GetResult<TContext>>
+    | Map<TKey, TResult>
+    | undefined
+  data: Array<GetResult<TContext>> | Array<TResult> | undefined
+  collection:
+    | Collection<GetResult<TContext>, string | number, {}>
+    | Collection<TResult, TKey, TUtils>
+    | undefined
+  status: CollectionStatus | undefined
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
@@ -109,7 +207,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * return <div>{data.length} items loaded</div>
  */
-// Overload 2: Accept config object
+// Overload 6: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<unknown>
@@ -154,7 +252,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
-// Overload 3: Accept pre-created live query collection
+// Overload 7: Accept pre-created live query collection
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
@@ -193,6 +291,13 @@ export function useLiveQuery(
   const depsRef = useRef<Array<unknown> | null>(null)
   const configRef = useRef<unknown>(null)
 
+  // Use refs to track version and memoized snapshot
+  const versionRef = useRef(0)
+  const snapshotRef = useRef<{
+    collection: Collection<object, string | number, {}> | null
+    version: number
+  } | null>(null)
+
   // Check if we need to create/recreate the collection
   const needsNewCollection =
     !collectionRef.current ||
@@ -209,31 +314,52 @@ export function useLiveQuery(
       collectionRef.current = configOrQueryOrCollection
       configRef.current = configOrQueryOrCollection
     } else {
-      // Original logic for creating collections
-      // Ensure we always start sync for React hooks
+      // Handle different callback return types
       if (typeof configOrQueryOrCollection === `function`) {
-        collectionRef.current = createLiveQueryCollection({
-          query: configOrQueryOrCollection,
-          startSync: true,
-          gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
-        }) as unknown as Collection<object, string | number, {}>
+        // Call the function with a query builder to see what it returns
+        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+        const result = configOrQueryOrCollection(queryBuilder)
+
+        if (result === undefined || result === null) {
+          // Callback returned undefined/null - disabled query
+          collectionRef.current = null
+        } else if (result instanceof CollectionImpl) {
+          // Callback returned a Collection instance - use it directly
+          result.startSyncImmediate()
+          collectionRef.current = result
+        } else if (result instanceof BaseQueryBuilder) {
+          // Callback returned QueryBuilder - create live query collection using the original callback
+          // (not the result, since the result might be from a different query builder instance)
+          collectionRef.current = createLiveQueryCollection({
+            query: configOrQueryOrCollection,
+            startSync: true,
+            gcTime: DEFAULT_GC_TIME_MS,
+          })
+        } else if (result && typeof result === `object`) {
+          // Assume it's a LiveQueryCollectionConfig
+          collectionRef.current = createLiveQueryCollection({
+            ...result,
+            startSync: true,
+            gcTime: DEFAULT_GC_TIME_MS,
+          })
+        } else {
+          // Unexpected return type
+          throw new Error(
+            `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`
+          )
+        }
+        depsRef.current = [...deps]
       } else {
+        // Original logic for config objects
         collectionRef.current = createLiveQueryCollection({
           startSync: true,
-          gcTime: 0, // Live queries created by useLiveQuery are cleaned up immediately
+          gcTime: DEFAULT_GC_TIME_MS,
           ...configOrQueryOrCollection,
-        }) as unknown as Collection<object, string | number, {}>
+        })
+        depsRef.current = [...deps]
       }
-      depsRef.current = [...deps]
     }
   }
-
-  // Use refs to track version and memoized snapshot
-  const versionRef = useRef(0)
-  const snapshotRef = useRef<{
-    collection: Collection<object, string | number, {}>
-    version: number
-  } | null>(null)
 
   // Reset refs when collection changes
   if (needsNewCollection) {
@@ -247,13 +373,18 @@ export function useLiveQuery(
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
-      const unsubscribe = collectionRef.current!.subscribeChanges(() => {
+      // If no collection, return a no-op unsubscribe function
+      if (!collectionRef.current) {
+        return () => {}
+      }
+
+      const unsubscribe = collectionRef.current.subscribeChanges(() => {
         // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
       })
       // Collection may be ready and will not receive initial `subscribeChanges()`
-      if (collectionRef.current!.status === `ready`) {
+      if (collectionRef.current.status === `ready`) {
         versionRef.current += 1
         onStoreChange()
       }
@@ -266,7 +397,7 @@ export function useLiveQuery(
   // Create stable getSnapshot function using ref
   const getSnapshotRef = useRef<
     | (() => {
-        collection: Collection<object, string | number, {}>
+        collection: Collection<object, string | number, {}> | null
         version: number
       })
     | null
@@ -274,7 +405,7 @@ export function useLiveQuery(
   if (!getSnapshotRef.current || needsNewCollection) {
     getSnapshotRef.current = () => {
       const currentVersion = versionRef.current
-      const currentCollection = collectionRef.current!
+      const currentCollection = collectionRef.current
 
       // Recreate snapshot object only if version/collection changed
       if (
@@ -300,7 +431,7 @@ export function useLiveQuery(
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
   const returnedSnapshotRef = useRef<{
-    collection: Collection<object, string | number, {}>
+    collection: Collection<object, string | number, {}> | null
     version: number
   } | null>(null)
   // Keep implementation return loose to satisfy overload signatures
@@ -312,33 +443,48 @@ export function useLiveQuery(
     returnedSnapshotRef.current.version !== snapshot.version ||
     returnedSnapshotRef.current.collection !== snapshot.collection
   ) {
-    // Capture a stable view of entries for this snapshot to avoid tearing
-    const entries = Array.from(snapshot.collection.entries())
-    let stateCache: Map<string | number, unknown> | null = null
-    let dataCache: Array<unknown> | null = null
+    // Handle null collection case (when callback returns undefined/null)
+    if (!snapshot.collection) {
+      returnedRef.current = {
+        state: undefined,
+        data: undefined,
+        collection: undefined,
+        status: undefined,
+        isLoading: false,
+        isReady: false,
+        isIdle: true,
+        isError: false,
+        isCleanedUp: false,
+      }
+    } else {
+      // Capture a stable view of entries for this snapshot to avoid tearing
+      const entries = Array.from(snapshot.collection.entries())
+      let stateCache: Map<string | number, unknown> | null = null
+      let dataCache: Array<unknown> | null = null
 
-    returnedRef.current = {
-      get state() {
-        if (!stateCache) {
-          stateCache = new Map(entries)
-        }
-        return stateCache
-      },
-      get data() {
-        if (!dataCache) {
-          dataCache = entries.map(([, value]) => value)
-        }
-        return dataCache
-      },
-      collection: snapshot.collection,
-      status: snapshot.collection.status,
-      isLoading:
-        snapshot.collection.status === `loading` ||
-        snapshot.collection.status === `initialCommit`,
-      isReady: snapshot.collection.status === `ready`,
-      isIdle: snapshot.collection.status === `idle`,
-      isError: snapshot.collection.status === `error`,
-      isCleanedUp: snapshot.collection.status === `cleaned-up`,
+      returnedRef.current = {
+        get state() {
+          if (!stateCache) {
+            stateCache = new Map(entries)
+          }
+          return stateCache
+        },
+        get data() {
+          if (!dataCache) {
+            dataCache = entries.map(([, value]) => value)
+          }
+          return dataCache
+        },
+        collection: snapshot.collection,
+        status: snapshot.collection.status,
+        isLoading:
+          snapshot.collection.status === `loading` ||
+          snapshot.collection.status === `initialCommit`,
+        isReady: snapshot.collection.status === `ready`,
+        isIdle: snapshot.collection.status === `idle`,
+        isError: snapshot.collection.status === `error`,
+        isCleanedUp: snapshot.collection.status === `cleaned-up`,
+      }
     }
 
     // Remember the snapshot that produced this returned value
