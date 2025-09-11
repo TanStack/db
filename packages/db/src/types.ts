@@ -259,19 +259,22 @@ export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
  * Collection status values for lifecycle management
@@ -302,7 +305,7 @@ export type CollectionStatus =
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
-export interface CollectionConfig<
+export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   // Let TSchema default to `never` such that if a user provides T explicitly and no schema
@@ -310,11 +313,12 @@ export interface CollectionConfig<
   // then it would conflict with the overloads of createCollection which
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
   id?: string
-  sync: SyncConfig<T, TKey>
   schema?: TSchema
   /**
    * Function to extract the ID from an object
@@ -397,7 +401,7 @@ export interface CollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<T, TKey>
+  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -441,7 +445,7 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey>
+  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
@@ -484,7 +488,15 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey>
+  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+}
+
+export interface CollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> extends BaseCollectionConfig<T, TKey, TSchema> {
+  sync: SyncConfig<T, TKey>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

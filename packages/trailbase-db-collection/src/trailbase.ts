@@ -9,6 +9,7 @@ import {
 import type { Event, RecordApi } from "trailbase"
 
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -88,8 +89,8 @@ export interface TrailBaseCollectionConfig<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
-    CollectionConfig<TItem, TKey>,
-    `sync` | `onInsert` | `onUpdate` | `onDelete`
+    BaseCollectionConfig<TItem, TKey>,
+    `onInsert` | `onUpdate` | `onDelete`
   > {
   /**
    * Record API name
