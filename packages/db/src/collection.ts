@@ -395,12 +395,13 @@ export class CollectionImpl<
         const callbacks = [...this.onFirstReadyCallbacks]
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
-
-        // to notify subscribers (like LiveQueryCollection) that the collection is ready
-        if (this.changeListeners.size > 0) {
-          this.emitEmptyReadyEvent()
-        }
       }
+    }
+
+    // Always notify dependents when markReady is called, after status is set
+    // This ensures live queries get notified when their dependencies become ready
+    if (this.changeListeners.size > 0) {
+      this.emitEmptyReadyEvent()
     }
   }
 
@@ -1270,6 +1271,13 @@ export class CollectionImpl<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+
+          // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
+          //    are compared against the post-truncate state (undefined) rather than pre-truncate state
+          //    This ensures that re-inserted keys are emitted as INSERT events, not UPDATE events
+          for (const key of changedKeys) {
+            currentVisibleState.delete(key)
+          }
         }
 
         for (const operation of transaction.operations) {

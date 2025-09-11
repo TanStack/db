@@ -229,7 +229,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser.name,
+                user_name: activeUser?.name,
                 issue_status: issue.status,
               }))
           },
@@ -373,8 +373,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser.name,
-                user_status: activeUser.status,
+                user_name: activeUser?.name,
+                user_status: activeUser?.status,
               }))
           },
         })
@@ -430,6 +430,82 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],
         })
+      })
+
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ issue: issuesCollection })
+              .join(
+                {
+                  users: q
+                    .from({ user: usersCollection })
+                    .where(({ user }) => eq(user.status, `active`))
+                    .orderBy(({ user }) => user.name, `asc`)
+                    .limit(1),
+                },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `left`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
+      })
+
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({
+                users: q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+                  .orderBy(({ user }) => user.name, `asc`)
+                  .limit(1),
+              })
+              .join(
+                { issue: issuesCollection },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `right`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
       })
 
       test(`should handle subqueries with SELECT clauses in both FROM and JOIN`, () => {

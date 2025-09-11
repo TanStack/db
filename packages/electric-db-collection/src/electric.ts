@@ -461,22 +461,30 @@ function createElectricSync<T extends Row<unknown>>(
     }
   }
 
-  // Abort controller for the stream - wraps the signal if provided
-  const abortController = new AbortController()
-  if (shapeOptions.signal) {
-    shapeOptions.signal.addEventListener(`abort`, () => {
-      abortController.abort()
-    })
-    if (shapeOptions.signal.aborted) {
-      abortController.abort()
-    }
-  }
-
   let unsubscribeStream: () => void
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady, truncate, collection } = params
+
+      // Abort controller for the stream - wraps the signal if provided
+      const abortController = new AbortController()
+
+      if (shapeOptions.signal) {
+        shapeOptions.signal.addEventListener(
+          `abort`,
+          () => {
+            abortController.abort()
+          },
+          {
+            once: true,
+          }
+        )
+        if (shapeOptions.signal.aborted) {
+          abortController.abort()
+        }
+      }
+
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,

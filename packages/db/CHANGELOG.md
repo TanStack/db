@@ -1,5 +1,74 @@
 # @tanstack/db
 
+## 0.2.3
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`a9878ad`](https://github.com/TanStack/db/commit/a9878ad58b71c3a2d10c03d75179a793bccf4ffc)]:
+  - @tanstack/db-ivm@0.1.5
+
+## 0.2.2
+
+### Patch Changes
+
+- fix a bug where a live query with a custom getKey would not update correctly because the source key was being used instead of the custom key for presence checks. ([#521](https://github.com/TanStack/db/pull/521))
+
+- Updated dependencies [[`c11eb51`](https://github.com/TanStack/db/commit/c11eb51fe24bb1c4c8529bcd34467af4e6542c71)]:
+  - @tanstack/db-ivm@0.1.4
+
+## 0.2.1
+
+### Patch Changes
+
+- export the new `isUndefined` and `isNull` query builder functions ([#515](https://github.com/TanStack/db/pull/515))
+
+## 0.2.0
+
+### Minor Changes
+
+- ## Enhanced Ref System with Nested Optional Properties ([#386](https://github.com/TanStack/db/pull/386))
+
+  Comprehensive refactor of the ref system to properly support nested structures and optionality, aligning the type system with JavaScript's optional chaining behavior.
+
+  ### ✨ New Features
+  - **Nested Optional Properties**: Full support for deeply nested optional objects (`employees.profile?.bio`, `orders.customer?.address?.street`)
+  - **Enhanced Type Safety**: Optional types now correctly typed as `RefProxy<T> | undefined` with optionality outside the ref
+  - **New Query Functions**: Added `isUndefined`, `isNull` for proper null/undefined checks
+  - **Improved JOIN Handling**: Fixed optionality in JOIN operations and multiple GROUP BY support
+
+  ### ⚠️ Breaking Changes
+
+  **IMPORTANT**: Code that previously ignored optionality now requires proper optional chaining syntax.
+
+  ```typescript
+  // Before (worked but type-unsafe)
+  employees.profile.bio // ❌ Now throws type error
+
+  // After (correct and type-safe)
+  employees.profile?.bio // ✅ Required syntax
+  ```
+
+  ### Migration
+
+  Add `?.` when accessing potentially undefined nested properties
+
+### Patch Changes
+
+- fix count aggregate function (evaluate only not null field values like SQL count) ([#453](https://github.com/TanStack/db/pull/453))
+
+- fix a bug where distinct was not applied to queries using a join ([#510](https://github.com/TanStack/db/pull/510))
+
+- Fix bug where too much data would be loaded when the lazy collection of a join contains an offset and/or limit clause. ([#508](https://github.com/TanStack/db/pull/508))
+
+- Refactored `select` improving spread (`...obj`) support and enabling nested projection. ([#389](https://github.com/TanStack/db/pull/389))
+
+- fix a bug that prevented chaining joins (joining collectionB to collectionA, then collectionC to collectionB) within one query without using a subquery ([#511](https://github.com/TanStack/db/pull/511))
+
+- Updated dependencies [[`08303e6`](https://github.com/TanStack/db/commit/08303e645974db97e10b2aca0031abcbce027dd6), [`0f6fb37`](https://github.com/TanStack/db/commit/0f6fb373d56177282552be5fb61e5bb32aeb09bb), [`0be4e2c`](https://github.com/TanStack/db/commit/0be4e2cf2b57a5e204f43c04457ddacc3532bd08)]:
+  - @tanstack/db-ivm@0.1.3
+
 ## 0.1.12
 
 ### Patch Changes
