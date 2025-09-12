@@ -8,7 +8,7 @@ import {
   gt,
 } from "@tanstack/db"
 import { injectLiveQuery } from "../src/index"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import type {
   Collection,
   CollectionStatus,
