@@ -19,6 +19,35 @@ import type {
 } from "@tanstack/db"
 import type { Signal } from "@angular/core"
 
+/**
+ * The result of calling `injectLiveQuery`.
+ * Contains reactive signals for the query state and data.
+ */
+export interface InjectLiveQueryResult<
+  TResult = any,
+  TKey extends string | number = string | number,
+  TUtils extends Record<string, any> = Record<string, never>,
+> {
+  /** A signal containing the complete state map of results keyed by their ID */
+  state: Signal<Map<TKey, TResult>>
+  /** A signal containing the results as an array */
+  data: Signal<Array<TResult>>
+  /** A signal containing the underlying collection instance */
+  collection: Signal<Collection<TResult, TKey, TUtils>>
+  /** A signal containing the current status of the collection */
+  status: Signal<CollectionStatus>
+  /** A signal indicating whether the collection is currently loading */
+  isLoading: Signal<boolean>
+  /** A signal indicating whether the collection is ready */
+  isReady: Signal<boolean>
+  /** A signal indicating whether the collection is idle */
+  isIdle: Signal<boolean>
+  /** A signal indicating whether the collection has an error */
+  isError: Signal<boolean>
+  /** A signal indicating whether the collection has been cleaned up */
+  isCleanedUp: Signal<boolean>
+}
+
 export function injectLiveQuery<
   TContext extends Context,
   TParams extends any,
@@ -28,66 +57,20 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext>
-}): {
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  data: Signal<Array<GetResult<TContext>>>
-  collection: Signal<
-    Collection<GetResult<TContext>, string | number, Record<string, never>>
-  >
-  status: Signal<CollectionStatus>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+}): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
-): {
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  data: Signal<Array<GetResult<TContext>>>
-  collection: Signal<
-    Collection<GetResult<TContext>, string | number, Record<string, never>>
-  >
-  status: Signal<CollectionStatus>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>
-): {
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  data: Signal<Array<GetResult<TContext>>>
-  collection: Signal<
-    Collection<GetResult<TContext>, string | number, Record<string, never>>
-  >
-  status: Signal<CollectionStatus>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils>
-): {
-  state: Signal<Map<TKey, TResult>>
-  data: Signal<Array<TResult>>
-  collection: Signal<Collection<TResult, TKey, TUtils>>
-  status: Signal<CollectionStatus>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+): InjectLiveQueryResult<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
