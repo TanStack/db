@@ -1,5 +1,16 @@
 # @tanstack/db
 
+## 0.2.4
+
+### Patch Changes
+
+- optimise key loading into query graph ([#526](https://github.com/TanStack/db/pull/526))
+
+- Fix a bug where selecting a prop that used a built in object such as a Date would result in incorrect types in the result object. ([#524](https://github.com/TanStack/db/pull/524))
+
+- Updated dependencies [[`92febbf`](https://github.com/TanStack/db/commit/92febbf1feaa1d46f8cc4d7a4ea0d44cd5f85256)]:
+  - @tanstack/db-ivm@0.1.6
+
 ## 0.2.3
 
 ### Patch Changes

@@ -97,6 +97,10 @@
         {
           "label": "Electric Collection",
           "to": "collections/electric-collection"
+        },
+        {
+          "label": "RxDB Collection",
+          "to": "collections/rxdb-collection"
         }
       ]
     },
@@ -146,6 +150,14 @@
         {
           "label": "queryCollectionOptions",
           "to": "reference/query-db-collection/functions/querycollectionoptions"
+        },
+        {
+          "label": "RxDB DB Collection",
+          "to": "reference/rxdb-db-collection/index"
+        },
+        {
+          "label": "rxdbCollectionOptions",
+          "to": "reference/rxdb-db-collection/functions/rxdbcollectionoptions"
         }
       ],
       "frameworks": [

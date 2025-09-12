@@ -500,20 +500,20 @@ export type Ref<T = any> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
-        NonNullable<T[K]> extends Record<string, any>
+        IsPlainObject<NonNullable<T[K]>> extends true
         ? Ref<NonNullable<T[K]>> | undefined
         : RefLeaf<NonNullable<T[K]>> | undefined
       : // Optional only
-        NonUndefined<T[K]> extends Record<string, any>
+        IsPlainObject<NonUndefined<T[K]>> extends true
         ? Ref<NonUndefined<T[K]>> | undefined
         : RefLeaf<NonUndefined<T[K]>> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
-        NonNull<T[K]> extends Record<string, any>
+        IsPlainObject<NonNull<T[K]>> extends true
         ? Ref<NonNull<T[K]>> | null
         : RefLeaf<NonNull<T[K]>> | null
       : // Required
-        T[K] extends Record<string, any>
+        IsPlainObject<T[K]> extends true
         ? Ref<T[K]>
         : RefLeaf<T[K]>
 } & RefLeaf<T>
@@ -825,3 +825,48 @@ export type WithResult<TContext extends Context, TResult> = Prettify<
 export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {}
+
+/**
+ * IsPlainObject - Utility type to check if T is a plain object
+ */
+type IsPlainObject<T> = T extends unknown
+  ? T extends object
+    ? T extends ReadonlyArray<any>
+      ? false
+      : T extends JsBuiltIns
+        ? false
+        : true
+    : false
+  : false
+
+/**
+ * JsBuiltIns - List of JavaScript built-ins
+ */
+type JsBuiltIns =
+  | ArrayBuffer
+  | ArrayBufferLike
+  | AsyncGenerator<any, any, any>
+  | BigInt64Array
+  | BigUint64Array
+  | DataView
+  | Date
+  | Error
+  | Float32Array
+  | Float64Array
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  | Function
+  | Generator<any, any, any>
+  | Int16Array
+  | Int32Array
+  | Int8Array
+  | Map<any, any>
+  | Promise<any>
+  | RegExp
+  | Set<any>
+  | string
+  | Uint16Array
+  | Uint32Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | WeakMap<any, any>
+  | WeakSet<any>

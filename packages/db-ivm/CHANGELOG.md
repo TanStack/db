@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.6
+
+### Patch Changes
+
+- optimise key loading into query graph ([#526](https://github.com/TanStack/db/pull/526))
+
 ## 0.1.5
 
 ### Patch Changes
