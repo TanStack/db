@@ -292,10 +292,32 @@ export function useLiveQuery(
     }
   }
 
+  const getServerSnapshotRef = useRef<
+    | (() => {
+        collection: Collection<object, string | number, {}>
+        version: number
+      })
+    | null
+  >(null)
+  if (!getServerSnapshotRef.current) {
+    // Create a mock collection-like object for server snapshot
+    const mockCollection = {
+      entries: () => [],
+      status: `idle` as CollectionStatus,
+      subscribeChanges: () => () => {},
+      startSyncImmediate: () => {},
+    } as unknown as Collection<object, string | number, {}>
+    getServerSnapshotRef.current = () => ({
+      collection: mockCollection,
+      version: 0,
+    })
+  }
+
   // Use useSyncExternalStore to subscribe to collection changes
   const snapshot = useSyncExternalStore(
     subscribeRef.current,
-    getSnapshotRef.current
+    getSnapshotRef.current,
+    getServerSnapshotRef.current
   )
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
