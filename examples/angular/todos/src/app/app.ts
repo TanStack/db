@@ -147,9 +147,7 @@ export class App {
   todoQuery = injectLiveQuery({
     params: () => ({ projectID: this.selectedProjectId() }),
     query: ({ params, q }) =>
-      q
-        .from({ todo: todosCollection })
-        .where(({ todo }) => eq(todo.projectID, params.projectID)),
+      q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.projectID, params.projectID)),
   });
 
   newTodoText = '';
