@@ -1,198 +1,127 @@
-# TanStack DB
 
-<!-- ![TanStack DB Header](https://github.com/tanstack/db/raw/main/media/repo-header.png) -->
+<div align="center">
+  <img src="./media/header_db.png" >
+</div>
 
-**A reactive client store for building super fast apps on sync**
+> Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
 
-TanStack DB extends TanStack Query with collections, live queries and optimistic mutations that keep your UI reactive, consistent and blazing fast 🔥
+A backend‑agnostic, real‑time data layer that powers live queries, local writes, and fine‑grained reactivity for complex apps.
 
-<p>
-  <a href="https://x.com/intent/post?text=TanStack%20DB&url=https://tanstack.com/db">
-    <img alt="#TanStack" src="https://img.shields.io/twitter/url?color=%2308a0e9&label=%23TanStack&style=social&url=https%3A%2F%2Ftwitter.com%2Fintent%2Ftweet%3Fbutton_hashtag%3DTanStack" /></a>
-  <a href="#status">
-    <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status - BETA"></a>
-  <a href="https://npmjs.com/package/@tanstack/db">
-    <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" /></a>
-  <a href="https://discord.gg/yjUNbvbraC">
-    <img alt="" src="https://img.shields.io/badge/Discord-TanStack-%235865F2" /></a>
-  <a href="https://github.com/tanstack/db/discussions">
-    <img alt="Join the discussion on Github" src="https://img.shields.io/badge/Discussions-Chat%20now!-green" /></a>
-  <a href="https://x.com/tan_stack">
-    <img alt="" src="https://img.shields.io/twitter/follow/tan_stack.svg?style=social&label=Follow @TanStack" /></a>
-</p>
+- Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates  
+- Fine‑grained reactivity to minimize component re‑rendering  
+- Robust transaction primitives for optimistic mutations with sync & lifecycle support  
+- Normalized data model that keeps backends simple and consistent
 
-Enjoy this library? Try the entire [TanStack](https://tanstack.com), including [TanStack Query](https://tanstack.com/query), [TanStack Store](https://tanstack.com/store), etc.
 
-## 🚀 Why TanStack DB?
+<a href="https://tanstack.com/db" style="font-weight:bold" >Read the DB docs →</a>
+<br />
 
-TanStack DB gives you robust support for real-time sync, live queries and local writes. With no stale data, super fast re-rendering and sub-millisecond cross-collection queries — even for large complex apps.
 
-Built on a TypeScript implementation of differential dataflow ([#](https://github.com/electric-sql/d2ts)), TanStack DB gives you:
+<div align="center" style="display: flex; gap: 10px; flex-direction: column; justify-content: center;">
 
-- 🔥 **a blazing fast query engine**<br />
-  for sub-millisecond live queries &mdash; even for complex queries with joins and aggregates
-- 🎯 **fine-grained reactivity**<br />
-  to minimize component re-rendering
-- 💪 **robust transaction primitives**<br />
-  for easy optimistic mutations with sync and lifecycle support
-- 🌟 **normalized data**<br />
-  to keep your backend simple
+<div align="center">
+	<!-- NPM Downloads -->
+	<a href="https://npmjs.com/package/@tanstack/db" target="\_parent">
+	  <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" alt="npm downloads" />
+	</a>
+	<!-- GitHub Stars -->
+	<a href="https://github.com/TanStack/db" target="\_parent">
+	  <img alt="" src="https://img.shields.io/github/stars/TanStack/db.svg?style=social&label=Star" alt="GitHub stars" />
+	</a>
+	<!-- Bundle size -->
+	<a href="https://bundlejs.com/?q=%40tanstack%2Fdb&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22react%22%2C%22react-dom%22%5D%7D%7D&badge=" target="\_parent">
+	  <img alt="" src="https://deno.bundlejs.com/?q=@tanstack/db&config={%22esbuild%22:{%22external%22:[%22react%22,%22react-dom%22]}}&badge=detailed" alt="Bundle size" />
+	</a>
+</div>
 
-TanStack DB is **backend agnostic** and **incrementally adoptable**:
+<div align="center">
+	<a href="#status">
+    <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status - BETA">
+  </a>
+	<a href="https://bestofjs.org/projects/tanstack-db">
+		<img alt="Best of JS" src="https://img.shields.io/endpoint?url=https://bestofjs-serverless.now.sh/api/project-badge?fullName=TanStack%2Fdb%26since=daily" alt="Best of JS"/>
+	</a>
+	<a href="https://twitter.com/tan_stack">
+		<img src="https://img.shields.io/twitter/follow/tan_stack.svg?style=social" alt="Follow @TanStack"/>
+	</a>
+</div>
 
-- plug in any backend: sync engines, REST APIs, GraphQL, polling, custom sources
-- builds on [TanStack Store](https://tanstack.com/store), works with and alongside [TanStack Query](https://tanstack.com/query)
+<div align="center" style="font-size: 2rem; font-weight: bolder;">
+		
+  [Become a Sponsor!](https://github.com/sponsors/tannerlinsley/)
+</div>
 
-## 💥 Usage example
+</div>
 
-Sync data into collections:
+## Get Involved
 
-```ts
-import { createCollection, QueryClient } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
-
-const todoCollection = createCollection(
-  queryCollectionOptions({
-    queryKey: ["todos"],
-    queryFn: async () => fetch("/api/todos"),
-    queryClient: new QueryClient(),
-    getKey: (item) => item.id,
-    schema: todoSchema, // any standard schema
-  })
-)
-```
-
-Use live queries in your components:
-
-```tsx
-import { useLiveQuery } from "@tanstack/react-db"
-import { eq } from "@tanstack/db"
-
-const Todos = () => {
-  const { data: todos } = useLiveQuery((query) =>
-    query
-      .from({ todos: todoCollection })
-      .where(({ todos }) => eq(todos.completed, false))
-  )
-
-  return <List items={todos} />
-}
-```
-
-Apply mutations with local optimistic state:
-
-```tsx
-// Define collection with persistence handlers
-const todoCollection = createCollection({
-  id: "todos",
-  // ... other config
-  onInsert: async ({ transaction }) => {
-    const modified = transaction.mutations[0].modified
-    await api.todos.create(modified)
-  },
-})
-
-// Then use collection operators in your components
-const AddTodo = () => {
-  return (
-    <Button
-      onClick={() =>
-        todoCollection.insert({
-          id: uuid(),
-          text: "🔥 Make app faster",
-          completed: false,
-        })
-      }
-    />
-  )
-}
-```
-
-## 📚 Docs
-
-See the [Usage guide](./docs/overview.md) for more details, including how to do:
-
-- real-time sync
-- cross-collection queries
-- fine-grained reactivity
-- different strategies for data loading and handling mutations
-
-There's also an example [React todo app](./examples/react/todo) and usage examples in the [package tests](./packages/db/tests).
-
-## 🧱 Core concepts
-
-### Collections
-
-- typed sets of objects that can mirror a backend table or be populated with a filtered view or result set, such as `pendingTodos` or `decemberNewTodos`
-- collections are just JavaScript data &mdash; load them on demand and define as many as you need
-
-### Live queries
-
-- run reactively against and across collections with support for joins, filters and aggregates
-- powered by differential dataflow: query results update incrementally, not by re-running the whole query
-
-### Transactional mutators
-
-- batch and stage local changes across collections with immediate application of local optimistic updates
-- sync transactions to the backend with automatic rollbacks and management of optimistic state
-
-## 📦 Collection Types
-
-TanStack DB provides several collection types to support different backend integrations:
-
-- **`@tanstack/db`** - Core collection functionality with local-only and local-storage collections for offline-first applications
-- **`@tanstack/query-db-collection`** - Collections backed by [TanStack Query](https://tanstack.com/query) for REST APIs and GraphQL endpoints
-- **`@tanstack/electric-db-collection`** - Real-time sync collections powered by [ElectricSQL](https://electric-sql.com) for live database synchronization
-- **`@tanstack/trailbase-db-collection`** - Collections for [TrailBase](https://trailbase.io) backend integration
-- **`@tanstack/rxdb-db-collection`** - Collections backed by [RxDB](https://rxdb.info), a client-side database with replication support and local persistence made for local-first apps.
-
-## Framework integrations
-
-TanStack DB integrates with React & Vue with more on the way!
-
-- **`@tanstack/react-db`** - React hooks and components for using TanStack DB collections in React applications
-- **`@tanstack/vue-db`** - Vue composables for using TanStack DB collections in Vue applications
-
-## 🔧 Install
-
-```bash
-npm install @tanstack/react-db
-# Optional: for specific collection types
-npm install @tanstack/electric-db-collection @tanstack/query-db-collection @tanstack/trailbase-db-collection @tanstack/rxdb-db-collection
-```
-
-Other framework integrations are in progress.
-
-## ❓ FAQ
-
-**How is this different from TanStack Query?**<br />
-TanStack DB builds _on top of_ TanStack Query. Use Query to fetch data; use DB to manage reactive local collections and mutations. They complement each other.
-
-**Do I need a sync engine like ElectricSQL?**<br />
-No. TanStack DB _is_ designed to work with sync engines like [Electric](https://electric-sql.com) but _also_ works with any backend: polling APIs, GraphQL, REST, or custom sync logic.
-
-**What is a Collection? Is it like a DB table?**<br />
-Kind of. Collections are typed sets of objects, but they can also be filtered views or custom groupings. They're just JavaScript structures that you define and manage.
-
-**Is this an ORM? Do queries hit my backend?**<br />
-No. TanStack DB is not an ORM. Queries run entirely in the client against local collections. The framework provides strong primitives to manage how data is loaded and synced.
+- We welcome issues and pull requests!
+- Participate in [GitHub discussions](https://github.com/TanStack/<library>/discussions)
+- Chat with the community on [Discord](https://discord.com/invite/WrRKjPJ)
+- See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup instructions
 
 ## Partners
 
-<a href="https://electric-sql.com">
-  <img alt="ElectricSQL logo"
-      src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png"
-  />
-</a>
+<div style="display: flex; flex-wrap: wrap; gap: 50px; justify-content: center; align-items: center;">
 
-## Status
+<a href="https://www.coderabbit.ai/?via=tanstack&dub_id=aCcEEdAOqqutX6OS" style="display: flex; align-items: center; border: none;">
+    <img src="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" alt="Code Rabbit"/>
+  </a>
+<a href="https://electric-sql.com" style="display: flex; align-items: center; border: none; margin-right: 0px; margin-top: 0px;"><img src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png" height="90" alt="ElectricSQL logo"/>
+  </a>
+  <a href="https://www.prisma.io?utm_source=tanstack&via=tanstack" style="display: flex; align-items: center; border: none;">
+    <img src="https://raw.githubusercontent.com/tanstack/tanstack.com/main/src/images/prisma-light.svg" height="50" alt="Prisma"/>
+  </a>
+  <a href="https://www.cloudflare.com?utm_source=tanstack" style="display: flex; align-items: center; border: none; margin-right: 0px; margin-top: 0px;">
+  <img src="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="60" alt="Cloudflare"/>
+  </a>
 
-Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
+</div>
 
-## Contributing
 
-View the contributing guidelines [here](https://github.com/TanStack/query/blob/main/CONTRIBUTING.md).
+<hr />
 
-### [Become a Sponsor!](https://github.com/sponsors/tannerlinsley/)
+<div align="center">
+  <div style="display: flex; flex-direction: column; max-width: 500px; align-items: center;">
+    <span style="display: flex; align-items: center; padding-bottom: 24px; font-size: 30px; color: #ff2056; font-weight: 900; text-transform: uppercase;">
+      DB
+      <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"></path><path d="M12 6l-3.293 3.293a1 1 0 0 0 0 1.414l.543 .543c.69 .69 1.81 .69 2.5 0l1 -1a3.182 3.182 0 0 1 4.5 0l2.25 2.25"></path><path d="M12.5 15.5l2 2"></path><path d="M15 13l2 2"></path></svg>
+      You?
+    </span>
+    <p>
+      We're looking for TanStack DB Partners to join our mission! Partner with us to push the boundaries of TanStack DB and build amazing things together.
+    </p>
+    <a href="mailto:partners@tanstack.com?subject=TanStack DB Partnership" style="text-transform: uppercase; font-weight: bold;">Let's chat</a>
+  </div>
+</div>
+
+## Explore the TanStack Ecosystem
+
+<div align="center">
+	<a href="https://github.com/tanstack/config" style="font-weight: bold;">TanStack Config</a> – Tooling for JS/TS packages
+	<br/>
+	<a href="https://github.com/tanstack/devtools" style="font-weight: bold;">TanStack DevTools</a> – Unified devtools panel
+	<br/>
+	<a href="https://github.com/tanstack/form" style="font-weight: bold;">TanStack Form</a> – Type‑safe form state
+	<br/>
+	<a href="https://github.com/tanstack/pacer" style="font-weight: bold;">TanStack Pacer</a> – Debouncing, throttling, batching
+	<br/>
+	<a href="https://github.com/tanstack/query" style="font-weight: bold;">TanStack Query</a> – Async state & caching
+	<br/>
+	<a href="https://github.com/tanstack/ranger" style="font-weight: bold;">TanStack Ranger</a> – Range & slider primitives
+	<br/>
+	<a href="https://github.com/tanstack/router" style="font-weight: bold;">TanStack Router</a> –  Type‑safe routing, caching & URL state
+	<br/>
+	<a href="https://github.com/tanstack/router" style="font-weight: bold;">TanStack Start</a> –  Full‑stack SSR & streaming
+	<br/>
+	<a href="https://github.com/tanstack/store" style="font-weight: bold;">TanStack Store</a> – Reactive data store
+	<br/>
+	<a href="https://github.com/tanstack/table" style="font-weight: bold;">TanStack Table</a> – Headless datagrids
+	<br/>
+	<a href="https://github.com/tanstack/virtual" style="font-weight: bold;">TanStack Virtual</a> – Virtualized rendering
+	<br/>
+  … and more at <a href="https://tanstack.com" style="font-weight: bold;">TanStack.com »</a>
+</di
+v>
 
 <!-- Use the force, Luke -->
