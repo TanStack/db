@@ -20,15 +20,12 @@ A backend‑agnostic, real‑time data layer that powers live queries, local wri
 <div align="center" style="display: flex; gap: 10px; flex-direction: column; justify-content: center;">
 
 <div align="center">
-	<!-- NPM Downloads -->
 	<a href="https://npmjs.com/package/@tanstack/db" target="\_parent">
 	  <img alt="" src="https://img.shields.io/npm/dm/@tanstack/db.svg" alt="npm downloads" />
 	</a>
-	<!-- GitHub Stars -->
 	<a href="https://github.com/TanStack/db" target="\_parent">
 	  <img alt="" src="https://img.shields.io/github/stars/TanStack/db.svg?style=social&label=Star" alt="GitHub stars" />
 	</a>
-	<!-- Bundle size -->
 	<a href="https://bundlejs.com/?q=%40tanstack%2Fdb&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22react%22%2C%22react-dom%22%5D%7D%7D&badge=" target="\_parent">
 	  <img alt="" src="https://deno.bundlejs.com/?q=@tanstack/db&config={%22esbuild%22:{%22external%22:[%22react%22,%22react-dom%22]}}&badge=detailed" alt="Bundle size" />
 	</a>
@@ -77,7 +74,6 @@ A backend‑agnostic, real‑time data layer that powers live queries, local wri
   </a>
 
 </div>
-
 
 <hr />
 
