@@ -24,9 +24,9 @@ import type { Signal } from "@angular/core"
  * Contains reactive signals for the query state and data.
  */
 export interface InjectLiveQueryResult<
-  TResult = any,
+  TResult extends object = any,
   TKey extends string | number = string | number,
-  TUtils extends Record<string, any> = Record<string, never>,
+  TUtils extends Record<string, any> = {},
 > {
   /** A signal containing the complete state map of results keyed by their ID */
   state: Signal<Map<TKey, TResult>>
