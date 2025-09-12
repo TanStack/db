@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/angular-db",
   "description": "Angular integration for @tanstack/db",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "author": "Ethan McDaniel",
   "license": "MIT",
   "repository": {
@@ -47,7 +47,7 @@
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
   "peerDependencies": {
-    "@angular/core": ">=14.0.0",
+    "@angular/core": ">=16.0.0",
     "rxjs": ">=6.0.0"
   },
   "scripts": {
