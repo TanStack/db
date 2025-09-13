@@ -44,7 +44,6 @@ export function consolidate<T>(): PipedOperator<T, T> {
       output.writer
     )
     stream.graph.addOperator(operator)
-    stream.graph.addStream(output.connectReader())
     return output
   }
 }

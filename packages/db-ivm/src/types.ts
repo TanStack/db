@@ -27,7 +27,6 @@ export interface ID2 {
   getNextOperatorId: () => number
   newInput: <T>() => IStreamBuilder<T>
   addOperator: (operator: UnaryOperator<any> | BinaryOperator<any>) => void
-  addStream: (stream: DifferenceStreamReader<any>) => void
   finalize: () => void
   step: () => void
 }

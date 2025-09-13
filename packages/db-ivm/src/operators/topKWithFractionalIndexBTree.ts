@@ -302,7 +302,6 @@ export function topKWithFractionalIndexBTree<KType, T>(
       opts
     )
     stream.graph.addOperator(operator)
-    stream.graph.addStream(output.connectReader())
     return output
   }
 }

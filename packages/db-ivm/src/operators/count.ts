@@ -46,7 +46,6 @@ export function count<
       output.writer
     )
     stream.graph.addOperator(operator)
-    stream.graph.addStream(output.connectReader())
     return output
   }
 }
