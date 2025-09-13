@@ -1,28 +1,57 @@
 import { MultiSet } from "./multiset.js"
 import { hash } from "./hashing/index.js"
+import type { Hash } from "./hashing/index.js"
 
+// We use a symbol to represent the absence of a prefix, unprefixed values a stored
+// against this key.
 const NO_PREFIX = Symbol(`NO_PREFIX`)
 type NO_PREFIX = typeof NO_PREFIX
 
-type Hash = number
+// A single value is a tuple of the value and the multiplicity.
 type SingleValue<TValue> = [TValue, number]
+
+// Base map type for the index. Stores single values or prefix maps against a key.
 type IndexMap<TKey, TValue, TPrefix> = Map<
   TKey,
   SingleValue<TValue> | PrefixMap<TValue, TPrefix>
 >
+
+// Second level map type for the index, stores single values or value maps against a prefix.
 type PrefixMap<TValue, TPrefix> = Map<
   TPrefix | NO_PREFIX,
   SingleValue<TValue> | ValueMap<TValue>
 >
+
+// Third level map type for the index, stores single values or value maps against a hash.
 type ValueMap<TValue> = Map<Hash, [TValue, number]>
 
+/**
+ * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
+ * Used in operations like join and reduce where the operation needs to
+ * exploit the key-value structure of the data to run efficiently.
+ */
 export class Index<TKey, TValue, TPrefix = any> {
+  /*
+   * This index maintains a nested map of keys -> (value, multiplicities), where:
+   * - initially the values are stored against the key as a single value tuple
+   * - when a key gets additional values, the values are stored against the key in a
+   *   prefix map
+   * - the prefix is extract where possible from values that are structured as
+   *   [rowPrimaryKey, rowValue], as they are in the Tanstack DB query pipeline.
+   * - only when there are multiple values for a given prefix do we fall back to a
+   *   hash to identify identical values, storing them in a third level value map.
+   */
   #inner: IndexMap<TKey, TValue, TPrefix>
 
   constructor() {
     this.#inner = new Map()
   }
 
+  /**
+   * This method returns a string representation of the index.
+   * @param indent - Whether to indent the string representation.
+   * @returns A string representation of the index.
+   */
   toString(indent = false): string {
     return `Index(${JSON.stringify(
       [...this.entries()],
@@ -31,18 +60,36 @@ export class Index<TKey, TValue, TPrefix = any> {
     )})`
   }
 
+  /**
+   * The size of the index.
+   */
   get size(): number {
     return this.#inner.size
   }
 
+  /**
+   * This method checks if the index has a given key.
+   * @param key - The key to check.
+   * @returns True if the index has the key, false otherwise.
+   */
   has(key: TKey): boolean {
     return this.#inner.has(key)
   }
 
+  /**
+   * This method returns all values for a given key.
+   * @param key - The key to get the values for.
+   * @returns An array of value tuples [value, multiplicity].
+   */
   get(key: TKey): Array<[TValue, number]> {
     return [...this.getIterator(key)]
   }
 
+  /**
+   * This method returns an iterator over all values for a given key.
+   * @param key - The key to get the values for.
+   * @returns An iterator of value tuples [value, multiplicity].
+   */
   *getIterator(key: TKey): Iterable<[TValue, number]> {
     const prefixMapOrSingleValue = this.#inner.get(key)
     if (isSingleValue(prefixMapOrSingleValue)) {
@@ -80,12 +127,17 @@ export class Index<TKey, TValue, TPrefix = any> {
    * It returns an iterator that you can use if you need to iterate over the values for a given key.
    * @returns An iterator of all *keys* in the index and their corresponding value iterator.
    */
-  *#entriesIterators(): Iterable<[TKey, Iterable<[TValue, number]>]> {
+  *entriesIterators(): Iterable<[TKey, Iterable<[TValue, number]>]> {
     for (const key of this.#inner.keys()) {
       yield [key, this.getIterator(key)]
     }
   }
 
+  /**
+   * This method adds a value to the index.
+   * @param key - The key to add the value to.
+   * @param valueTuple - The value tuple [value, multiplicity] to add to the index.
+   */
   addValue(key: TKey, valueTuple: SingleValue<TValue>) {
     const [value, multiplicity] = valueTuple
     // If the multiplicity is 0, do nothing
@@ -232,12 +284,21 @@ export class Index<TKey, TValue, TPrefix = any> {
     }
   }
 
+  /**
+   * This method appends another index to the current index.
+   * @param other - The index to append to the current index.
+   */
   append(other: Index<TKey, TValue>): void {
     for (const [key, value] of other.entries()) {
       this.addValue(key, value)
     }
   }
 
+  /**
+   * This method joins two indexes.
+   * @param other - The index to join with the current index.
+   * @returns A multiset of the joined values.
+   */
   join<TValue2>(
     other: Index<TKey, TValue2>
   ): MultiSet<[TKey, [TValue, TValue2]]> {
@@ -245,7 +306,7 @@ export class Index<TKey, TValue, TPrefix = any> {
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.
     if (this.size <= other.size) {
-      for (const [key, valueIt] of this.#entriesIterators()) {
+      for (const [key, valueIt] of this.entriesIterators()) {
         if (!other.has(key)) continue
         const otherValues = other.get(key)
         for (const [val1, mul1] of valueIt) {
@@ -257,7 +318,7 @@ export class Index<TKey, TValue, TPrefix = any> {
         }
       }
     } else {
-      for (const [key, otherValueIt] of other.#entriesIterators()) {
+      for (const [key, otherValueIt] of other.entriesIterators()) {
         if (!this.has(key)) continue
         const values = this.get(key)
         for (const [val2, mul2] of otherValueIt) {
@@ -274,6 +335,11 @@ export class Index<TKey, TValue, TPrefix = any> {
   }
 }
 
+/**
+ * This function extracts the prefix from a value.
+ * @param value - The value to extract the prefix from.
+ * @returns The prefix and the suffix.
+ */
 function getPrefix<TValue, TPrefix>(
   value: TValue
 ): [TPrefix | NO_PREFIX, TValue] {
@@ -291,6 +357,11 @@ function getPrefix<TValue, TPrefix>(
   return [NO_PREFIX, value]
 }
 
+/**
+ * This function checks if a value is a single value.
+ * @param value - The value to check.
+ * @returns True if the value is a single value, false otherwise.
+ */
 function isSingleValue<TValue>(
   value: SingleValue<TValue> | unknown
 ): value is SingleValue<TValue> {
