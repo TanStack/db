@@ -38,12 +38,6 @@ export class D2 implements ID2 {
     this.#operators.push(operator)
   }
 
-  addStream(_stream: DifferenceStreamReader<any>): void {
-    // No-op: we no longer track dangling public readers to avoid memory growth
-    // This method remains for API compatibility
-    this.#checkNotFinalized()
-  }
-
   finalize() {
     this.#checkNotFinalized()
     this.#finalized = true

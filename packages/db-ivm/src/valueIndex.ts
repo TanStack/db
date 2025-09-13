@@ -53,16 +53,6 @@ export class ValueIndex<K, V> {
 
     if (this.has(key)) {
       const [currValue, currMultiplicity] = this.get(key)!
-      // Fast path for primitive equality to avoid hashing cost
-      if (
-        (typeof value === `number` || typeof value === `string`) &&
-        value === (currValue as any)
-      ) {
-        // Update the multiplicity
-        this.#setMultiplicity(key, value as V, currMultiplicity + multiplicity)
-        return
-      }
-      // Fallback to structural hash-based equality for complex values
       if (hash(value) === hash(currValue)) {
         // Update the multiplicity
         this.#setMultiplicity(key, value, currMultiplicity + multiplicity)
