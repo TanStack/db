@@ -248,7 +248,7 @@ export function rxdbCollectionOptions<
     onInsert: async (params) => {
       debug(`insert`, params)
       const newItems = params.transaction.mutations.map((m) => m.modified)
-      return rxCollection.bulkUpsert(newItems as any[]).then((result) => {
+      return rxCollection.bulkUpsert(newItems as Array<any>).then((result) => {
         if (result.error.length > 0) {
           throw rxStorageWriteErrorToRxError(ensureNotFalsy(result.error[0]))
         }

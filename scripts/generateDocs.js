@@ -79,6 +79,13 @@ const packages = [
     outputDir: resolve(__dirname, `../docs/framework/vue/reference`),
     exclude: [`packages/db/**/*`],
   },
+  {
+    name: `angular-db`,
+    entryPoints: [resolve(__dirname, `../packages/angular-db/src/index.ts`)],
+    tsconfig: resolve(__dirname, `../packages/angular-db/tsconfig.docs.json`),
+    outputDir: resolve(__dirname, `../docs/framework/angular/reference`),
+    exclude: [`packages/db/**/*`],
+  },
 ]
 
 await generateReferenceDocs({ packages })

@@ -33,6 +33,14 @@ npm install @tanstack/vue-db
 
 TanStack DB is compatible with Vue v3.3.0+
 
+## Angular
+
+```sh
+npm install @tanstack/angular-db
+```
+
+TanStack DB is compatible with Angular v16.0.0+
+
 ## Vanilla JS
 
 ```sh
