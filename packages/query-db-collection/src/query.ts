@@ -56,6 +56,13 @@ type ResolveType<
     : InferSchemaOutput<TSchema>
   : TExplicit
 
+// Select return type inference helper
+type QueryFnResolveType<TQueryFn> = TQueryFn extends (
+  ...args: any
+) => Promise<infer R>
+  ? R
+  : never
+
 /**
  * Configuration options for creating a Query Collection
  * @template TExplicit - The explicit type of items stored in the collection (highest priority)
@@ -67,24 +74,32 @@ type ResolveType<
 export interface QueryCollectionConfig<
   TExplicit extends object = object,
   TSchema extends StandardSchemaV1 = never,
-  TQueryFn extends (
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
     context: QueryFunctionContext<any>
-  ) => Promise<Array<any>> = (
-    context: QueryFunctionContext<any>
-  ) => Promise<Array<any>>,
+  ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
 > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
   /** Function that fetches data from the server. Must return the complete collection state */
+  // Declare as a new Type (REFACTER!!!)
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>
   ) => Promise<Array<any>>
-    ? TQueryFn
-    : (
+    ? TQueryFn extends (
         context: QueryFunctionContext<TQueryKey>
       ) => Promise<Array<ResolveType<TExplicit, TSchema, TQueryFn>>>
+      ? TQueryFn
+      : (
+          context: QueryFunctionContext<TQueryKey>
+        ) => Promise<Array<ResolveType<TExplicit, TSchema, TQueryFn>>>
+    : TQueryFn
+
+  // USE UTILITES!!! select?: (data: Awaited<ReturnType<TQueryFn>>) => Array<ResolveType<...>>
+  select?: (
+    data: QueryFnResolveType<TQueryFn>
+  ) => Array<ResolveType<TExplicit, TSchema, TQueryFn>>
 
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -426,11 +441,9 @@ export interface QueryCollectionUtils<
 export function queryCollectionOptions<
   TExplicit extends object = object,
   TSchema extends StandardSchemaV1 = never,
-  TQueryFn extends (
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
     context: QueryFunctionContext<any>
-  ) => Promise<Array<any>> = (
-    context: QueryFunctionContext<any>
-  ) => Promise<Array<any>>,
+  ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -450,6 +463,7 @@ export function queryCollectionOptions<
   const {
     queryKey,
     queryFn,
+    select,
     queryClient,
     enabled,
     refetchInterval,
@@ -529,7 +543,8 @@ export function queryCollectionOptions<
         lastError = undefined
         errorCount = 0
 
-        const newItemsArray = result.data
+        const rawData = result.data as QueryFnResolveType<TQueryFn>
+        const newItemsArray = select ? select(rawData) : rawData
 
         if (
           !Array.isArray(newItemsArray) ||
