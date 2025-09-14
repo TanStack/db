@@ -634,6 +634,7 @@ export function queryCollectionOptions<
     return queryClient.refetchQueries(
       {
         queryKey: queryKey,
+        exact: true,
       },
       {
         throwOnError: opts?.throwOnError,
