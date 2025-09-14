@@ -2033,6 +2033,226 @@ describe(`QueryCollection`, () => {
     ])
   })
 
+  describe(`refetchType`, () => {
+    it(`should refetch for 'all' when no observers exist`, async () => {
+      const mockItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryKey = [`refetch-all-test-query`]
+      const queryFn = vi.fn().mockResolvedValue(mockItems)
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-all-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `all`,
+          // Do not start sync: no observers -> inactive
+          startSync: false,
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should refetch for 'all' when an active observer exists`, async () => {
+      const queryKey = [`refetch-all-test-query`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-all-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `all`,
+          startSync: true,
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should be no-op for 'active' when no observers exist`, async () => {
+      const mockItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryKey = [`refetch-active-test-query`]
+      const queryFn = vi.fn().mockResolvedValue(mockItems)
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-active-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `active`,
+          // Do not start sync: no observers -> inactive
+          startSync: false,
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it(`should refetch for 'active' when an active observer exists`, async () => {
+      const queryKey = [`refetch-active-test-query`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-active-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `active`,
+          startSync: true, // observer exists but query is disabled
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should refetch for 'inactive' when no observers exist`, async () => {
+      const mockItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryKey = [`refetch-inactive-test-query`]
+      const queryFn = vi.fn().mockResolvedValue(mockItems)
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-inactive-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `inactive`,
+          // Do not start sync: no observers -> inactive
+          startSync: false,
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it(`should be no-op for 'inactive' when an active observer exists`, async () => {
+      const queryKey = [`refetch-inactive-test-query`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      // TanStack Query only refetches queries that already exist in the cache
+      await queryClient.prefetchQuery({ queryKey, queryFn })
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-inactive-test-query`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          refetchType: `inactive`,
+          startSync: true,
+        })
+      )
+
+      // Clear mock to test refetch behavior
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it(`should be no-op for all refetchType values when query is not in cache`, async () => {
+      const base = `no-cache-refetch-test-query`
+      for (const type of [`active`, `inactive`, `all`] as const) {
+        const queryKey = [base, type]
+        const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+        const collection = createCollection(
+          queryCollectionOptions({
+            id: `no-cache-refetch-test-query-${type}`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey,
+            refetchType: type,
+            startSync: false, // no observer; also do not prefetch
+          })
+        )
+
+        await collection.utils.refetch()
+        expect(queryFn).not.toHaveBeenCalled()
+      }
+    })
+
+    it(`should be no-op for all refetchType values when query is disabled`, async () => {
+      const base = `refetch-test-query`
+      for (const type of [`active`, `inactive`, `all`] as const) {
+        const queryKey = [base, type]
+        const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+        // TanStack Query only refetches queries that already exist in the cache
+        await queryClient.prefetchQuery({ queryKey, queryFn })
+
+        const collection = createCollection(
+          queryCollectionOptions({
+            id: `no-cache-refetch-test-query-${type}`,
+            queryClient,
+            queryKey,
+            queryFn,
+            getKey,
+            refetchType: type,
+            startSync: true,
+            enabled: false,
+          })
+        )
+
+        // Clear mock to test refetch behavior
+        queryFn.mockClear()
+
+        await collection.utils.refetch()
+        expect(queryFn).not.toHaveBeenCalled()
+      }
+    })
+  })
+
   describe(`Error Handling`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (

@@ -77,6 +77,18 @@ export interface QueryCollectionConfig<
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
+  /**
+   * The type of refetch to perform (default: all)
+   * - `all`: Refetch this collection regardless of observer state
+   * - `active`: Refetch only when there is an active observer
+   * - `inactive`: Refetch only when there is no active observer
+   *
+   * Notes:
+   * - Refetch only targets queries that already exist in the TanStack Query cache for the exact `queryKey`
+   * - If `enabled: false`, `utils.refetch()` is a no-op for all `refetchType` values
+   * - An "active observer" exists while the collection is syncing (e.g. when `startSync: true` or once started manually)
+   */
+  refetchType?: `active` | `inactive` | `all`
   refetchInterval?: QueryObserverOptions<
     Array<T>,
     TError,
@@ -381,6 +393,7 @@ export function queryCollectionOptions(
     select,
     queryClient,
     enabled,
+    refetchType = `all`,
     refetchInterval,
     retry,
     retryDelay,
@@ -602,6 +615,7 @@ export function queryCollectionOptions(
       {
         queryKey: queryKey,
         exact: true,
+        type: refetchType,
       },
       {
         throwOnError: opts?.throwOnError,
