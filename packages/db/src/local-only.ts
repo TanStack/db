@@ -14,7 +14,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
  * Configuration interface for Local-only collection options
  * @template T - The type of items in the collection
  * @template TSchema - The schema type for validation
- * @template TKey - The type of the key returned by getKey
+ * @template TKey - The type of the key returned by `getKey`
  */
 export interface LocalOnlyCollectionConfig<
   T extends object = object,
@@ -134,7 +134,7 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey, never> & {
+): CollectionConfig<T, TKey> & {
   utils: LocalOnlyCollectionUtils
   schema?: never // no schema in the result
 }
