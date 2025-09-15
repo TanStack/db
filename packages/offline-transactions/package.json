@@ -1,0 +1,59 @@
+{
+  "name": "@tanstack/offline-transactions",
+  "version": "0.0.1",
+  "description": "Offline-first transaction capabilities for TanStack DB",
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/offline-transactions"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "tanstack",
+    "database",
+    "offline",
+    "transactions",
+    "persistence",
+    "sync"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "eslint": "^8.57.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@tanstack/db": "workspace:*"
+  }
+}
