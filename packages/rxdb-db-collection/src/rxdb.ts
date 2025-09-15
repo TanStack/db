@@ -14,7 +14,11 @@ import type {
   RxDocumentData,
 } from "rxdb/plugins/core"
 
-import type { CollectionConfig, ResolveType, SyncConfig } from "@tanstack/db"
+import type {
+  CollectionConfig,
+  InferSchemaOutput,
+  SyncConfig,
+} from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 const debug = DebugModule.debug(`ts/db:rxdb`)
@@ -26,7 +30,7 @@ export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<any>>()
 
 /**
  * Configuration interface for RxDB collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority). Use the document type of your RxCollection here.
+ * @template T - The explicit type of items in the collection (highest priority). Use the document type of your RxCollection here.
  * @template TSchema - The schema type for validation and type inference (second priority)
  *
  * @remarks
@@ -38,16 +42,16 @@ export const OPEN_RXDB_SUBSCRIPTIONS = new WeakMap<RxCollection, Set<any>>()
  * Notice that primary keys in RxDB must always be a string.
  */
 export type RxDBCollectionConfig<
-  TExplicit extends object = Record<string, unknown>,
+  T extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
 > = Omit<
-  CollectionConfig<ResolveType<TExplicit, TSchema, any>, string, TSchema>,
+  CollectionConfig<T, string, TSchema>,
   `insert` | `update` | `delete` | `getKey` | `sync`
 > & {
   /**
    * The RxCollection from a RxDB Database instance.
    */
-  rxCollection: RxCollection<TExplicit, unknown, unknown, unknown>
+  rxCollection: RxCollection<T, unknown, unknown, unknown>
 
   /**
    * The maximum number of documents to read from the RxDB collection
@@ -75,18 +79,32 @@ export type RxDBCollectionConfig<
  * @param config - Configuration options for the RxDB collection
  * @returns Collection options with utilities
  */
-export function rxdbCollectionOptions<
-  TExplicit extends object = Record<string, unknown>,
-  TSchema extends StandardSchemaV1 = never,
->(config: RxDBCollectionConfig<TExplicit, TSchema>) {
-  type Row = ResolveType<TExplicit, TSchema, any>
+
+// Overload for when schema is provided
+export function rxdbCollectionOptions<T extends StandardSchemaV1>(
+  config: RxDBCollectionConfig<InferSchemaOutput<T>, T>
+): CollectionConfig<InferSchemaOutput<T>, string, T> & {
+  schema: T
+}
+
+// Overload for when no schema is provided
+export function rxdbCollectionOptions<T extends object>(
+  config: RxDBCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, string> & {
+  schema?: never // no schema in the result
+}
+
+export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
+  type Row = Record<string, unknown>
   type Key = string // because RxDB primary keys must be strings
 
   const { ...restConfig } = config
   const rxCollection = config.rxCollection
 
   // "getKey"
-  const primaryPath = rxCollection.schema.primaryPath as string
+  const primaryPath = rxCollection.schema.primaryPath
   function getKey(item: any): string {
     const key: string = item[primaryPath] as string
     return key
@@ -98,7 +116,7 @@ export function rxdbCollectionOptions<
    * and the in-memory tanstack-db collection.
    * It is not about sync between a client and a server!
    */
-  type SyncParams = Parameters<SyncConfig<Row, Key>[`sync`]>[0]
+  type SyncParams = Parameters<SyncConfig<Row, string>[`sync`]>[0]
   const sync: SyncConfig<Row, Key> = {
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
@@ -110,12 +128,12 @@ export function rxdbCollectionOptions<
          * which can be used to "sort" document writes,
          * so for initial sync we iterate over that.
          */
-        let cursor: RxDocumentData<TExplicit> | undefined = undefined
+        let cursor: RxDocumentData<Row> | undefined = undefined
         const syncBatchSize = config.syncBatchSize ? config.syncBatchSize : 1000
         begin()
 
         while (!ready) {
-          let query: FilledMangoQuery<TExplicit>
+          let query: FilledMangoQuery<Row>
           if (cursor) {
             query = {
               selector: {
@@ -148,7 +166,7 @@ export function rxdbCollectionOptions<
            * RxCollection document cache because it likely wont be used anyway
            * since most queries will run directly on the tanstack-db side.
            */
-          const preparedQuery = prepareQuery<TExplicit>(
+          const preparedQuery = prepareQuery<Row>(
             rxCollection.storageInstance.schema,
             query
           )
@@ -187,9 +205,7 @@ export function rxdbCollectionOptions<
       function startOngoingFetch() {
         // Subscribe early and buffer live changes during initial load and ongoing
         sub = rxCollection.$.subscribe((ev) => {
-          const cur: ResolveType<TExplicit, TSchema, any> = stripRxdbFields(
-            clone(ev.documentData as Row)
-          )
+          const cur: Row = stripRxdbFields(clone(ev.documentData as Row))
           switch (ev.operation) {
             case `INSERT`:
               queue({ type: `insert`, value: cur })
@@ -241,7 +257,7 @@ export function rxdbCollectionOptions<
     getSyncMetadata: undefined,
   }
 
-  const collectionConfig: CollectionConfig<ResolveType<TExplicit, TSchema>> = {
+  const collectionConfig: CollectionConfig<Row, string, any> = {
     ...restConfig,
     getKey: getKey as any,
     sync,
