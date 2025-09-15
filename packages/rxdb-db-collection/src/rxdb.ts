@@ -15,6 +15,7 @@ import type {
 } from "rxdb/plugins/core"
 
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   InferSchemaOutput,
   SyncConfig,
@@ -45,8 +46,8 @@ export type RxDBCollectionConfig<
   T extends object = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
 > = Omit<
-  CollectionConfig<T, string, TSchema>,
-  `insert` | `update` | `delete` | `getKey` | `sync`
+  BaseCollectionConfig<T, string, TSchema>,
+  `onInsert` | `onUpdate` | `onDelete` | `getKey`
 > & {
   /**
    * The RxCollection from a RxDB Database instance.
