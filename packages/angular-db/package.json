@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/angular-db",
   "description": "Angular integration for @tanstack/db",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Ethan McDaniel",
   "license": "MIT",
   "repository": {

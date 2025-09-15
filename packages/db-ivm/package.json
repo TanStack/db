@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db-ivm",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "dependencies": {
     "fractional-indexing": "^3.2.0",
     "sorted-btree": "^1.8.1"

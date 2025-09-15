@@ -1,5 +1,16 @@
 # @tanstack/db
 
+## 0.2.5
+
+### Patch Changes
+
+- Refactor of the types of collection config factories for better type inference. ([#530](https://github.com/TanStack/db/pull/530))
+
+- Define BaseCollectionConfig interface and let all collections extend it. ([#531](https://github.com/TanStack/db/pull/531))
+
+- Updated dependencies [[`c58cec9`](https://github.com/TanStack/db/commit/c58cec9eb3f5fc72453793cfd6842387621a63d3)]:
+  - @tanstack/db-ivm@0.1.7
+
 ## 0.2.4
 
 ### Patch Changes
