@@ -381,7 +381,10 @@ class Transaction<T extends object = Record<string, unknown>> {
       }
 
       // rollback the transaction
-      return this.rollback()
+      this.rollback()
+
+      // Re-throw the error so commit() can be used in try/catch
+      throw this.error.error
     }
 
     return this

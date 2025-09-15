@@ -231,6 +231,40 @@ describe(`Transactions`, () => {
     expect(transaction.error?.message).toBe(`bad`)
     expect(transaction.error?.error).toBeInstanceOf(Error)
   })
+  it(`commit() should throw errors when mutation function fails`, async () => {
+    const tx = createTransaction({
+      mutationFn: async () => {
+        throw new Error(`API failed`)
+      },
+    })
+
+    const collection = createCollection<{
+      id: string
+      text: string
+    }>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    tx.mutate(() => {
+      collection.insert({ id: `1`, text: `Item` })
+    })
+
+    try {
+      await tx.commit()
+      expect.fail(`Expected commit to throw`)
+    } catch (error) {
+      // Transaction has been rolled back
+      expect(tx.state).toBe(`failed`)
+      expect(tx.error?.message).toBe(`API failed`)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(`API failed`)
+    }
+  })
+
   it(`should, when rolling back, find any other pending transactions w/ overlapping mutations and roll them back as well`, async () => {
     const transaction1 = createTransaction({
       mutationFn: async () => Promise.resolve(),
