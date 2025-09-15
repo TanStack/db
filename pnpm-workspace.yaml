@@ -3,7 +3,7 @@ packages:
   - "examples/**"
 catalog:
   "@changesets/cli": ^2.28.1
-  "@electric-sql/client": 1.0.0
+  "@electric-sql/client": 1.0.10
   "@electric-sql/d2mini": ^0.1.8
   "@eslint/js": ^9.22.0
   "@solid-primitives/map": ^0.7.2

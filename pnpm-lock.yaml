@@ -445,7 +445,7 @@ importers:
     dependencies:
       '@tanstack/electric-db-collection':
         specifier: ^0.0.9
-        version: 0.0.9(@electric-sql/client@1.0.9)(typescript@5.9.2)
+        version: 0.0.9(@electric-sql/client@1.0.10)(typescript@5.9.2)
       '@tanstack/query-core':
         specifier: ^5.87.4
         version: 5.87.4
@@ -622,8 +622,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: 1.0.9
-        version: 1.0.9
+        specifier: 1.0.10
+        version: 1.0.10
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -676,8 +676,8 @@ importers:
         version: 1.5.0(react@19.1.1)
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.0.10
+        version: 1.0.10
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.0(@testing-library/dom@10.4.1)(@types/react-dom@19.1.9(@types/react@19.1.12))(@types/react@19.1.12)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
@@ -738,8 +738,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.0.10
+        version: 1.0.10
       '@solidjs/testing-library':
         specifier: ^0.8.10
         version: 0.8.10(solid-js@1.9.9)
@@ -819,8 +819,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.0.10
+        version: 1.0.10
       '@vitejs/plugin-vue':
         specifier: ^5.2.4
         version: 5.2.4(vite@7.1.5(@types/node@24.3.1)(jiti@2.5.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.5)(yaml@2.8.1))(vue@3.5.21(typescript@5.9.2))
@@ -1359,11 +1359,8 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@electric-sql/client@1.0.0':
-    resolution: {integrity: sha512-kGiVbBIlMqc/CeJpWZuLjxNkm0836NWxeMtIWH2w5IUK8pUL13hyxg3ZkR7+FlTGhpKuZRiCP5nPOH9D6wbhPw==}
-
-  '@electric-sql/client@1.0.9':
-    resolution: {integrity: sha512-9fLjGww+5mGBJ9o47sizCSkyLixjoA49IRh8jBVxzpDq4EGwv77k54df0hRYWtD4VoBQL+49MyT9KDfE/a5Ygw==}
+  '@electric-sql/client@1.0.10':
+    resolution: {integrity: sha512-KcP6R2OGiruxbhAa0wMGiRIfpXDQQ8vznBmn34kG/UJ11sqA4NQBhoPhSsKkCPs5EKc2DoS6bcnqLkIHFdxmvg==}
 
   '@electric-sql/d2mini@0.1.8':
     resolution: {integrity: sha512-ovLncfKvj6fTHA7qqaHt/cOzU/2JvhOw9lySYdZtmnecGv/1IiCH9HFrj6gAie07QLq3mqiNLdjZoDcO4w6Rzg==}
@@ -9930,11 +9927,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@electric-sql/client@1.0.0':
-    optionalDependencies:
-      '@rollup/rollup-darwin-arm64': 4.50.1
-
-  '@electric-sql/client@1.0.9':
+  '@electric-sql/client@1.0.10':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
@@ -11863,9 +11856,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@tanstack/electric-db-collection@0.0.9(@electric-sql/client@1.0.9)(typescript@5.9.2)':
+  '@tanstack/electric-db-collection@0.0.9(@electric-sql/client@1.0.10)(typescript@5.9.2)':
     dependencies:
-      '@electric-sql/client': 1.0.9
+      '@electric-sql/client': 1.0.10
       '@standard-schema/spec': 1.0.0
       '@tanstack/db': 0.0.27(typescript@5.9.2)
       '@tanstack/store': 0.7.5
