@@ -1836,7 +1836,6 @@ describe(`QueryCollection`, () => {
 
       const config: QueryCollectionConfig<
         TestItem,
-        never,
         typeof queryFn,
         CustomError
       > = {

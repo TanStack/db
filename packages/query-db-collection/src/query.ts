@@ -425,7 +425,12 @@ export function queryCollectionOptions<
   }
 ): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
   schema: T
-  utils: QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>>
+  utils: QueryCollectionUtils<
+    InferSchemaOutput<T>,
+    TKey,
+    InferSchemaInput<T>,
+    TError
+  >
 }
 
 // Overload for when no schema is provided
@@ -446,7 +451,7 @@ export function queryCollectionOptions<
   }
 ): CollectionConfig<T, TKey> & {
   schema?: never // no schema in the result
-  utils: QueryCollectionUtils<T, TKey>
+  utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
 export function queryCollectionOptions(
