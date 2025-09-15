@@ -216,7 +216,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       )
 
       if (existingIndex >= 0) {
-        const existingMutation = this.mutations[existingIndex]
+        const existingMutation = this.mutations[existingIndex]!
 
         if (newMutation.type === `delete`) {
           if (existingMutation.type === `insert`) {
@@ -231,10 +231,10 @@ class Transaction<T extends object = Record<string, unknown>> {
           existingMutation.type === `insert`
         ) {
           // Update after insert: keep as insert but merge the changes
-          const mergedMutation = {
+          const mergedMutation: PendingMutation<T> = {
             ...existingMutation,
             // Keep the insert type and empty original
-            type: `insert`,
+            type: `insert` as const,
             original: {},
             // Use the update's final modified value
             modified: newMutation.modified,
