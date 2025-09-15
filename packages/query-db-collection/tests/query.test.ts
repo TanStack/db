@@ -426,6 +426,99 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
   })
 
+  describe(`Select method testing`, () => {
+    type MetaDataType<T> = {
+      metaDataOne: string
+      metaDataTwo: string
+      data: Array<T>
+    }
+
+    const initialMetaData: MetaDataType<TestItem> = {
+      metaDataOne: `example metadata`,
+      metaDataTwo: `example metadata`,
+      data: [
+        {
+          id: `1`,
+          name: `First Item`,
+        },
+        {
+          id: `2`,
+          name: `Second Item`,
+        },
+      ],
+    }
+
+    it(`select extracts array from metadata`, async () => {
+      const queryKey = [`select-test`]
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn().mockReturnValue(initialMetaData.data)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(select).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBeGreaterThan(0)
+      })
+
+      expect(collection.size).toBe(initialMetaData.data.length)
+      expect(collection.get(`1`)).toEqual(initialMetaData.data[0])
+      expect(collection.get(`2`)).toEqual(initialMetaData.data[1])
+    })
+
+    it(`throws error if select returns non array`, async () => {
+      const queryKey = [`select-test`]
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      // Returns non-array
+      const select = vi.fn().mockReturnValue(initialMetaData)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(select).toHaveBeenCalledTimes(1)
+      })
+
+      // Verify the validation error was logged
+      await vi.waitFor(() => {
+        const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
+          call[0].includes(
+            `[QueryCollection] queryFn did not return an array of objects. Skipping update.`
+          )
+        )
+        expect(errorCallArgs).toBeDefined()
+      })
+
+      expect(collection.size).toBe(0)
+
+      // Clean up the spy
+      consoleErrorSpy.mockRestore()
+    })
+  })
+
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       const queryKey = [`directPersistenceTest`]
@@ -1243,7 +1336,7 @@ describe(`QueryCollection`, () => {
         })
       }).toThrow(/does not exist/)
     })
-
+    // note!
     it(`should update query cache when using sync methods`, async () => {
       const queryKey = [`sync-cache-test`]
       const initialItems: Array<TestItem> = [
