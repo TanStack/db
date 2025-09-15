@@ -216,8 +216,39 @@ class Transaction<T extends object = Record<string, unknown>> {
       )
 
       if (existingIndex >= 0) {
-        // Replace existing mutation
-        this.mutations[existingIndex] = newMutation
+        const existingMutation = this.mutations[existingIndex]
+
+        if (newMutation.type === `delete`) {
+          if (existingMutation.type === `insert`) {
+            // Delete after insert: remove both mutations (cancel each other out)
+            this.mutations.splice(existingIndex, 1)
+          } else {
+            // Delete after update: replace with delete (current behavior)
+            this.mutations[existingIndex] = newMutation
+          }
+        } else if (
+          newMutation.type === `update` &&
+          existingMutation.type === `insert`
+        ) {
+          // Update after insert: keep as insert but merge the changes
+          const mergedMutation = {
+            ...existingMutation,
+            // Keep the insert type and empty original
+            type: `insert`,
+            original: {},
+            // Use the update's final modified value
+            modified: newMutation.modified,
+            // Merge the changes from both mutations
+            changes: { ...existingMutation.changes, ...newMutation.changes },
+            // Update metadata with the latest mutation info
+            mutationId: newMutation.mutationId,
+            updatedAt: newMutation.updatedAt,
+          }
+          this.mutations[existingIndex] = mergedMutation
+        } else {
+          // Default behavior: replace existing mutation
+          this.mutations[existingIndex] = newMutation
+        }
       } else {
         // Insert new mutation
         this.mutations.push(newMutation)
