@@ -578,6 +578,28 @@ importers:
         specifier: ^0.14.0
         version: 0.14.10
 
+  packages/benchmarks:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tanstack/db-ivm':
+        specifier: workspace:*
+        version: link:../db-ivm
+      tsx:
+        specifier: ^4.0.0
+        version: 4.20.5
+      zod:
+        specifier: ^3.22.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.18.1
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.2
+
   packages/db:
     dependencies:
       '@standard-schema/spec':
