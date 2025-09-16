@@ -187,7 +187,7 @@ describe(`Transactions`, () => {
       })
     })
 
-    transaction.commit()
+    await expect(transaction.commit()).rejects.toThrow(`bad`)
 
     await expect(transaction.isPersisted.promise).rejects.toThrow(`bad`)
     transaction.isPersisted.promise.catch(() => {})
@@ -223,7 +223,7 @@ describe(`Transactions`, () => {
       })
     })
 
-    transaction.commit()
+    await expect(transaction.commit()).rejects.toThrow(`bad`)
 
     await expect(transaction.isPersisted.promise).rejects.toThrow(`bad`)
     transaction.isPersisted.promise.catch(() => {})
@@ -236,6 +236,7 @@ describe(`Transactions`, () => {
       mutationFn: async () => {
         throw new Error(`API failed`)
       },
+      autoCommit: false,
     })
 
     const collection = createCollection<{

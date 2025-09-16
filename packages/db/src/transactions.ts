@@ -203,7 +203,10 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     if (this.autoCommit) {
-      this.commit()
+      this.commit().catch(() => {
+        // Errors from autoCommit are handled via isPersisted.promise
+        // This catch prevents unhandled promise rejections
+      })
     }
 
     return this
