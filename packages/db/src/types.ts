@@ -28,51 +28,6 @@ export type InferSchemaInput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-/**
- * Helper type to determine the insert input type
- * This takes the raw generics (TExplicit, TSchema, TFallback) instead of the resolved T.
- *
- * Priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema input type (if schema provided)
- * 3. Fallback type TFallback
- *
- * @internal This is used for collection insert type inference
- */
-export type ResolveInsertInput<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? TFallback
-    : InferSchemaInput<TSchema>
-  : TExplicit extends object
-    ? TExplicit
-    : Record<string, unknown>
-
-/**
- * Helper type to determine the final type based on priority:
- * 1. Explicit generic TExplicit (if not 'unknown')
- * 2. Schema output type (if schema provided)
- * 3. Fallback type TFallback
- *
- * @remarks
- * This type is used internally to resolve the collection item type based on the provided generics and schema.
- * Users should not need to use this type directly, but understanding the priority order helps when defining collections.
- */
-export type ResolveType<
-  TExplicit,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> = unknown extends TExplicit
-  ? [TSchema] extends [never]
-    ? TFallback
-    : InferSchemaOutput<TSchema>
-  : TExplicit extends object
-    ? TExplicit
-    : Record<string, unknown>
-
 export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 
 /**
@@ -304,19 +259,22 @@ export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = Record<string, Fn>,
-> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<any>
+  TReturn = any,
+> = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
  * Collection status values for lifecycle management
@@ -347,16 +305,20 @@ export type CollectionStatus =
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
-export interface CollectionConfig<
+export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+  // Let TSchema default to `never` such that if a user provides T explicitly and no schema
+  // then TSchema will be `never` otherwise if it would default to StandardSchemaV1
+  // then it would conflict with the overloads of createCollection which
+  // requires either T to be provided or a schema to be provided but not both!
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = Record<string, Fn>,
+  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
   id?: string
-  sync: SyncConfig<T, TKey>
   schema?: TSchema
   /**
    * Function to extract the ID from an object
@@ -439,7 +401,7 @@ export interface CollectionConfig<
    *   })
    * }
    */
-  onInsert?: InsertMutationFn<TInsertInput, TKey>
+  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -483,7 +445,7 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey>
+  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
@@ -526,7 +488,15 @@ export interface CollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey>
+  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+}
+
+export interface CollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> extends BaseCollectionConfig<T, TKey, TSchema> {
+  sync: SyncConfig<T, TKey>
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

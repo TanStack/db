@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
 import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
+import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
   CollectionImpl,
   DeleteMutationFnParams,
@@ -177,7 +178,9 @@ describe(`QueryCollection`, () => {
       .spyOn(console, `error`)
       .mockImplementation(() => {})
 
-    const queryFn = vi
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
       .mockRejectedValueOnce(testError)
@@ -229,7 +232,11 @@ describe(`QueryCollection`, () => {
       .mockImplementation(() => {})
 
     // Mock queryFn to return invalid data (not an array of objects)
-    const queryFn = vi.fn().mockResolvedValue(`not an array` as any)
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
+      .fn()
+      .mockResolvedValue(`not an array` as any)
 
     const options = queryCollectionOptions({
       id: `test`,
@@ -271,7 +278,9 @@ describe(`QueryCollection`, () => {
     // First query returns the initial item
     // Second query returns a new object with the same properties (different reference)
     // Third query returns an object with an actual change
-    const queryFn = vi
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
       .mockResolvedValueOnce([{ ...initialItem }]) // Same data, different object reference
@@ -1611,7 +1620,9 @@ describe(`QueryCollection`, () => {
       { id: `1`, name: `Cached Item 1` },
       { id: `2`, name: `Cached Item 2` },
     ]
-    const queryFn = vi.fn().mockReturnValue(initialItems)
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi.fn().mockReturnValue(initialItems)
     await queryClient.prefetchQuery({ queryKey, queryFn })
 
     // The collection should immediately be ready
@@ -1825,7 +1836,6 @@ describe(`QueryCollection`, () => {
 
       const config: QueryCollectionConfig<
         TestItem,
-        never,
         typeof queryFn,
         CustomError
       > = {

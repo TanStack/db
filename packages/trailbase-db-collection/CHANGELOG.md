@@ -1,5 +1,14 @@
 # @tanstack/trailbase-db-collection
 
+## 0.1.18
+
+### Patch Changes
+
+- Define BaseCollectionConfig interface and let all collections extend it. ([#531](https://github.com/TanStack/db/pull/531))
+
+- Updated dependencies [[`b03894d`](https://github.com/TanStack/db/commit/b03894db05e063629a3660e03b31a80a48558dd5), [`3968087`](https://github.com/TanStack/db/commit/39680877fdc1993733933d2def13217bd18fa254)]:
+  - @tanstack/db@0.2.5
+
 ## 0.1.17
 
 ### Patch Changes

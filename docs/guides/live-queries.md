@@ -137,7 +137,30 @@ function UserList() {
 }
 ```
 
-For more details on framework integration, see the [React](../../framework/react/adapter) and [Vue](../../framework/vue/adapter) adapter documentation.
+In Angular, you can use the `injectLiveQuery` function:
+
+```typescript
+import { Component } from '@angular/core'
+import { injectLiveQuery } from '@tanstack/angular-db'
+
+@Component({
+  selector: 'user-list',
+  template: `
+    @for (user of activeUsers.data(); track user.id) {
+      <li>{{ user.name }}</li>
+    }
+  `
+})
+export class UserListComponent {
+  activeUsers = injectLiveQuery((q) =>
+    q
+      .from({ user: usersCollection })
+      .where(({ user }) => eq(user.active, true))
+  )
+}
+```
+
+For more details on framework integration, see the [React](../../framework/react/adapter), [Vue](../../framework/vue/adapter), and [Angular](../../framework/angular/adapter) adapter documentation.
 
 ## From Clause
 

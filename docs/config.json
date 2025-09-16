@@ -58,6 +58,15 @@
               "to": "framework/svelte/adapter"
             }
           ]
+        },
+        {
+          "label": "angular",
+          "children": [
+            {
+              "label": "Angular Adapter",
+              "to": "framework/angular/adapter"
+            }
+          ]
         }
       ]
     },
@@ -196,6 +205,19 @@
             {
               "label": "UseLiveQueryReturnWithCollection",
               "to": "framework/vue/reference/interfaces/uselivequeryreturnwithcollection"
+            }
+          ]
+        },
+        {
+          "label": "angular",
+          "children": [
+            {
+              "label": "Angular Functions",
+              "to": "framework/angular/reference/index"
+            },
+            {
+              "label": "injectLiveQuery",
+              "to": "framework/angular/reference/functions/injectlivequery"
             }
           ]
         }
