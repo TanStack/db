@@ -12,8 +12,6 @@ Fix transaction error handling to match documented behavior and preserve error i
 
 1. **Fixed commit() not throwing errors** - The `commit()` method now properly throws errors when the mutation function fails, matching the documented behavior. Both `await tx.commit()` and `await tx.isPersisted.promise` now work correctly in try/catch blocks.
 
-2. **Fixed error identity preservation** - Errors thrown from `commit()` and rejected by `isPersisted.promise` are now the exact same error instance, preserving the original error's identity and stack trace for better debugging.
-
 ### Migration Guide
 
 If you were catching errors from `commit()` by checking the transaction state:
