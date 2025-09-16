@@ -16,6 +16,7 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from "../errors"
+import type { Collection, CollectionImpl } from "../collection/index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   InsertConfig,
@@ -27,7 +28,6 @@ import type {
   UtilsRecord,
   WritableDeep,
 } from "../types"
-import { CollectionImpl, type Collection } from "../collection"
 
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,

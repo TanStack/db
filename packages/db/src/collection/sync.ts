@@ -9,7 +9,7 @@ import {
 } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage } from "../types"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -17,8 +17,8 @@ export class CollectionSyncManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  private preloadPromise: Promise<void> | null = null
-  private syncCleanupFn: (() => void) | null = null
+  public preloadPromise: Promise<void> | null = null
+  public syncCleanupFn: (() => void) | null = null
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -191,8 +191,7 @@ export class CollectionSyncManager<
     return this.preloadPromise
   }
 
-  public cleanup(): Promise<void> {
-    // Stop sync - wrap in try/catch since it's user-provided code
+  public cleanup(): void {
     try {
       if (this.syncCleanupFn) {
         this.syncCleanupFn()
@@ -215,8 +214,6 @@ export class CollectionSyncManager<
         }
       })
     }
-
     this.preloadPromise = null
-    return Promise.resolve()
   }
 }

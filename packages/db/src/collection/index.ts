@@ -1,12 +1,17 @@
-import { BTreeIndex } from "./indexes/btree-index.js"
-import type { IndexProxy } from "./indexes/lazy-index.js"
 import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
-} from "./errors"
-import { currentStateAsChanges } from "./change-events"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
+} from "../errors"
+import { currentStateAsChanges } from "../change-events"
+
+import { CollectionStateManager } from "../collection/state"
+import { CollectionChangesManager } from "../collection/changes"
+import { CollectionLifecycleManager } from "../collection/lifecycle.js"
+import { CollectionSyncManager } from "../collection/sync"
+import { CollectionIndexesManager } from "../collection/indexes"
+import { CollectionMutationsManager } from "../collection/mutations"
+import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
+import type { IndexOptions } from "../indexes/index-options.js"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -22,16 +27,11 @@ import type {
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
-} from "./types"
-import type { IndexOptions } from "./indexes/index-options.js"
-import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
-
-import { CollectionStateManager } from "./collection/state"
-import { CollectionChangesManager } from "./collection/changes"
-import { CollectionLifecycleManager } from "./collection/lifecycle.js"
-import { CollectionSyncManager } from "./collection/sync"
-import { CollectionIndexesManager } from "./collection/indexes"
-import { CollectionMutationsManager } from "./collection/mutations"
+} from "../types"
+import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { BTreeIndex } from "../indexes/btree-index.js"
+import type { IndexProxy } from "../indexes/lazy-index.js"
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -330,7 +330,7 @@ export class CollectionImpl<
     }
 
     // Check optimistic upserts first
-    if (optimisticDeletes.has(key)) {
+    if (optimisticUpserts.has(key)) {
       return optimisticUpserts.get(key)
     }
 
@@ -820,12 +820,11 @@ export class CollectionImpl<
    * This can be called manually or automatically by garbage collection
    */
   public async cleanup(): Promise<void> {
-    await Promise.all([
-      this._state.cleanup(),
-      this._changes.cleanup(),
-      this._lifecycle.cleanup(),
-      this._sync.cleanup(),
-      this._indexes.cleanup(),
-    ])
+    this._sync.cleanup()
+    this._state.cleanup()
+    this._changes.cleanup()
+    this._indexes.cleanup()
+    this._lifecycle.cleanup()
+    return Promise.resolve()
   }
 }

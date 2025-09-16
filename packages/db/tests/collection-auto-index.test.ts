@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import {
   and,
   eq,

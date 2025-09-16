@@ -1,15 +1,15 @@
-import { StandardSchemaV1 } from "@standard-schema/spec"
-import { CollectionImpl } from "../collection"
 import { IndexProxy, LazyIndexWrapper } from "../indexes/lazy-index"
-import { BaseIndex, IndexResolver } from "../indexes/base-index"
-import { ChangeMessage } from "../types"
-import { IndexOptions } from "../indexes/index-options"
 import {
   createSingleRowRefProxy,
-  SingleRowRefProxy,
   toExpression,
 } from "../query/builder/ref-proxy"
 import { BTreeIndex } from "../indexes/btree-index"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { CollectionImpl } from "../collection/index.js"
+import type { BaseIndex, IndexResolver } from "../indexes/base-index"
+import type { ChangeMessage } from "../types"
+import type { IndexOptions } from "../indexes/index-options"
+import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
 
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
@@ -155,7 +155,7 @@ export class CollectionIndexesManager<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
-  public async cleanup(): Promise<void> {
+  public cleanup(): void {
     this.lazyIndexes.clear()
     this.resolvedIndexes.clear()
   }

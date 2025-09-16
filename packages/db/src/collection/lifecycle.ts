@@ -1,9 +1,9 @@
-import { StandardSchemaV1 } from "@standard-schema/spec"
-import { CollectionImpl } from "../collection"
 import {
-  InvalidCollectionStatusTransitionError,
   CollectionInErrorStateError,
+  InvalidCollectionStatusTransitionError,
 } from "../errors"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { CollectionImpl } from "../collection/index.js"
 import type { CollectionStatus } from "../types"
 
 export class CollectionLifecycleManager<
@@ -16,8 +16,7 @@ export class CollectionLifecycleManager<
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
-
-  private gcTimeoutId: ReturnType<typeof setTimeout> | null = null
+  public gcTimeoutId: ReturnType<typeof setTimeout> | null = null
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -142,7 +141,9 @@ export class CollectionLifecycleManager<
 
     this.gcTimeoutId = setTimeout(() => {
       if (this.collection._changes.activeSubscribersCount === 0) {
-        this.cleanup()
+        // We call the main collection cleanup, not just the one for the
+        // lifecycle manager
+        this.collection.cleanup()
       }
     }, gcTime)
   }
@@ -158,15 +159,16 @@ export class CollectionLifecycleManager<
     }
   }
 
-  public cleanup(): Promise<void> {
+  public cleanup(): void {
     if (this.gcTimeoutId) {
       clearTimeout(this.gcTimeoutId)
       this.gcTimeoutId = null
     }
 
     this.hasBeenReady = false
-    this.hasReceivedFirstCommit = false
+    this.onFirstReadyCallbacks = []
 
-    return Promise.resolve()
+    // Set status to cleaned-up
+    this.setStatus(`cleaned-up`)
   }
 }

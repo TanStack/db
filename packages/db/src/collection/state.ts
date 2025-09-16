@@ -3,7 +3,7 @@ import { SortedMap } from "../SortedMap"
 import type { Transaction } from "../transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage, OptimisticChangeMessage } from "../types"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -35,11 +35,11 @@ export class CollectionStateManager<
   public size = 0
 
   // State used for computing the change events
-  private syncedKeys = new Set<TKey>()
-  private preSyncVisibleState = new Map<TKey, TOutput>()
-  private recentlySyncedKeys = new Set<TKey>()
-  private hasReceivedFirstCommit = false
-  private isCommittingSyncTransactions = false
+  public syncedKeys = new Set<TKey>()
+  public preSyncVisibleState = new Map<TKey, TOutput>()
+  public recentlySyncedKeys = new Set<TKey>()
+  public hasReceivedFirstCommit = false
+  public isCommittingSyncTransactions = false
 
   /**
    * Creates a new CollectionState manager
@@ -704,8 +704,7 @@ export class CollectionStateManager<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
-  public async cleanup(): Promise<void> {
-    // Clear data
+  public cleanup(): void {
     this.syncedData.clear()
     this.syncedMetadata.clear()
     this.optimisticUpserts.clear()
@@ -714,7 +713,5 @@ export class CollectionStateManager<
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
     this.hasReceivedFirstCommit = false
-
-    return Promise.resolve()
   }
 }

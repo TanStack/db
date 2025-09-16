@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
 import type {
@@ -685,8 +685,8 @@ describe(`Collection.subscribeChanges`, () => {
         },
         write: (messageWithoutKey: any) => {
           const pendingTransaction =
-          syncCollection._state.pendingSyncedTransactions[
-            syncCollection._state.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
           const message = { ...messageWithoutKey, key }
@@ -694,8 +694,8 @@ describe(`Collection.subscribeChanges`, () => {
         },
         commit: () => {
           const pendingTransaction =
-          syncCollection._state.pendingSyncedTransactions[
-            syncCollection._state.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           pendingTransaction.committed = true
           syncCollection.commitPendingTransactions()

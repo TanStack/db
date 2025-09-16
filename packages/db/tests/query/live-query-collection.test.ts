@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { Temporal } from "temporal-polyfill"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import {
   createLiveQueryCollection,
   eq,

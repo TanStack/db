@@ -1,13 +1,13 @@
-import { StandardSchemaV1 } from "@standard-schema/spec"
-import { CollectionImpl } from "../collection"
-import {
+import { ensureIndexForExpression } from "../indexes/auto-index.js"
+import { createFilteredCallback } from "../change-events"
+import { NegativeActiveSubscribersError } from "../errors"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { CollectionImpl } from "../collection/index.js"
+import type {
   ChangeListener,
   ChangeMessage,
   SubscribeChangesOptions,
 } from "../types"
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { createFilteredCallback } from "../change-events"
-import { NegativeActiveSubscribersError } from "../errors"
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -214,7 +214,7 @@ export class CollectionChangesManager<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
-  public async cleanup(): Promise<void> {
+  public cleanup(): void {
     this.batchedEvents = []
     this.shouldBatchEvents = false
   }

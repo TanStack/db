@@ -9,7 +9,7 @@ import type {
   CurrentStateAsChangesOptions,
   SubscribeChangesOptions,
 } from "./types"
-import type { Collection } from "./collection"
+import type { Collection } from "./collection/index.js"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
 import type { BasicExpression } from "./query/ir.js"
 

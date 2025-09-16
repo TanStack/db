@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { z } from "zod"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { SchemaValidationError } from "../src/errors"
 import { createTransaction } from "../src/transactions"
 import type {

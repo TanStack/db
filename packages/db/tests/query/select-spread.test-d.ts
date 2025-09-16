@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { createLiveQueryCollection } from "../../src/query/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 import { add, length, upper } from "../../src/query/builder/functions.js"

@@ -3,7 +3,7 @@ import { D2 } from "@tanstack/db-ivm"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection.js"
+import type { CollectionImpl } from "../../../src/collection/index.js"
 
 describe(`Subquery Caching`, () => {
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {

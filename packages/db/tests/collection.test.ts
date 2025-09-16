@@ -1,6 +1,6 @@
 import mitt from "mitt"
 import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
@@ -480,7 +480,8 @@ describe(`Collection`, () => {
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection._state.transactions.values())[0].mutations[0].changes
+      Array.from(collection._state.transactions.values())[0].mutations[0]
+        .changes
     ).toEqual({
       id: 1,
       value: `bar`,
