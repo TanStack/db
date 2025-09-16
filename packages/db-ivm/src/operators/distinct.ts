@@ -92,7 +92,6 @@ export function distinct<T>(by: (value: T) => any = (value: T) => value) {
       by
     )
     stream.graph.addOperator(operator)
-    stream.graph.addStream(output.connectReader())
     return output
   }
 }

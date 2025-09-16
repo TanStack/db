@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.7
+
+### Patch Changes
+
+- Fix memory leak that results in linear memory growth with incremental changes over time. Thanks to @sorenbs for finding and fixing this. ([#550](https://github.com/TanStack/db/pull/550))
+
 ## 0.1.6
 
 ### Patch Changes
