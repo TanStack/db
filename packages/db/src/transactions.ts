@@ -20,6 +20,93 @@ let transactionStack: Array<Transaction<any>> = []
 let sequenceNumber = 0
 
 /**
+ * Merges two pending mutations for the same item within a transaction
+ *
+ * Merge behavior truth table:
+ * - (insert, update) → insert (merge changes, keep empty original)
+ * - (insert, delete) → null (cancel both mutations)
+ * - (update, delete) → delete (delete dominates)
+ * - (delete, update) → delete (delete dominates - update ignored)
+ * - (update, update) → update (replace with latest, union changes)
+ * - (delete, delete) → delete (replace with latest)
+ * - (insert, insert) → insert (replace with latest)
+ * - (delete, insert) → insert (resurrection)
+ *
+ * @param existing - The existing mutation in the transaction
+ * @param incoming - The new mutation being applied
+ * @returns The merged mutation, or null if both should be removed
+ */
+function mergePendingMutations<T extends object>(
+  existing: PendingMutation<T>,
+  incoming: PendingMutation<T>
+): PendingMutation<T> | null {
+  // Truth table implementation
+  switch (`${existing.type}-${incoming.type}` as const) {
+    case `insert-update`: {
+      // Update after insert: keep as insert but merge changes
+      // For insert-update, the key should remain the same since collections don't allow key changes
+      return {
+        ...existing,
+        type: `insert` as const,
+        original: {},
+        modified: incoming.modified,
+        changes: { ...existing.changes, ...incoming.changes },
+        // Keep existing keys (key changes not allowed in updates)
+        key: existing.key,
+        globalKey: existing.globalKey,
+        // Merge metadata (last-write-wins)
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+        // Update tracking info
+        mutationId: incoming.mutationId,
+        updatedAt: incoming.updatedAt,
+      }
+    }
+
+    case `insert-delete`:
+      // Delete after insert: cancel both mutations
+      return null
+
+    case `update-delete`:
+      // Delete after update: delete dominates
+      return incoming
+
+    case `delete-update`:
+      // Update after delete: delete dominates (update ignored)
+      return existing
+
+    case `update-update`: {
+      // Update after update: replace with latest, union changes
+      return {
+        ...incoming,
+        // Keep original from first update
+        original: existing.original,
+        // Union the changes from both updates
+        changes: { ...existing.changes, ...incoming.changes },
+        // Merge metadata
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+      }
+    }
+
+    case `delete-delete`:
+    case `insert-insert`:
+      // Same type: replace with latest
+      return incoming
+
+    case `delete-insert`:
+      // Insert after delete: treat as a fresh insert (delete clears the slate)
+      return incoming
+
+    default: {
+      // Exhaustiveness check
+      const _exhaustive: never = `${existing.type}-${incoming.type}` as never
+      throw new Error(`Unhandled mutation combination: ${_exhaustive}`)
+    }
+  }
+}
+
+/**
  * Creates a new transaction for grouping multiple collection operations
  * @param config - Transaction configuration with mutation function
  * @returns A new Transaction instance
@@ -217,37 +304,14 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       if (existingIndex >= 0) {
         const existingMutation = this.mutations[existingIndex]!
+        const mergeResult = mergePendingMutations(existingMutation, newMutation)
 
-        if (newMutation.type === `delete`) {
-          if (existingMutation.type === `insert`) {
-            // Delete after insert: remove both mutations (cancel each other out)
-            this.mutations.splice(existingIndex, 1)
-          } else {
-            // Delete after update: replace with delete (current behavior)
-            this.mutations[existingIndex] = newMutation
-          }
-        } else if (
-          newMutation.type === `update` &&
-          existingMutation.type === `insert`
-        ) {
-          // Update after insert: keep as insert but merge the changes
-          const mergedMutation: PendingMutation<T> = {
-            ...existingMutation,
-            // Keep the insert type and empty original
-            type: `insert` as const,
-            original: {},
-            // Use the update's final modified value
-            modified: newMutation.modified,
-            // Merge the changes from both mutations
-            changes: { ...existingMutation.changes, ...newMutation.changes },
-            // Update metadata with the latest mutation info
-            mutationId: newMutation.mutationId,
-            updatedAt: newMutation.updatedAt,
-          }
-          this.mutations[existingIndex] = mergedMutation
+        if (mergeResult === null) {
+          // Remove the mutation (e.g., delete after insert cancels both)
+          this.mutations.splice(existingIndex, 1)
         } else {
-          // Default behavior: replace existing mutation
-          this.mutations[existingIndex] = newMutation
+          // Replace with merged mutation
+          this.mutations[existingIndex] = mergeResult
         }
       } else {
         // Insert new mutation
