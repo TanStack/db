@@ -296,6 +296,25 @@ class Transaction<T extends object = Record<string, unknown>> {
     return this
   }
 
+  /**
+   * Apply new mutations to this transaction, intelligently merging with existing mutations
+   *
+   * When mutations operate on the same item (same globalKey), they are merged according to
+   * the following rules:
+   *
+   * - **insert + update** → insert (merge changes, keep empty original)
+   * - **insert + delete** → removed (mutations cancel each other out)
+   * - **update + delete** → delete (delete dominates)
+   * - **delete + update** → delete (delete dominates, update ignored)
+   * - **update + update** → update (union changes, keep first original)
+   * - **delete + insert** → insert (fresh insert, delete clears the slate)
+   * - **same type** → replace with latest
+   *
+   * This merging reduces over-the-wire churn and keeps the optimistic local view
+   * aligned with user intent.
+   *
+   * @param mutations - Array of new mutations to apply
+   */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
     for (const newMutation of mutations) {
       const existingIndex = this.mutations.findIndex(
