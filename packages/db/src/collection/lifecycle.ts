@@ -27,9 +27,8 @@ export class CollectionLifecycleManager<
 
   /**
    * Validates state transitions to prevent invalid status changes
-   * @private
    */
-  private validateStatusTransition(
+  public validateStatusTransition(
     from: CollectionStatus,
     to: CollectionStatus
   ): void {
