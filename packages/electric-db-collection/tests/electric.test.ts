@@ -628,7 +628,7 @@ describe(`Electric Integration`, () => {
       })
 
       // If awaitTxId wasn't called automatically, this wouldn't be true.
-      expect(testcollection._state.syncedData.size).toEqual(0)
+      expect(testCollection._state.syncedData.size).toEqual(0)
 
       // Verify that our onInsert handler was called
       expect(onInsert).toHaveBeenCalled()
@@ -641,7 +641,7 @@ describe(`Electric Integration`, () => {
         id: 1,
         name: `Direct Persistence User`,
       })
-      expect(testcollection._state.syncedData.size).toEqual(1)
+      expect(testCollection._state.syncedData.size).toEqual(1)
     })
   })
 
@@ -854,7 +854,7 @@ describe(`Electric Integration`, () => {
       }).not.toThrow()
 
       // Should have processed the valid message without issues
-      expect(testcollection._state.syncedData.size).toBe(0) // Still pending until up-to-date
+      expect(testCollection._state.syncedData.size).toBe(0) // Still pending until up-to-date
 
       // Send up-to-date to commit
       expect(() => {
