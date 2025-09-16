@@ -377,17 +377,21 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       this.isPersisted.resolve(this)
     } catch (error) {
+      // Preserve the original error for rethrowing
+      const originalError =
+        error instanceof Error ? error : new Error(String(error))
+
       // Update transaction with error information
       this.error = {
-        message: error instanceof Error ? error.message : String(error),
-        error: error instanceof Error ? error : new Error(String(error)),
+        message: originalError.message,
+        error: originalError,
       }
 
       // rollback the transaction
       this.rollback()
 
-      // Re-throw the error so commit() can be used in try/catch
-      throw this.error.error
+      // Re-throw the original error to preserve identity and stack
+      throw originalError
     }
 
     return this

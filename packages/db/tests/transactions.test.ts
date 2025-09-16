@@ -266,6 +266,233 @@ describe(`Transactions`, () => {
     }
   })
 
+  it(`commit() and isPersisted.promise should reject with the same error instance`, async () => {
+    const originalError = new Error(`Original API error`)
+    const tx = createTransaction({
+      mutationFn: async () => {
+        throw originalError
+      },
+      autoCommit: false,
+    })
+
+    const collection = createCollection<{
+      id: string
+      text: string
+    }>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    tx.mutate(() => {
+      collection.insert({ id: `1`, text: `Item` })
+    })
+
+    let commitError: unknown
+    let persistedError: unknown
+
+    // Capture error from commit()
+    try {
+      await tx.commit()
+    } catch (error) {
+      commitError = error
+    }
+
+    // Capture error from isPersisted.promise
+    try {
+      await tx.isPersisted.promise
+    } catch (error) {
+      persistedError = error
+    }
+
+    // Both should be the exact same error instance
+    expect(commitError).toBe(originalError)
+    expect(persistedError).toBe(originalError)
+    expect(commitError).toBe(persistedError)
+  })
+
+  it(`should handle non-Error throwables (strings)`, async () => {
+    const tx = createTransaction({
+      mutationFn: async () => {
+        throw `string error`
+      },
+      autoCommit: false,
+    })
+
+    const collection = createCollection<{
+      id: string
+    }>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    tx.mutate(() => {
+      collection.insert({ id: `1` })
+    })
+
+    try {
+      await tx.commit()
+      expect.fail(`Expected commit to throw`)
+    } catch (error) {
+      // Should be converted to an Error object
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(`string error`)
+    }
+
+    // Same error from isPersisted.promise
+    try {
+      await tx.isPersisted.promise
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(`string error`)
+    }
+  })
+
+  it(`should handle non-Error throwables (numbers, objects)`, async () => {
+    const tx = createTransaction({
+      mutationFn: async () => {
+        throw 42
+      },
+      autoCommit: false,
+    })
+
+    tx.mutate(() => {})
+
+    try {
+      await tx.commit()
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(`42`)
+    }
+
+    const tx2 = createTransaction({
+      mutationFn: async () => {
+        throw { code: `ERR_FAILED`, details: `Something went wrong` }
+      },
+      autoCommit: false,
+    })
+
+    tx2.mutate(() => {})
+
+    try {
+      await tx2.commit()
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain(`[object Object]`)
+    }
+  })
+
+  it(`should throw TransactionNotPendingCommitError when commit() is called on completed transaction`, async () => {
+    const tx = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
+
+    tx.mutate(() => {})
+
+    // First commit succeeds
+    await tx.commit()
+    expect(tx.state).toBe(`completed`)
+
+    // Second commit should throw TransactionNotPendingCommitError
+    await expect(tx.commit()).rejects.toThrow(TransactionNotPendingCommitError)
+  })
+
+  it(`should throw TransactionNotPendingCommitError when commit() is called on failed transaction`, async () => {
+    const tx = createTransaction({
+      mutationFn: async () => {
+        throw new Error(`Failed`)
+      },
+      autoCommit: false,
+    })
+
+    const collection = createCollection<{
+      id: string
+    }>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    tx.mutate(() => {
+      collection.insert({ id: `1` })
+    })
+
+    // First commit fails
+    try {
+      await tx.commit()
+    } catch {
+      // Expected to fail
+    }
+    expect(tx.state).toBe(`failed`)
+
+    // Second commit should throw TransactionNotPendingCommitError
+    await expect(tx.commit()).rejects.toThrow(TransactionNotPendingCommitError)
+  })
+
+  it(`should handle cascading rollbacks with proper error propagation`, async () => {
+    const originalError = new Error(`Primary transaction failed`)
+    const tx1 = createTransaction({
+      mutationFn: async () => {
+        throw originalError
+      },
+      autoCommit: false,
+    })
+    const tx2 = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
+
+    const collection = createCollection<{
+      id: string
+      value: string
+    }>({
+      id: `test-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {},
+      },
+    })
+
+    // Both transactions insert items - tx2 will depend on tx1's item
+    tx1.mutate(() => {
+      collection.insert({ id: `item-1`, value: `from-tx1` })
+    })
+
+    tx2.mutate(() => {
+      // Insert an item that references tx1's item, creating a dependency
+      collection.insert({ id: `item-1-copy`, value: `copied-from-tx1` })
+      collection.update(`item-1`, (draft) => {
+        draft.value = `modified-by-tx2`
+      })
+    })
+
+    // tx1 commit fails and should cascade rollback to tx2
+    let tx1CommitError: unknown
+    try {
+      await tx1.commit()
+    } catch (error) {
+      tx1CommitError = error
+    }
+
+    // Verify both transactions are failed
+    expect(tx1.state).toBe(`failed`)
+    expect(tx2.state).toBe(`failed`)
+
+    // tx1 should throw the original error
+    expect(tx1CommitError).toBe(originalError)
+
+    // tx2's isPersisted.promise should also be rejected (but with undefined since it's a cascading rollback)
+    await expect(tx2.isPersisted.promise).rejects.toBeUndefined()
+  })
+
   it(`should, when rolling back, find any other pending transactions w/ overlapping mutations and roll them back as well`, async () => {
     const transaction1 = createTransaction({
       mutationFn: async () => Promise.resolve(),
