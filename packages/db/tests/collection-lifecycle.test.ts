@@ -200,21 +200,21 @@ describe(`Collection Lifecycle Management`, () => {
       })
 
       // No subscribers initially
-      expect((collection as any).activeSubscribersCount).toBe(0)
+      expect(collection._changes.activeSubscribersCount).toBe(0)
 
       // Subscribe to changes
       const unsubscribe1 = collection.subscribeChanges(() => {})
-      expect((collection as any).activeSubscribersCount).toBe(1)
+      expect(collection._changes.activeSubscribersCount).toBe(1)
 
       const unsubscribe2 = collection.subscribeChanges(() => {})
-      expect((collection as any).activeSubscribersCount).toBe(2)
+      expect(collection._changes.activeSubscribersCount).toBe(2)
 
       // Unsubscribe
       unsubscribe1()
-      expect((collection as any).activeSubscribersCount).toBe(1)
+      expect(collection._changes.activeSubscribersCount).toBe(1)
 
       unsubscribe2()
-      expect((collection as any).activeSubscribersCount).toBe(0)
+      expect(collection._changes.activeSubscribersCount).toBe(0)
     })
 
     it(`should track key-specific subscribers`, () => {
@@ -230,14 +230,14 @@ describe(`Collection Lifecycle Management`, () => {
       const unsubscribe2 = collection.subscribeChangesKey(`key2`, () => {})
       const unsubscribe3 = collection.subscribeChangesKey(`key1`, () => {})
 
-      expect((collection as any).activeSubscribersCount).toBe(3)
+      expect(collection._changes.activeSubscribersCount).toBe(3)
 
       unsubscribe1()
-      expect((collection as any).activeSubscribersCount).toBe(2)
+      expect(collection._changes.activeSubscribersCount).toBe(2)
 
       unsubscribe2()
       unsubscribe3()
-      expect((collection as any).activeSubscribersCount).toBe(0)
+      expect(collection._changes.activeSubscribersCount).toBe(0)
     })
 
     it(`should handle rapid subscribe/unsubscribe correctly`, () => {
@@ -253,9 +253,9 @@ describe(`Collection Lifecycle Management`, () => {
       // Subscribe and immediately unsubscribe multiple times
       for (let i = 0; i < 5; i++) {
         const unsubscribe = collection.subscribeChanges(() => {})
-        expect((collection as any).activeSubscribersCount).toBe(1)
+        expect(collection._changes.activeSubscribersCount).toBe(1)
         unsubscribe()
-        expect((collection as any).activeSubscribersCount).toBe(0)
+        expect(collection._changes.activeSubscribersCount).toBe(0)
 
         // Should start GC timer each time
         expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)

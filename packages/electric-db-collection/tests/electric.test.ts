@@ -466,7 +466,7 @@ describe(`Electric Integration`, () => {
 
       await transaction.isPersisted.promise
 
-      transaction = collection.transactions.get(transaction.id)!
+      transaction = collection._state.transactions.get(transaction.id)!
 
       // Verify the mutation function was called correctly
       expect(testMutationFn).toHaveBeenCalledTimes(1)
@@ -628,7 +628,7 @@ describe(`Electric Integration`, () => {
       })
 
       // If awaitTxId wasn't called automatically, this wouldn't be true.
-      expect(testCollection.syncedData.size).toEqual(0)
+      expect(testcollection._state.syncedData.size).toEqual(0)
 
       // Verify that our onInsert handler was called
       expect(onInsert).toHaveBeenCalled()
@@ -641,7 +641,7 @@ describe(`Electric Integration`, () => {
         id: 1,
         name: `Direct Persistence User`,
       })
-      expect(testCollection.syncedData.size).toEqual(1)
+      expect(testcollection._state.syncedData.size).toEqual(1)
     })
   })
 
@@ -854,7 +854,7 @@ describe(`Electric Integration`, () => {
       }).not.toThrow()
 
       // Should have processed the valid message without issues
-      expect(testCollection.syncedData.size).toBe(0) // Still pending until up-to-date
+      expect(testcollection._state.syncedData.size).toBe(0) // Still pending until up-to-date
 
       // Send up-to-date to commit
       expect(() => {

@@ -227,8 +227,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -262,11 +262,11 @@ describe(`Collection`, () => {
 
     // after mutationFn returns, check that the transaction is cleaned up,
     // optimistic update is gone & synced data & combined state are all updated.
-    expect(collection.transactions.size).toEqual(0) // Transaction should be cleaned up
+    expect(collection._state.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
-    expect(collection.optimisticUpserts.size).toEqual(0)
+    expect(collection._state.optimisticUpserts.size).toEqual(0)
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
@@ -480,7 +480,7 @@ describe(`Collection`, () => {
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
+      Array.from(collection._state.transactions.values())[0].mutations[0].changes
     ).toEqual({
       id: 1,
       value: `bar`,
@@ -488,8 +488,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -789,7 +789,7 @@ describe(`Collection`, () => {
 
     // The item should NOT appear in the collection state immediately
     expect(collection.state.has(2)).toBe(false)
-    expect(collection.optimisticUpserts.has(2)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(false)
     expect(collection.state.size).toBe(1) // Only the initial item
 
     // Now resolve the mutation and wait for completion
@@ -814,7 +814,7 @@ describe(`Collection`, () => {
 
     // The original value should still be there immediately
     expect(collection.state.get(1)?.value).toBe(`initial value`)
-    expect(collection.optimisticUpserts.has(1)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(false)
 
     // Now resolve the update mutation and wait for completion
     pendingMutations[1]?.()
@@ -828,7 +828,7 @@ describe(`Collection`, () => {
 
     // The item should still be there immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticDeletes.has(2)).toBe(false)
+    expect(collection._state.optimisticDeletes.has(2)).toBe(false)
 
     // Now resolve the delete mutation and wait for completion
     pendingMutations[2]?.()
@@ -889,7 +889,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticUpserts.has(2)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(true)
     expect(collection.state.get(2)).toEqual({
       id: 2,
       value: `default optimistic`,
@@ -905,7 +905,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(3)).toBe(true)
-    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
     expect(collection.state.get(3)).toEqual({
       id: 3,
       value: `explicit optimistic`,
@@ -924,7 +924,7 @@ describe(`Collection`, () => {
 
     // The update should be reflected immediately
     expect(collection.state.get(1)?.value).toBe(`optimistic update`)
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
 
     await optimisticUpdateTx.isPersisted.promise
 
@@ -933,7 +933,7 @@ describe(`Collection`, () => {
 
     // The item should be gone immediately
     expect(collection.state.has(3)).toBe(false)
-    expect(collection.optimisticDeletes.has(3)).toBe(true)
+    expect(collection._state.optimisticDeletes.has(3)).toBe(true)
 
     await optimisticDeleteTx.isPersisted.promise
   })
@@ -1097,8 +1097,8 @@ describe(`Collection`, () => {
 
     // Verify collection is cleared
     expect(collection.state.size).toBe(0)
-    expect(collection.syncedData.size).toBe(0)
-    expect(collection.syncedMetadata.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
   it(`should keep operations written after truncate in the same transaction`, async () => {
@@ -1163,8 +1163,8 @@ describe(`Collection`, () => {
       id: 3,
       value: `should not be cleared`,
     })
-    expect(collection.syncedData.size).toBe(1)
-    expect(collection.syncedMetadata.size).toBe(1)
+    expect(collection._state.syncedData.size).toBe(1)
+    expect(collection._state.syncedMetadata.size).toBe(1)
   })
 
   it(`should handle truncate with empty collection`, async () => {
@@ -1200,8 +1200,8 @@ describe(`Collection`, () => {
 
     // Verify collection remains empty
     expect(collection.state.size).toBe(0)
-    expect(collection.syncedData.size).toBe(0)
-    expect(collection.syncedMetadata.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
   it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {
