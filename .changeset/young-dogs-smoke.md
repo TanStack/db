@@ -5,6 +5,7 @@
 Fix transaction error handling to match documented behavior and preserve error identity
 
 ### Breaking Changes
+
 - `commit()` now throws errors when the mutation function fails (previously returned a failed transaction)
 
 ### Bug Fixes
@@ -16,17 +17,18 @@ Fix transaction error handling to match documented behavior and preserve error i
 ### Migration Guide
 
 If you were catching errors from `commit()` by checking the transaction state:
+
 ```js
 // Before - commit() didn't throw
 await tx.commit()
-if (tx.state === 'failed') {
-  console.error('Failed:', tx.error)
+if (tx.state === "failed") {
+  console.error("Failed:", tx.error)
 }
 
 // After - commit() now throws
 try {
   await tx.commit()
 } catch (error) {
-  console.error('Failed:', error)
+  console.error("Failed:", error)
 }
 ```
