@@ -139,37 +139,6 @@ describe(`applyMutations merge logic`, () => {
     expect(finalMutation.modified.value).toBe(20)
   })
 
-  it(`should handle update after delete - delete dominates`, () => {
-    const transaction = createTransaction({
-      mutationFn: async () => Promise.resolve(),
-      autoCommit: false,
-    })
-    const collection = createMockCollection()
-
-    // Add an item first so we can delete it
-    collection.insert({ id: `item-1`, name: `Original Name` })
-
-    // Delete then try to update (should be ignored - delete dominates)
-    transaction.mutate(() => {
-      collection.delete(`item-1`)
-    })
-
-    transaction.mutate(() => {
-      collection.update(`item-1`, (draft) => {
-        draft.name = `Updated`
-      })
-    })
-
-    expect(transaction.mutations).toHaveLength(1)
-    const finalMutation = transaction.mutations[0]!
-
-    // Should remain a delete mutation (update ignored)
-    expect(finalMutation.type).toBe(`delete`)
-  })
-
-  // Note: Key changes are not allowed by the collection,
-  // so we'll skip this test for now and handle it at the mutation level
-
   it(`should handle delete after insert-update chain`, () => {
     const transaction = createTransaction({
       mutationFn: async () => Promise.resolve(),
@@ -194,36 +163,5 @@ describe(`applyMutations merge logic`, () => {
 
     // Should have no mutations (all canceled out)
     expect(transaction.mutations).toHaveLength(0)
-  })
-
-  it(`should handle insert after delete (fresh insert)`, () => {
-    const transaction = createTransaction({
-      mutationFn: async () => Promise.resolve(),
-      autoCommit: false,
-    })
-    const collection = createMockCollection()
-
-    // First, add an item so we can test delete -> insert sequence
-    collection.insert({ id: `item-1`, name: `Original` })
-
-    // Within transaction: delete existing item, then insert a new one with same ID
-    transaction.mutate(() => {
-      collection.delete(`item-1`)
-    })
-
-    // Create a fresh collection for the insert to avoid ID conflict
-    const collection2 = createMockCollection()
-    transaction.mutate(() => {
-      collection2.insert({ id: `item-1`, name: `Fresh Insert` })
-    })
-
-    // Delete followed by insert with same key should merge to just an insert
-    expect(transaction.mutations).toHaveLength(1)
-
-    // Should be a fresh insert (delete cleared the slate)
-    expect(transaction.mutations[0]!.type).toBe(`insert`)
-    expect(transaction.mutations[0]!.original).toEqual({})
-    expect(transaction.mutations[0]!.modified.id).toBe(`item-1`)
-    expect(transaction.mutations[0]!.modified.name).toBe(`Fresh Insert`)
   })
 })

@@ -676,9 +676,7 @@ The merging behavior follows a truth table based on the mutation types:
 | **insert + update** | `insert` | Keeps insert type, merges changes, empty original |
 | **insert + delete** | *removed* | Mutations cancel each other out |
 | **update + delete** | `delete` | Delete dominates |
-| **delete + update** | `delete` | Delete dominates, update ignored |
 | **update + update** | `update` | Union changes, keep first original |
-| **delete + insert** | `insert` | Fresh insert, delete clears the slate |
 | **same type** | *latest* | Replace with most recent mutation |
 
 #### Examples
@@ -711,19 +709,6 @@ tx.mutate(() => todoCollection.insert({ id: '1', text: 'Temp todo' }))
 tx.mutate(() => todoCollection.delete('1'))
 
 // Result: No mutations (they cancel each other out)
-```
-
-**Delete followed by insert (resurrection):**
-```ts
-// Delete an existing item, then insert a new one with same ID
-tx.mutate(() => todoCollection.delete('1'))
-tx.mutate(() => todoCollection.insert({
-  id: '1',
-  text: 'Fresh start',
-  completed: false
-}))
-
-// Result: Single insert mutation (fresh start)
 ```
 
 This intelligent merging ensures that:

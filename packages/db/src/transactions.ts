@@ -26,11 +26,12 @@ let sequenceNumber = 0
  * - (insert, update) → insert (merge changes, keep empty original)
  * - (insert, delete) → null (cancel both mutations)
  * - (update, delete) → delete (delete dominates)
- * - (delete, update) → delete (delete dominates - update ignored)
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
- * - (delete, insert) → insert (resurrection)
+ *
+ * Note: (delete, update) and (delete, insert) should never occur as the collection
+ * layer prevents operations on deleted items within the same transaction.
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
@@ -71,10 +72,6 @@ function mergePendingMutations<T extends object>(
       // Delete after update: delete dominates
       return incoming
 
-    case `delete-update`:
-      // Update after delete: delete dominates (update ignored)
-      return existing
-
     case `update-update`: {
       // Update after update: replace with latest, union changes
       return {
@@ -92,10 +89,6 @@ function mergePendingMutations<T extends object>(
     case `delete-delete`:
     case `insert-insert`:
       // Same type: replace with latest
-      return incoming
-
-    case `delete-insert`:
-      // Insert after delete: treat as a fresh insert (delete clears the slate)
       return incoming
 
     default: {
@@ -305,9 +298,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * - **insert + update** → insert (merge changes, keep empty original)
    * - **insert + delete** → removed (mutations cancel each other out)
    * - **update + delete** → delete (delete dominates)
-   * - **delete + update** → delete (delete dominates, update ignored)
    * - **update + update** → update (union changes, keep first original)
-   * - **delete + insert** → insert (fresh insert, delete clears the slate)
    * - **same type** → replace with latest
    *
    * This merging reduces over-the-wire churn and keeps the optimistic local view
