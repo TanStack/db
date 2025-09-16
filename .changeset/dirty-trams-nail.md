@@ -2,8 +2,6 @@
 "@tanstack/db": patch
 ---
 
-Improve merge logic for applyMutations
+Improve mutation merging from crude replacement to sophisticated merge logic
 
-- Update after insert: keeps the insert type with empty original, merges changes from both mutations
-- Delete after insert: removes both mutations (they cancel each other out)
-- Delete after update: maintains current behavior of replacing with delete
+Previously, mutations were simply replaced when operating on the same item. Now mutations are intelligently merged based on their operation types (insert vs update vs delete), reducing network overhead and better preserving user intent.
