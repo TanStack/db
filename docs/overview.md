@@ -665,6 +665,72 @@ addTodoTx.mutate(() => todoCollection.insert({ id: '2', text: 'Second todo', com
 addTodoTx.commit()
 ```
 
+### Mutation Merging
+
+When multiple mutations operate on the same item within a transaction, TanStack DB intelligently merges them to reduce over-the-wire churn and keep the optimistic local view aligned with user intent.
+
+The merging behavior follows a truth table based on the mutation types:
+
+| Existing → New | Result | Description |
+|---|---|---|
+| **insert + update** | `insert` | Keeps insert type, merges changes, empty original |
+| **insert + delete** | *removed* | Mutations cancel each other out |
+| **update + delete** | `delete` | Delete dominates |
+| **delete + update** | `delete` | Delete dominates, update ignored |
+| **update + update** | `update` | Union changes, keep first original |
+| **delete + insert** | `insert` | Fresh insert, delete clears the slate |
+| **same type** | *latest* | Replace with most recent mutation |
+
+#### Examples
+
+**Insert followed by update:**
+```ts
+const tx = createTransaction({ autoCommit: false, mutationFn })
+
+// Insert a new todo
+tx.mutate(() => todoCollection.insert({
+  id: '1',
+  text: 'Buy groceries',
+  completed: false
+}))
+
+// Update the same todo
+tx.mutate(() => todoCollection.update('1', (draft) => {
+  draft.text = 'Buy organic groceries'
+  draft.priority = 'high'
+}))
+
+// Result: Single insert mutation with merged data
+// { id: '1', text: 'Buy organic groceries', completed: false, priority: 'high' }
+```
+
+**Insert followed by delete:**
+```ts
+// Insert then delete cancels out - no mutations sent to server
+tx.mutate(() => todoCollection.insert({ id: '1', text: 'Temp todo' }))
+tx.mutate(() => todoCollection.delete('1'))
+
+// Result: No mutations (they cancel each other out)
+```
+
+**Delete followed by insert (resurrection):**
+```ts
+// Delete an existing item, then insert a new one with same ID
+tx.mutate(() => todoCollection.delete('1'))
+tx.mutate(() => todoCollection.insert({
+  id: '1',
+  text: 'Fresh start',
+  completed: false
+}))
+
+// Result: Single insert mutation (fresh start)
+```
+
+This intelligent merging ensures that:
+- **Network efficiency**: Fewer mutations sent to the server
+- **User intent preservation**: Final state matches what user expects
+- **Optimistic UI consistency**: Local state always reflects user actions
+
 ## Transaction lifecycle
 
 Transactions progress through the following states:

@@ -40,7 +40,7 @@ describe(`applyMutations merge logic`, () => {
     })
 
     expect(transaction.mutations).toHaveLength(1)
-    const finalMutation = transaction.mutations[0]
+    const finalMutation = transaction.mutations[0]!
 
     // Should remain an insert with empty original
     expect(finalMutation.type).toBe(`insert`)
@@ -94,7 +94,7 @@ describe(`applyMutations merge logic`, () => {
     })
 
     expect(transaction.mutations).toHaveLength(1)
-    const finalMutation = transaction.mutations[0]
+    const finalMutation = transaction.mutations[0]!
 
     // Should be a delete mutation
     expect(finalMutation.type).toBe(`delete`)
@@ -127,7 +127,7 @@ describe(`applyMutations merge logic`, () => {
     })
 
     expect(transaction.mutations).toHaveLength(1)
-    const finalMutation = transaction.mutations[0]
+    const finalMutation = transaction.mutations[0]!
 
     // Should still be an insert
     expect(finalMutation.type).toBe(`insert`)
@@ -161,7 +161,7 @@ describe(`applyMutations merge logic`, () => {
     })
 
     expect(transaction.mutations).toHaveLength(1)
-    const finalMutation = transaction.mutations[0]
+    const finalMutation = transaction.mutations[0]!
 
     // Should remain a delete mutation (update ignored)
     expect(finalMutation.type).toBe(`delete`)
@@ -221,9 +221,9 @@ describe(`applyMutations merge logic`, () => {
     expect(transaction.mutations).toHaveLength(1)
 
     // Should be a fresh insert (delete cleared the slate)
-    expect(transaction.mutations[0].type).toBe(`insert`)
-    expect(transaction.mutations[0].original).toEqual({})
-    expect(transaction.mutations[0].modified.id).toBe(`item-1`)
-    expect(transaction.mutations[0].modified.name).toBe(`Fresh Insert`)
+    expect(transaction.mutations[0]!.type).toBe(`insert`)
+    expect(transaction.mutations[0]!.original).toEqual({})
+    expect(transaction.mutations[0]!.modified.id).toBe(`item-1`)
+    expect(transaction.mutations[0]!.modified.name).toBe(`Fresh Insert`)
   })
 })
