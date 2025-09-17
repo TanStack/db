@@ -38,7 +38,7 @@
 
 > Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
 
-A backend‑agnostic, real‑time data layer that powers live queries, local writes, and fine‑grained reactivity for complex apps.
+A reactive client store that lets you build fast, sync‑driven apps with a backend‑agnostic real‑time data layer:
 
 - Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates  
 - Fine‑grained reactivity to minimize component re‑rendering  
