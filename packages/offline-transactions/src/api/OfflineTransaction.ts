@@ -1,7 +1,9 @@
 import { createTransaction } from "@tanstack/db"
+import { NonRetriableError } from "../types"
 import type { Transaction } from "@tanstack/db"
 import type {
   CreateOfflineTransactionOptions,
+  MutationFn,
   OfflineTransaction as OfflineTransactionType,
 } from "../types"
 
@@ -12,68 +14,76 @@ export class OfflineTransaction {
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
-  private onPersist?: (
-    offlineTransaction: OfflineTransactionType
-  ) => Promise<void>
+  private mutationFn: MutationFn
+  private persistTransaction: (tx: OfflineTransactionType) => Promise<void>
 
   constructor(
     options: CreateOfflineTransactionOptions,
-    onPersist?: (offlineTransaction: OfflineTransactionType) => Promise<void>
+    mutationFn: MutationFn,
+    persistTransaction: (tx: OfflineTransactionType) => Promise<void>
   ) {
     this.offlineId = crypto.randomUUID()
     this.mutationFnName = options.mutationFnName
     this.autoCommit = options.autoCommit ?? true
     this.idempotencyKey = options.idempotencyKey ?? crypto.randomUUID()
     this.metadata = options.metadata ?? {}
-    this.onPersist = onPersist
+    this.mutationFn = mutationFn
+    this.persistTransaction = persistTransaction
   }
 
   mutate(callback: () => void): Transaction {
     this.transaction = createTransaction({
       id: this.offlineId,
       autoCommit: false,
-      mutationFn: async () => {
-        // This will be handled by the offline executor
-      },
+      mutationFn: this.mutationFn,
       metadata: this.metadata,
     })
 
     this.transaction.mutate(callback)
 
     if (this.autoCommit) {
-      return this.commit()
+      // Note: this will need to be handled differently since commit is now async
+      // For now, returning the transaction and letting caller handle commit
+      this.commit().catch((error) => {
+        console.error(`Auto-commit failed:`, error)
+      })
     }
 
     return this.transaction
   }
 
-  commit(): Transaction {
+  async commit(): Promise<Transaction> {
     if (!this.transaction) {
       throw new Error(`No mutations to commit. Call mutate() first.`)
     }
 
-    if (this.onPersist) {
-      const offlineTransaction: OfflineTransactionType = {
-        id: this.offlineId,
-        mutationFnName: this.mutationFnName,
-        mutations: this.serializeMutations(this.transaction.mutations),
-        keys: this.extractKeys(this.transaction.mutations),
-        idempotencyKey: this.idempotencyKey,
-        createdAt: new Date(),
-        retryCount: 0,
-        nextAttemptAt: Date.now(),
-        metadata: this.metadata,
-        version: 1,
-      }
-
-      this.onPersist(offlineTransaction).catch((error) => {
-        console.error(`Failed to persist offline transaction:`, error)
-        this.transaction?.rollback()
-      })
+    const offlineTransaction: OfflineTransactionType = {
+      id: this.offlineId,
+      mutationFnName: this.mutationFnName,
+      mutations: this.serializeMutations(this.transaction.mutations),
+      keys: this.extractKeys(this.transaction.mutations),
+      idempotencyKey: this.idempotencyKey,
+      createdAt: new Date(),
+      retryCount: 0,
+      nextAttemptAt: Date.now(),
+      metadata: this.metadata,
+      version: 1,
     }
 
-    this.transaction.commit()
-    return this.transaction
+    try {
+      // Persist to outbox first - this triggers the retry system
+      await this.persistTransaction(offlineTransaction)
+
+      // Only commit to TanStack DB after successful persistence
+      await this.transaction.commit()
+      return this.transaction
+    } catch (error) {
+      // Only rollback for NonRetriableError - other errors should allow retry
+      if (error instanceof NonRetriableError) {
+        this.transaction.rollback()
+      }
+      throw error
+    }
   }
 
   rollback(): void {

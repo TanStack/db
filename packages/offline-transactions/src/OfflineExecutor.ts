@@ -152,18 +152,32 @@ export class OfflineExecutor {
   createOfflineTransaction(
     options: CreateOfflineTransactionOptions
   ): OfflineTransactionAPI {
+    const mutationFn = this.config.mutationFns[options.mutationFnName]
+
+    if (!mutationFn) {
+      throw new Error(`Unknown mutation function: ${options.mutationFnName}`)
+    }
+
     return new OfflineTransactionAPI(
       options,
-      this.isOfflineEnabled ? this.persistTransaction.bind(this) : undefined
+      mutationFn,
+      this.persistTransaction.bind(this)
     )
   }
 
   createOfflineAction<T>(
     options: CreateOfflineActionOptions<T>
   ): (vars: T) => Transaction {
+    const mutationFn = this.config.mutationFns[options.mutationFnName]
+
+    if (!mutationFn) {
+      throw new Error(`Unknown mutation function: ${options.mutationFnName}`)
+    }
+
     return createOfflineAction(
       options,
-      this.isOfflineEnabled ? this.persistTransaction.bind(this) : undefined
+      mutationFn,
+      this.persistTransaction.bind(this)
     )
   }
 
