@@ -457,7 +457,7 @@ describe(`QueryCollection`, () => {
       ],
     }
 
-    it(`select extracts array from metadata`, async () => {
+    it(`Select extracts array from metadata`, async () => {
       const queryKey = [`select-test`]
 
       const queryFn = vi.fn().mockResolvedValue(initialMetaData)
@@ -485,7 +485,7 @@ describe(`QueryCollection`, () => {
       expect(collection.get(`2`)).toEqual(initialMetaData.data[1])
     })
 
-    it(`throws error if select returns non array`, async () => {
+    it(`Throws error if select returns non array`, async () => {
       const queryKey = [`select-test`]
       const consoleErrorSpy = vi
         .spyOn(console, `error`)
@@ -526,8 +526,37 @@ describe(`QueryCollection`, () => {
       // Clean up the spy
       consoleErrorSpy.mockRestore()
     })
-  })
 
+    it(`Whole response is cached in QueryClient when used with select option`, async () => {
+      const queryKey = [`select-test`]
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn().mockReturnValue(initialMetaData.data)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(select).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify that the query cache state exists along with its metadata
+      const initialCache = queryClient.getQueryData(
+        queryKey
+      ) as MetaDataType<TestItem>
+      expect(initialCache).toEqual(initialMetaData)
+    })
+  })
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
       const queryKey = [`directPersistenceTest`]
@@ -1345,7 +1374,7 @@ describe(`QueryCollection`, () => {
         })
       }).toThrow(/does not exist/)
     })
-    // note!
+
     it(`should update query cache when using sync methods`, async () => {
       const queryKey = [`sync-cache-test`]
       const initialItems: Array<TestItem> = [
@@ -1398,7 +1427,7 @@ describe(`QueryCollection`, () => {
       const updatedItem = cacheAfterUpdate.find((item) => item.id === `1`)
       expect(updatedItem?.name).toBe(`Updated Item 1`)
       expect(updatedItem?.value).toBe(10) // Original value preserved
-
+      // console.log(cacheAfterUpdate)
       // Test writeDelete updates cache
       collection.utils.writeDelete(`2`)
 
