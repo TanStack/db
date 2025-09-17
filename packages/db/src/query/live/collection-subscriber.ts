@@ -13,9 +13,6 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
-  // Keep track of the keys we've sent (needed for join and orderBy optimizations)
-  private sentKeys = new Set<string | number>()
-
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
@@ -269,8 +266,6 @@ export class CollectionSubscriber<
     comparator: (a: any, b: any) => number
   ) {
     for (const change of changes) {
-      this.sentKeys.add(change.key)
-
       if (!this.biggest) {
         this.biggest = change.value
       } else if (comparator(this.biggest, change.value) < 0) {
