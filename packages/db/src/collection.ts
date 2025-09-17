@@ -42,6 +42,7 @@ import type {
   CollectionEventHandler,
 } from "./collection-events.js"
 import { currentStateAsChanges } from "./change-events"
+import { CollectionSubscription } from "./collection-subscription.js"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
@@ -66,7 +67,6 @@ import type {
 } from "./types"
 import type { IndexOptions } from "./indexes/index-options.js"
 import type { BaseIndex, IndexResolver } from "./indexes/base-index.js"
-import { CollectionSubscription } from "./collection-subscription.js"
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -599,16 +599,12 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
-    console.log("in preload of ", this.id)
     if (this.preloadPromise) {
-      console.log("return cached preloadPromise")
       return this.preloadPromise
     }
 
     this.preloadPromise = new Promise<void>((resolve, reject) => {
-      console.log("in preloadPromise")
       if (this._status === `ready`) {
-        console.log("preload --> resolving preloadPromise because collection is ready")
         resolve()
         return
       }
@@ -620,14 +616,12 @@ export class CollectionImpl<
 
       // Register callback BEFORE starting sync to avoid race condition
       this.onFirstReady(() => {
-        console.log("onFirstReady --> resolving preloadPromise")
         resolve()
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
       if (this._status === `idle` || this._status === `cleaned-up`) {
         try {
-          console.log("preload --> starting sync")
           this.startSync()
         } catch (error) {
           reject(error)
@@ -978,7 +972,6 @@ export class CollectionImpl<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false
   ): void {
-    console.log("emitEvents for changes: ", JSON.stringify(changes, null, 2))
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
@@ -1000,7 +993,6 @@ export class CollectionImpl<
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
-      console.log("emmitting to subscription")
       subscription.emitEvents(eventsToEmit)
     }
   }

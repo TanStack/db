@@ -685,7 +685,6 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const newResults = Array.from(collection.values())
 
-        console.log("newResults: ", JSON.stringify(newResults, null, 2))
         expect(newResults).toHaveLength(2)
         expect(newResults.map((r) => [r.id, r.salary])).toEqual([
           [2, 62_000],

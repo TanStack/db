@@ -79,14 +79,6 @@ export class CollectionSubscription {
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
     const newChanges = this.filterAndFlipChanges(changes)
-    console.log(
-      `subscription.emitEvents, og changes: `,
-      JSON.stringify(changes, null, 2)
-    )
-    console.log(
-      `subscription.emitEvents, new changes: `,
-      JSON.stringify(newChanges, null, 2)
-    )
     this.filteredCallback(newChanges)
   }
 
@@ -98,9 +90,6 @@ export class CollectionSubscription {
    * or, the entire state was already loaded.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
-    // TODO: i don't think we should short circuit here
-    //       because we may need to request more data even after having loaded the entire state?
-    //       --> no maybe we never do this
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
       return false
@@ -128,17 +117,6 @@ export class CollectionSubscription {
       this.loadedInitialState = true
     }
 
-    // TODO: Then modify currentStateAsChanges to handle the orderBy and limit options
-    //       because those changes will be needed for the orderBy optimization
-
-    // TODO: when loading from the index we can take into account the where clause now
-    //       such that we always load the limit amount of items that fulfill the where clause
-    //       and if we don't have enough items that really means we exhausted the collection
-    //       and so there is no need to check if we need to load more data or not
-    //       Not 100% sure, because there could perhaps be an intermediate operator that filters out rows
-    //       before they get to the topK operator?
-    //       e.g. if we do an inner join, we don't know how many rows will come out of it and thus reach the topK operator
-
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
 
     if (snapshot === undefined) {
@@ -151,19 +129,7 @@ export class CollectionSubscription {
       (change) => !this.sentKeys.has(change.key)
     )
 
-    // TODO: we have to check what we need to do here: send filteredSnapshot or entire snapshot?
-    //       if i sent entire snapshot then we get errors because a key already exists in the collection
-    //       if i sent filteredSnapshot then join breaks because join requests a snapshot
-    //       for matching keys but then it doesn't receive the matching keys because it has already been sent
-    //       --> but how come it has already been sent?
-    // SOLUTION: the reason is because in `subscribeToMatchingChanges` we only send the changes if subscription.hasSentAtLeastOneSnapshot()
-    //           but in here we will track it as if we have sent it, so this subscription should have an option to
-    //           track only after it has sent the first snapshot (so we can provide trackBeforeFirstSnapshot: false)
-    //           to disable this behavior
-
     this.snapshotSent = true
-    console.log(`og snapshot: `, JSON.stringify(snapshot, null, 2))
-    console.log(`Sending snapshot: `, JSON.stringify(filteredSnapshot, null, 2))
     this.callback(filteredSnapshot)
     return true
   }

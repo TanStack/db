@@ -133,25 +133,15 @@ export class CollectionSubscriber<
         this.collectionId
       ]!
 
-    // Load the first `offset + limit` values from the index
-    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-    // this.loadNextItems(offset + limit)
-
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
-      console.log(
-        `sendChangesInRange, changes: `,
-        JSON.stringify(changes, null, 2)
-      )
       // Split live updates into a delete of the old value and an insert of the new value
       // and filter out changes that are bigger than the biggest value we've sent so far
-      // because they can't affect the topK
+      // because they can't affect the topK (and if later we need more data, we will dynamically load more data)
       const splittedChanges = splitUpdates(changes)
       let filteredChanges = splittedChanges
       if (dataNeeded!() === 0) {
-        console.log(`dataNeeded!(): `, dataNeeded!())
-        console.log(`this.biggest: `, this.biggest)
         // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
         // because they can never make it into the topK.
         // However, if the topK isn't full yet, we need to also send changes > maxSentValue
@@ -162,7 +152,7 @@ export class CollectionSubscriber<
           this.biggest
         )
       }
-      console.log(`splittedChanges: `, JSON.stringify(filteredChanges, null, 2))
+
       this.sendChangesToPipelineWithTracking(filteredChanges, subscription)
     }
 

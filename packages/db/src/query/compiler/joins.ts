@@ -17,6 +17,8 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
+import { PropRef } from "../ir.js"
+import { inArray } from "../builder/functions.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery, followRef } from "./index.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
@@ -27,7 +29,6 @@ import type {
   QueryIR,
   QueryRef,
 } from "../ir.js"
-import { PropRef } from "../ir.js"
 import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection.js"
 import type {
@@ -36,8 +37,7 @@ import type {
   NamespacedRow,
 } from "../../types.js"
 import type { QueryCache, QueryMapping } from "./types.js"
-import { inArray } from "../builder/functions.js"
-import { CollectionSubscription } from "../../collection-subscription.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 
 export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {
@@ -219,8 +219,6 @@ function processJoin(
       const activePipeline =
         activeCollection === `main` ? mainPipeline : joinedPipeline
 
-      //let index: BaseIndex<string | number> | undefined
-
       const lazyCollectionJoinExpr =
         activeCollection === `main`
           ? (joinedExpr as PropRef)
@@ -242,17 +240,13 @@ function processJoin(
         )
       }
 
-      //let deoptimized = false
-
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          console.log("in tap")
           const lazyCollectionSubscription = subscriptions[lazyCollection.id]
 
           if (!lazyCollectionSubscription) {
-            console.log("lazyCollectionSubscription is missing: ", JSON.stringify(subscriptions, null, 2))
             throw new Error(
               `Internal error: subscription for collection is missing in join pipeline. Make sure the live query collection sets the subscription before running the pipeline.`
             )
@@ -260,63 +254,20 @@ function processJoin(
 
           if (lazyCollectionSubscription.hasLoadedInitialState()) {
             // Entire state was already loaded because we deoptimized the join
-            console.log("Returning because deoptimized")
             return
           }
 
-          console.log("data: ", JSON.stringify(data.getInner(), null, 2))
           const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
           const lazyJoinRef = new PropRef(followRefResult.path)
-          console.log("Requesting snapshot for lazyJoinRef:", JSON.stringify(lazyJoinRef, null, 2))
-          console.log("Join keys:", JSON.stringify(joinKeys, null, 2))
           const loaded = lazyCollectionSubscription.requestSnapshot({
             where: inArray(lazyJoinRef, joinKeys),
             optimizedOnly: true,
           })
-          console.log("Loaded", loaded)
 
           if (!loaded) {
             // Snapshot wasn't sent because it could not be loaded from the indexes
             lazyCollectionSubscription.requestSnapshot()
           }
-
-          /*
-          // Find the index for the path we join on
-          // we need to find the index inside the map operator
-          // because the indexes are only available after the initial sync
-          // so we can't fetch it during compilation
-          index ??= findIndexForField(
-            followRefCollection.indexes,
-            followRefResult.path
-          )
-
-          // The `callbacks` object is passed by the liveQueryCollection to the compiler.
-          // It contains a function to lazy load keys for each lazy collection
-          // as well as a function to switch back to a regular collection
-          // (useful when there's no index for available for lazily loading the collection)
-          const collectionCallbacks = callbacks[lazyCollection.id]
-          if (!collectionCallbacks) {
-            throw new Error(
-              `Internal error: callbacks for collection are missing in join pipeline. Make sure the live query collection sets them before running the pipeline.`
-            )
-          }
-
-          const { loadKeys, loadInitialState } = collectionCallbacks
-
-          if (index && index.supports(`in`)) {
-            // Use the index to fetch the PKs of the rows in the lazy collection
-            // that match this row from the active collection based on the value of the joinKey
-            const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
-            const matchingKeys = index.lookup(`in`, joinKeys)
-            // Inform the lazy collection that those keys need to be loaded
-            loadKeys(matchingKeys)
-          } else {
-            // We can't optimize the join because there is no index for the join key
-            // on the lazy collection, so we load the initial state
-            deoptimized = true
-            loadInitialState()
-          }
-          */
         })
       )
 

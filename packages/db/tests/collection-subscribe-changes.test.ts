@@ -3,13 +3,13 @@ import mitt from "mitt"
 import { createCollection } from "../src/collection"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
+import { PropRef } from "../src/query/ir"
 import type {
   ChangeMessage,
   ChangesPayload,
   MutationFn,
   PendingMutation,
 } from "../src/types"
-import { PropRef } from "../src/query/ir"
 
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
@@ -715,7 +715,6 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Should only receive the active item in initial state
-    console.log("callback mock calls: ", JSON.stringify(callback.mock.calls, null, 2))
     expect(callback).toHaveBeenCalledTimes(1)
     const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       id: number
@@ -843,12 +842,14 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    },
-    {
-      includeInitialState: true,
-    })
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
 
     await collection.stateWhenReady()
 
@@ -918,11 +919,14 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    }, {
-      includeInitialState: true,
-    })
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
 
     await collection.stateWhenReady()
 
@@ -1026,12 +1030,13 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    },
-    {
-      includeInitialState: true,
-    }
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
     )
 
     await collection.stateWhenReady()

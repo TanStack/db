@@ -550,7 +550,6 @@ describe(`createLiveQueryCollection`, () => {
       const preloadPromise = liveQuery.preload()
 
       // Write player
-      console.log("INSERTING ALICE")
       playerCollection.utils.begin()
       playerCollection.utils.write({
         type: `insert`,
@@ -560,7 +559,6 @@ describe(`createLiveQueryCollection`, () => {
       playerCollection.utils.markReady()
 
       // Write challenge1
-      console.log("INSERTING CHALLENGE1")
       challenge1Collection.utils.begin()
       challenge1Collection.utils.write({
         type: `insert`,
@@ -570,7 +568,6 @@ describe(`createLiveQueryCollection`, () => {
       challenge1Collection.utils.markReady()
 
       // Write challenge2
-      console.log("INSERTING CHALLENGE2")
       challenge2Collection.utils.begin()
       challenge2Collection.utils.write({
         type: `insert`,
@@ -579,15 +576,12 @@ describe(`createLiveQueryCollection`, () => {
       challenge2Collection.utils.commit()
       challenge2Collection.utils.markReady()
 
-      console.log("before awaiting preloadPromise")
       await preloadPromise
-      console.log("after awaiting preloadPromise")
 
       // With a failed test the results show more than 1 item
       // It returns both an unjoined player with no joined challenges, and a joined
       // player with the challenges
       const results = liveQuery.toArray
-      console.log("results: ", JSON.stringify(results, null, 2))
       expect(results.length).toBe(1)
 
       const result = results[0]!
