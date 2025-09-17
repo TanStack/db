@@ -3,7 +3,7 @@ import { NonRetriableError } from "../types"
 import type { Transaction } from "@tanstack/db"
 import type {
   CreateOfflineTransactionOptions,
-  MutationFn,
+  OfflineMutationFn,
   OfflineTransaction as OfflineTransactionType,
 } from "../types"
 
@@ -14,12 +14,12 @@ export class OfflineTransaction {
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
-  private mutationFn: MutationFn
+  private mutationFn: OfflineMutationFn
   private persistTransaction: (tx: OfflineTransactionType) => Promise<void>
 
   constructor(
     options: CreateOfflineTransactionOptions,
-    mutationFn: MutationFn,
+    mutationFn: OfflineMutationFn,
     persistTransaction: (tx: OfflineTransactionType) => Promise<void>
   ) {
     this.offlineId = crypto.randomUUID()
@@ -35,7 +35,12 @@ export class OfflineTransaction {
     this.transaction = createTransaction({
       id: this.offlineId,
       autoCommit: false,
-      mutationFn: this.mutationFn,
+      mutationFn: async (params) => {
+        return this.mutationFn({
+          ...params,
+          idempotencyKey: this.idempotencyKey,
+        })
+      },
       metadata: this.metadata,
     })
 
