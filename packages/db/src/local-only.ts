@@ -1,9 +1,10 @@
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
+  InferSchemaOutput,
   InsertMutationFnParams,
   OperationType,
-  ResolveType,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -12,76 +13,23 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**
  * Configuration interface for Local-only collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
- * @template TKey - The type of the key returned by getKey
- *
- * @remarks
- * Type resolution follows a priority order:
- * 1. If you provide an explicit type via generic parameter, it will be used
- * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
- * 3. If neither explicit type nor schema is provided, the fallback type will be used
- *
- * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * @template T - The type of items in the collection
+ * @template TSchema - The schema type for validation
+ * @template TKey - The type of the key returned by `getKey`
  */
 export interface LocalOnlyCollectionConfig<
-  TExplicit = unknown,
+  T extends object = object,
   TSchema extends StandardSchemaV1 = never,
-  TFallback extends Record<string, unknown> = Record<string, unknown>,
   TKey extends string | number = string | number,
-> {
-  /**
-   * Standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: (item: ResolveType<TExplicit, TSchema, TFallback>) => TKey
-
+> extends Omit<
+    BaseCollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils>,
+    `gcTime` | `startSync`
+  > {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process
    */
-  initialData?: Array<ResolveType<TExplicit, TSchema, TFallback>>
-
-  /**
-   * Optional asynchronous handler function called after an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onInsert?: (
-    params: InsertMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onUpdate?: (
-    params: UpdateMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
-
-  /**
-   * Optional asynchronous handler function called after a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
-   */
-  onDelete?: (
-    params: DeleteMutationFnParams<
-      ResolveType<TExplicit, TSchema, TFallback>,
-      TKey,
-      LocalOnlyCollectionUtils
-    >
-  ) => Promise<any>
+  initialData?: Array<T>
 }
 
 /**
@@ -96,9 +44,7 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * that immediately "syncs" all optimistic changes to the collection, making them permanent.
  * Perfect for local-only data that doesn't need persistence or external synchronization.
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
+ * @template T - The schema type if a schema is provided, otherwise the type of items in the collection
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
  * @returns Collection options with utilities (currently empty but follows the pattern)
@@ -135,29 +81,55 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  *   })
  * )
  */
+
+// Overload for when schema is provided
 export function localOnlyCollectionOptions<
-  TExplicit = unknown,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Record<string, unknown> = Record<string, unknown>,
+  T extends StandardSchemaV1,
   TKey extends string | number = string | number,
 >(
-  config: LocalOnlyCollectionConfig<TExplicit, TSchema, TFallback, TKey>
-): CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>, TKey> & {
+  config: LocalOnlyCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
+    schema: T
+  }
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
   utils: LocalOnlyCollectionUtils
-} {
-  type ResolvedType = ResolveType<TExplicit, TSchema, TFallback>
+  schema: T
+}
 
+// Overload for when no schema is provided
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function localOnlyCollectionOptions<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
+  config: LocalOnlyCollectionConfig<T, never, TKey> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, TKey> & {
+  utils: LocalOnlyCollectionUtils
+  schema?: never // no schema in the result
+}
+
+export function localOnlyCollectionOptions(
+  config: LocalOnlyCollectionConfig<any, any, string | number>
+): CollectionConfig<any, string | number, any> & {
+  utils: LocalOnlyCollectionUtils
+  schema?: StandardSchemaV1
+} {
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<ResolvedType, TKey>(initialData)
+  const syncResult = createLocalOnlySync(initialData)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
    * Wraps the user's onInsert handler to also confirm the transaction immediately
    */
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: InsertMutationFnParams<
+      any,
+      string | number,
+      LocalOnlyCollectionUtils
+    >
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -175,7 +147,11 @@ export function localOnlyCollectionOptions<
    * Wrapper for onUpdate handler that also confirms the transaction immediately
    */
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: UpdateMutationFnParams<
+      any,
+      string | number,
+      LocalOnlyCollectionUtils
+    >
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -193,7 +169,11 @@ export function localOnlyCollectionOptions<
    * Wrapper for onDelete handler that also confirms the transaction immediately
    */
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<ResolvedType, TKey, LocalOnlyCollectionUtils>
+    params: DeleteMutationFnParams<
+      any,
+      string | number,
+      LocalOnlyCollectionUtils
+    >
   ) => {
     // Call user handler first if provided
     let handlerResult

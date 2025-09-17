@@ -47,7 +47,6 @@ export function output<T>(
       fn
     )
     stream.graph.addOperator(operator)
-    stream.graph.addStream(outputStream.connectReader())
     return outputStream
   }
 }

@@ -218,7 +218,9 @@ export function mockSyncCollectionOptions<
     },
   }
 
-  const options: CollectionConfig<T> & { utils: typeof utils } = {
+  const options: CollectionConfig<T, string | number, never> & {
+    utils: typeof utils
+  } = {
     sync: {
       sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
         begin = params.begin
@@ -271,6 +273,7 @@ export function mockSyncCollectionOptionsNoInitialState<
   let write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
   let commit: () => void
   let markReady: () => void
+  let truncate: () => void
 
   let syncPendingPromise: Promise<void> | undefined
   let syncPendingResolve: (() => void) | undefined
@@ -297,6 +300,7 @@ export function mockSyncCollectionOptionsNoInitialState<
     write: ((value) => write!(value)) as typeof write,
     commit: () => commit!(),
     markReady: () => markReady!(),
+    truncate: () => truncate!(),
     resolveSync: () => {
       syncPendingResolve!()
     },
@@ -305,13 +309,16 @@ export function mockSyncCollectionOptionsNoInitialState<
     },
   }
 
-  const options: CollectionConfig<T> & { utils: typeof utils } = {
+  const options: CollectionConfig<T, string | number, never> & {
+    utils: typeof utils
+  } = {
     sync: {
       sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
         begin = params.begin
         write = params.write
         commit = params.commit
         markReady = params.markReady
+        truncate = params.truncate
       },
     },
     startSync: false,
@@ -333,4 +340,89 @@ export function mockSyncCollectionOptionsNoInitialState<
   }
 
   return options
+}
+
+// Utility to flush microtasks and promises
+export const flushPromises = () =>
+  new Promise((resolve) => setTimeout(resolve, 0))
+
+/**
+ * Utility to suppress expected unhandled rejections in tests.
+ *
+ * This function temporarily removes the vitest unhandled rejection handler and
+ * sets up a custom handler that catches rejections with the expected message.
+ * It's useful for testing scenarios where you expect a rejection to happen
+ * asynchronously (e.g., in microtasks) that would otherwise cause vitest to
+ * report an unhandled error.
+ *
+ * In tanstack db we rethrow errors in optimistic mutations inside a microtask, and so
+ * this bubbles up as an unhandled rejection. This utility can be used to suppress
+ * these rejections within a test.
+ *
+ * @param expectedMessage - The error message to expect and suppress
+ * @param testFn - The test function that will trigger the expected rejection
+ * @returns A promise that resolves when the test completes and the rejection is caught
+ *
+ * @example
+ * ```typescript
+ * await withExpectedRejection('expected error message', () => {
+ *   // Your test code that triggers the rejection
+ *   someAsyncOperation()
+ *   return flushPromises()
+ * })
+ * ```
+ */
+export function withExpectedRejection<T>(
+  expectedMessage: string,
+  testFn: () => T | Promise<T>
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    // Find and temporarily remove the vitest unhandled rejection handler
+    const originalUnhandledRejection = process
+      .listeners(`unhandledRejection`)
+      .find((listener) => listener.name === `vitestUnhandledRejectionHandler`)
+
+    let expectedRejectionCaught = false
+    const handleRejection = (reason: any) => {
+      if (reason?.message === expectedMessage) {
+        expectedRejectionCaught = true
+        return // Don't re-throw, this is expected
+      }
+      // Re-throw other rejections
+      reject(reason)
+    }
+
+    if (originalUnhandledRejection) {
+      process.removeListener(`unhandledRejection`, originalUnhandledRejection)
+    }
+    process.on(`unhandledRejection`, handleRejection)
+
+    // Execute the test function and handle the result
+    Promise.resolve(testFn())
+      .then(async (value) => {
+        // Wait for microtasks and then check if the rejection was caught
+        await flushPromises()
+
+        if (!expectedRejectionCaught) {
+          reject(
+            new Error(
+              `Expected rejection with message "${expectedMessage}" was not caught`
+            )
+          )
+          return
+        }
+
+        resolve(value)
+      })
+      .catch((error) => {
+        reject(error)
+      })
+      .finally(() => {
+        // Clean up the error handler
+        process.removeListener(`unhandledRejection`, handleRejection)
+        if (originalUnhandledRejection) {
+          process.addListener(`unhandledRejection`, originalUnhandledRejection)
+        }
+      })
+  })
 }

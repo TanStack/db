@@ -138,6 +138,7 @@ export class CollectionSubscriber<
     keys: Iterable<string | number>,
     filterFn: (item: object) => boolean
   ) {
+    const changes: Array<ChangeMessage<any, string | number>> = []
     for (const key of keys) {
       // Only load the key once
       if (this.sentKeys.has(key)) continue
@@ -145,8 +146,11 @@ export class CollectionSubscriber<
       const value = this.collection.get(key)
       if (value !== undefined && filterFn(value)) {
         this.sentKeys.add(key)
-        this.sendChangesToPipeline([{ type: `insert`, key, value }])
+        changes.push({ type: `insert`, key, value })
       }
+    }
+    if (changes.length > 0) {
+      this.sendChangesToPipeline(changes)
     }
   }
 

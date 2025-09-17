@@ -15,7 +15,7 @@ import {
   createIndexUsageTracker,
   expectIndexUsage,
   withIndexTracking,
-} from "./utls"
+} from "./utils"
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()
@@ -294,7 +294,7 @@ describe(`Collection Auto-Indexing`, () => {
     })
 
     const unsubscribe3 = autoIndexCollection.subscribeChanges(() => {}, {
-      whereExpression: lte(row.score!, 90),
+      whereExpression: lte(row.score, 90),
     })
 
     // Should have created indexes for each field
@@ -413,7 +413,7 @@ describe(`Collection Auto-Indexing`, () => {
       whereExpression: and(
         eq(row.status, `active`),
         gt(row.age, 25),
-        lte(row.score!, 90)
+        lte(row.score, 90)
       ),
     })
 
@@ -532,9 +532,128 @@ describe(`Collection Auto-Indexing`, () => {
     expect(tracker.stats.queriesExecuted).toEqual([
       {
         type: `index`,
-        operation: `eq`,
+        operation: `in`,
         field: `id2`,
-        value: `other2`,
+        value: [`other2`],
+      },
+    ])
+
+    expect(liveQuery.size).toBe(testData.length + 1)
+
+    tracker.restore()
+  })
+
+  it(`should create auto-indexes for join key on lazy collection when joining subquery`, async () => {
+    const leftCollection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of testData) {
+            write({
+              type: `insert`,
+              value: item,
+            })
+          }
+          commit()
+          markReady()
+        },
+      },
+      onInsert: async (_) => {},
+    })
+
+    const rightCollection = createCollection<TestItem2, string>({
+      getKey: (item) => item.id2,
+      autoIndex: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: {
+              id2: `1`,
+              name: `Other Active Item`,
+              age: 40,
+              status: `active`,
+              createdAt: new Date(),
+            },
+          })
+          write({
+            type: `insert`,
+            value: {
+              id2: `other2`,
+              name: `Other Inactive Item`,
+              age: 35,
+              status: `inactive`,
+              createdAt: new Date(),
+            },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await rightCollection.stateWhenReady()
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q: any) =>
+        q
+          .from({ item: leftCollection })
+          .join(
+            {
+              other: q
+                .from({ other: rightCollection })
+                .select(({ other }: any) => ({
+                  id2: other.id2,
+                  name: other.name,
+                })),
+            },
+            ({ item, other }: any) => eq(item.id, other.id2),
+            `left`
+          )
+          .select(({ item, other }: any) => ({
+            id: item.id,
+            name: item.name,
+            otherName: other.name,
+          })),
+      startSync: true,
+    })
+
+    await liveQuery.stateWhenReady()
+
+    expect(liveQuery.size).toBe(testData.length)
+
+    expect(rightCollection.indexes.size).toBe(1)
+
+    const index = rightCollection.indexes.values().next().value!
+    expect(index.expression).toEqual({
+      type: `ref`,
+      path: [`id2`],
+    })
+
+    const tracker = createIndexUsageTracker(rightCollection)
+
+    // Now send another item through the left collection
+    // and check that it used the index to join it to items of the right collection
+
+    leftCollection.insert({
+      id: `other2`,
+      name: `New Item`,
+      age: 25,
+      status: `active`,
+      createdAt: new Date(),
+    })
+
+    expect(tracker.stats.queriesExecuted).toEqual([
+      {
+        type: `index`,
+        operation: `in`,
+        field: `id2`,
+        value: [`other2`],
       },
     ])
 

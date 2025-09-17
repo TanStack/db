@@ -12,7 +12,7 @@ import {
   length,
   or,
 } from "../../src/query/builder/functions"
-import { mockSyncCollectionOptions } from "../utls"
+import { mockSyncCollectionOptions } from "../utils"
 
 interface TestItem {
   id: string
@@ -780,9 +780,9 @@ describe(`Query Index Optimization`, () => {
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
             type: `index`,
-            operation: `eq`,
+            operation: `in`,
             field: `id`,
-            value: `1`,
+            value: [`1`],
           },
         ])
       } finally {
@@ -983,28 +983,16 @@ describe(`Query Index Optimization`, () => {
         expect(tracker2.stats.queriesExecuted).toEqual([
           {
             type: `index`,
-            operation: `eq`,
+            operation: `in`,
             field: `id2`,
-            value: `1`,
-          },
-          {
-            type: `index`,
-            operation: `eq`,
-            field: `id2`,
-            value: `3`,
-          },
-          {
-            type: `index`,
-            operation: `eq`,
-            field: `id2`,
-            value: `5`,
+            value: [`1`, `3`, `5`],
           },
         ])
 
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 4,
+          indexCallCount: 2,
           fullScanCallCount: 0,
         })
       } finally {
@@ -1187,9 +1175,9 @@ describe(`Query Index Optimization`, () => {
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
             type: `index`,
-            operation: `eq`,
+            operation: `in`,
             field: `id`,
-            value: `1`,
+            value: [`1`],
           },
         ])
       } finally {

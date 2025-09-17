@@ -6,7 +6,7 @@ import {
   gt,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample user type for tests
 type User = {
@@ -450,11 +450,11 @@ describe(`Functional Variants Types`, () => {
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
             eq(user.department_id, dept.id)
           )
-          .groupBy(({ dept }) => dept.name)
+          .groupBy(({ dept }) => dept?.name)
           .fn.having((row) => row.dept?.name !== `HR`)
           .select(({ dept, user }) => ({
-            departmentId: dept.id,
-            departmentName: dept.name,
+            departmentId: dept?.id,
+            departmentName: dept?.name,
             totalEmployees: count(user.id),
           })),
     })

@@ -2,8 +2,8 @@ import {
   DefaultMap,
   chunkedArrayPush,
   globalObjectIdGenerator,
-  hash,
 } from "./utils.js"
+import { hash } from "./hashing/index.js"
 
 export type MultiSetArray<T> = Array<[T, number]>
 export type KeyedData<T> = [key: string, value: T]

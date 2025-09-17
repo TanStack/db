@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createLiveQueryCollection } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 import {
   and,
   avg,

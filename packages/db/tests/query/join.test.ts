@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample data types for join testing
 type User = {
@@ -108,9 +108,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
-              budget: dept.budget,
+              user_name: user?.name,
+              department_name: dept?.name,
+              budget: dept?.budget,
             })),
       })
 
@@ -289,8 +289,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
+              user_name: user?.name,
+              department_name: dept?.name,
             })),
       })
 
@@ -332,8 +332,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType
             )
             .select(({ user, dept }) => ({
-              user_name: user.name,
-              department_name: dept.name,
+              user_name: user?.name,
+              department_name: dept?.name,
             })),
       })
 
@@ -371,8 +371,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -420,8 +420,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType
               )
               .select(({ user, dept }) => ({
-                user_name: user.name,
-                department_name: dept.name,
+                user_name: user?.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -520,12 +520,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id)
               )
-              .where(({ member }) => eq(member.user_id, 100))
+              .where(({ member }) => eq(member?.user_id, 100))
               .select(({ team, member }) => ({
                 team_id: team.id,
                 team_name: team.name,
-                user_id: member.user_id,
-                role: member.role,
+                user_id: member?.user_id,
+                role: member?.role,
               })),
         })
       } else if (joinType === `right`) {
@@ -540,10 +540,10 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 { member: teamMembersCollection },
                 ({ team, member }) => eq(team.id, member.team_id)
               )
-              .where(({ team }) => eq(team.active, true))
+              .where(({ team }) => eq(team?.active, true))
               .select(({ team, member }) => ({
-                team_id: team.id,
-                team_name: team.name,
+                team_id: team?.id,
+                team_name: team?.name,
                 user_id: member.user_id,
                 role: member.role,
               })),
@@ -559,12 +559,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id)
               )
-              .where(({ member }) => eq(member.role, `admin`))
+              .where(({ member }) => eq(member?.role, `admin`))
               .select(({ team, member }) => ({
-                team_id: team.id,
-                team_name: team.name,
-                user_id: member.user_id,
-                role: member.role,
+                team_id: team?.id,
+                team_name: team?.name,
+                user_id: member?.user_id,
+                role: member?.role,
               })),
         })
       } else {
@@ -645,6 +645,140 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           expect(typedResults.map((r) => r.user_id).sort()).toEqual([100, 100])
           break
       }
+    })
+
+    test(`should handle chained joins for ${joinType} joins`, () => {
+      // Test schema for chained joins - using simpler data to focus on the core functionality
+      type Company = {
+        id: number
+        name: string
+      }
+
+      type Project = {
+        id: number
+        name: string
+        company_id: number
+      }
+
+      type Task = {
+        id: number
+        name: string
+        project_id: number
+      }
+
+      // Simple data with complete chains for easier testing
+      const companies: Array<Company> = [
+        { id: 1, name: `TechCorp` },
+        { id: 2, name: `DataInc` },
+      ]
+
+      const projects: Array<Project> = [
+        { id: 1, name: `Website`, company_id: 1 },
+        { id: 2, name: `Analytics`, company_id: 2 },
+      ]
+
+      const tasks: Array<Task> = [
+        { id: 1, name: `Design`, project_id: 1 },
+        { id: 2, name: `Research`, project_id: 2 },
+      ]
+
+      const companiesCollection = createCollection(
+        mockSyncCollectionOptions<Company>({
+          id: `test-companies-${joinType}-${autoIndex}`,
+          getKey: (company) => company.id,
+          initialData: companies,
+          autoIndex,
+        })
+      )
+
+      const projectsCollection = createCollection(
+        mockSyncCollectionOptions<Project>({
+          id: `test-projects-${joinType}-${autoIndex}`,
+          getKey: (project) => project.id,
+          initialData: projects,
+          autoIndex,
+        })
+      )
+
+      const tasksCollection = createCollection(
+        mockSyncCollectionOptions<Task>({
+          id: `test-tasks-${joinType}-${autoIndex}`,
+          getKey: (task) => task.id,
+          initialData: tasks,
+          autoIndex,
+        })
+      )
+
+      // Create chained join query: Company -> Project -> Task
+      // The key test: the second join references the first joined table (project)
+      const chainedJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ company: companiesCollection })
+            .join(
+              { project: projectsCollection },
+              ({ company, project }) => eq(project.company_id, company.id),
+              joinType
+            )
+            .join(
+              { task: tasksCollection },
+              ({ task, project }) => eq(task.project_id, project?.id),
+              joinType
+            )
+            .select(({ company, project, task }) => ({
+              company_name: company?.name,
+              project_name: project?.name,
+              task_name: task?.name,
+            })),
+      })
+
+      const results = chainedJoinQuery.toArray
+
+      // The key assertion: chained joins should work regardless of join type
+      expect(results.length).toBeGreaterThan(0)
+
+      // For all join types, we should be able to find the complete chains
+      const techCorpChain = results.find(
+        (r) =>
+          r.company_name === `TechCorp` &&
+          r.project_name === `Website` &&
+          r.task_name === `Design`
+      )
+      const dataIncChain = results.find(
+        (r) =>
+          r.company_name === `DataInc` &&
+          r.project_name === `Analytics` &&
+          r.task_name === `Research`
+      )
+
+      expect(techCorpChain).toBeDefined()
+      expect(dataIncChain).toBeDefined()
+
+      // Test incremental updates work correctly for this join type
+      const newTask: Task = {
+        id: 3,
+        name: `New Task`,
+        project_id: 1, // Website project
+      }
+
+      const initialCount = results.length
+
+      tasksCollection.utils.begin()
+      tasksCollection.utils.write({ type: `insert`, value: newTask })
+      tasksCollection.utils.commit()
+
+      const resultsAfterInsert = chainedJoinQuery.toArray
+
+      // All join types should handle the new task insertion
+      expect(resultsAfterInsert.length).toBeGreaterThanOrEqual(initialCount)
+
+      const newTaskResult = resultsAfterInsert.find(
+        (r) => r.task_name === `New Task`
+      )
+      expect(newTaskResult).toBeDefined()
+      expect(newTaskResult!.project_name).toBe(`Website`)
+      expect(newTaskResult!.company_name).toBe(`TechCorp`)
     })
   })
 }
@@ -794,7 +928,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 user_id: user.id,
                 user_name: user.name,
                 department_id: user.department_id,
-                department_name: dept.name,
+                department_name: dept?.name,
               })),
         })
 
@@ -814,6 +948,201 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         const alice = results.find((r) => r.user_name === `Alice`)
         expect(alice?.department_name).toBe(`Engineering`)
       })
+    })
+
+    test(`should handle chained joins with incremental updates`, () => {
+      // Test schema for chained joins scenario
+      type Player = {
+        name: string
+        club_id: string
+        position: string
+      }
+
+      type Client = {
+        name: string
+        player: string // references Player.name
+
+        email: string
+      }
+
+      type Balance = {
+        name: string
+        client: string // references Client.name
+        amount: number
+      }
+
+      // Sample data
+      const samplePlayers: Array<Player> = [
+        { name: `player1`, club_id: `club1`, position: `forward` },
+        { name: `player2`, club_id: `club1`, position: `midfielder` },
+        { name: `player3`, club_id: `club1`, position: `defender` },
+      ]
+
+      const sampleClients: Array<Client> = [
+        { name: `client1`, player: `player1`, email: `client1@example.com` },
+        { name: `client2`, player: `player2`, email: `client2@example.com` },
+        { name: `client3`, player: `player3`, email: `client3@example.com` },
+      ]
+
+      const sampleBalances: Array<Balance> = [
+        { name: `balance1`, client: `client1`, amount: 1000 },
+        { name: `balance2`, client: `client2`, amount: 2000 },
+        { name: `balance3`, client: `client3`, amount: 1500 },
+      ]
+
+      const playersCollection = createCollection(
+        mockSyncCollectionOptions<Player>({
+          id: `test-players-chained-${autoIndex}`,
+          getKey: (player) => player.name,
+          initialData: samplePlayers,
+          autoIndex,
+        })
+      )
+
+      const clientsCollection = createCollection(
+        mockSyncCollectionOptions<Client>({
+          id: `test-clients-chained-${autoIndex}`,
+          getKey: (client) => client.name,
+          initialData: sampleClients,
+          autoIndex,
+        })
+      )
+
+      const balancesCollection = createCollection(
+        mockSyncCollectionOptions<Balance>({
+          id: `test-balances-chained-${autoIndex}`,
+          getKey: (balance) => balance.name,
+          initialData: sampleBalances,
+          autoIndex,
+        })
+      )
+
+      // Create chained join query: Player -> Client -> Balance
+      // This reproduces the exact scenario from the bug report
+      // where the second join joins against the previously joined collection (client)
+      // Using inner joins to ensure we only get complete chains
+      const chainedJoinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ player: playersCollection })
+            .innerJoin({ client: clientsCollection }, ({ client, player }) =>
+              eq(client.player, player.name)
+            )
+            .innerJoin({ balance: balancesCollection }, ({ balance, client }) =>
+              eq(balance.client, client.name)
+            )
+            .select(({ player, client, balance }) => ({
+              player_name: player.name,
+              client_name: client.name,
+              balance_amount: balance.amount,
+              player_position: player.position,
+              client_email: client.email,
+            })),
+      })
+
+      const initialResults = chainedJoinQuery.toArray
+
+      // Should have 3 results - one for each player-client-balance chain
+      expect(initialResults).toHaveLength(3)
+
+      // Verify the initial structure
+      const result1 = initialResults.find((r) => r.player_name === `player1`)
+      expect(result1).toBeDefined()
+      expect(result1!.client_name).toBe(`client1`)
+      expect(result1!.balance_amount).toBe(1000)
+
+      // Test 1: Update a middle collection (client)
+      const updatedClient: Client = {
+        name: `client1`,
+        player: `player1`,
+        email: `updated-client1@example.com`, // Changed email
+      }
+
+      clientsCollection.utils.begin()
+      clientsCollection.utils.write({ type: `update`, value: updatedClient })
+      clientsCollection.utils.commit()
+
+      const resultsAfterClientUpdate = chainedJoinQuery.toArray
+      expect(resultsAfterClientUpdate).toHaveLength(3)
+
+      const updatedResult1 = resultsAfterClientUpdate.find(
+        (r) => r.player_name === `player1`
+      )
+      expect(updatedResult1!.client_email).toBe(`updated-client1@example.com`)
+      expect(updatedResult1!.balance_amount).toBe(1000) // Balance should remain the same
+
+      // Test 2: Update the latter collection (balance)
+      const updatedBalance: Balance = {
+        name: `balance2`,
+        client: `client2`,
+        amount: 3000, // Changed amount
+      }
+
+      balancesCollection.utils.begin()
+      balancesCollection.utils.write({
+        type: `update`,
+        value: updatedBalance,
+      })
+      balancesCollection.utils.commit()
+
+      const resultsAfterBalanceUpdate = chainedJoinQuery.toArray
+      expect(resultsAfterBalanceUpdate).toHaveLength(3)
+
+      const updatedResult2 = resultsAfterBalanceUpdate.find(
+        (r) => r.player_name === `player2`
+      )
+      expect(updatedResult2!.balance_amount).toBe(3000) // Updated amount
+      expect(updatedResult2!.client_name).toBe(`client2`) // Client should remain the same
+
+      // Test 3: Insert into middle collection (client)
+      const newClient: Client = {
+        name: `client4`,
+        player: `player1`, // Same player as client1
+        email: `client4@example.com`,
+      }
+
+      clientsCollection.utils.begin()
+      clientsCollection.utils.write({ type: `insert`, value: newClient })
+      clientsCollection.utils.commit()
+
+      // This should not increase the result count because there's no balance for client4
+      const resultsAfterClientInsert = chainedJoinQuery.toArray
+      expect(resultsAfterClientInsert).toHaveLength(3)
+
+      // Test 4: Insert into latter collection (balance) to complete the chain
+      const newBalance: Balance = {
+        name: `balance4`,
+        client: `client4`,
+        amount: 2500,
+      }
+
+      balancesCollection.utils.begin()
+      balancesCollection.utils.write({ type: `insert`, value: newBalance })
+      balancesCollection.utils.commit()
+
+      // Now we should have 4 results because client4 now has a balance
+      const resultsAfterBalanceInsert = chainedJoinQuery.toArray
+      expect(resultsAfterBalanceInsert).toHaveLength(4)
+
+      const newResult = resultsAfterBalanceInsert.find(
+        (r) => r.client_name === `client4`
+      )
+      expect(newResult).toBeDefined()
+      expect(newResult!.player_name).toBe(`player1`)
+      expect(newResult!.balance_amount).toBe(2500)
+
+      // Test 5: Delete from middle collection (client)
+      clientsCollection.utils.begin()
+      clientsCollection.utils.write({ type: `delete`, value: newClient })
+      clientsCollection.utils.commit()
+
+      // Should go back to 3 results as the chain is broken
+      const resultsAfterClientDelete = chainedJoinQuery.toArray
+      expect(resultsAfterClientDelete).toHaveLength(3)
+      expect(
+        resultsAfterClientDelete.find((r) => r.client_name === `client4`)
+      ).toBeUndefined()
     })
 
     test(`should self-join`, () => {
@@ -1012,14 +1341,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same table "unknown"`
+        `Invalid join condition: expressions must reference table aliases`
       )
     })
 
-    test(`should throw error when expressions reference tables not involved in join`, () => {
+    test(`should throw error when right side doesn't match joined table`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
-          id: `test-users-wrong-table`,
+          id: `test-users-no-refs`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
         })
@@ -1027,46 +1356,27 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
 
-      // This test demonstrates the error when trying to reference a table not in the join
-      // We'll use a different approach - create a query that references a non-existent table alias
-      expect(() => {
-        createLiveQueryCollection({
-          startSync: true,
-          query: (q) =>
-            q.from({ user: usersCollection }).join(
-              { dept: departmentsCollection },
-              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
-              `inner`
-            ),
-        })
-      }).toThrow(
-        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
-      )
-    })
-
-    test(`should throw error when one expression references table not in join`, () => {
-      const usersCollection = createCollection(
-        mockSyncCollectionOptions<User>({
-          id: `test-users-one-wrong-table`,
-          getKey: (user) => user.id,
-          initialData: sampleUsers,
-        })
-      )
-
-      const departmentsCollection = createDepartmentsCollection(autoIndex)
+      const departmentsCollection2 = createDepartmentsCollection(autoIndex)
 
       expect(() => {
         createLiveQueryCollection({
           startSync: true,
           query: (q) =>
-            q.from({ user: usersCollection }).join(
-              { dept: departmentsCollection },
-              ({ user }) => eq(user.id, 123), // Right side is constant, no table reference
-              `inner`
-            ),
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`
+              )
+              .join(
+                { dept2: departmentsCollection2 },
+                ({ user, dept }) => eq(dept.id, user.department_id),
+                `inner`
+              ),
         })
       }).toThrow(
-        `Invalid join condition: expressions must reference table aliases "user" and "dept"`
+        `Invalid join condition: right expression does not refer to the joined table "dept2"`
       )
     })
 

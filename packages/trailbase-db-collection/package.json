@@ -1,17 +1,17 @@
 {
   "name": "@tanstack/trailbase-db-collection",
   "description": "TrailBase collection for TanStack DB",
-  "version": "0.1.8",
+  "version": "0.1.19",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.7.0",
+    "@tanstack/store": "^0.7.5",
     "debug": "^4.4.1",
-    "trailbase": "^0.7.1"
+    "trailbase": "^0.7.2"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {

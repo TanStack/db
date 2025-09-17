@@ -154,8 +154,9 @@ There are a number of built-in collection types:
 1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
 2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
 3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
-4. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-5. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+4. [`RxDBCollection`](#rxdbcollection) to integrate with [RxDB](https://rxdb.info) for local persistence and sync
+5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
+6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
 
 You can also use:
 
@@ -276,7 +277,7 @@ import { initClient } from "trailbase"
 const trailBaseClient = initClient(`https://trailbase.io`)
 
 export const todoCollection = createCollection<SelectTodo, Todo>(
-  electricCollectionOptions({
+  trailBaseCollectionOptions({
     id: "todos",
     recordApi: trailBaseClient.records(`todos`),
     getKey: (item) => item.id,
@@ -300,6 +301,52 @@ This collection requires the following TrailBase-specific options:
 
 A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
+
+#### `RxDBCollection`
+
+[RxDB](https://rxdb.info) is a client-side database for JavaScript apps with replication, conflict resolution, and offline-first features.  
+Use `rxdbCollectionOptions` from `@tanstack/rxdb-db-collection` to integrate an RxDB collection with TanStack DB:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { rxdbCollectionOptions } from "@tanstack/rxdb-db-collection"
+import { createRxDatabase } from "rxdb"
+
+const db = await createRxDatabase({
+  name: "mydb",
+  storage: getRxStorageMemory(),
+})
+await db.addCollections({
+  todos: {
+    schema: {
+      version: 0,
+      primaryKey: "id",
+      type: "object",
+      properties: {
+        id: { type: "string", maxLength: 100 },
+        text: { type: "string" },
+        completed: { type: "boolean" },
+      },
+    },
+  },
+})
+
+// Wrap the RxDB collection with TanStack DB
+export const todoCollection = createCollection(
+  rxdbCollectionOptions({
+    rxCollection: db.todos,
+    startSync: true
+  })
+)
+```
+
+With this integration:
+
+- TanStack DB subscribes to RxDB's change streams and reflects updates, deletes, and inserts in real-time.
+- You get local-first sync when RxDB replication is configured.
+- Mutation handlers (onInsert, onUpdate, onDelete) are implemented using RxDB's APIs (bulkUpsert, incrementalPatch, bulkRemove).
+
+This makes RxDB a great choice for apps that need local-first storage, replication, or peer-to-peer sync combined with TanStack DB's live queries and transaction lifecycle.
 
 #### `LocalStorageCollection`
 
@@ -517,7 +564,11 @@ Transactional mutators allow you to batch and stage local changes across collect
 
 Mutators are created with a `mutationFn`. You can define a single, generic `mutationFn` for your whole app. Or you can define collection or mutation specific functions.
 
-The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored, e.g.:
+The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored.
+
+**Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back before you return, as the optimistic state is dropped when you return from the mutation function. You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`, direct write APIs, or Electric's `utils.awaitTxId()`.
+
+For example:
 
 ```tsx
 import type { MutationFn } from "@tanstack/react-db"
@@ -556,13 +607,19 @@ const addTodo = createOptimisticAction<string>({
       completed: false,
     })
   },
-  mutationFn: async (text) => {
+  mutationFn: async (text, params) => {
     // Persist the todo to your backend
     const response = await fetch("/api/todos", {
       method: "POST",
       body: JSON.stringify({ text, completed: false }),
     })
-    return response.json()
+    const result = await response.json()
+    
+    // IMPORTANT: Ensure server writes have synced back before returning
+    // This ensures the optimistic state can be safely discarded
+    await todoCollection.utils.refetch()
+    
+    return result
   },
 })
 
@@ -607,6 +664,57 @@ addTodoTx.mutate(() => todoCollection.insert({ id: '2', text: 'Second todo', com
 // User decides to save and we call .commit() and the mutations are persisted to the backend.
 addTodoTx.commit()
 ```
+
+### Mutation Merging
+
+When multiple mutations operate on the same item within a transaction, TanStack DB intelligently merges them to reduce over-the-wire churn and keep the optimistic local view aligned with user intent.
+
+The merging behavior follows a truth table based on the mutation types:
+
+| Existing → New | Result | Description |
+|---|---|---|
+| **insert + update** | `insert` | Keeps insert type, merges changes, empty original |
+| **insert + delete** | *removed* | Mutations cancel each other out |
+| **update + delete** | `delete` | Delete dominates |
+| **update + update** | `update` | Union changes, keep first original |
+| **same type** | *latest* | Replace with most recent mutation |
+
+#### Examples
+
+**Insert followed by update:**
+```ts
+const tx = createTransaction({ autoCommit: false, mutationFn })
+
+// Insert a new todo
+tx.mutate(() => todoCollection.insert({
+  id: '1',
+  text: 'Buy groceries',
+  completed: false
+}))
+
+// Update the same todo
+tx.mutate(() => todoCollection.update('1', (draft) => {
+  draft.text = 'Buy organic groceries'
+  draft.priority = 'high'
+}))
+
+// Result: Single insert mutation with merged data
+// { id: '1', text: 'Buy organic groceries', completed: false, priority: 'high' }
+```
+
+**Insert followed by delete:**
+```ts
+// Insert then delete cancels out - no mutations sent to server
+tx.mutate(() => todoCollection.insert({ id: '1', text: 'Temp todo' }))
+tx.mutate(() => todoCollection.delete('1'))
+
+// Result: No mutations (they cancel each other out)
+```
+
+This intelligent merging ensures that:
+- **Network efficiency**: Fewer mutations sent to the server
+- **User intent preservation**: Final state matches what user expects
+- **Optimistic UI consistency**: Local state always reflects user actions
 
 ## Transaction lifecycle
 

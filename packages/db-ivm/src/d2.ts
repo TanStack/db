@@ -8,7 +8,6 @@ import type { MultiSet, MultiSetArray } from "./multiset.js"
 import type { ID2, IStreamBuilder, PipedOperator } from "./types.js"
 
 export class D2 implements ID2 {
-  #streams: Array<DifferenceStreamReader<any>> = []
   #operators: Array<UnaryOperator<any> | BinaryOperator<any>> = []
   #nextOperatorId = 0
   #finalized = false
@@ -31,18 +30,12 @@ export class D2 implements ID2 {
     const writer = new DifferenceStreamWriter<T>()
     // Use the root stream builder that exposes the sendData and sendFrontier methods
     const streamBuilder = new RootStreamBuilder<T>(this, writer)
-    this.#streams.push(streamBuilder.connectReader())
     return streamBuilder
   }
 
   addOperator(operator: UnaryOperator<any> | BinaryOperator<any>): void {
     this.#checkNotFinalized()
     this.#operators.push(operator)
-  }
-
-  addStream(stream: DifferenceStreamReader<any>): void {
-    this.#checkNotFinalized()
-    this.#streams.push(stream)
   }
 
   finalize() {
