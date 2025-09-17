@@ -2,7 +2,7 @@ import { BaseLeaderElection } from "./LeaderElection"
 
 export class WebLocksLeader extends BaseLeaderElection {
   private lockName: string
-  private lockController: AbortController | null = null
+  private releaseLock: (() => void) | null = null
 
   constructor(lockName = `offline-executor-leader`) {
     super()
@@ -19,24 +19,21 @@ export class WebLocksLeader extends BaseLeaderElection {
     }
 
     try {
-      this.lockController = new AbortController()
+      let releaseLock: (() => void) | null = null
 
       const result = await navigator.locks.request(
         this.lockName,
         {
           mode: `exclusive`,
           ifAvailable: true,
-          signal: this.lockController.signal,
         },
         async (lock) => {
           if (lock) {
             this.notifyLeadershipChange(true)
-
             return new Promise<boolean>((resolve) => {
-              this.lockController!.signal.addEventListener(`abort`, () => {
-                this.notifyLeadershipChange(false)
-                resolve(true)
-              })
+              // Store the release function
+              releaseLock = () => resolve(true)
+              this.releaseLock = releaseLock
             })
           }
           return false
@@ -54,9 +51,9 @@ export class WebLocksLeader extends BaseLeaderElection {
   }
 
   releaseLeadership(): void {
-    if (this.lockController) {
-      this.lockController.abort()
-      this.lockController = null
+    if (this.releaseLock) {
+      this.releaseLock() // This will resolve the promise and release the lock
+      this.releaseLock = null
     }
     this.notifyLeadershipChange(false)
   }
