@@ -2,6 +2,7 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection.js"
@@ -20,7 +21,6 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
-import { CollectionSubscription } from "../../collection-subscription.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -324,11 +324,14 @@ export class CollectionConfigBuilder<
           syncState,
           this
         )
+
         const subscription = collectionSubscriber.subscribe()
         this.subscriptions[collectionId] = subscription
 
-        const loadMore =
-          collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+          collectionSubscriber,
+          subscription
+        )
 
         return loadMore
       }

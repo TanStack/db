@@ -1,17 +1,24 @@
-import type { Collection } from "./collection.js"
-import type { ChangeMessage } from "./types.js"
-import { OrderBy, type BasicExpression } from "./query/ir.js"
-import { createFilteredCallback } from "./change-events.js"
+import {
+  createFilterFunctionFromExpression,
+  createFilteredCallback,
+} from "./change-events.js"
 import { ensureIndexForExpression } from "./indexes/auto-index.js"
 import { and } from "./query/index.js"
+import type { BasicExpression } from "./query/ir.js"
+import type { BaseIndex } from "./indexes/base-index.js"
+import type { ChangeMessage } from "./types.js"
+import type { Collection } from "./collection.js"
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
-  orderBy?: OrderBy
-  limit?: number
   optimizedOnly?: boolean
 }
-    
+
+type RequestLimitedSnapshotOptions = {
+  minValue?: any
+  limit: number
+}
+
 type CollectionSubscriptionOptions = {
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
@@ -30,6 +37,8 @@ export class CollectionSubscription {
   private sentKeys = new Set<string | number>()
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
+
+  private orderByIndex: BaseIndex<string | number> | undefined
 
   constructor(
     private collection: Collection<any, any, any, any, any>,
@@ -56,6 +65,10 @@ export class CollectionSubscription {
       : this.callback
   }
 
+  setOrderByIndex(index: BaseIndex<any>) {
+    this.orderByIndex = index
+  }
+
   hasLoadedInitialState() {
     return this.loadedInitialState
   }
@@ -66,8 +79,14 @@ export class CollectionSubscription {
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
     const newChanges = this.filterAndFlipChanges(changes)
-    console.log("subscription.emitEvents, og changes: ", JSON.stringify(changes, null, 2))
-    console.log("subscription.emitEvents, new changes: ", JSON.stringify(newChanges, null, 2))
+    console.log(
+      `subscription.emitEvents, og changes: `,
+      JSON.stringify(changes, null, 2)
+    )
+    console.log(
+      `subscription.emitEvents, new changes: `,
+      JSON.stringify(newChanges, null, 2)
+    )
     this.filteredCallback(newChanges)
   }
 
@@ -87,13 +106,13 @@ export class CollectionSubscription {
       return false
     }
 
-    let stateOpts: RequestSnapshotOptions = {
+    const stateOpts: RequestSnapshotOptions = {
       where: this.options.whereExpression,
       optimizedOnly: opts?.optimizedOnly ?? false,
     }
 
     if (opts) {
-      if ("where" in opts) {
+      if (`where` in opts) {
         const snapshotWhereExp = opts.where
         if (stateOpts.where) {
           // Combine the two where expressions
@@ -104,14 +123,6 @@ export class CollectionSubscription {
           stateOpts.where = snapshotWhereExp
         }
       }
-
-      if ("orderBy" in opts) {
-        stateOpts.orderBy = opts.orderBy
-
-        if ("limit" in opts) {
-          stateOpts.limit = opts.limit
-        }
-      }
     } else {
       // No options provided so it's loading the entire initial state
       this.loadedInitialState = true
@@ -119,6 +130,14 @@ export class CollectionSubscription {
 
     // TODO: Then modify currentStateAsChanges to handle the orderBy and limit options
     //       because those changes will be needed for the orderBy optimization
+
+    // TODO: when loading from the index we can take into account the where clause now
+    //       such that we always load the limit amount of items that fulfill the where clause
+    //       and if we don't have enough items that really means we exhausted the collection
+    //       and so there is no need to check if we need to load more data or not
+    //       Not 100% sure, because there could perhaps be an intermediate operator that filters out rows
+    //       before they get to the topK operator?
+    //       e.g. if we do an inner join, we don't know how many rows will come out of it and thus reach the topK operator
 
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
 
@@ -143,10 +162,68 @@ export class CollectionSubscription {
     //           to disable this behavior
 
     this.snapshotSent = true
-    console.log("og snapshot: ", JSON.stringify(snapshot, null, 2))
-    console.log("Sending snapshot: ", JSON.stringify(filteredSnapshot, null, 2))
+    console.log(`og snapshot: `, JSON.stringify(snapshot, null, 2))
+    console.log(`Sending snapshot: `, JSON.stringify(filteredSnapshot, null, 2))
     this.callback(filteredSnapshot)
     return true
+  }
+
+  /**
+   * Sends a snapshot that is limited to the first `limit` rows that fulfill the `where` clause and are bigger than `minValue`.
+   * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
+   * It uses that range index to load the items in the order of the index.
+   * Note: it does not send keys that have already been sent before.
+   */
+  requestLimitedSnapshot({ limit, minValue }: RequestLimitedSnapshotOptions) {
+    if (!limit) throw new Error(`limit is required`)
+
+    if (!this.orderByIndex) {
+      throw new Error(
+        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
+      )
+    }
+
+    const index = this.orderByIndex
+    const where = this.options.whereExpression
+    const whereFilterFn = where
+      ? createFilterFunctionFromExpression(where)
+      : undefined
+
+    const filterFn = (key: string | number): boolean => {
+      if (this.sentKeys.has(key)) {
+        return false
+      }
+
+      const value = this.collection.get(key)
+      if (value === undefined) {
+        return false
+      }
+
+      return whereFilterFn?.(value) ?? true
+    }
+
+    let biggestObservedValue = minValue
+    const changes: Array<ChangeMessage<any, string | number>> = []
+    let keys: Array<string | number> = index.take(limit, minValue, filterFn)
+
+    const valuesNeeded = () => Math.max(limit - changes.length, 0)
+    const collectionExhausted = () => keys.length === 0
+
+    while (valuesNeeded() > 0 && !collectionExhausted()) {
+      for (const key of keys) {
+        const value = this.collection.get(key)!
+        changes.push({
+          type: `insert`,
+          key,
+          value,
+        })
+        biggestObservedValue = value
+      }
+
+      keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
+    }
+
+    this.callback(changes)
   }
 
   /**
@@ -154,7 +231,7 @@ export class CollectionSubscription {
    * Deletes are filtered out for keys that have not been sent yet.
    * Updates are flipped into inserts for keys that have not been sent yet.
    */
-  filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
+  private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
     if (this.loadedInitialState) {
       // We loaded the entire initial state
       // so no need to filter or flip changes

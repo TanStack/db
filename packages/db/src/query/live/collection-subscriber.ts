@@ -71,7 +71,7 @@ export class CollectionSubscriber<
       // If the collection is lazy then we should not include the initial state
       const includeInitialState =
         !this.collectionConfigBuilder.lazyCollections.has(this.collectionId)
-      
+
       subscription = this.subscribeToMatchingChanges(
         whereExpression,
         includeInitialState
@@ -116,7 +116,7 @@ export class CollectionSubscriber<
   ) {
     const sendChanges = (
       changes: Array<ChangeMessage<any, string | number>>
-    ) => {      
+    ) => {
       this.sendChangesToPipeline(changes)
     }
 
@@ -131,27 +131,30 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const { offset, limit, comparator, dataNeeded } =
+    const { offset, limit, comparator, dataNeeded, index } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
 
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-    this.loadNextItems(offset + limit)
+    // this.loadNextItems(offset + limit)
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
-      console.log("sendChangesInRange, changes: ", JSON.stringify(changes, null, 2))
+      console.log(
+        `sendChangesInRange, changes: `,
+        JSON.stringify(changes, null, 2)
+      )
       // Split live updates into a delete of the old value and an insert of the new value
       // and filter out changes that are bigger than the biggest value we've sent so far
       // because they can't affect the topK
       const splittedChanges = splitUpdates(changes)
       let filteredChanges = splittedChanges
       if (dataNeeded!() === 0) {
-        console.log("dataNeeded!(): ", dataNeeded!())
-        console.log("this.biggest: ", this.biggest)
+        console.log(`dataNeeded!(): `, dataNeeded!())
+        console.log(`this.biggest: `, this.biggest)
         // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
         // because they can never make it into the topK.
         // However, if the topK isn't full yet, we need to also send changes > maxSentValue
@@ -162,11 +165,8 @@ export class CollectionSubscriber<
           this.biggest
         )
       }
-      console.log("splittedChanges: ", JSON.stringify(filteredChanges, null, 2))
-      this.sendChangesToPipeline(
-        filteredChanges,
-        this.loadMoreIfNeeded.bind(this)
-      )
+      console.log(`splittedChanges: `, JSON.stringify(filteredChanges, null, 2))
+      this.sendChangesToPipelineWithTracking(filteredChanges, subscription)
     }
 
     // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
@@ -175,13 +175,21 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
+    subscription.setOrderByIndex(index)
+
+    // Load the first `offset + limit` values from the index
+    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+    subscription.requestLimitedSnapshot({
+      limit: offset + limit,
+    })
+
     return subscription
   }
 
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  loadMoreIfNeeded() {
+  loadMoreIfNeeded(subscription: CollectionSubscription) {
     const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
@@ -189,7 +197,7 @@ export class CollectionSubscriber<
 
     if (!orderByInfo) {
       // This query has no orderBy operator
-      // so there's no data to load, just return true
+      // so there's no data to load
       return true
     }
 
@@ -206,32 +214,31 @@ export class CollectionSubscriber<
     // `dataNeeded` probes the orderBy operator to see if it needs more data
     // if it needs more data, it returns the number of items it needs
     const n = dataNeeded()
-    let noMoreNextItems = false
     if (n > 0) {
-      const loadedItems = this.loadNextItems(n)
-      noMoreNextItems = loadedItems === 0
+      this.loadNextItems(n, subscription)
     }
-
-    // Indicate that we're done loading data if we didn't need to load more data
-    // or there's no more data to load
-    return n === 0 || noMoreNextItems
+    return true
   }
 
   private sendChangesToPipelineWithTracking(
-    changes: Iterable<ChangeMessage<any, string | number>>
+    changes: Iterable<ChangeMessage<any, string | number>>,
+    subscription: CollectionSubscription
   ) {
     const { comparator } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
     const trackedChanges = this.trackSentValues(changes, comparator)
-    this.sendChangesToPipeline(trackedChanges, this.loadMoreIfNeeded.bind(this))
+    this.sendChangesToPipeline(
+      trackedChanges,
+      this.loadMoreIfNeeded.bind(this, subscription)
+    )
   }
 
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
-  private loadNextItems(n: number) {
-    const { valueExtractorForRawRow, index } =
+  private loadNextItems(n: number, subscription: CollectionSubscription) {
+    const { valueExtractorForRawRow } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -240,13 +247,10 @@ export class CollectionSubscriber<
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
     // Take the `n` items after the biggest sent value
-    const nextOrderedKeys = index.take(n, biggestSentValue)
-    const nextInserts: Array<ChangeMessage<any, string | number>> =
-      nextOrderedKeys.map((key) => {
-        return { type: `insert`, key, value: this.collection.get(key) }
-      })
-    this.sendChangesToPipelineWithTracking(nextInserts)
-    return nextInserts.length
+    subscription.requestLimitedSnapshot({
+      limit: n,
+      minValue: biggestSentValue,
+    })
   }
 
   private getWhereClauseFromAlias(

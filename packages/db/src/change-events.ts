@@ -41,7 +41,10 @@ export interface CollectionLike<
  *   whereExpression: eq(row.status, 'active')
  * })
  */
-export function currentStateAsChanges<T extends object, TKey extends string | number>(
+export function currentStateAsChanges<
+  T extends object,
+  TKey extends string | number,
+>(
   collection: CollectionLike<T, TKey>,
   options: CurrentStateAsChangesOptions = {}
 ): Array<ChangeMessage<T>> | void {
@@ -63,6 +66,9 @@ export function currentStateAsChanges<T extends object, TKey extends string | nu
     return result
   }
 
+  // TODO: handle orderBy and limit options
+  //       by calling optimizeOrderedLimit
+
   if (!options.where) {
     // No filtering, return all items
     return collectFilteredResults()
@@ -70,7 +76,7 @@ export function currentStateAsChanges<T extends object, TKey extends string | nu
 
   // There's a where clause, let's see if we can use an index
   try {
-    let expression: BasicExpression<boolean> = options.where
+    const expression: BasicExpression<boolean> = options.where
 
     // Try to optimize the query using indexes
     const optimizationResult = optimizeExpressionWithIndexes(
@@ -107,7 +113,7 @@ export function currentStateAsChanges<T extends object, TKey extends string | nu
       error
     )
 
-    const filterFn = createFilterFunctionFromExpression(options.where!)
+    const filterFn = createFilterFunctionFromExpression(options.where)
 
     if (options.optimizedOnly) {
       return
