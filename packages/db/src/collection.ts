@@ -2333,23 +2333,23 @@ export class CollectionImpl<
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   changes.forEach(change => {
    *     console.log(`${change.type}: ${change.key}`, change.value)
    *   })
    * })
    *
-   * // Later: unsubscribe()
+   * // Later: subscription.unsubscribe()
    *
    * @example
    * // Include current state immediately
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
    *
    * @example
    * // Subscribe only to changes matching a condition
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
@@ -2358,7 +2358,7 @@ export class CollectionImpl<
    *
    * @example
    * // Subscribe using a pre-compiled expression
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
