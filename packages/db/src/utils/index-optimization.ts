@@ -16,7 +16,7 @@
  */
 
 import type { BaseIndex, IndexOperation } from "../indexes/base-index.js"
-import type { BasicExpression } from "../query/ir.js"
+import type { BasicExpression, OrderBy } from "../query/ir.js"
 
 /**
  * Result of index-based query optimization
@@ -342,6 +342,14 @@ function optimizeSimpleComparison<TKey extends string | number>(
   }
 
   return { canOptimize: false, matchingKeys: new Set() }
+}
+
+function optimizeOrderedLimit(
+  orderBy: OrderBy,
+  limit: number,
+  indexes: Map<number, BaseIndex<any>>
+) {
+  
 }
 
 /**

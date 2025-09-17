@@ -16,7 +16,6 @@ import {
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from "../../errors.js"
-import { findIndexForField } from "../../utils/index-optimization.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { compileExpression } from "./evaluators.js"
 import { compileQuery, followRef } from "./index.js"
@@ -25,10 +24,10 @@ import type {
   BasicExpression,
   CollectionRef,
   JoinClause,
-  PropRef,
   QueryIR,
   QueryRef,
 } from "../ir.js"
+import { PropRef } from "../ir.js"
 import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection.js"
 import type {
@@ -37,7 +36,8 @@ import type {
   NamespacedRow,
 } from "../../types.js"
 import type { QueryCache, QueryMapping } from "./types.js"
-import type { BaseIndex } from "../../indexes/base-index.js"
+import { inArray } from "../builder/functions.js"
+import { CollectionSubscription } from "../../collection-subscription.js"
 
 export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {
@@ -58,6 +58,7 @@ export function processJoins(
   cache: QueryCache,
   queryMapping: QueryMapping,
   collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -76,6 +77,7 @@ export function processJoins(
       cache,
       queryMapping,
       collections,
+      subscriptions,
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
@@ -99,6 +101,7 @@ function processJoin(
   cache: QueryCache,
   queryMapping: QueryMapping,
   collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -113,6 +116,7 @@ function processJoin(
     joinClause.from,
     allInputs,
     collections,
+    subscriptions,
     callbacks,
     lazyCollections,
     optimizableOrderByCollections,
@@ -215,7 +219,7 @@ function processJoin(
       const activePipeline =
         activeCollection === `main` ? mainPipeline : joinedPipeline
 
-      let index: BaseIndex<string | number> | undefined
+      //let index: BaseIndex<string | number> | undefined
 
       const lazyCollectionJoinExpr =
         activeCollection === `main`
@@ -238,16 +242,45 @@ function processJoin(
         )
       }
 
-      let deoptimized = false
+      //let deoptimized = false
 
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          if (deoptimized) {
+          console.log("in tap")
+          const lazyCollectionSubscription = subscriptions[lazyCollection.id]
+
+          if (!lazyCollectionSubscription) {
+            console.log("lazyCollectionSubscription is missing: ", JSON.stringify(subscriptions, null, 2))
+            throw new Error(
+              `Internal error: subscription for collection is missing in join pipeline. Make sure the live query collection sets the subscription before running the pipeline.`
+            )
+          }
+
+          if (lazyCollectionSubscription.hasLoadedInitialState()) {
+            // Entire state was already loaded because we deoptimized the join
+            console.log("Returning because deoptimized")
             return
           }
 
+          console.log("data: ", JSON.stringify(data.getInner(), null, 2))
+          const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
+          const lazyJoinRef = new PropRef(followRefResult.path)
+          console.log("Requesting snapshot for lazyJoinRef:", JSON.stringify(lazyJoinRef, null, 2))
+          console.log("Join keys:", JSON.stringify(joinKeys, null, 2))
+          const loaded = lazyCollectionSubscription.requestSnapshot({
+            where: inArray(lazyJoinRef, joinKeys),
+            optimizedOnly: true,
+          })
+          console.log("Loaded", loaded)
+
+          if (!loaded) {
+            // Snapshot wasn't sent because it could not be loaded from the indexes
+            lazyCollectionSubscription.requestSnapshot()
+          }
+
+          /*
           // Find the index for the path we join on
           // we need to find the index inside the map operator
           // because the indexes are only available after the initial sync
@@ -283,6 +316,7 @@ function processJoin(
             deoptimized = true
             loadInitialState()
           }
+          */
         })
       )
 
@@ -397,6 +431,7 @@ function processJoinSource(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -420,6 +455,7 @@ function processJoinSource(
         originalQuery,
         allInputs,
         collections,
+        subscriptions,
         callbacks,
         lazyCollections,
         optimizableOrderByCollections,

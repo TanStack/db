@@ -20,6 +20,7 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
+import { CollectionSubscription } from "../../collection-subscription.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -48,6 +49,8 @@ export class CollectionConfigBuilder<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
+  // Map of collection ID to subscription
+  readonly subscriptions: Record<string, CollectionSubscription> = {}
   // Map of collection IDs to functions that load keys for that lazy collection
   lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
@@ -189,6 +192,7 @@ export class CollectionConfigBuilder<
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
+      this.subscriptions,
       this.lazyCollectionsCallbacks,
       this.lazyCollections,
       this.optimizableOrderByCollections
@@ -320,7 +324,8 @@ export class CollectionConfigBuilder<
           syncState,
           this
         )
-        collectionSubscriber.subscribe()
+        const subscription = collectionSubscriber.subscribe()
+        this.subscriptions[collectionId] = subscription
 
         const loadMore =
           collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
@@ -330,7 +335,7 @@ export class CollectionConfigBuilder<
     )
 
     const loadMoreDataCallback = () => {
-      loaders.map((loader) => loader()) // .every((doneLoading) => doneLoading)
+      loaders.map((loader) => loader())
       return true
     }
 

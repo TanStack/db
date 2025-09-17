@@ -41,13 +41,10 @@ export interface CollectionLike<
  *   whereExpression: eq(row.status, 'active')
  * })
  */
-export function currentStateAsChanges<
-  T extends object,
-  TKey extends string | number,
->(
+export function currentStateAsChanges<T extends object, TKey extends string | number>(
   collection: CollectionLike<T, TKey>,
-  options: CurrentStateAsChangesOptions<T> = {}
-): Array<ChangeMessage<T>> {
+  options: CurrentStateAsChangesOptions = {}
+): Array<ChangeMessage<T>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
     filterFn?: (value: T) => boolean
@@ -66,31 +63,14 @@ export function currentStateAsChanges<
     return result
   }
 
-  if (!options.where && !options.whereExpression) {
+  if (!options.where) {
     // No filtering, return all items
     return collectFilteredResults()
   }
 
   // There's a where clause, let's see if we can use an index
   try {
-    let expression: BasicExpression<boolean>
-
-    if (options.whereExpression) {
-      // Use the pre-compiled expression directly
-      expression = options.whereExpression
-    } else if (options.where) {
-      // Create the single-row refProxy for the callback
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
-
-      // Execute the callback to get the expression
-      const whereExpression = options.where(singleRowRefProxy)
-
-      // Convert the result to a BasicExpression
-      expression = toExpression(whereExpression)
-    } else {
-      // This should never happen due to the check above, but TypeScript needs it
-      return []
-    }
+    let expression: BasicExpression<boolean> = options.where
 
     // Try to optimize the query using indexes
     const optimizationResult = optimizeExpressionWithIndexes(
@@ -113,11 +93,11 @@ export function currentStateAsChanges<
       }
       return result
     } else {
-      // No index found or complex expression, fall back to full scan with filter
-      const filterFn = options.where
-        ? createFilterFunction(options.where)
-        : createFilterFunctionFromExpression(expression)
+      if (options.optimizedOnly) {
+        return
+      }
 
+      const filterFn = createFilterFunctionFromExpression(expression)
       return collectFilteredResults(filterFn)
     }
   } catch (error) {
@@ -127,9 +107,11 @@ export function currentStateAsChanges<
       error
     )
 
-    const filterFn = options.where
-      ? createFilterFunction(options.where)
-      : createFilterFunctionFromExpression(options.whereExpression!)
+    const filterFn = createFilterFunctionFromExpression(options.where!)
+
+    if (options.optimizedOnly) {
+      return
+    }
 
     return collectFilteredResults(filterFn)
   }
@@ -201,11 +183,9 @@ export function createFilterFunctionFromExpression<T extends object>(
  */
 export function createFilteredCallback<T extends object>(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-  options: SubscribeChangesOptions<T>
+  options: SubscribeChangesOptions
 ): (changes: Array<ChangeMessage<T>>) => void {
-  const filterFn = options.whereExpression
-    ? createFilterFunctionFromExpression(options.whereExpression)
-    : createFilterFunction(options.where!)
+  const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
   return (changes: Array<ChangeMessage<T>>) => {
     const filteredChanges: Array<ChangeMessage<T>> = []

@@ -1,5 +1,4 @@
 import { MultiSet } from "@tanstack/db-ivm"
-import { createFilterFunctionFromExpression } from "../../change-events.js"
 import { convertToBasicExpression } from "../compiler/expressions.js"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
@@ -8,6 +7,7 @@ import type { ChangeMessage, SyncConfig } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression } from "../ir.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 
 export class CollectionSubscriber<
   TContext extends Context,
@@ -27,7 +27,7 @@ export class CollectionSubscriber<
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
   ) {}
 
-  subscribe() {
+  subscribe(): CollectionSubscription {
     const collectionAlias = findCollectionAlias(
       this.collectionId,
       this.collectionConfigBuilder.query
@@ -43,7 +43,7 @@ export class CollectionSubscriber<
 
       if (whereExpression) {
         // Use index optimization for this collection
-        this.subscribeToChanges(whereExpression)
+        return this.subscribeToChanges(whereExpression)
       } else {
         // This should not happen - if we have a whereClause but can't create whereExpression,
         // it indicates a bug in our optimization logic
@@ -54,25 +54,34 @@ export class CollectionSubscriber<
       }
     } else {
       // No WHERE clause for this collection, use regular subscription
-      this.subscribeToChanges()
+      return this.subscribeToChanges()
     }
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
-    let unsubscribe: () => void
-    if (this.collectionConfigBuilder.lazyCollections.has(this.collectionId)) {
-      unsubscribe = this.subscribeToMatchingChanges(whereExpression)
-    } else if (
+    let subscription: CollectionSubscription
+    if (
       Object.hasOwn(
         this.collectionConfigBuilder.optimizableOrderByCollections,
         this.collectionId
       )
     ) {
-      unsubscribe = this.subscribeToOrderedChanges(whereExpression)
+      subscription = this.subscribeToOrderedChanges(whereExpression)
     } else {
-      unsubscribe = this.subscribeToAllChanges(whereExpression)
+      // If the collection is lazy then we should not include the initial state
+      const includeInitialState =
+        !this.collectionConfigBuilder.lazyCollections.has(this.collectionId)
+      
+      subscription = this.subscribeToMatchingChanges(
+        whereExpression,
+        includeInitialState
+      )
+    }
+    const unsubscribe = () => {
+      subscription.unsubscribe()
     }
     this.syncState.unsubscribeCallbacks.add(unsubscribe)
+    return subscription
   }
 
   private sendChangesToPipeline(
@@ -101,133 +110,22 @@ export class CollectionSubscriber<
     )
   }
 
-  // Wraps the sendChangesToPipeline function
-  // in order to turn `update`s into `insert`s
-  // for keys that have not been sent to the pipeline yet
-  // and filter out deletes for keys that have not been sent
-  private sendVisibleChangesToPipeline = (
-    changes: Array<ChangeMessage<any, string | number>>,
-    loadedInitialState: boolean
-  ) => {
-    if (loadedInitialState) {
-      // There was no index for the join key
-      // so we loaded the initial state
-      // so we can safely assume that the pipeline has seen all keys
-      return this.sendChangesToPipeline(changes)
-    }
-
-    const newChanges = []
-    for (const change of changes) {
-      let newChange = change
-      if (!this.sentKeys.has(change.key)) {
-        if (change.type === `update`) {
-          newChange = { ...change, type: `insert` }
-        } else if (change.type === `delete`) {
-          // filter out deletes for keys that have not been sent
-          continue
-        }
-        this.sentKeys.add(change.key)
-      }
-      newChanges.push(newChange)
-    }
-
-    return this.sendChangesToPipeline(newChanges)
-  }
-
-  private loadKeys(
-    keys: Iterable<string | number>,
-    filterFn: (item: object) => boolean
+  private subscribeToMatchingChanges(
+    whereExpression: BasicExpression<boolean> | undefined,
+    includeInitialState: boolean = false
   ) {
-    const changes: Array<ChangeMessage<any, string | number>> = []
-    for (const key of keys) {
-      // Only load the key once
-      if (this.sentKeys.has(key)) continue
-
-      const value = this.collection.get(key)
-      if (value !== undefined && filterFn(value)) {
-        this.sentKeys.add(key)
-        changes.push({ type: `insert`, key, value })
-      }
-    }
-    if (changes.length > 0) {
+    const sendChanges = (
+      changes: Array<ChangeMessage<any, string | number>>
+    ) => {      
       this.sendChangesToPipeline(changes)
     }
-  }
 
-  private subscribeToAllChanges(
-    whereExpression: BasicExpression<boolean> | undefined
-  ) {
-    const sendChangesToPipeline = this.sendChangesToPipeline.bind(this)
-    const unsubscribe = this.collection.subscribeChanges(
-      sendChangesToPipeline,
-      {
-        includeInitialState: true,
-        ...(whereExpression ? { whereExpression } : undefined),
-      }
-    )
-    return unsubscribe
-  }
-
-  private subscribeToMatchingChanges(
-    whereExpression: BasicExpression<boolean> | undefined
-  ) {
-    // Flag to indicate we have send to whole initial state of the collection
-    // to the pipeline, this is set when there are no indexes that can be used
-    // to filter the changes and so the whole state was requested from the collection
-    let loadedInitialState = false
-
-    // Flag to indicate that we have started sending changes to the pipeline.
-    // This is set to true by either the first call to `loadKeys` or when the
-    // query requests the whole initial state in `loadInitialState`.
-    // Until that point we filter out all changes from subscription to the collection.
-    let sendChanges = false
-
-    const sendVisibleChanges = (
-      changes: Array<ChangeMessage<any, string | number>>
-    ) => {
-      // We filter out changes when sendChanges is false to ensure that we don't send
-      // any changes from the live subscription until the join operator requests either
-      // the initial state or its first key. This is needed otherwise it could receive
-      // changes which are then later subsumed by the initial state (and that would
-      // lead to weird bugs due to the data being received twice).
-      this.sendVisibleChangesToPipeline(
-        sendChanges ? changes : [],
-        loadedInitialState
-      )
-    }
-
-    const unsubscribe = this.collection.subscribeChanges(sendVisibleChanges, {
+    const subscription = this.collection.subscribeChanges(sendChanges, {
+      includeInitialState,
       whereExpression,
     })
 
-    // Create a function that loads keys from the collection
-    // into the query pipeline on demand
-    const filterFn = whereExpression
-      ? createFilterFunctionFromExpression(whereExpression)
-      : () => true
-    const loadKs = (keys: Set<string | number>) => {
-      sendChanges = true
-      return this.loadKeys(keys, filterFn)
-    }
-
-    // Store the functions to load keys and load initial state in the `lazyCollectionsCallbacks` map
-    // This is used by the join operator to dynamically load matching keys from the lazy collection
-    // or to get the full initial state of the collection if there's no index for the join key
-    this.collectionConfigBuilder.lazyCollectionsCallbacks[this.collectionId] = {
-      loadKeys: loadKs,
-      loadInitialState: () => {
-        // Make sure we only load the initial state once
-        if (loadedInitialState) return
-        loadedInitialState = true
-        sendChanges = true
-
-        const changes = this.collection.currentStateAsChanges({
-          whereExpression,
-        })
-        this.sendChangesToPipeline(changes)
-      },
-    }
-    return unsubscribe
+    return subscription
   }
 
   private subscribeToOrderedChanges(
@@ -245,12 +143,15 @@ export class CollectionSubscriber<
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
+      console.log("sendChangesInRange, changes: ", JSON.stringify(changes, null, 2))
       // Split live updates into a delete of the old value and an insert of the new value
       // and filter out changes that are bigger than the biggest value we've sent so far
       // because they can't affect the topK
       const splittedChanges = splitUpdates(changes)
       let filteredChanges = splittedChanges
       if (dataNeeded!() === 0) {
+        console.log("dataNeeded!(): ", dataNeeded!())
+        console.log("this.biggest: ", this.biggest)
         // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
         // because they can never make it into the topK.
         // However, if the topK isn't full yet, we need to also send changes > maxSentValue
@@ -261,6 +162,7 @@ export class CollectionSubscriber<
           this.biggest
         )
       }
+      console.log("splittedChanges: ", JSON.stringify(filteredChanges, null, 2))
       this.sendChangesToPipeline(
         filteredChanges,
         this.loadMoreIfNeeded.bind(this)
@@ -269,11 +171,11 @@ export class CollectionSubscriber<
 
     // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
     // values that are bigger don't need to be sent because they can't affect the topK
-    const unsubscribe = this.collection.subscribeChanges(sendChangesInRange, {
+    const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
     })
 
-    return unsubscribe
+    return subscription
   }
 
   // This function is called by maybeRunGraph
@@ -463,7 +365,7 @@ function* filterChanges<
 }
 
 /**
- * Filters changes to only include those that are smaller than the provided max value
+ * Filters changes to only include those that are smaller or equal to the provided max value
  * @param changes - Iterable of changes to filter
  * @param comparator - Comparator function to use for filtering
  * @param maxValue - Range to filter changes within (range boundaries are exclusive)
