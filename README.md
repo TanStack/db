@@ -62,23 +62,40 @@ A reactive client store that lets you build fast, sync‑driven apps with a back
 <tr>
 <td>
 <a href="https://www.coderabbit.ai/?via=tanstack&dub_id=aCcEEdAOqqutX6OS" >
-<img src="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" alt="Code Rabbit"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/coderabbit-dark-CMcuvjEy.svg" height="40" />
+  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" />
+  <img src="https://tanstack.com/assets/coderabbit-light-DVMJ2jHi.svg" height="40" alt="CodeRabbit" />
+</picture>
 </a>
 </td>
 <td>
 <a href="https://www.cloudflare.com?utm_source=tanstack">
- <img src="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="70" alt="Cloudflare"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/cloudflare-white-DQDB7UaL.svg" height="60" />
+  <source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="60" />
+  <img src="https://tanstack.com/assets/cloudflare-black-CPufaW0B.svg" height="60" alt="Cloudflare" />
+</picture>
 </a>
 </td>
 </tr>
 <tr>
 <td>
-<a href="https://electric-sql.com"><img src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png" height="90" alt="ElectricSQL logo"/>
+<a href="https://electric-sql.com">
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/electric-dark-Bfu2Vl2j.svg" height="60">
+	<source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/electric-light-C-5MDda4.svg" height="60">
+	<img src="https://raw.githubusercontent.com/electric-sql/meta/main/identity/ElectricSQL-logo.with-background.sm.png" height="60" alt="ElectricSQL logo"/>
+</picture>
 </a>
 </td>
 <td>
 <a href="https://www.prisma.io?utm_source=tanstack&via=tanstack">
-<img src="https://raw.githubusercontent.com/tanstack/tanstack.com/main/src/images/prisma-light.svg" height="50" alt="Prisma"/>
+<picture>
+<source media="(prefers-color-scheme: dark)" srset="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60">
+<source media="(prefers-color-scheme: light)" srset="https://tanstack.com/assets/prisma-light-Cloa3Onm.svg" height="60">
+<img src="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60" alt="Prisma">
+</picture>
 </a>
 </td>
 </tr>
