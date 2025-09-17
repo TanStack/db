@@ -92,9 +92,9 @@ A reactive client store that lets you build fast, sync‑driven apps with a back
 <td>
 <a href="https://www.prisma.io?utm_source=tanstack&via=tanstack">
 <picture>
-<source media="(prefers-color-scheme: dark)" srset="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60">
-<source media="(prefers-color-scheme: light)" srset="https://tanstack.com/assets/prisma-light-Cloa3Onm.svg" height="60">
-<img src="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60" alt="Prisma">
+	<source media="(prefers-color-scheme: dark)" srcset="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60">
+	<source media="(prefers-color-scheme: light)" srcset="https://tanstack.com/assets/prisma-light-Cloa3Onm.svg" height="60">
+	<img src="https://tanstack.com/assets/prisma-dark-DwgDxLwn.svg" height="60" alt="Prisma"/>
 </picture>
 </a>
 </td>
