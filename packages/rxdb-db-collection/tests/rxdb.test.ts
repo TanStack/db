@@ -225,12 +225,12 @@ describe(`RxDB Integration`, () => {
       await rxCollection.insert({ id: `3`, name: `Item 3` })
 
       // Access collection data to restart sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       await collection.toArrayWhenReady()
       expect(collection.get(`3`).name).toEqual(`Item 3`)
 
-      unsubscribe()
+      subscription.unsubscribe()
       await db.remove()
     })
   })
