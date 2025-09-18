@@ -685,6 +685,8 @@ export class CollectionImpl<
     this.batchedEvents = []
     this.shouldBatchEvents = false
 
+    this.events.cleanup()
+
     // Update status
     this.setStatus(`cleaned-up`)
 
@@ -2548,5 +2550,15 @@ export class CollectionImpl<
     callback: CollectionEventHandler<T>
   ) {
     this.events.off(event, callback)
+  }
+
+  /**
+   * Wait for a collection event
+   */
+  public waitFor<T extends keyof AllCollectionEvents>(
+    event: T,
+    timeout?: number
+  ) {
+    return this.events.waitFor(event, timeout)
   }
 }

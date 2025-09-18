@@ -38,6 +38,11 @@ export type AllCollectionEvents = {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
 
+export type CollectionEvent =
+  | AllCollectionEvents[keyof AllCollectionEvents]
+  | CollectionStatusChangeEvent
+  | CollectionSubscribersChangeEvent
+
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T]
 ) => void
@@ -85,11 +90,44 @@ export class CollectionEvents {
     this.listeners.get(event)?.delete(callback)
   }
 
+  waitFor<T extends keyof AllCollectionEvents>(
+    event: T,
+    timeout?: number
+  ): Promise<AllCollectionEvents[T]> {
+    return new Promise((resolve, reject) => {
+      let timeoutId: NodeJS.Timeout | undefined
+      const unsubscribe = this.on(event, (eventPayload) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = undefined
+        }
+        resolve(eventPayload)
+        unsubscribe()
+      })
+      if (timeout) {
+        timeoutId = setTimeout(() => {
+          timeoutId = undefined
+          unsubscribe()
+          reject(new Error(`Timeout waiting for event ${event}`))
+        }, timeout)
+      }
+    })
+  }
+
   emit<T extends keyof AllCollectionEvents>(
     event: T,
     eventPayload: AllCollectionEvents[T]
   ) {
-    this.listeners.get(event)?.forEach((listener) => listener(eventPayload))
+    this.listeners.get(event)?.forEach((listener) => {
+      try {
+        listener(eventPayload)
+      } catch (error) {
+        // Re-throw in a microtask to surface the error
+        queueMicrotask(() => {
+          throw error
+        })
+      }
+    })
   }
 
   emitStatusChange<T extends CollectionStatus>(
@@ -123,5 +161,9 @@ export class CollectionEvents {
       previousSubscriberCount,
       subscriberCount,
     })
+  }
+
+  cleanup() {
+    this.listeners.clear()
   }
 }

@@ -121,4 +121,37 @@ describe(`Collection Events System`, () => {
       unsubscribe()
     })
   })
+
+  describe(`waitFor Method`, () => {
+    it(`should resolve when event is emitted without timeout`, async () => {
+      const waitPromise = collection.waitFor(`status:change`)
+
+      // Trigger the event
+      collection.startSyncImmediate()
+
+      const event = await waitPromise
+
+      expect(event).toMatchObject({
+        type: `status:change`,
+        collection,
+        previousStatus: `idle`,
+        status: `loading`,
+      })
+    })
+
+    it(`should reject when timeout is reached`, async () => {
+      vi.useFakeTimers()
+
+      const waitPromise = collection.waitFor(`status:change`, 1000)
+
+      // Fast-forward time beyond the timeout
+      vi.advanceTimersByTime(1001)
+
+      await expect(waitPromise).rejects.toThrow(
+        `Timeout waiting for event status:change`
+      )
+
+      vi.useRealTimers()
+    })
+  })
 })
