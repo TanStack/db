@@ -2304,12 +2304,8 @@ export class CollectionImpl<
       return Promise.resolve(this.state)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Map<TKey, TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.state)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the state
+    return this.preload().then(() => this.state)
   }
 
   /**
@@ -2333,12 +2329,8 @@ export class CollectionImpl<
       return Promise.resolve(this.toArray)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Array<TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.toArray)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the array
+    return this.preload().then(() => this.toArray)
   }
 
   /**
