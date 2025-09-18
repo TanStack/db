@@ -266,9 +266,6 @@ export function useLiveQuery(
         state.set(key, value)
       }
 
-      // Initialize data array in correct order
-      syncDataFromCollection(currentCollection)
-
       // Subscribe to collection changes with granular updates
       const subscription = currentCollection.subscribeChanges(
         (changes: Array<ChangeMessage<any>>) => {
@@ -292,6 +289,9 @@ export function useLiveQuery(
 
           // Update status ref on every change
           setStatus(currentCollection.status)
+        },
+        {
+          includeInitialState: true,
         }
       )
 
