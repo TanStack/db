@@ -1480,10 +1480,10 @@ describe(`Query Collections`, () => {
       expect(result.current.state).toBeUndefined()
       expect(result.current.data).toBeUndefined()
       expect(result.current.collection).toBeUndefined()
-      expect(result.current.status).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(false)
-      expect(result.current.isIdle).toBe(true)
+      expect(result.current.isIdle).toBe(false)
       expect(result.current.isError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
@@ -1519,10 +1519,10 @@ describe(`Query Collections`, () => {
       expect(result.current.state).toBeUndefined()
       expect(result.current.data).toBeUndefined()
       expect(result.current.collection).toBeUndefined()
-      expect(result.current.status).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(false)
-      expect(result.current.isIdle).toBe(true)
+      expect(result.current.isIdle).toBe(false)
       expect(result.current.isError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
     })
@@ -1560,10 +1560,10 @@ describe(`Query Collections`, () => {
       expect(result.current.state).toBeUndefined()
       expect(result.current.data).toBeUndefined()
       expect(result.current.collection).toBeUndefined()
-      expect(result.current.status).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isReady).toBe(false)
-      expect(result.current.isIdle).toBe(true)
+      expect(result.current.isIdle).toBe(false)
       expect(result.current.isError).toBe(false)
       expect(result.current.isCleanedUp).toBe(false)
 
@@ -1791,7 +1791,8 @@ describe(`Query Collections`, () => {
       // Initially disabled
       expect(result.current.state).toBeUndefined()
       expect(result.current.data).toBeUndefined()
-      expect(result.current.isIdle).toBe(true)
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
 
       // Enable with minAge 30
       act(() => {
@@ -1821,7 +1822,8 @@ describe(`Query Collections`, () => {
 
       expect(result.current.state).toBeUndefined()
       expect(result.current.data).toBeUndefined()
-      expect(result.current.isIdle).toBe(true)
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
     })
   })
 })

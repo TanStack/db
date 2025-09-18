@@ -16,6 +16,8 @@ import type {
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 
+export type UseLiveQueryStatus = CollectionStatus | `disabled`
+
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
@@ -74,12 +76,13 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
+  status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: true // Always true if always returns QueryBuilder
 }
 
 // Overload 2: Accept query function that can return undefined/null
@@ -92,12 +95,13 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>> | undefined
   data: Array<GetResult<TContext>> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
-  status: CollectionStatus | undefined
+  status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
@@ -110,12 +114,13 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>> | undefined
   data: Array<GetResult<TContext>> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
-  status: CollectionStatus | undefined
+  status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 // Overload 4: Accept query function that can return Collection
@@ -132,12 +137,13 @@ export function useLiveQuery<
   state: Map<TKey, TResult> | undefined
   data: Array<TResult> | undefined
   collection: Collection<TResult, TKey, TUtils> | undefined
-  status: CollectionStatus | undefined
+  status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 // Overload 5: Accept query function that can return all types
@@ -166,12 +172,13 @@ export function useLiveQuery<
     | Collection<GetResult<TContext>, string | number, {}>
     | Collection<TResult, TKey, TUtils>
     | undefined
-  status: CollectionStatus | undefined
+  status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 /**
@@ -215,12 +222,13 @@ export function useLiveQuery<TContext extends Context>(
   state: Map<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
+  status: CollectionStatus // Can't be disabled for config objects
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: true // Always true for config objects
 }
 
 /**
@@ -263,12 +271,13 @@ export function useLiveQuery<
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
-  status: CollectionStatus
+  status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
+  isEnabled: true // Always true for pre-created live query collections
 }
 
 // Implementation - use function overloads to infer the actual collection type
@@ -338,9 +347,9 @@ export function useLiveQuery(
         } else if (result && typeof result === `object`) {
           // Assume it's a LiveQueryCollectionConfig
           collectionRef.current = createLiveQueryCollection({
-            ...result,
             startSync: true,
             gcTime: DEFAULT_GC_TIME_MS,
+            ...result,
           })
         } else {
           // Unexpected return type
@@ -449,12 +458,13 @@ export function useLiveQuery(
         state: undefined,
         data: undefined,
         collection: undefined,
-        status: undefined,
+        status: `disabled`,
         isLoading: false,
         isReady: false,
-        isIdle: true,
+        isIdle: false,
         isError: false,
         isCleanedUp: false,
+        isEnabled: false,
       }
     } else {
       // Capture a stable view of entries for this snapshot to avoid tearing
@@ -484,6 +494,7 @@ export function useLiveQuery(
         isIdle: snapshot.collection.status === `idle`,
         isError: snapshot.collection.status === `error`,
         isCleanedUp: snapshot.collection.status === `cleaned-up`,
+        isEnabled: true,
       }
     }
 
