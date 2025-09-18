@@ -546,7 +546,8 @@ export interface SubscribeChangesOptions {
   whereExpression?: BasicExpression<boolean>
 }
 
-export interface SubscribeChangesSnapshotOptions extends Omit<SubscribeChangesOptions, `includeInitialState`> {
+export interface SubscribeChangesSnapshotOptions
+  extends Omit<SubscribeChangesOptions, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }

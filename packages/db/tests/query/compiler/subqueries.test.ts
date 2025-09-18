@@ -270,7 +270,7 @@ describe(`Query2 Subqueries`, () => {
 
       const builtQuery = getQueryIR(query)
 
-      const usersSubscription = usersCollection.subscribeChanges(() => { })
+      const usersSubscription = usersCollection.subscribeChanges(() => {})
       const issuesSubscription = issuesCollection.subscribeChanges(() => {})
 
       // Compile and execute the query
