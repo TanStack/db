@@ -346,6 +346,9 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status state on every change
         status = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
 
