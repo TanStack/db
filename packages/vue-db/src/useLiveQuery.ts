@@ -328,6 +328,9 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status ref on every change
         status.value = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
 
