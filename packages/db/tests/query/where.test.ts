@@ -31,6 +31,7 @@ type Employee = {
   salary: number
   active: boolean
   hire_date: string
+  hire_date_instance: Date
   email: string | null
   first_name: string
   last_name: string
@@ -76,6 +77,7 @@ const sampleEmployees: Array<Employee> = [
     salary: 75000,
     active: true,
     hire_date: `2020-01-15`,
+    hire_date_instance: new Date(`2020-01-15`),
     email: `alice@company.com`,
     first_name: `Alice`,
     last_name: `Johnson`,
@@ -115,7 +117,8 @@ const sampleEmployees: Array<Employee> = [
     department_id: 2,
     salary: 65000,
     active: true,
-    hire_date: `2019-03-20`,
+    hire_date: `2020-01-15`,
+    hire_date_instance: new Date(`2020-01-15`),
     email: `bob@company.com`,
     first_name: `Bob`,
     last_name: `Smith`,
@@ -150,6 +153,7 @@ const sampleEmployees: Array<Employee> = [
     salary: 85000,
     active: false,
     hire_date: `2018-07-10`,
+    hire_date_instance: new Date(`2018-07-10`),
     email: null,
     first_name: `Charlie`,
     last_name: `Brown`,
@@ -176,6 +180,7 @@ const sampleEmployees: Array<Employee> = [
     salary: 95000,
     active: true,
     hire_date: `2021-11-05`,
+    hire_date_instance: new Date(`2021-11-05`),
     email: `diana@company.com`,
     first_name: `Diana`,
     last_name: `Miller`,
@@ -202,6 +207,7 @@ const sampleEmployees: Array<Employee> = [
     salary: 55000,
     active: true,
     hire_date: `2022-02-14`,
+    hire_date_instance: new Date(`2022-02-14`),
     email: `eve@company.com`,
     first_name: `Eve`,
     last_name: `Wilson`,
@@ -214,6 +220,7 @@ const sampleEmployees: Array<Employee> = [
     salary: 45000,
     active: false,
     hire_date: `2017-09-30`,
+    hire_date_instance: new Date(`2017-09-30`),
     email: `frank@company.com`,
     first_name: `Frank`,
     last_name: `Davis`,
@@ -242,6 +249,22 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
       })
 
       test(`eq operator - equality comparison`, () => {
+        const hireDateEmployee = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                eq(emp.hire_date_instance, new Date(`2020-01-15`))
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                active: emp.active,
+              })),
+        })
+        expect(hireDateEmployee.size).toBe(2)
+
         const activeEmployees = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
@@ -279,6 +302,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 70000,
           active: true,
           hire_date: `2023-01-10`,
+          hire_date_instance: new Date(`2023-01-10`),
           email: `grace@company.com`,
           first_name: `Grace`,
           last_name: `Lee`,
@@ -348,6 +372,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 80000, // Above 70k threshold
           active: true,
           hire_date: `2023-01-15`,
+          hire_date_instance: new Date(`2023-01-15`),
           email: `henry@company.com`,
           first_name: `Henry`,
           last_name: `Young`,
@@ -1000,6 +1025,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 80000, // >= 70k
           active: true,
           hire_date: `2023-01-20`,
+          hire_date_instance: new Date(`2023-01-20`),
           email: `ian@company.com`,
           first_name: `Ian`,
           last_name: `Clark`,
@@ -1064,6 +1090,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 60000,
           active: true,
           hire_date: `2023-01-25`,
+          hire_date_instance: new Date(`2023-01-25`),
           email: `amy@company.com`,
           first_name: `amy`, // lowercase 'a'
           last_name: `stone`,
@@ -1133,6 +1160,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 60000,
           active: true,
           hire_date: `2023-02-01`,
+          hire_date_instance: new Date(`2023-02-01`),
           email: null, // null email
           first_name: `Jack`,
           last_name: `Null`,
@@ -1183,6 +1211,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 60000,
           active: true,
           hire_date: `2023-02-05`,
+          hire_date_instance: new Date(`2023-02-05`),
           email: `first@company.com`,
           first_name: `First`,
           last_name: `Employee`,
@@ -1344,6 +1373,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           salary: 80000, // >= 70k
           active: true, // active
           hire_date: `2023-01-01`,
+          hire_date_instance: new Date(`2023-01-01`),
           email: `john@company.com`,
           first_name: `John`,
           last_name: `Doe`,
