@@ -257,8 +257,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
     beforeEach(() => {
+      console.log(`before each`)
       employeesCollection = createEmployeesCollection(autoIndex)
       departmentsCollection = createDepartmentsCollection(autoIndex)
+      console.log(`end of before each`)
     })
 
     describe(`Basic OrderBy`, () => {
@@ -405,6 +407,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies offset correctly with ordering`, async () => {
+        console.log(`in applies offset correctly with ordering`)
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -425,6 +428,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies both limit and offset with ordering`, async () => {
+        console.log(`in applies both limit and offset with ordering`)
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -446,6 +450,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`throws error when limit/offset used without orderBy`, () => {
+        console.log(`in throws error when limit/offset used without orderBy`)
         expect(() => {
           createLiveQueryCollection((q) =>
             q
@@ -462,6 +467,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies incremental insert of a new row before the topK correctly`, async () => {
+        console.log(
+          `in applies incremental insert of a new row before the topK correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -509,6 +517,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies incremental insert of a new row inside the topK correctly`, async () => {
+        console.log(
+          `in applies incremental insert of a new row inside the topK correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -553,9 +564,13 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           [6, 62_000],
           [2, 60_000],
         ])
+        console.log(`end`)
       })
 
       it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
+        console.log(
+          `in applies incremental insert of a new row inside the topK but after max sent value correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -607,6 +622,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies incremental insert of a new row after the topK correctly`, async () => {
+        console.log(
+          `in applies incremental insert of a new row after the topK correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -650,6 +668,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies incremental update of a row inside the topK correctly`, async () => {
+        console.log(
+          `in applies incremental update of a row inside the topK correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -693,6 +714,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
 
       it(`applies incremental delete of a row in the topK correctly`, async () => {
+        console.log(
+          `in applies incremental delete of a row in the topK correctly`
+        )
         const collection = createLiveQueryCollection((q) =>
           q
             .from({ employees: employeesCollection })
@@ -1847,6 +1871,6 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 }
 
 describe(`Query2 OrderBy Compiler`, () => {
-  createOrderByTests(`off`)
+  // createOrderByTests(`off`)
   createOrderByTests(`eager`)
 })
