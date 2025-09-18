@@ -102,7 +102,9 @@ function createMockCollection<T extends object, K extends string | number>(
     size: () => map.size,
     subscribeChanges: (cb: (changes: Array<any>) => void) => {
       subs.add(cb)
-      return () => subs.delete(cb)
+      return {
+        unsubscribe: () => subs.delete(cb),
+      }
     },
     onFirstReady: (cb: () => void) => {
       if (status === `ready`) {

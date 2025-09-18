@@ -28,6 +28,7 @@ import type {
   ResultStream,
 } from "../../types.js"
 import type { QueryCache, QueryMapping } from "./types.js"
+import { CollectionSubscription } from "../../collection-subscription.js"
 
 /**
  * Result of query compilation including both the pipeline and collection-specific WHERE clauses
@@ -53,6 +54,7 @@ export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
   collections: Record<string, Collection<any, any, any, any, any>>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -88,6 +90,7 @@ export function compileQuery(
     query.from,
     allInputs,
     collections,
+    subscriptions,
     callbacks,
     lazyCollections,
     optimizableOrderByCollections,
@@ -120,6 +123,7 @@ export function compileQuery(
       cache,
       queryMapping,
       collections,
+      subscriptions,
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
@@ -323,6 +327,7 @@ function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -346,6 +351,7 @@ function processFrom(
         originalQuery,
         allInputs,
         collections,
+        subscriptions,
         callbacks,
         lazyCollections,
         optimizableOrderByCollections,

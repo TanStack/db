@@ -48,6 +48,7 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
+        {},
         new Set(),
         {}
       )
@@ -101,6 +102,7 @@ describe(`Query2 Compiler`, () => {
         query,
         { users: input },
         { users: usersCollection },
+        {},
         {},
         new Set(),
         {}
@@ -178,6 +180,7 @@ describe(`Query2 Compiler`, () => {
         { users: input },
         { users: usersCollection },
         {},
+        {},
         new Set(),
         {}
       )
@@ -241,6 +244,7 @@ describe(`Query2 Compiler`, () => {
         query,
         { users: input },
         { users: usersCollection },
+        {},
         {},
         new Set(),
         {}

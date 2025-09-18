@@ -122,7 +122,7 @@ describe(`LocalOnly Collection`, () => {
     const changeHandler = vi.fn()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(changeHandler)
+    const subscription = collection.subscribeChanges(changeHandler)
 
     // Insert an item
     collection.insert({ id: 1, name: `Test Item` })
@@ -138,7 +138,7 @@ describe(`LocalOnly Collection`, () => {
     ])
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should support toArray method`, () => {

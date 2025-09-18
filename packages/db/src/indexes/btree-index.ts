@@ -236,7 +236,7 @@ export class BTreeIndex<
    * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
    * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
    */
-  take(n: number, from?: any): Array<TKey> {
+  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
     const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
@@ -248,7 +248,7 @@ export class BTreeIndex<
         const it = keys.values()
         let ks: TKey | undefined
         while (result.length < n && (ks = it.next().value)) {
-          if (!keysInResult.has(ks)) {
+          if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
             result.push(ks)
             keysInResult.add(ks)
           }

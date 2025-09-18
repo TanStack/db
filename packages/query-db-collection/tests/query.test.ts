@@ -740,12 +740,12 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`cleaned-up`)
 
       // Access collection data to restart sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Should restart sync (might be ready immediately if query is cached)
       expect([`loading`, `ready`]).toContain(collection.status)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should handle query lifecycle during restart cycle`, async () => {
@@ -790,13 +790,13 @@ describe(`QueryCollection`, () => {
       removeQueriesSpy.mockClear()
 
       // Restart by accessing collection
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Should restart sync
       expect([`loading`, `ready`]).toContain(collection.status)
 
       // Cleanup again to verify the new sync cleanup works
-      unsubscribe()
+      subscription.unsubscribe()
       await collection.cleanup()
       await flushPromises()
 
@@ -948,8 +948,8 @@ describe(`QueryCollection`, () => {
       const changeHandler1 = vi.fn()
       const changeHandler2 = vi.fn()
 
-      const unsubscribe1 = collection.subscribeChanges(changeHandler1)
-      const unsubscribe2 = collection.subscribeChanges(changeHandler2)
+      const subscription1 = collection.subscribeChanges(changeHandler1)
+      const subscription2 = collection.subscribeChanges(changeHandler2)
 
       // Change the data and trigger a refetch
       items = [{ id: `1`, name: `Item 1 Updated` }]
@@ -965,7 +965,7 @@ describe(`QueryCollection`, () => {
       expect(changeHandler2).toHaveBeenCalled()
 
       // Unsubscribe one
-      unsubscribe1()
+      subscription1.unsubscribe()
       changeHandler1.mockClear()
       changeHandler2.mockClear()
 
@@ -983,7 +983,7 @@ describe(`QueryCollection`, () => {
       expect(changeHandler2).toHaveBeenCalled()
 
       // Cleanup
-      unsubscribe2()
+      subscription2.unsubscribe()
     })
 
     it(`should handle query cancellation gracefully`, async () => {
@@ -1810,13 +1810,13 @@ describe(`QueryCollection`, () => {
       // Read-only operations don't affect error state
       expect(collection.has(`1`)).toBe(true)
       const changeHandler = vi.fn()
-      const unsubscribe = collection.subscribeChanges(changeHandler)
+      const subscription = collection.subscribeChanges(changeHandler)
 
       expect(collection.utils.lastError()).toBe(originalError)
       expect(collection.utils.isError()).toBe(true)
       expect(collection.utils.errorCount()).toBe(originalErrorCount)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should handle custom error objects correctly`, async () => {

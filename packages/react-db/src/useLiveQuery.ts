@@ -387,7 +387,7 @@ export function useLiveQuery(
         return () => {}
       }
 
-      const unsubscribe = collectionRef.current.subscribeChanges(() => {
+      const subscription = collectionRef.current.subscribeChanges(() => {
         // Bump version on any change; getSnapshot will rebuild next time
         versionRef.current += 1
         onStoreChange()
@@ -398,7 +398,7 @@ export function useLiveQuery(
         onStoreChange()
       }
       return () => {
-        unsubscribe()
+        subscription.unsubscribe()
       }
     }
   }

@@ -2,6 +2,7 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection.js"
@@ -48,6 +49,8 @@ export class CollectionConfigBuilder<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
+  // Map of collection ID to subscription
+  readonly subscriptions: Record<string, CollectionSubscription> = {}
   // Map of collection IDs to functions that load keys for that lazy collection
   lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
@@ -189,6 +192,7 @@ export class CollectionConfigBuilder<
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
+      this.subscriptions,
       this.lazyCollectionsCallbacks,
       this.lazyCollections,
       this.optimizableOrderByCollections
@@ -320,17 +324,21 @@ export class CollectionConfigBuilder<
           syncState,
           this
         )
-        collectionSubscriber.subscribe()
 
-        const loadMore =
-          collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+        const subscription = collectionSubscriber.subscribe()
+        this.subscriptions[collectionId] = subscription
+
+        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+          collectionSubscriber,
+          subscription
+        )
 
         return loadMore
       }
     )
 
     const loadMoreDataCallback = () => {
-      loaders.map((loader) => loader()) // .every((doneLoading) => doneLoading)
+      loaders.map((loader) => loader())
       return true
     }
 

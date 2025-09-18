@@ -162,11 +162,12 @@ export function injectLiveQuery(opts: any) {
     }
 
     // Subscribe to changes
-    unsub = currentCollection.subscribeChanges(
+    const subscription = currentCollection.subscribeChanges(
       (_: Array<ChangeMessage<any>>) => {
         syncDataFromCollection(currentCollection)
       }
     )
+    unsub = subscription.unsubscribe.bind(subscription)
 
     // Handle ready state
     currentCollection.onFirstReady(() => {

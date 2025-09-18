@@ -1,6 +1,6 @@
 import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
 import { comparisonFunctions } from "../query/builder/functions.js"
-import type { BasicExpression, OrderByDirection } from "../query/ir.js"
+import type { BasicExpression } from "../query/ir.js"
 
 /**
  * Operations that indexes can support, imported from available comparison functions
@@ -58,8 +58,8 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    direction?: OrderByDirection,
-    from?: TKey
+    from?: TKey,
+    filterFn?: (key: TKey) => boolean
   ): Array<TKey>
   abstract get keyCount(): number
 
