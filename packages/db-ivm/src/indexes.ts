@@ -10,20 +10,20 @@ type NO_PREFIX = typeof NO_PREFIX
 // A single value is a tuple of the value and the multiplicity.
 type SingleValue<TValue> = [TValue, number]
 
-// Base map type for the index. Stores single values or prefix maps against a key.
+// Base map type for the index. Stores single values, prefix maps, or value maps against a key.
 type IndexMap<TKey, TValue, TPrefix> = Map<
   TKey,
-  SingleValue<TValue> | PrefixMap<TValue, TPrefix>
+  SingleValue<TValue> | PrefixMap<TValue, TPrefix> | ValueMap<TValue>
 >
 
 // Second level map type for the index, stores single values or value maps against a prefix.
-type PrefixMap<TValue, TPrefix> = Map<
+class PrefixMap<TValue, TPrefix> extends Map<
   TPrefix | NO_PREFIX,
   SingleValue<TValue> | ValueMap<TValue>
->
+> {}
 
 // Third level map type for the index, stores single values or value maps against a hash.
-type ValueMap<TValue> = Map<Hash, [TValue, number]>
+class ValueMap<TValue> extends Map<Hash, [TValue, number]> {}
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
@@ -91,13 +91,19 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of value tuples [value, multiplicity].
    */
   *getIterator(key: TKey): Iterable<[TValue, number]> {
-    const prefixMapOrSingleValue = this.#inner.get(key)
-    if (isSingleValue(prefixMapOrSingleValue)) {
-      yield prefixMapOrSingleValue
-    } else if (prefixMapOrSingleValue === undefined) {
+    const mapOrSingleValue = this.#inner.get(key)
+    if (isSingleValue(mapOrSingleValue)) {
+      yield mapOrSingleValue
+    } else if (mapOrSingleValue === undefined) {
       return
+    } else if (mapOrSingleValue instanceof ValueMap) {
+      // Direct ValueMap - all values have NO_PREFIX
+      for (const valueTuple of mapOrSingleValue.values()) {
+        yield valueTuple
+      }
     } else {
-      for (const singleValueOrValueMap of prefixMapOrSingleValue.values()) {
+      // PrefixMap - iterate through all prefixes
+      for (const singleValueOrValueMap of mapOrSingleValue.values()) {
         if (isSingleValue(singleValueOrValueMap)) {
           yield singleValueOrValueMap
         } else {
@@ -143,23 +149,17 @@ export class Index<TKey, TValue, TPrefix = any> {
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
 
-    const prefixMapOrSingleValue = this.#inner.get(key)
+    const mapOrSingleValue = this.#inner.get(key)
 
-    if (prefixMapOrSingleValue === undefined) {
+    if (mapOrSingleValue === undefined) {
       // This is the first time we see a value for this key we just insert it
       // into the index as a single value tuple
       this.#inner.set(key, valueTuple)
       return
     }
 
-    const [currentSingleValueForKey, prefixMap] = isSingleValue(
-      prefixMapOrSingleValue
-    )
-      ? [prefixMapOrSingleValue, undefined]
-      : [undefined, prefixMapOrSingleValue]
-
-    if (currentSingleValueForKey) {
-      const [currentValue, currentMultiplicity] = currentSingleValueForKey
+    if (isSingleValue(mapOrSingleValue)) {
+      const [currentValue, currentMultiplicity] = mapOrSingleValue
       // We have a single value for this key, lets check if this is the same value
       // and if so we just update the multiplicity. This is a check if its the same
       // literal value or object reference.
@@ -172,16 +172,13 @@ export class Index<TKey, TValue, TPrefix = any> {
         }
         return
       }
-    }
 
-    // Get the prefix of the new value
-    const [prefix, suffix] = getPrefix<TValue, TPrefix>(value)
-
-    if (currentSingleValueForKey) {
-      const [currentValue, currentMultiplicity] = currentSingleValueForKey
+      // Get the prefix of both values
+      const [prefix, suffix] = getPrefix<TValue, TPrefix>(value)
       const [currentPrefix, currentSuffix] = getPrefix<TValue, TPrefix>(
         currentValue
       )
+
       if (
         currentPrefix === prefix &&
         (currentSuffix === suffix || hash(currentSuffix) === hash(suffix))
@@ -194,34 +191,74 @@ export class Index<TKey, TValue, TPrefix = any> {
           this.#inner.set(key, [value, newMultiplicity])
         }
         return
+      }
+
+      // They are different values - decide between ValueMap or PrefixMap
+      if (currentPrefix === NO_PREFIX && prefix === NO_PREFIX) {
+        // Both values have NO_PREFIX, use ValueMap directly
+        const valueMap = new ValueMap<TValue>()
+        valueMap.set(hash(currentSuffix), mapOrSingleValue)
+        valueMap.set(hash(suffix), valueTuple)
+        this.#inner.set(key, valueMap)
+        return
       } else {
-        // They are different values, so we need to move the current value to a
-        // new prefix map
-        const newPrefixMap = new Map<
-          TPrefix | NO_PREFIX,
-          SingleValue<TValue> | ValueMap<TValue>
-        >()
+        // At least one has a prefix, use PrefixMap
+        const newPrefixMap = new PrefixMap<TValue, TPrefix>()
         this.#inner.set(key, newPrefixMap)
 
         if (currentPrefix === prefix) {
           // They have the same prefix but different suffixes, so we need to add a
           // value map for this suffix to the prefix map
-          const valueMap = new Map<Hash, [TValue, number]>()
-          valueMap.set(hash(currentSuffix), currentSingleValueForKey)
+          const valueMap = new ValueMap<TValue>()
+          valueMap.set(hash(currentSuffix), mapOrSingleValue)
           valueMap.set(hash(suffix), valueTuple)
           newPrefixMap.set(currentPrefix, valueMap)
         } else {
-          // They have different prefixes, so we can add then as singe values to the
+          // They have different prefixes, so we can add then as single values to the
           // prefix map
-          newPrefixMap.set(currentPrefix, currentSingleValueForKey)
+          newPrefixMap.set(currentPrefix, mapOrSingleValue)
           newPrefixMap.set(prefix, valueTuple)
         }
         return
       }
     }
 
-    // At this point there is a prefix map for this key, we need the value map or
-    // single value for this prefix
+    // At this point we have either a ValueMap or PrefixMap
+    const [prefix, suffix] = getPrefix<TValue, TPrefix>(value)
+
+    if (mapOrSingleValue instanceof ValueMap) {
+      // Direct ValueMap - all values have NO_PREFIX
+      if (prefix !== NO_PREFIX) {
+        // This value has a prefix but existing values don't - need to convert to PrefixMap
+        const newPrefixMap = new PrefixMap<TValue, TPrefix>()
+        newPrefixMap.set(NO_PREFIX, mapOrSingleValue)
+        newPrefixMap.set(prefix, valueTuple)
+        this.#inner.set(key, newPrefixMap)
+        return
+      }
+
+      // Both existing and new values have NO_PREFIX, add to ValueMap
+      const suffixHash = hash(suffix)
+      const currentValueForSuffix = mapOrSingleValue.get(suffixHash)
+      if (currentValueForSuffix) {
+        const [, currentMultiplicity] = currentValueForSuffix
+        const newMultiplicity = currentMultiplicity + multiplicity
+        if (newMultiplicity === 0) {
+          mapOrSingleValue.delete(suffixHash)
+          if (mapOrSingleValue.size === 0) {
+            this.#inner.delete(key)
+          }
+        } else {
+          mapOrSingleValue.set(suffixHash, [value, newMultiplicity])
+        }
+      } else {
+        mapOrSingleValue.set(suffixHash, valueTuple)
+      }
+      return
+    }
+
+    // PrefixMap case
+    const prefixMap = mapOrSingleValue
     const valueMapOrSingleValue = prefixMap.get(prefix)
 
     const [valueMap, currentSingleValueForPrefix] = isSingleValue(
@@ -243,6 +280,9 @@ export class Index<TKey, TValue, TPrefix = any> {
         const newMultiplicity = currentMultiplicity + multiplicity
         if (newMultiplicity === 0) {
           prefixMap.delete(prefix)
+          if (prefixMap.size === 0) {
+            this.#inner.delete(key)
+          }
         } else {
           prefixMap.set(prefix, [value, newMultiplicity])
         }
@@ -250,7 +290,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       } else {
         // They have different suffixes, so we need to add a value map for this suffix
         // to the prefix map
-        const valueMap = new Map<Hash, [TValue, number]>()
+        const valueMap = new ValueMap<TValue>()
         valueMap.set(hash(currentSuffix), currentSingleValueForPrefix)
         valueMap.set(hash(suffix), valueTuple)
         prefixMap.set(prefix, valueMap)
@@ -276,6 +316,12 @@ export class Index<TKey, TValue, TPrefix = any> {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
         valueMap.delete(suffixHash)
+        if (valueMap.size === 0) {
+          prefixMap.delete(prefix)
+          if (prefixMap.size === 0) {
+            this.#inner.delete(key)
+          }
+        }
       } else {
         valueMap.set(suffixHash, [value, newMultiplicity])
       }
