@@ -42,6 +42,8 @@ export class CollectionConfigBuilder<
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
+  private isGraphRunning = false
+
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
@@ -107,6 +109,16 @@ export class CollectionConfigBuilder<
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
+    if (this.isGraphRunning) {
+      // no nested runs of the graph
+      // which is possible if the `callback`
+      // would call `maybeRunGraph` e.g. after it has loaded some more data
+      console.log(`IGNORING MAYBERUNGRAPH`)
+      return
+    }
+
+    this.isGraphRunning = true
+
     const { begin, commit, markReady } = config
 
     // We only run the graph if all the collections are ready
@@ -114,8 +126,11 @@ export class CollectionConfigBuilder<
       this.allCollectionsReadyOrInitialCommit() &&
       syncState.subscribedToAllCollections
     ) {
-      syncState.graph.run()
-      const ready = callback?.() ?? true
+      while (syncState.graph.pendingWork()) {
+        syncState.graph.run()
+        callback?.()
+      }
+
       // On the initial run, we may need to do an empty commit to ensure that
       // the collection is initialized
       if (syncState.messagesCount === 0) {
@@ -123,10 +138,12 @@ export class CollectionConfigBuilder<
         commit()
       }
       // Mark the collection as ready after the first successful run
-      if (ready && this.allCollectionsReady()) {
+      if (this.allCollectionsReady()) {
         markReady()
       }
     }
+
+    this.isGraphRunning = false
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
