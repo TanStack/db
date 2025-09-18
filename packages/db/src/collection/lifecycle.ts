@@ -3,7 +3,7 @@ import {
   InvalidCollectionStatusTransitionError,
 } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionImpl } from "../collection/index.js"
+import type { CollectionImpl } from "./index.js"
 import type { CollectionStatus } from "../types"
 
 export class CollectionLifecycleManager<
@@ -63,6 +63,7 @@ export class CollectionLifecycleManager<
    */
   public setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this.status, newStatus)
+    const previousStatus = this.status
     this.status = newStatus
 
     // Resolve indexes when collection becomes ready
@@ -72,6 +73,9 @@ export class CollectionLifecycleManager<
         console.warn(`Failed to resolve indexes:`, error)
       })
     }
+
+    // Emit event
+    this.collection._events.emitStatusChange(newStatus, previousStatus)
   }
 
   /**

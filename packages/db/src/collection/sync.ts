@@ -9,7 +9,7 @@ import {
 } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage } from "../types"
-import type { CollectionImpl } from "../collection/index.js"
+import type { CollectionImpl } from "./index.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,

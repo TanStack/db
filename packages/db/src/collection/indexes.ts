@@ -5,7 +5,7 @@ import {
 } from "../query/builder/ref-proxy"
 import { BTreeIndex } from "../indexes/btree-index"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionImpl } from "../collection/index.js"
+import type { CollectionImpl } from "./index.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index"
 import type { ChangeMessage } from "../types"
 import type { IndexOptions } from "../indexes/index-options"

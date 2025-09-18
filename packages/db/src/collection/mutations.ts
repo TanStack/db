@@ -16,7 +16,7 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from "../errors"
-import type { Collection, CollectionImpl } from "../collection/index.js"
+import type { Collection, CollectionImpl } from "./index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   InsertConfig,

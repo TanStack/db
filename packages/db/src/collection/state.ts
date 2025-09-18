@@ -3,7 +3,7 @@ import { SortedMap } from "../SortedMap"
 import type { Transaction } from "../transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage, OptimisticChangeMessage } from "../types"
-import type { CollectionImpl } from "../collection/index.js"
+import type { CollectionImpl } from "./index.js"
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean

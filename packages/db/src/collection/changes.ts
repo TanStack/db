@@ -2,7 +2,7 @@ import { ensureIndexForExpression } from "../indexes/auto-index.js"
 import { createFilteredCallback } from "../change-events"
 import { NegativeActiveSubscribersError } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionImpl } from "../collection/index.js"
+import type { CollectionImpl } from "./index.js"
 import type {
   ChangeListener,
   ChangeMessage,
@@ -185,6 +185,7 @@ export class CollectionChangesManager<
    * Increment the active subscribers count and start sync if needed
    */
   private addSubscriber(): void {
+    const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.collection._lifecycle.cancelGCTimer()
 
@@ -195,12 +196,18 @@ export class CollectionChangesManager<
     ) {
       this.collection._sync.startSync()
     }
+
+    this.collection._events.emitSubscribersChange(
+      this.activeSubscribersCount,
+      previousSubscriberCount
+    )
   }
 
   /**
    * Decrement the active subscribers count and start GC timer if needed
    */
   private removeSubscriber(): void {
+    const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
@@ -208,6 +215,11 @@ export class CollectionChangesManager<
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
     }
+
+    this.collection._events.emitSubscribersChange(
+      this.activeSubscribersCount,
+      previousSubscriberCount
+    )
   }
 
   /**

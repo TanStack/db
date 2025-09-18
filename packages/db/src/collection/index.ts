@@ -4,12 +4,14 @@ import {
 } from "../errors"
 import { currentStateAsChanges } from "../change-events"
 
-import { CollectionStateManager } from "../collection/state"
-import { CollectionChangesManager } from "../collection/changes"
-import { CollectionLifecycleManager } from "../collection/lifecycle.js"
-import { CollectionSyncManager } from "../collection/sync"
-import { CollectionIndexesManager } from "../collection/indexes"
-import { CollectionMutationsManager } from "../collection/mutations"
+import { CollectionStateManager } from "./state"
+import { CollectionChangesManager } from "./changes"
+import { CollectionLifecycleManager } from "./lifecycle.js"
+import { CollectionSyncManager } from "./sync"
+import { CollectionIndexesManager } from "./indexes"
+import { CollectionMutationsManager } from "./mutations"
+import { CollectionEventsManager } from "./events.js"
+import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
 import type { IndexOptions } from "../indexes/index-options.js"
 import type {
@@ -182,6 +184,7 @@ export class CollectionImpl<
   public utils: Record<string, Fn> = {}
 
   // Managers
+  public _events: CollectionEventsManager
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   public _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
@@ -224,6 +227,7 @@ export class CollectionImpl<
       autoIndex: config.autoIndex ?? `eager`,
     }
 
+    this._events = new CollectionEventsManager(this)
     this._state = new CollectionStateManager<TOutput, TKey, TSchema, TInput>(
       this
     )
@@ -265,6 +269,13 @@ export class CollectionImpl<
    */
   public get status(): CollectionStatus {
     return this._lifecycle.status
+  }
+
+  /**
+   * Get the number of subscribers to the collection
+   */
+  public get subscriberCount(): number {
+    return this._changes.activeSubscribersCount
   }
 
   /**
@@ -695,12 +706,8 @@ export class CollectionImpl<
       return Promise.resolve(this.state)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Map<TKey, TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.state)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the state
+    return this.preload().then(() => this.state)
   }
 
   /**
@@ -724,12 +731,8 @@ export class CollectionImpl<
       return Promise.resolve(this.toArray)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Array<TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.toArray)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the array
+    return this.preload().then(() => this.toArray)
   }
 
   /**
@@ -816,10 +819,51 @@ export class CollectionImpl<
   }
 
   /**
+   * Subscribe to a collection event
+   */
+  public on<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    return this._events.on(event, callback)
+  }
+
+  /**
+   * Subscribe to a collection event once
+   */
+  public once<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    return this._events.once(event, callback)
+  }
+
+  /**
+   * Unsubscribe from a collection event
+   */
+  public off<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    this._events.off(event, callback)
+  }
+
+  /**
+   * Wait for a collection event
+   */
+  public waitFor<T extends keyof AllCollectionEvents>(
+    event: T,
+    timeout?: number
+  ) {
+    return this._events.waitFor(event, timeout)
+  }
+
+  /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
   public async cleanup(): Promise<void> {
+    this._events.cleanup()
     this._sync.cleanup()
     this._state.cleanup()
     this._changes.cleanup()
