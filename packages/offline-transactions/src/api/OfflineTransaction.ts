@@ -1,6 +1,6 @@
 import { createTransaction } from "@tanstack/db"
 import { NonRetriableError } from "../types"
-import type { Transaction } from "@tanstack/db"
+import type { PendingMutation, Transaction } from "@tanstack/db"
 import type {
   CreateOfflineTransactionOptions,
   OfflineMutationFn,
@@ -14,37 +14,69 @@ export class OfflineTransaction {
   private idempotencyKey: string
   private metadata: Record<string, any>
   private transaction: Transaction | null = null
-  private mutationFn: OfflineMutationFn
   private persistTransaction: (tx: OfflineTransactionType) => Promise<void>
+  private executor: any // Will be typed properly - reference to OfflineExecutor
 
   constructor(
     options: CreateOfflineTransactionOptions,
     mutationFn: OfflineMutationFn,
-    persistTransaction: (tx: OfflineTransactionType) => Promise<void>
+    persistTransaction: (tx: OfflineTransactionType) => Promise<void>,
+    executor: any
   ) {
     this.offlineId = crypto.randomUUID()
     this.mutationFnName = options.mutationFnName
     this.autoCommit = options.autoCommit ?? true
     this.idempotencyKey = options.idempotencyKey ?? crypto.randomUUID()
     this.metadata = options.metadata ?? {}
-    this.mutationFn = mutationFn
     this.persistTransaction = persistTransaction
+    this.executor = executor
   }
 
   mutate(callback: () => void): Transaction {
     this.transaction = createTransaction({
       id: this.offlineId,
       autoCommit: false,
-      mutationFn: async (params) => {
-        return this.mutationFn({
-          ...params,
+      mutationFn: async () => {
+        // This is the blocking mutationFn that waits for the executor
+        // First persist the transaction to the outbox
+        const completionPromise = this.executor.waitForTransactionCompletion(
+          this.offlineId
+        )
+        const offlineTransaction: OfflineTransactionType = {
+          id: this.offlineId,
+          mutationFnName: this.mutationFnName,
+          mutations: this.transaction!.mutations,
+          keys: this.extractKeys(this.transaction!.mutations),
           idempotencyKey: this.idempotencyKey,
-        })
+          createdAt: new Date(),
+          retryCount: 0,
+          nextAttemptAt: Date.now(),
+          metadata: this.metadata,
+          version: 1,
+        }
+
+        console.log(`starting to persist`)
+        try {
+          await this.persistTransaction(offlineTransaction)
+
+          // Now block and wait for the executor to complete the real mutation
+          await completionPromise
+        } catch (error) {
+          const normalizedError =
+            error instanceof Error ? error : new Error(String(error))
+          this.executor.rejectTransaction(this.offlineId, normalizedError)
+          throw error
+        }
+        console.log(`done persisting`)
+
+        return
       },
       metadata: this.metadata,
     })
 
-    this.transaction.mutate(callback)
+    this.transaction.mutate(() => {
+      callback()
+    })
 
     if (this.autoCommit) {
       // Note: this will need to be handled differently since commit is now async
@@ -62,24 +94,9 @@ export class OfflineTransaction {
       throw new Error(`No mutations to commit. Call mutate() first.`)
     }
 
-    const offlineTransaction: OfflineTransactionType = {
-      id: this.offlineId,
-      mutationFnName: this.mutationFnName,
-      mutations: this.serializeMutations(this.transaction.mutations),
-      keys: this.extractKeys(this.transaction.mutations),
-      idempotencyKey: this.idempotencyKey,
-      createdAt: new Date(),
-      retryCount: 0,
-      nextAttemptAt: Date.now(),
-      metadata: this.metadata,
-      version: 1,
-    }
-
     try {
-      // Persist to outbox first - this triggers the retry system
-      await this.persistTransaction(offlineTransaction)
-
-      // Only commit to TanStack DB after successful persistence
+      // Commit the TanStack DB transaction
+      // This will trigger the mutationFn which handles persistence and waiting
       await this.transaction.commit()
       return this.transaction
     } catch (error) {
@@ -97,18 +114,8 @@ export class OfflineTransaction {
     }
   }
 
-  private extractKeys(mutations: Array<any>): Array<string> {
+  private extractKeys(mutations: Array<PendingMutation>): Array<string> {
     return mutations.map((mutation) => mutation.globalKey)
-  }
-
-  private serializeMutations(mutations: Array<any>): Array<any> {
-    return mutations.map((mutation) => ({
-      globalKey: mutation.globalKey,
-      type: mutation.type,
-      modified: mutation.modified,
-      original: mutation.original,
-      collectionId: mutation.collection.id,
-    }))
   }
 
   get id(): string {

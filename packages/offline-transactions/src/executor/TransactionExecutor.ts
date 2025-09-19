@@ -11,16 +11,20 @@ export class TransactionExecutor {
   private retryPolicy: DefaultRetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
+  private offlineExecutor: any // Reference to OfflineExecutor for signaling
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
-    config: OfflineConfig
+    config: OfflineConfig,
+    offlineExecutor: any
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
     this.retryPolicy = new DefaultRetryPolicy(10, config.jitter ?? true)
+    this.offlineExecutor = offlineExecutor
   }
 
   async execute(transaction: OfflineTransaction): Promise<void> {
@@ -59,6 +63,9 @@ export class TransactionExecutor {
       )
       await Promise.allSettled(executions)
     }
+
+    // Schedule next retry after execution completes
+    this.scheduleNextRetry()
   }
 
   private async executeTransaction(
@@ -67,11 +74,18 @@ export class TransactionExecutor {
     this.scheduler.markStarted(transaction)
 
     try {
-      await this.runMutationFn(transaction)
+      const result = await this.runMutationFn(transaction)
 
       this.scheduler.markCompleted(transaction)
       await this.outbox.remove(transaction.id)
+
+      // Signal success to the waiting transaction
+      this.offlineExecutor.resolveTransaction(transaction.id, result)
     } catch (error) {
+      console.log(
+        `executeTransaction caught error for ${transaction.id}:`,
+        error
+      )
       await this.handleError(transaction, error as Error)
     }
   }
@@ -89,33 +103,17 @@ export class TransactionExecutor {
       throw new NonRetriableError(errorMessage)
     }
 
-    const reconstructedMutations = this.reconstructMutations(transaction)
-
+    // Mutations are already PendingMutation objects with collections attached
+    // from the deserializer, so we can use them directly
     const transactionWithMutations = {
       id: transaction.id,
-      mutations: reconstructedMutations,
+      mutations: transaction.mutations,
       metadata: transaction.metadata ?? {},
     }
 
     await mutationFn({
       transaction: transactionWithMutations as any,
       idempotencyKey: transaction.idempotencyKey,
-    })
-  }
-
-  private reconstructMutations(transaction: OfflineTransaction): Array<any> {
-    return transaction.mutations.map((mutation) => {
-      const collectionId = (mutation as any).collectionId
-      const collection = this.config.collections[collectionId]
-
-      if (!collection) {
-        throw new NonRetriableError(`Collection ${collectionId} not found`)
-      }
-
-      return {
-        ...mutation,
-        collection,
-      }
     })
   }
 
@@ -132,6 +130,9 @@ export class TransactionExecutor {
       this.scheduler.markCompleted(transaction)
       await this.outbox.remove(transaction.id)
       console.warn(`Transaction ${transaction.id} failed permanently:`, error)
+
+      // Signal permanent failure to the waiting transaction
+      this.offlineExecutor.rejectTransaction(transaction.id, error)
       return
     }
 
@@ -150,6 +151,9 @@ export class TransactionExecutor {
     this.scheduler.markFailed(transaction)
     this.scheduler.updateTransaction(updatedTransaction)
     await this.outbox.update(transaction.id, updatedTransaction)
+
+    // Schedule retry timer
+    this.scheduleNextRetry()
   }
 
   async loadPendingTransactions(): Promise<void> {
@@ -164,6 +168,9 @@ export class TransactionExecutor {
       this.scheduler.schedule(transaction)
     }
 
+    // Schedule retry timer for loaded transactions
+    this.scheduleNextRetry()
+
     const removedTransactions = transactions.filter(
       (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id)
     )
@@ -175,13 +182,61 @@ export class TransactionExecutor {
 
   clear(): void {
     this.scheduler.clear()
+    this.clearRetryTimer()
   }
 
   getPendingCount(): number {
     return this.scheduler.getPendingCount()
   }
 
+  private scheduleNextRetry(): void {
+    // Clear existing timer
+    this.clearRetryTimer()
+
+    // Find the earliest retry time among pending transactions
+    const earliestRetryTime = this.getEarliestRetryTime()
+
+    if (earliestRetryTime === null) {
+      return // No transactions pending retry
+    }
+
+    const delay = Math.max(0, earliestRetryTime - Date.now())
+
+    this.retryTimer = setTimeout(() => {
+      this.executeAll().catch((error) => {
+        console.warn(`Failed to execute retry batch:`, error)
+      })
+    }, delay)
+  }
+
+  private getEarliestRetryTime(): number | null {
+    const allTransactions = this.scheduler.getAllPendingTransactions()
+
+    if (allTransactions.length === 0) {
+      return null
+    }
+
+    return Math.min(...allTransactions.map((tx) => tx.nextAttemptAt))
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+  }
+
   getRunningCount(): number {
     return this.scheduler.getRunningCount()
+  }
+
+  resetRetryDelays(): void {
+    const allTransactions = this.scheduler.getAllPendingTransactions()
+    const updatedTransactions = allTransactions.map((transaction) => ({
+      ...transaction,
+      nextAttemptAt: Date.now(),
+    }))
+
+    this.scheduler.updateTransactions(updatedTransactions)
   }
 }

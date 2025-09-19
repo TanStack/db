@@ -19,7 +19,6 @@ import { OfflineTransaction as OfflineTransactionAPI } from "./api/OfflineTransa
 import { createOfflineAction } from "./api/OfflineAction"
 
 // Replay
-import { TransactionReplay } from "./replay/TransactionReplay"
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -38,24 +37,33 @@ export class OfflineExecutor {
   private executor: TransactionExecutor
   private leaderElection: LeaderElection
   private onlineDetector: DefaultOnlineDetector
-  private replay: TransactionReplay
   private isLeaderState = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
 
+  // Coordination mechanism for blocking transactions
+  private pendingTransactionPromises: Map<
+    string,
+    {
+      promise: Promise<any>
+      resolve: (result: any) => void
+      reject: (error: Error) => void
+    }
+  > = new Map()
+
   constructor(config: OfflineConfig) {
     this.config = config
     this.storage = this.createStorage()
-    this.outbox = new OutboxManager(this.storage)
+    this.outbox = new OutboxManager(this.storage, this.config.collections)
     this.scheduler = new KeyScheduler()
     this.executor = new TransactionExecutor(
       this.scheduler,
       this.outbox,
-      this.config
+      this.config,
+      this
     )
     this.leaderElection = this.createLeaderElection()
     this.onlineDetector = new DefaultOnlineDetector()
-    this.replay = new TransactionReplay(this.config.collections)
 
     this.setupEventListeners()
     this.initialize()
@@ -78,6 +86,10 @@ export class OfflineExecutor {
   }
 
   private createLeaderElection(): LeaderElection {
+    if (this.config.leaderElection) {
+      return this.config.leaderElection
+    }
+
     if (WebLocksLeader.isSupported()) {
       return new WebLocksLeader()
     } else if (BroadcastChannelLeader.isSupported()) {
@@ -85,7 +97,7 @@ export class OfflineExecutor {
     } else {
       // Fallback: always be leader in environments without multi-tab support
       return {
-        requestLeadership: async () => true,
+        requestLeadership: () => true,
         releaseLeadership: () => {},
         isLeader: () => true,
         onLeadershipChange: () => () => {},
@@ -110,6 +122,8 @@ export class OfflineExecutor {
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled) {
+        // Reset retry delays so transactions can execute immediately when back online
+        this.executor.resetRetryDelays()
         this.executor.executeAll().catch((error) => {
           console.warn(
             `Failed to execute transactions on connectivity change:`,
@@ -136,9 +150,6 @@ export class OfflineExecutor {
     try {
       await this.executor.loadPendingTransactions()
 
-      const allTransactions = await this.outbox.getAll()
-      await this.replay.replayAll(allTransactions)
-
       await this.executor.executeAll()
     } catch (error) {
       console.warn(`Failed to load and replay transactions:`, error)
@@ -161,7 +172,8 @@ export class OfflineExecutor {
     return new OfflineTransactionAPI(
       options,
       mutationFn,
-      this.persistTransaction.bind(this)
+      this.persistTransaction.bind(this),
+      this
     )
   }
 
@@ -177,7 +189,8 @@ export class OfflineExecutor {
     return createOfflineAction(
       options,
       mutationFn,
-      this.persistTransaction.bind(this)
+      this.persistTransaction.bind(this),
+      this
     )
   }
 
@@ -185,6 +198,7 @@ export class OfflineExecutor {
     transaction: OfflineTransaction
   ): Promise<void> {
     if (!this.isOfflineEnabled) {
+      this.resolveTransaction(transaction.id, undefined)
       return
     }
 
@@ -192,8 +206,52 @@ export class OfflineExecutor {
       await this.outbox.add(transaction)
       await this.executor.execute(transaction)
     } catch (error) {
-      console.error(`Failed to persist offline transaction:`, error)
+      console.error(
+        `Failed to persist offline transaction ${transaction.id}:`,
+        error
+      )
       throw error
+    }
+  }
+
+  // Method for OfflineTransaction to wait for completion
+  async waitForTransactionCompletion(transactionId: string): Promise<any> {
+    const existing = this.pendingTransactionPromises.get(transactionId)
+    if (existing) {
+      return existing.promise
+    }
+
+    const deferred: {
+      promise: Promise<any>
+      resolve: (result: any) => void
+      reject: (error: Error) => void
+    } = {} as any
+
+    deferred.promise = new Promise((resolve, reject) => {
+      deferred.resolve = resolve
+      deferred.reject = reject
+    })
+
+    this.pendingTransactionPromises.set(transactionId, deferred)
+    return deferred.promise
+  }
+
+  // Method for TransactionExecutor to signal completion
+  resolveTransaction(transactionId: string, result: any): void {
+    const deferred = this.pendingTransactionPromises.get(transactionId)
+    console.log(`resolving transaction`, { transactionId }, deferred)
+    if (deferred) {
+      deferred.resolve(result)
+      this.pendingTransactionPromises.delete(transactionId)
+    }
+  }
+
+  // Method for TransactionExecutor to signal failure
+  rejectTransaction(transactionId: string, error: Error): void {
+    const deferred = this.pendingTransactionPromises.get(transactionId)
+    if (deferred) {
+      deferred.reject(error)
+      this.pendingTransactionPromises.delete(transactionId)
     }
   }
 

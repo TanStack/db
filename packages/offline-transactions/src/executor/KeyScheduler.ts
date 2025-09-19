@@ -139,4 +139,20 @@ export class KeyScheduler {
     this.runningKeys.clear()
     this.pendingTransactions = []
   }
+
+  getAllPendingTransactions(): Array<OfflineTransaction> {
+    return [...this.pendingTransactions]
+  }
+
+  updateTransactions(updatedTransactions: Array<OfflineTransaction>): void {
+    for (const updatedTx of updatedTransactions) {
+      const index = this.pendingTransactions.findIndex(
+        (tx) => tx.id === updatedTx.id
+      )
+      if (index >= 0) {
+        this.pendingTransactions[index] = updatedTx
+      }
+    }
+    this.organizeQueues()
+  }
 }

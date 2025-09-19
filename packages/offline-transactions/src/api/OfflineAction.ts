@@ -9,7 +9,8 @@ import type {
 export function createOfflineAction<T>(
   options: CreateOfflineActionOptions<T>,
   mutationFn: OfflineMutationFn,
-  persistTransaction: (tx: OfflineTransactionType) => Promise<void>
+  persistTransaction: (tx: OfflineTransactionType) => Promise<void>,
+  executor: any
 ): (variables: T) => Transaction {
   const { mutationFnName, onMutate } = options
 
@@ -20,7 +21,8 @@ export function createOfflineAction<T>(
         autoCommit: true,
       },
       mutationFn,
-      persistTransaction
+      persistTransaction,
+      executor
     )
 
     return offlineTransaction.mutate(() => {

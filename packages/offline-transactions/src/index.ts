@@ -45,4 +45,3 @@ export { KeyScheduler } from "./executor/KeyScheduler"
 export { TransactionExecutor } from "./executor/TransactionExecutor"
 
 // Replay
-export { TransactionReplay } from "./replay/TransactionReplay"

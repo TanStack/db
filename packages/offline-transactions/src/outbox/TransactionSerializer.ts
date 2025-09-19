@@ -2,45 +2,105 @@ import type {
   OfflineTransaction,
   SerializedError,
   SerializedMutation,
+  SerializedOfflineTransaction,
 } from "../types"
+import type { Collection, PendingMutation } from "@tanstack/db"
 
 export class TransactionSerializer {
-  serialize(transaction: OfflineTransaction): string {
-    const serialized = {
-      ...transaction,
-      createdAt: transaction.createdAt.toISOString(),
-      mutations: transaction.mutations.map(this.serializeMutation),
+  private collections: Record<string, Collection>
+  private collectionIdToKey: Map<string, string>
+
+  constructor(collections: Record<string, Collection>) {
+    this.collections = collections
+    // Create reverse lookup from collection.id to registry key
+    this.collectionIdToKey = new Map()
+    for (const [key, collection] of Object.entries(collections)) {
+      this.collectionIdToKey.set(collection.id, key)
     }
-    return JSON.stringify(serialized)
+  }
+
+  serialize(transaction: OfflineTransaction): string {
+    console.log(`serialize`, transaction)
+    const serialized: SerializedOfflineTransaction = {
+      ...transaction,
+      createdAt: transaction.createdAt,
+      mutations: transaction.mutations.map((mutation) =>
+        this.serializeMutation(mutation)
+      ),
+    }
+    // Convert the whole object to JSON, handling dates
+    return JSON.stringify(serialized, (key, value) => {
+      if (value instanceof Date) {
+        return value.toISOString()
+      }
+      return value
+    })
   }
 
   deserialize(data: string): OfflineTransaction {
-    const parsed = JSON.parse(data)
+    const parsed: SerializedOfflineTransaction = JSON.parse(
+      data,
+      (key, value) => {
+        // Parse ISO date strings back to Date objects
+        if (
+          typeof value === `string` &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)
+        ) {
+          return new Date(value)
+        }
+        return value
+      }
+    )
+
     return {
       ...parsed,
-      createdAt: new Date(parsed.createdAt),
-      mutations: parsed.mutations.map(this.deserializeMutation),
+      mutations: parsed.mutations.map((mutationData) =>
+        this.deserializeMutation(mutationData)
+      ),
     }
   }
 
-  private serializeMutation(mutation: any): SerializedMutation {
+  private serializeMutation(mutation: PendingMutation): SerializedMutation {
+    const registryKey = this.collectionIdToKey.get(mutation.collection.id)
+    if (!registryKey) {
+      throw new Error(
+        `Collection with id ${mutation.collection.id} not found in registry`
+      )
+    }
+
     return {
       globalKey: mutation.globalKey,
       type: mutation.type,
       modified: this.serializeValue(mutation.modified),
       original: this.serializeValue(mutation.original),
-      collectionId: mutation.collection.id,
+      collectionId: registryKey, // Store registry key instead of collection.id
     }
   }
 
-  private deserializeMutation(data: any): SerializedMutation {
+  private deserializeMutation(data: SerializedMutation): PendingMutation {
+    const collection = this.collections[data.collectionId]
+    if (!collection) {
+      throw new Error(`Collection with id ${data.collectionId} not found`)
+    }
+
+    // Create a partial PendingMutation - we can't fully reconstruct it but
+    // we provide what we can. The executor will need to handle the rest.
     return {
       globalKey: data.globalKey,
-      type: data.type,
+      type: data.type as any,
       modified: this.deserializeValue(data.modified),
       original: this.deserializeValue(data.original),
-      collectionId: data.collectionId,
-    }
+      collection,
+      // These fields would need to be reconstructed by the executor
+      mutationId: ``, // Will be regenerated
+      key: null, // Will be extracted from the data
+      changes: {}, // Will be recalculated
+      metadata: undefined,
+      syncMetadata: {},
+      optimistic: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as PendingMutation
   }
 
   private serializeValue(value: any): any {

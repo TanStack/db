@@ -1,14 +1,18 @@
 import { TransactionSerializer } from "./TransactionSerializer"
 import type { OfflineTransaction, StorageAdapter } from "../types"
+import type { Collection } from "@tanstack/db"
 
 export class OutboxManager {
   private storage: StorageAdapter
   private serializer: TransactionSerializer
   private keyPrefix = `tx:`
 
-  constructor(storage: StorageAdapter) {
+  constructor(
+    storage: StorageAdapter,
+    collections: Record<string, Collection>
+  ) {
     this.storage = storage
-    this.serializer = new TransactionSerializer()
+    this.serializer = new TransactionSerializer(collections)
   }
 
   private getStorageKey(id: string): string {
