@@ -1,5 +1,4 @@
 import {
-  consolidate,
   filter,
   join as joinOperator,
   map,
@@ -296,7 +295,6 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    consolidate(),
     processJoinResults(joinClause.type)
   )
 }
