@@ -1,9 +1,4 @@
-import {
-  filter,
-  join as joinOperator,
-  map,
-  tap,
-} from "@tanstack/db-ivm"
+import { filter, join as joinOperator, map, tap } from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
