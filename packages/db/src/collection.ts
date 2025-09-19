@@ -38,6 +38,11 @@ import {
   UpdateKeyNotFoundError,
 } from "./errors"
 import { createFilteredCallback, currentStateAsChanges } from "./change-events"
+import { CollectionEvents } from "./collection-events.js"
+import type {
+  AllCollectionEvents,
+  CollectionEventHandler,
+} from "./collection-events.js"
 import type { Transaction } from "./transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
@@ -267,6 +272,9 @@ export class CollectionImpl<
   private preloadPromise: Promise<void> | null = null
   private syncCleanupFn: (() => void) | null = null
 
+  // Event system
+  private events: CollectionEvents
+
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
@@ -346,6 +354,13 @@ export class CollectionImpl<
   }
 
   /**
+   * Get the number of subscribers to the collection
+   */
+  public get subscriberCount(): number {
+    return this.activeSubscribersCount
+  }
+
+  /**
    * Validates that the collection is in a usable state for data operations
    * @private
    */
@@ -395,6 +410,7 @@ export class CollectionImpl<
    */
   private setStatus(newStatus: CollectionStatus): void {
     this.validateStatusTransition(this._status, newStatus)
+    const previousStatus = this._status
     this._status = newStatus
 
     // Resolve indexes when collection becomes ready
@@ -404,6 +420,9 @@ export class CollectionImpl<
         console.warn(`Failed to resolve indexes:`, error)
       })
     }
+
+    // Emit event
+    this.events.emitStatusChange(newStatus, previousStatus)
   }
 
   /**
@@ -444,6 +463,9 @@ export class CollectionImpl<
     } else {
       this.syncedData = new Map<TKey, TOutput>()
     }
+
+    // Set up event system
+    this.events = new CollectionEvents(this)
 
     // Only start sync immediately if explicitly enabled
     if (config.startSync === true) {
@@ -663,6 +685,8 @@ export class CollectionImpl<
     this.batchedEvents = []
     this.shouldBatchEvents = false
 
+    this.events.cleanup()
+
     // Update status
     this.setStatus(`cleaned-up`)
 
@@ -707,6 +731,7 @@ export class CollectionImpl<
    * Increment the active subscribers count and start sync if needed
    */
   private addSubscriber(): void {
+    const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.cancelGCTimer()
 
@@ -714,12 +739,18 @@ export class CollectionImpl<
     if (this._status === `cleaned-up` || this._status === `idle`) {
       this.startSync()
     }
+
+    this.events.emitSubscribersChange(
+      this.activeSubscribersCount,
+      previousSubscriberCount
+    )
   }
 
   /**
    * Decrement the active subscribers count and start GC timer if needed
    */
   private removeSubscriber(): void {
+    const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
@@ -727,6 +758,11 @@ export class CollectionImpl<
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
     }
+
+    this.events.emitSubscribersChange(
+      this.activeSubscribersCount,
+      previousSubscriberCount
+    )
   }
 
   /**
@@ -2270,12 +2306,8 @@ export class CollectionImpl<
       return Promise.resolve(this.state)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Map<TKey, TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.state)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the state
+    return this.preload().then(() => this.state)
   }
 
   /**
@@ -2299,12 +2331,8 @@ export class CollectionImpl<
       return Promise.resolve(this.toArray)
     }
 
-    // Otherwise, wait for the collection to be ready
-    return new Promise<Array<TOutput>>((resolve) => {
-      this.onFirstReady(() => {
-        resolve(this.toArray)
-      })
-    })
+    // Use preload to ensure the collection starts loading, then return the array
+    return this.preload().then(() => this.toArray)
   }
 
   /**
@@ -2492,5 +2520,45 @@ export class CollectionImpl<
     this.capturePreSyncVisibleState()
 
     this.recomputeOptimisticState(false)
+  }
+
+  /**
+   * Subscribe to a collection event
+   */
+  public on<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    return this.events.on(event, callback)
+  }
+
+  /**
+   * Subscribe to a collection event once
+   */
+  public once<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    return this.events.once(event, callback)
+  }
+
+  /**
+   * Unsubscribe from a collection event
+   */
+  public off<T extends keyof AllCollectionEvents>(
+    event: T,
+    callback: CollectionEventHandler<T>
+  ) {
+    this.events.off(event, callback)
+  }
+
+  /**
+   * Wait for a collection event
+   */
+  public waitFor<T extends keyof AllCollectionEvents>(
+    event: T,
+    timeout?: number
+  ) {
+    return this.events.waitFor(event, timeout)
   }
 }

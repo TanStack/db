@@ -1,5 +1,62 @@
 # @tanstack/react-db
 
+## 0.1.21
+
+### Patch Changes
+
+- Expand `useLiveQuery` callback to support conditional queries and additional return types, enabling the ability to temporarily disable the query. ([#535](https://github.com/TanStack/db/pull/535))
+
+  **New Features:**
+  - Callback can now return `undefined` or `null` to temporarily disable the query
+  - Callback can return a pre-created `Collection` instance to use it directly
+  - Callback can return a `LiveQueryCollectionConfig` object for advanced configuration
+  - When disabled (returning `undefined`/`null`), the hook returns a specific idle state
+
+  **Usage Examples:**
+
+  ```ts
+  // Conditional queries - disable when not ready
+  const enabled = useState(false)
+  const { data, state, isIdle } = useLiveQuery((q) => {
+    if (!enabled) return undefined  // Disables the query
+    return q.from({ users }).where(...)
+  }, [enabled])
+
+  /**
+   * When disabled, returns:
+   * {
+   *   state: undefined,
+   *   data: undefined,
+   *   isIdle: true,
+   *   ...
+   * }
+   */
+
+  // Return pre-created Collection
+  const { data } = useLiveQuery((q) => {
+    if (usePrebuilt) return myCollection  // Use existing collection
+    return q.from({ items }).select(...)
+  }, [usePrebuilt])
+
+  // Return LiveQueryCollectionConfig
+  const { data } = useLiveQuery((q) => {
+    return {
+      query: q.from({ items }).select(...),
+      id: `my-collection`,
+    }
+  })
+  ```
+
+- Updated dependencies [[`cacfca2`](https://github.com/TanStack/db/commit/cacfca2d1b430c34a05202128fd3affa4bff54d6)]:
+  - @tanstack/db@0.3.2
+
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [[`5f51f35`](https://github.com/TanStack/db/commit/5f51f35d2c9543766a00cc5eea1374c62798b34e)]:
+  - @tanstack/db@0.3.1
+
 ## 0.1.19
 
 ### Patch Changes

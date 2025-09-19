@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.3.2
+
+### Patch Changes
+
+- Added a new events system for subscribing to status changes and other internal events. ([#555](https://github.com/TanStack/db/pull/555))
+
+## 0.3.1
+
+### Patch Changes
+
+- Fix `stateWhenReady()` and `toArrayWhenReady()` methods to consistently wait for collections to be ready by using `preload()` internally. This ensures the collection starts loading if needed rather than just waiting passively. ([#565](https://github.com/TanStack/db/pull/565))
+
 ## 0.3.0
 
 ### Minor Changes
