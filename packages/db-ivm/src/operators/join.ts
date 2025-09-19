@@ -1,3 +1,53 @@
+/**
+ * # Direct Join Algorithms for Incremental View Maintenance
+ *
+ * High-performance join operations implementing all join types (inner, left, right, full, anti)
+ * with minimal state and optimized performance.
+ *
+ * ## Algorithm
+ *
+ * For each tick, the algorithm processes incoming changes (deltas) and emits join results:
+ *
+ * 1. **Build deltas**: Extract new/changed/deleted rows from input messages
+ * 2. **Inner results**: Emit `ΔA⋈B_old + A_old⋈ΔB + ΔA⋈ΔB` (matched pairs)
+ * 3. **Outer results**: For unmatched rows, emit null-extended tuples:
+ *    - New unmatched rows from deltas (when opposite side empty)
+ *    - Presence transitions: when key goes `0→>0` (retract nulls) or `>0→0` (emit nulls)
+ * 4. **Update state**: Append deltas to indexes and update mass counters
+ *
+ * **Mass tracking** enables O(1) presence checks instead of scanning index buckets.
+ *
+ * ## State
+ *
+ * **Indexes** store the actual data:
+ * - `indexA: Index<K, V1>` - all left-side rows accumulated over time
+ * - `indexB: Index<K, V2>` - all right-side rows accumulated over time
+ *
+ * **Mass maps** track presence efficiently:
+ * - `massA/massB: Map<K, number>` - sum of multiplicities per key
+ * - Used for O(1) presence checks: `mass.get(key) !== 0` means key exists
+ * - Avoids scanning entire index buckets just to check if key has any rows
+ *
+ * ## Join Types
+ *
+ * - **Inner**: Standard delta terms only
+ * - **Outer**: Inner results + null-extended unmatched rows with transition handling
+ * - **Anti**: Unmatched rows only (no inner results)
+ *
+ * ## Key Optimizations
+ *
+ * - **No temp copying**: Uses `(A⊎ΔA)⋈ΔB = A⋈ΔB ⊎ ΔA⋈ΔB` distributive property
+ * - **Early-out checks**: Skip phases when no deltas present
+ * - **Zero-entry pruning**: Keep maps compact, O(distinct keys) memory
+ * - **Final presence logic**: Avoid emit→retract churn within same tick
+ *
+ * ## Correctness
+ *
+ * - **Ordering**: Pre-append snapshots for emissions, post-emit state updates
+ * - **Presence**: Key matched iff mass ≠ 0, transitions trigger null handling
+ * - **Bag semantics**: Proper multiplicity handling including negatives
+ */
+
 import { BinaryOperator, DifferenceStreamWriter } from "../graph.js"
 import { StreamBuilder } from "../d2.js"
 import { MultiSet } from "../multiset.js"
@@ -24,7 +74,14 @@ function buildDelta<K, V>(
     for (const [item, multiplicity] of multiSetMessage.getInner()) {
       const [key, value] = item
       delta.addValue(key, [value, multiplicity])
-      deltaMass.set(key, (deltaMass.get(key) || 0) + multiplicity)
+
+      // Keep deltaMass small by deleting zero entries
+      const next = (deltaMass.get(key) || 0) + multiplicity
+      if (next === 0) {
+        deltaMass.delete(key)
+      } else {
+        deltaMass.set(key, next)
+      }
     }
   }
 
@@ -59,64 +116,72 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     const [deltaA, deltaMassA] = buildDelta<K, V1>(this.inputAMessages())
     const [deltaB, deltaMassB] = buildDelta<K, V2>(this.inputBMessages())
 
+    // Early-out checks
+    const hasDeltaA = deltaA.size > 0
+    const hasDeltaB = deltaB.size > 0
+    const hasDeltaMassA = deltaMassA.size > 0
+    const hasDeltaMassB = deltaMassB.size > 0
+
+    // If nothing happened, bail early
+    if (!(hasDeltaA || hasDeltaB || hasDeltaMassA || hasDeltaMassB)) return
+
+    // Precompute mode flags to avoid repeated string comparisons
+    const mode = this.#mode
+    const emitInner =
+      mode === `inner` || mode === `left` || mode === `right` || mode === `full`
+    const emitLeftNulls = mode === `left` || mode === `full`
+    const emitRightNulls = mode === `right` || mode === `full`
+    const emitAntiLeft = mode === `anti`
+
     const results = new MultiSet<any>()
 
     // 2) INNER part (used by inner/left/right/full, but NOT anti)
-    if (
-      this.#mode === `inner` ||
-      this.#mode === `left` ||
-      this.#mode === `right` ||
-      this.#mode === `full`
-    ) {
-      // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB
+    if (emitInner && (hasDeltaA || hasDeltaB)) {
+      // Emit the three standard delta terms: DeltaA⋈B_old, A_old⋈DeltaB, DeltaA⋈DeltaB
       // This avoids copying the entire left index each tick
-      results.extend(deltaA.join(this.#indexB))
-      results.extend(this.#indexA.join(deltaB))
-      results.extend(deltaA.join(deltaB))
+      if (hasDeltaA) results.extend(deltaA.join(this.#indexB))
+      if (hasDeltaB) results.extend(this.#indexA.join(deltaB))
+      if (hasDeltaA && hasDeltaB) results.extend(deltaA.join(deltaB))
     }
 
     // 3) OUTER/ANTI specifics
 
     // LEFT side nulls or anti-left (depend only on B's presence)
-    if (
-      this.#mode === `left` ||
-      this.#mode === `full` ||
-      this.#mode === `anti`
-    ) {
-      // 3a) New/deleted left rows that are currently unmatched
-      // For initial state, check final presence after applying deltaB
-      for (const [key, valueIterator] of deltaA.entriesIterators()) {
-        const finalMassB =
-          (this.#massB.get(key) || 0) + (deltaMassB.get(key) || 0)
-        if (finalMassB === 0) {
-          for (const [value, multiplicity] of valueIterator) {
-            if (multiplicity !== 0) {
-              results.add([key, [value, null]], multiplicity)
+    if ((emitLeftNulls || emitAntiLeft) && (hasDeltaA || hasDeltaMassB)) {
+      // 3a) New/deleted left rows that are currently unmatched (only if DeltaA changed)
+      if (hasDeltaA) {
+        // For initial state, check final presence after applying deltaB
+        for (const [key, valueIterator] of deltaA.entriesIterators()) {
+          const finalMassB =
+            (this.#massB.get(key) || 0) + (deltaMassB.get(key) || 0)
+          if (finalMassB === 0) {
+            for (const [value, multiplicity] of valueIterator) {
+              if (multiplicity !== 0) {
+                results.add([key, [value, null]], multiplicity)
+              }
             }
           }
         }
       }
 
-      // 3b) Right-side presence transitions flip match status for *current* left rows
-      for (const [key, deltaMass] of deltaMassB) {
-        const before = this.#massB.get(key) || 0
-        const after = before + deltaMass
+      // 3b) Right-side presence transitions (only if some RHS masses changed)
+      if (hasDeltaMassB) {
+        for (const [key, deltaMass] of deltaMassB) {
+          const before = this.#massB.get(key) || 0
+          if (deltaMass === 0) continue
+          const after = before + deltaMass
 
-        // Skip if presence doesn't flip (0->0, >0->different>0)
-        if ((before === 0) === (after === 0)) continue
+          // Skip if presence doesn't flip (0->0, >0->different>0)
+          if ((before === 0) === (after === 0)) continue
 
-        if (before === 0 && after !== 0) {
-          // B: 0 -> >0 — retract previously unmatched left-at-k
-          for (const [value, multiplicity] of this.#indexA.getIterator(key)) {
+          const it = this.#indexA.getIterator(key)
+          const retract = before === 0 // 0->!0 => retract, else (>0->0) emit
+          for (const [value, multiplicity] of it) {
             if (multiplicity !== 0) {
-              results.add([key, [value, null]], -multiplicity)
-            }
-          }
-        } else if (before !== 0 && after === 0) {
-          // B: >0 -> 0 — emit left-at-k as unmatched
-          for (const [value, multiplicity] of this.#indexA.getIterator(key)) {
-            if (multiplicity !== 0) {
-              results.add([key, [value, null]], multiplicity)
+              results.add(
+                [key, [value, null]],
+                retract ? -multiplicity : +multiplicity
+              )
             }
           }
         }
@@ -124,41 +189,41 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     }
 
     // RIGHT side nulls (depend only on A's presence)
-    if (this.#mode === `right` || this.#mode === `full`) {
-      // 3a) New/deleted right rows that are currently unmatched
-      // For initial state, check final presence after applying deltaA
-      for (const [key, valueIterator] of deltaB.entriesIterators()) {
-        const finalMassA =
-          (this.#massA.get(key) || 0) + (deltaMassA.get(key) || 0)
-        if (finalMassA === 0) {
-          for (const [value, multiplicity] of valueIterator) {
-            if (multiplicity !== 0) {
-              results.add([key, [null, value]], multiplicity)
+    if (emitRightNulls && (hasDeltaB || hasDeltaMassA)) {
+      // 3a) New/deleted right rows that are currently unmatched (only if DeltaB changed)
+      if (hasDeltaB) {
+        // For initial state, check final presence after applying deltaA
+        for (const [key, valueIterator] of deltaB.entriesIterators()) {
+          const finalMassA =
+            (this.#massA.get(key) || 0) + (deltaMassA.get(key) || 0)
+          if (finalMassA === 0) {
+            for (const [value, multiplicity] of valueIterator) {
+              if (multiplicity !== 0) {
+                results.add([key, [null, value]], multiplicity)
+              }
             }
           }
         }
       }
 
-      // 3b) Left-side presence transitions flip match status for *current* right rows
-      for (const [key, deltaMass] of deltaMassA) {
-        const before = this.#massA.get(key) || 0
-        const after = before + deltaMass
+      // 3b) Left-side presence transitions (only if some LHS masses changed)
+      if (hasDeltaMassA) {
+        for (const [key, deltaMass] of deltaMassA) {
+          const before = this.#massA.get(key) || 0
+          if (deltaMass === 0) continue
+          const after = before + deltaMass
 
-        // Skip if presence doesn't flip (0->0, >0->different>0)
-        if ((before === 0) === (after === 0)) continue
+          // Skip if presence doesn't flip (0->0, >0->different>0)
+          if ((before === 0) === (after === 0)) continue
 
-        if (before === 0 && after !== 0) {
-          // A: 0 -> >0 — retract previously unmatched right-at-k
-          for (const [value, multiplicity] of this.#indexB.getIterator(key)) {
+          const it = this.#indexB.getIterator(key)
+          const retract = before === 0 // 0->!0 => retract, else (>0->0) emit
+          for (const [value, multiplicity] of it) {
             if (multiplicity !== 0) {
-              results.add([key, [null, value]], -multiplicity)
-            }
-          }
-        } else if (before !== 0 && after === 0) {
-          // A: >0 -> 0 — emit right-at-k as unmatched
-          for (const [value, multiplicity] of this.#indexB.getIterator(key)) {
-            if (multiplicity !== 0) {
-              results.add([key, [null, value]], multiplicity)
+              results.add(
+                [key, [null, value]],
+                retract ? -multiplicity : +multiplicity
+              )
             }
           }
         }
@@ -172,12 +237,22 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     this.#indexA.append(deltaA)
     this.#indexB.append(deltaB)
 
-    // Update masses
+    // Update masses and keep maps small by deleting zero entries
     for (const [key, deltaMass] of deltaMassA) {
-      this.#massA.set(key, (this.#massA.get(key) || 0) + deltaMass)
+      const next = (this.#massA.get(key) || 0) + deltaMass
+      if (next === 0) {
+        this.#massA.delete(key)
+      } else {
+        this.#massA.set(key, next)
+      }
     }
     for (const [key, deltaMass] of deltaMassB) {
-      this.#massB.set(key, (this.#massB.get(key) || 0) + deltaMass)
+      const next = (this.#massB.get(key) || 0) + deltaMass
+      if (next === 0) {
+        this.#massB.delete(key)
+      } else {
+        this.#massB.set(key, next)
+      }
     }
 
     // Send results
