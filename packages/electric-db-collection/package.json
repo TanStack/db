@@ -4,6 +4,7 @@
   "version": "0.1.22",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
+    "@electric-sql/client": "^1.0.10",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.7.5",
     "debug": "^4.4.1"

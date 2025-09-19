@@ -621,6 +621,9 @@ importers:
 
   packages/electric-db-collection:
     dependencies:
+      '@electric-sql/client':
+        specifier: ^1.0.10
+        version: 1.0.10
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -637,9 +640,6 @@ importers:
         specifier: '>=4.7'
         version: 5.9.2
     devDependencies:
-      '@electric-sql/client':
-        specifier: ^1.0.10
-        version: 1.0.10
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
