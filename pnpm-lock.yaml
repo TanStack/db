@@ -636,9 +636,6 @@ importers:
       debug:
         specifier: ^4.4.1
         version: 4.4.1
-      typescript:
-        specifier: '>=4.7'
-        version: 5.9.2
     devDependencies:
       '@types/debug':
         specifier: ^4.1.12
