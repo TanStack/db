@@ -3,13 +3,13 @@
   "description": "ElectricSQL collection for TanStack DB",
   "version": "0.1.22",
   "dependencies": {
-    "@electric-sql/client": "1.0.9",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.7.5",
     "debug": "^4.4.1"
   },
   "devDependencies": {
+    "@electric-sql/client": "^1.0.10",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
@@ -34,7 +34,7 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.6.3",
   "peerDependencies": {
-    "@electric-sql/client": ">=1.0.0",
+    "@electric-sql/client": "^1.0.0",
     "typescript": ">=4.7"
   },
   "author": "Kyle Mathews",
