@@ -209,6 +209,12 @@ export class MultiSet<T> {
     chunkedArrayPush(this.#inner, otherArray)
   }
 
+  add(item: T, multiplicity: number): void {
+    if (multiplicity !== 0) {
+      this.#inner.push([item, multiplicity])
+    }
+  }
+
   getInner(): MultiSetArray<T> {
     return this.#inner
   }
