@@ -10,7 +10,6 @@
     "debug": "^4.4.1"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.0.10",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
