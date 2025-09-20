@@ -3,7 +3,7 @@ This is the intermediate representation of the query.
 */
 
 import type { CompareOptions } from "./builder/types"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 import type { NamespacedRow } from "../types"
 
 export interface QueryIR {

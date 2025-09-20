@@ -2,7 +2,7 @@ import { describe, expectTypeOf, test } from "vitest"
 import { z } from "zod"
 import { type } from "arktype"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample user type for tests

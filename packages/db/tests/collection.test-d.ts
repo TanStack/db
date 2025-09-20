@@ -1,6 +1,6 @@
 import { assertType, describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import type { OperationConfig } from "../src/types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 

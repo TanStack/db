@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionImpl } from "../../../src/collection.js"
+import { CollectionImpl } from "../../../src/collection/index.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
 
 // Test schema types

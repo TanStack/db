@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,

@@ -86,9 +86,9 @@ describe(`QueryCollection`, () => {
     expect(collection.get(`2`)).toEqual(initialItems[1])
 
     // Verify the synced data
-    expect(collection.syncedData.size).toBe(initialItems.length)
-    expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
-    expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
+    expect(collection._state.syncedData.size).toBe(initialItems.length)
+    expect(collection._state.syncedData.get(`1`)).toEqual(initialItems[0])
+    expect(collection._state.syncedData.get(`2`)).toEqual(initialItems[1])
   })
 
   it(`should update collection when query data changes`, async () => {

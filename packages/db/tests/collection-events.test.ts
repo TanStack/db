@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection.js"
+import { createCollection } from "../src/collection/index.js"
 
 describe(`Collection Events System`, () => {
   let collection: ReturnType<typeof createCollection>

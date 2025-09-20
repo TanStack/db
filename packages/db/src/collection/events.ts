@@ -1,5 +1,5 @@
-import type { Collection } from "./collection"
-import type { CollectionStatus } from "./types"
+import type { Collection } from "./index.js"
+import type { CollectionStatus } from "../types.js"
 
 /**
  * Event emitted when the collection status changes
@@ -47,7 +47,7 @@ export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T]
 ) => void
 
-export class CollectionEvents {
+export class CollectionEventsManager {
   private collection: Collection<any, any, any, any, any>
   private listeners = new Map<
     keyof AllCollectionEvents,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection"
+import { createCollection } from "../../src/collection/index.js"
 
 import { createLiveQueryCollection } from "../../src/query/live-query-collection"
 import {

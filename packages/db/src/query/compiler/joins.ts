@@ -30,7 +30,7 @@ import type {
   QueryRef,
 } from "../ir.js"
 import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
-import type { Collection } from "../../collection.js"
+import type { Collection } from "../../collection/index.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,

@@ -1,5 +1,5 @@
 // Re-export all public APIs
-export * from "./collection"
+export * from "./collection/index.js"
 export * from "./SortedMap"
 export * from "./transactions"
 export * from "./types"
@@ -17,4 +17,4 @@ export * from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"
 
 // Re-export some stuff explicitly to ensure the type & value is exported
-export type { Collection } from "./collection"
+export type { Collection } from "./collection/index.js"

@@ -21,7 +21,7 @@ import type {
   QueryRef,
 } from "../ir.js"
 import type { LazyCollectionCallbacks } from "./joins.js"
-import type { Collection } from "../../collection.js"
+import type { Collection } from "../../collection/index.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
