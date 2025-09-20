@@ -145,6 +145,7 @@ TanStack DB provides several collection types to support different backend integ
 - **`@tanstack/electric-db-collection`** - Real-time sync collections powered by [ElectricSQL](https://electric-sql.com) for live database synchronization
 - **`@tanstack/trailbase-db-collection`** - Collections for [TrailBase](https://trailbase.io) backend integration
 - **`@tanstack/rxdb-db-collection`** - Collections backed by [RxDB](https://rxdb.info), a client-side database with replication support and local persistence made for local-first apps.
+- **`@tanstack/dexie-db-collection`** - Collections backed by [Dexie.js](https://dexie.org) for IndexedDB persistence with reactive updates and efficient syncing.
 
 ## Framework integrations
 
@@ -158,7 +159,7 @@ TanStack DB integrates with React & Vue with more on the way!
 ```bash
 npm install @tanstack/react-db
 # Optional: for specific collection types
-npm install @tanstack/electric-db-collection @tanstack/query-db-collection @tanstack/trailbase-db-collection @tanstack/rxdb-db-collection
+npm install @tanstack/electric-db-collection @tanstack/query-db-collection @tanstack/trailbase-db-collection @tanstack/rxdb-db-collection @tanstack/dexie-db-collection
 ```
 
 Other framework integrations are in progress.
