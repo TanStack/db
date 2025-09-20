@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.3.2
+
+### Patch Changes
+
+- Added a new events system for subscribing to status changes and other internal events. ([#555](https://github.com/TanStack/db/pull/555))
+
 ## 0.3.1
 
 ### Patch Changes

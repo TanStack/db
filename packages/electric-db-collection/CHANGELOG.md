@@ -1,5 +1,14 @@
 # @tanstack/electric-db-collection
 
+## 0.1.23
+
+### Patch Changes
+
+- Pull in the latest version of @electric-sql/client instead of pinning it ([#572](https://github.com/TanStack/db/pull/572))
+
+- Updated dependencies [[`cacfca2`](https://github.com/TanStack/db/commit/cacfca2d1b430c34a05202128fd3affa4bff54d6)]:
+  - @tanstack/db@0.3.2
+
 ## 0.1.22
 
 ### Patch Changes
