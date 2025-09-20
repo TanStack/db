@@ -52,15 +52,14 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
  */
 export interface QueryCollectionConfig<
   T extends object = object,
-  TQueryFn extends (
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
     context: QueryFunctionContext<any>
-  ) => Promise<Array<any>> = (
-    context: QueryFunctionContext<any>
-  ) => Promise<Array<any>>,
+  ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
 > extends BaseCollectionConfig<T, TKey, TSchema> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
@@ -68,9 +67,10 @@ export interface QueryCollectionConfig<
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>
   ) => Promise<Array<any>>
-    ? TQueryFn
-    : (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+    : TQueryFn
 
+  select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
 
@@ -249,6 +249,63 @@ export interface QueryCollectionUtils<
  *   })
  * )
  */
+// Overload for when schema is provided and select present
+export function queryCollectionOptions<
+  T extends StandardSchemaV1,
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any>,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfig<
+    InferSchemaOutput<T>,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    T
+  > & {
+    schema: T
+    select: (data: TQueryData) => Array<InferSchemaInput<T>>
+  }
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  schema: T
+  utils: QueryCollectionUtils<
+    InferSchemaOutput<T>,
+    TKey,
+    InferSchemaInput<T>,
+    TError
+  >
+}
+
+// Overload for when no schema is provided and select present
+export function queryCollectionOptions<
+  T extends object,
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+    context: QueryFunctionContext<any>
+  ) => Promise<any>,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfig<
+    T,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    never,
+    TQueryData
+  > & {
+    schema?: never // prohibit schema
+    select: (data: TQueryData) => Array<T>
+  }
+): CollectionConfig<T, TKey> & {
+  schema?: never // no schema in the result
+  utils: QueryCollectionUtils<T, TKey, T, TError>
+}
 
 // Overload for when schema is provided
 export function queryCollectionOptions<
@@ -308,6 +365,7 @@ export function queryCollectionOptions(
   const {
     queryKey,
     queryFn,
+    select,
     queryClient,
     enabled,
     refetchInterval,
@@ -387,7 +445,8 @@ export function queryCollectionOptions(
         lastError = undefined
         errorCount = 0
 
-        const newItemsArray = result.data
+        const rawData = result.data
+        const newItemsArray = select ? select(rawData) : rawData
 
         if (
           !Array.isArray(newItemsArray) ||
