@@ -445,6 +445,42 @@ export const tempDataCollection = createCollection(
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
+#### `DexieCollection`
+
+Dexie collections provide seamless integration with [Dexie.js](https://dexie.org) for IndexedDB-backed local persistence with reactive updates. They automatically sync between your in-memory TanStack DB collection and a Dexie table using live queries.
+
+Use `dexieCollectionOptions` to create a collection that persists data with IndexedDB:
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { dexieCollectionOptions } from "@tanstack/dexie-db-collection"
+
+export const todoCollection = createCollection(
+  dexieCollectionOptions({
+    id: "todos",
+    schema: todoSchema,
+    getKey: (item) => item.id,
+    dbName: "my-app-db", // Optional: defaults to 'app-db'
+    tableName: "todos", // Optional: defaults to collection id
+  })
+)
+```
+
+The Dexie collection requires:
+
+- `getKey` — identifies the id for items in the collection
+
+Optional configuration:
+
+- `dbName` — Dexie database name (default: 'app-db')
+- `tableName` — Dexie table name (defaults to collection id)
+- `codec` — data transformation between stored and in-memory formats
+- `syncBatchSize` — batch size for initial sync (default: 1000)
+- `rowUpdateMode` — 'partial' or 'full' update strategy
+
+> [!TIP]
+> Dexie collections are perfect for offline-first apps that need local persistence with reactive updates. They work seamlessly with TanStack DB's live queries for building fast, responsive UIs that persist data locally.
+
 #### Derived collections
 
 Live queries return collections. This allows you to derive collections from other collections.

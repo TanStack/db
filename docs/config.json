@@ -101,6 +101,10 @@
         {
           "label": "RxDB Collection",
           "to": "collections/rxdb-collection"
+        },
+        {
+          "label": "Dexie Collection",
+          "to": "collections/dexie-collection"
         }
       ]
     },
@@ -158,6 +162,14 @@
         {
           "label": "rxdbCollectionOptions",
           "to": "reference/rxdb-db-collection/functions/rxdbcollectionoptions"
+        },
+        {
+          "label": "Dexie DB Collection",
+          "to": "reference/dexie-db-collection/index"
+        },
+        {
+          "label": "dexieCollectionOptions",
+          "to": "reference/dexie-db-collection/functions/dexiecollectionoptions"
         }
       ],
       "frameworks": [

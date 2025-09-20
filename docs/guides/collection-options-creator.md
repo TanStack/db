@@ -332,6 +332,7 @@ For complete, production-ready examples, see the collection packages in the TanS
 - **[@tanstack/trailbase-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-collection)** - Pattern B: Built-in handlers with ID-based tracking  
 - **[@tanstack/electric-collection](https://github.com/TanStack/db/tree/main/packages/electric-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
 - **[@tanstack/rxdb-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
+- **[@tanstack/dexie-collection](https://github.com/TanStack/db/tree/main/packages/dexie-collection)** - Pattern B: Built-in handlers that integrate [Dexie.js](https://dexie.org) with IndexedDB persistence and reactive live queries
 
 ### Key Lessons from Production Collections
 
@@ -354,6 +355,11 @@ For complete, production-ready examples, see the collection packages in the TanS
 - Uses RxDB's built-in queries and change streams
 - Uses `RxCollection.$` to subscribe to inserts/updates/deletes and forward them to TanStack DB with begin-write-commit
 - Implements built-in mutation handlers (onInsert, onUpdate, onDelete) that call RxDB APIs (bulkUpsert, incrementalPatch, bulkRemove)
+
+**From Dexie Collection:**
+- Shows IndexedDB integration with reactive live queries via Dexie's `liveQuery`
+- Demonstrates efficient batch syncing with metadata tracking for change detection
+- Uses built-in mutation handlers that leverage Dexie's transaction system and bulk operations
 
 ## Complete Example: WebSocket Collection
 
