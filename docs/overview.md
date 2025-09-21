@@ -448,6 +448,7 @@ export const tempDataCollection = createCollection(
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
+<a id="dexiecollection"></a>
 ### DexieCollection (Unofficial)
 
 _This entry is unofficial and maintained by the community._
@@ -458,6 +459,8 @@ Repository: `https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collectio
 
 Install: `npm install tanstack-dexie-db-collection`
 
+Read more examples: [Dexie Collection Examples](https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collection/blob/master/EXAMPLES.md)
+
 Two concise examples showing common workflows:
 
 1) Zod (TypeScript) — type-safe schema + runtime validation
@@ -465,14 +468,6 @@ Two concise examples showing common workflows:
 ```ts
 import { createCollection } from "@tanstack/react-db"
 import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
-import { z } from "zod"
-
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  completed: z.boolean(),
-  createdAt: z.date().optional(),
-})
 
 const todos = createCollection(
   dexieCollectionOptions({
@@ -483,25 +478,39 @@ const todos = createCollection(
 )
 ```
 
-2) Plain JS + `codec` — when stored shape differs (e.g. dates as ISO strings)
+2) Sync handlers — common persistence patterns
 
-```js
+```ts
 import { createCollection } from "@tanstack/react-db"
 import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
+
 
 const todos = createCollection(
   dexieCollectionOptions({
     id: "todos",
     getKey: (t) => t.id,
-    codec: {
-      parse: (stored) => ({
-        ...stored,
-        createdAt: stored.createdAt ? new Date(stored.createdAt) : undefined,
-      }),
-      serialize: (item) => ({
-        ...item,
-        createdAt: item.createdAt ? item.createdAt.toISOString() : undefined,
-      }),
+    schema: todoSchema,
+    // Example A — bulk background sync using an existing mutation
+    onUpdate: async ({ transaction }) => {
+      const updates = transaction.mutations.map((m) => ({
+        id: m.key,
+        changes: m.changes,
+      }))
+
+      await bulkUpdateMutation.mutateAsync({ updates })
+    },
+
+    // Example B — per-item sync using individual mutations
+    onInsert: async ({ transaction }) => {
+      for (const m of transaction.mutations) {
+        await itemCreateMutation.mutateAsync(m.modified)
+      }
+    },
+
+    onDelete: async ({ transaction }) => {
+      for (const m of transaction.mutations) {
+        await itemDeleteMutation.mutateAsync({ id: m.key })
+      }
     },
   })
 )
