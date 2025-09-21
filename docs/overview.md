@@ -69,6 +69,8 @@ Collections can be populated in many ways, including:
 
 Once you have your data in collections, you can query across them using live queries in your components.
 
+ 
+
 ### Using live queries
 
 Live queries are used to query data out of collections. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the result is incrementally updated and returned from the query, triggering a re-render.
@@ -157,6 +159,7 @@ There are a number of built-in collection types:
 4. [`RxDBCollection`](#rxdbcollection) to integrate with [RxDB](https://rxdb.info) for local persistence and sync
 5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
 6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+7. [`DexieCollection`](#dexiecollection) — _Unofficial_ community integration for Dexie.js (IndexedDB)
 
 You can also use:
 
@@ -444,6 +447,68 @@ export const tempDataCollection = createCollection(
 
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
+
+### DexieCollection (Unofficial)
+
+_This entry is unofficial and maintained by the community._
+
+For local-first persistence using IndexedDB, there's a community package that integrates [Dexie.js](https://dexie.org) with TanStack DB. It keeps a TanStack DB collection and a Dexie table in sync, supports optimistic mutations, and can use a `codec` or a schema for parsing/serializing stored rows.
+
+Repository: `https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collection.git`
+
+Install: `npm install tanstack-dexie-db-collection`
+
+Two concise examples showing common workflows:
+
+1) Zod (TypeScript) — type-safe schema + runtime validation
+
+```ts
+import { createCollection } from "@tanstack/react-db"
+import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
+import { z } from "zod"
+
+const todoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  completed: z.boolean(),
+  createdAt: z.date().optional(),
+})
+
+const todos = createCollection(
+  dexieCollectionOptions({
+    id: "todos",
+    schema: todoSchema,
+    getKey: (t) => t.id,
+  })
+)
+```
+
+2) Plain JS + `codec` — when stored shape differs (e.g. dates as ISO strings)
+
+```js
+import { createCollection } from "@tanstack/react-db"
+import { dexieCollectionOptions } from "tanstack-dexie-db-collection"
+
+const todos = createCollection(
+  dexieCollectionOptions({
+    id: "todos",
+    getKey: (t) => t.id,
+    codec: {
+      parse: (stored) => ({
+        ...stored,
+        createdAt: stored.createdAt ? new Date(stored.createdAt) : undefined,
+      }),
+      serialize: (item) => ({
+        ...item,
+        createdAt: item.createdAt ? item.createdAt.toISOString() : undefined,
+      }),
+    },
+  })
+)
+```
+
+Quick note: Use Zod (or another Standard Schema) for compile-time types and runtime validation. Use a `codec` when you need to transform stored shapes (ISO dates, legacy fields) without a typed schema.
+
 
 #### Derived collections
 

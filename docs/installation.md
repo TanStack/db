@@ -104,3 +104,13 @@ npm install @tanstack/rxdb-db-collection
 
 Use `rxdbCollectionOptions` to bridge an [RxDB collection](https://rxdb.info/rx-collection.html) into TanStack DB.
 This gives you reactive TanStack DB collections backed by RxDB's powerful local-first database, replication, and conflict handling features.
+
+### Dexie (Unofficial)
+
+For local persistence using [Dexie.js](https://dexie.org) (IndexedDB). A small community-maintained adapter keeps a TanStack DB collection in sync with a Dexie table.
+
+Install: `npm install tanstack-dexie-db-collection`
+
+Repository: `https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collection.git`
+
+Note: This package is unofficial and maintained by the community. Compatibility with core packages or future releases is not guaranteed.
