@@ -119,31 +119,36 @@ export class CollectionConfigBuilder<
 
     this.isGraphRunning = true
 
-    const { begin, commit, markReady } = config
+    try {
+      const { begin, commit, markReady } = config
 
-    // We only run the graph if all the collections are ready
-    if (
-      this.allCollectionsReadyOrInitialCommit() &&
-      syncState.subscribedToAllCollections
-    ) {
-      while (syncState.graph.pendingWork()) {
-        syncState.graph.run()
-        callback?.()
-      }
+      // We only run the graph if all the collections are ready
+      if (
+        this.allCollectionsReadyOrInitialCommit() &&
+        syncState.subscribedToAllCollections
+      ) {
+        while (syncState.graph.pendingWork()) {
+          console.log(`RUNNING GRAPH`)
+          syncState.graph.run()
+          console.log(`Calling callback`)
+          callback?.()
+          console.log(`returned from callback`)
+        }
 
-      // On the initial run, we may need to do an empty commit to ensure that
-      // the collection is initialized
-      if (syncState.messagesCount === 0) {
-        begin()
-        commit()
+        // On the initial run, we may need to do an empty commit to ensure that
+        // the collection is initialized
+        if (syncState.messagesCount === 0) {
+          begin()
+          commit()
+        }
+        // Mark the collection as ready after the first successful run
+        if (this.allCollectionsReady()) {
+          markReady()
+        }
       }
-      // Mark the collection as ready after the first successful run
-      if (this.allCollectionsReady()) {
-        markReady()
-      }
+    } finally {
+      this.isGraphRunning = false
     }
-
-    this.isGraphRunning = false
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
