@@ -182,7 +182,7 @@ export function electricCollectionOptions(
   const wrappedOnInsert = config.onInsert
     ? async (params: InsertMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
+
         const handlerResult = (await config.onInsert!(params)) ?? {}
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
@@ -204,7 +204,7 @@ export function electricCollectionOptions(
   const wrappedOnUpdate = config.onUpdate
     ? async (params: UpdateMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
+
         const handlerResult = (await config.onUpdate!(params)) ?? {}
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 

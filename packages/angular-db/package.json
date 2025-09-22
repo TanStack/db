@@ -15,19 +15,19 @@
     "angular",
     "typescript"
   ],
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.17.0",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@angular/common": "^19.0.0",
-    "@angular/compiler": "^19.0.0",
-    "@angular/core": "^19.0.0",
-    "@angular/platform-browser": "^19.0.0",
-    "@angular/platform-browser-dynamic": "^19.0.0",
-    "@vitest/coverage-istanbul": "^3.0.9",
-    "rxjs": "^7.8.0",
-    "zone.js": "^0.14.0"
+    "@angular/common": "^19.2.15",
+    "@angular/compiler": "^19.2.15",
+    "@angular/core": "^19.2.15",
+    "@angular/platform-browser": "^19.2.15",
+    "@angular/platform-browser-dynamic": "^19.2.15",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "rxjs": "^7.8.2",
+    "zone.js": "^0.15.1"
   },
   "exports": {
     ".": {
