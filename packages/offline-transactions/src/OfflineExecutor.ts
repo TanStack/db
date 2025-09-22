@@ -97,7 +97,7 @@ export class OfflineExecutor {
     } else {
       // Fallback: always be leader in environments without multi-tab support
       return {
-        requestLeadership: () => true,
+        requestLeadership: () => Promise.resolve(true),
         releaseLeadership: () => {},
         isLeader: () => true,
         onLeadershipChange: () => () => {},
