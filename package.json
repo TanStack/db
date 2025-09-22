@@ -1,17 +1,12 @@
 {
-  "name": "@tanstack/db-monorepo",
+  "name": "root",
   "private": true,
-  "description": "Reactive client queryable store for sync-first applications",
-  "version": "0.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/tanstack/db.git"
   },
-  "author": "Kyle Mathews <mathews.kyle@gmail.com>",
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.17.0",
   "type": "module",
-  "keywords": [],
-  "license": "MIT",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
     "changeset": "changeset",
@@ -43,42 +38,25 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
-    "fast-glob": "^3.3.3",
     "husky": "^9.1.7",
     "jsdom": "^26.1.0",
+    "knip": "^5.63.1",
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.2",
     "mitt": "^3.0.1",
     "prettier": "^3.6.2",
-    "publint": "^0.3.12",
+    "publint": "^0.3.13",
+    "sherif": "^1.6.1",
     "shx": "^0.4.0",
-    "tsup": "^8.5.0",
+    "tinyglobby": "^0.2.15",
     "typescript": "^5.9.2",
     "vite": "^6.3.6",
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
   },
-  "exports": {
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
   "lint-staged": {
     "*.{ts,tsx}": [
       "eslint --fix"
     ]
-  },
-  "workspaces": [
-    "packages/*",
-    "examples/*",
-    "examples/react/*"
-  ],
-  "overrides": {
-    "@tanstack/db": "workspace:*",
-    "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/react-db": "workspace:*",
-    "@tanstack/vue-db": "workspace:*"
   }
 }
