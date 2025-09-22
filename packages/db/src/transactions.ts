@@ -14,34 +14,8 @@ import type {
   TransactionWithMutations,
 } from "./types"
 
-// Add module instance ID for debugging multiple instances
-// const MODULE_INSTANCE_ID = `transactions_${Math.random().toString(36).substr(2, 9)}`
-// console.log(`[${MODULE_INSTANCE_ID}] transactions.ts module loaded`)
-
-// Use global registry to share transaction state across multiple module instances
-const GLOBAL_TRANSACTION_KEY = Symbol.for(`@tanstack/db_global_transactions`)
-const globalScope = (
-  typeof globalThis !== `undefined`
-    ? globalThis
-    : typeof window !== `undefined`
-      ? window
-      : typeof global !== `undefined`
-        ? global
-        : {}
-) as any
-
-// Initialize global transaction registry if it doesn't exist
-if (!globalScope[GLOBAL_TRANSACTION_KEY]) {
-  globalScope[GLOBAL_TRANSACTION_KEY] = {
-    transactions: [],
-    transactionStack: [],
-  }
-}
-
-// Use the global registry instead of local variables
-const transactions: Array<Transaction<any>> =
-  globalScope[GLOBAL_TRANSACTION_KEY].transactions
-// transactionStack is now accessed via globalScope[GLOBAL_TRANSACTION_KEY].transactionStack
+const transactions: Array<Transaction<any>> = []
+let transactionStack: Array<Transaction<any>> = []
 
 let sequenceNumber = 0
 
@@ -197,22 +171,19 @@ export function createTransaction<T extends object = Record<string, unknown>>(
  * }
  */
 export function getActiveTransaction(): Transaction | undefined {
-  const currentStack = globalScope[GLOBAL_TRANSACTION_KEY].transactionStack
-  if (currentStack.length > 0) {
-    return currentStack.slice(-1)[0]
+  if (transactionStack.length > 0) {
+    return transactionStack.slice(-1)[0]
   } else {
     return undefined
   }
 }
 
 function registerTransaction(tx: Transaction<any>) {
-  globalScope[GLOBAL_TRANSACTION_KEY].transactionStack.push(tx)
+  transactionStack.push(tx)
 }
 
 function unregisterTransaction(tx: Transaction<any>) {
-  globalScope[GLOBAL_TRANSACTION_KEY].transactionStack = globalScope[
-    GLOBAL_TRANSACTION_KEY
-  ].transactionStack.filter((t: Transaction<any>) => t.id !== tx.id)
+  transactionStack = transactionStack.filter((t) => t.id !== tx.id)
 }
 
 function removeFromPendingList(tx: Transaction<any>) {

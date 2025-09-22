@@ -14,20 +14,6 @@ export class NonRetriableError extends TanStackDBError {
   }
 }
 
-// Multiple instance error
-export class MultipleInstancesError extends TanStackDBError {
-  existingInstance: any
-  currentInstance: any
-
-  constructor(existingInstance: any, currentInstance: any) {
-    const message = `Multiple instances of @tanstack/db detected. This usually happens when different packages depend on different versions of @tanstack/db. Use pnpm overrides or npm resolutions to force a single version.`
-    super(message)
-    this.name = `MultipleInstancesError`
-    this.existingInstance = existingInstance
-    this.currentInstance = currentInstance
-  }
-}
-
 // Schema validation error (exported from index for backward compatibility)
 export class SchemaValidationError extends TanStackDBError {
   type: `insert` | `update`

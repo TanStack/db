@@ -4,9 +4,7 @@
   "version": "0.3.2",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/query-db-collection": "catalog:",
-    "@tanstack/react-db": "catalog:"
+    "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
