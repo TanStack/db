@@ -69,8 +69,6 @@ Collections can be populated in many ways, including:
 
 Once you have your data in collections, you can query across them using live queries in your components.
 
- 
-
 ### Using live queries
 
 Live queries are used to query data out of collections. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the result is incrementally updated and returned from the query, triggering a re-render.
@@ -159,7 +157,6 @@ There are a number of built-in collection types:
 4. [`RxDBCollection`](#rxdbcollection) to integrate with [RxDB](https://rxdb.info) for local persistence and sync
 5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
 6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
-7. [`DexieCollection`](#dexiecollection) — _Unofficial_ community integration for Dexie.js (IndexedDB)
 
 You can also use:
 
@@ -189,8 +186,8 @@ const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ["todoItems"],
     queryFn: async () => {
-      const response = await fetch("/api/todos");
-      return response.json();
+      const response = await fetch("/api/todos")
+      return response.json()
     },
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
@@ -304,7 +301,6 @@ This collection requires the following TrailBase-specific options:
 
 A new collections doesn't start syncing until you call `collection.preload()` or you query it.
 
-
 #### `RxDBCollection`
 
 [RxDB](https://rxdb.info) is a client-side database for JavaScript apps with replication, conflict resolution, and offline-first features.  
@@ -338,7 +334,7 @@ await db.addCollections({
 export const todoCollection = createCollection(
   rxdbCollectionOptions({
     rxCollection: db.todos,
-    startSync: true
+    startSync: true,
   })
 )
 ```
@@ -447,7 +443,6 @@ export const tempDataCollection = createCollection(
 
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
-
 
 #### Derived collections
 
@@ -618,11 +613,11 @@ const addTodo = createOptimisticAction<string>({
       body: JSON.stringify({ text, completed: false }),
     })
     const result = await response.json()
-    
+
     // IMPORTANT: Ensure server writes have synced back before returning
     // This ensures the optimistic state can be safely discarded
     await todoCollection.utils.refetch()
-    
+
     return result
   },
 })
@@ -675,47 +670,54 @@ When multiple mutations operate on the same item within a transaction, TanStack 
 
 The merging behavior follows a truth table based on the mutation types:
 
-| Existing → New | Result | Description |
-|---|---|---|
-| **insert + update** | `insert` | Keeps insert type, merges changes, empty original |
-| **insert + delete** | *removed* | Mutations cancel each other out |
-| **update + delete** | `delete` | Delete dominates |
-| **update + update** | `update` | Union changes, keep first original |
-| **same type** | *latest* | Replace with most recent mutation |
+| Existing → New      | Result    | Description                                       |
+| ------------------- | --------- | ------------------------------------------------- |
+| **insert + update** | `insert`  | Keeps insert type, merges changes, empty original |
+| **insert + delete** | _removed_ | Mutations cancel each other out                   |
+| **update + delete** | `delete`  | Delete dominates                                  |
+| **update + update** | `update`  | Union changes, keep first original                |
+| **same type**       | _latest_  | Replace with most recent mutation                 |
 
 #### Examples
 
 **Insert followed by update:**
+
 ```ts
 const tx = createTransaction({ autoCommit: false, mutationFn })
 
 // Insert a new todo
-tx.mutate(() => todoCollection.insert({
-  id: '1',
-  text: 'Buy groceries',
-  completed: false
-}))
+tx.mutate(() =>
+  todoCollection.insert({
+    id: "1",
+    text: "Buy groceries",
+    completed: false,
+  })
+)
 
 // Update the same todo
-tx.mutate(() => todoCollection.update('1', (draft) => {
-  draft.text = 'Buy organic groceries'
-  draft.priority = 'high'
-}))
+tx.mutate(() =>
+  todoCollection.update("1", (draft) => {
+    draft.text = "Buy organic groceries"
+    draft.priority = "high"
+  })
+)
 
 // Result: Single insert mutation with merged data
 // { id: '1', text: 'Buy organic groceries', completed: false, priority: 'high' }
 ```
 
 **Insert followed by delete:**
+
 ```ts
 // Insert then delete cancels out - no mutations sent to server
-tx.mutate(() => todoCollection.insert({ id: '1', text: 'Temp todo' }))
-tx.mutate(() => todoCollection.delete('1'))
+tx.mutate(() => todoCollection.insert({ id: "1", text: "Temp todo" }))
+tx.mutate(() => todoCollection.delete("1"))
 
 // Result: No mutations (they cancel each other out)
 ```
 
 This intelligent merging ensures that:
+
 - **Network efficiency**: Fewer mutations sent to the server
 - **User intent preservation**: Final state matches what user expects
 - **Optimistic UI consistency**: Local state always reflects user actions
@@ -903,32 +905,36 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection"
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createCollection(queryCollectionOptions({
-  queryKey: ["todos"],
-  queryFn: async () => fetch("/api/todos"),
-  getKey: (item) => item.id,
-  schema: todoSchema, // any standard schema
-  onInsert: async ({ transaction }) => {
-    const { changes: newTodo } = transaction.mutations[0]
+const todoCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async () => fetch("/api/todos"),
+    getKey: (item) => item.id,
+    schema: todoSchema, // any standard schema
+    onInsert: async ({ transaction }) => {
+      const { changes: newTodo } = transaction.mutations[0]
 
-    // Handle the local write by sending it to your API.
-    await api.todos.create(newTodo)
-  }
-  // also add onUpdate, onDelete as needed.
-}))
-const listCollection = createCollection(queryCollectionOptions({
-  queryKey: ["todo-lists"],
-  queryFn: async () => fetch("/api/todo-lists"),
-  getKey: (item) => item.id,
-  schema: todoListSchema,
-  onInsert: async ({ transaction }) => {
-    const { changes: newTodo } = transaction.mutations[0]
+      // Handle the local write by sending it to your API.
+      await api.todos.create(newTodo)
+    },
+    // also add onUpdate, onDelete as needed.
+  })
+)
+const listCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todo-lists"],
+    queryFn: async () => fetch("/api/todo-lists"),
+    getKey: (item) => item.id,
+    schema: todoListSchema,
+    onInsert: async ({ transaction }) => {
+      const { changes: newTodo } = transaction.mutations[0]
 
-    // Handle the local write by sending it to your API.
-    await api.todoLists.create(newTodo)
-  }
-  // also add onUpdate, onDelete as needed.
-}))
+      // Handle the local write by sending it to your API.
+      await api.todoLists.create(newTodo)
+    },
+    // also add onUpdate, onDelete as needed.
+  })
+)
 
 const Todos = () => {
   // Read the data using live queries. Here we show a live
@@ -939,19 +945,18 @@ const Todos = () => {
       .join(
         { list: listCollection },
         ({ todo, list }) => eq(list.id, todo.list_id),
-        'inner'
+        "inner"
       )
       .where(({ list }) => eq(list.active, true))
       .select(({ todo, list }) => ({
         id: todo.id,
         text: todo.text,
         status: todo.status,
-        listName: list.name
+        listName: list.name,
       }))
   )
 
   // ...
-
 }
 ```
 
@@ -964,37 +969,41 @@ One of the most powerful ways of using TanStack DB is with a sync engine, for a 
 Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
 
 ```tsx
-import type { Collection } from '@tanstack/db'
-import type { MutationFn, PendingMutation, createCollection } from '@tanstack/react-db'
-import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import type { Collection } from "@tanstack/db"
+import type {
+  MutationFn,
+  PendingMutation,
+  createCollection,
+} from "@tanstack/react-db"
+import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 
-export const todoCollection = createCollection(electricCollectionOptions({
-  id: 'todos',
-  schema: todoSchema,
-  // Electric syncs data using "shapes". These are filtered views
-  // on database tables that Electric keeps in sync for you.
-  shapeOptions: {
-    url: 'https://api.electric-sql.cloud/v1/shape',
-    params: {
-      table: 'todos'
-    }
-  },
-  getKey: (item) => item.id,
-  schema: todoSchema,
-  onInsert: async ({ transaction }) => {
-    const response = await api.todos.create(transaction.mutations[0].modified)
+export const todoCollection = createCollection(
+  electricCollectionOptions({
+    id: "todos",
+    schema: todoSchema,
+    // Electric syncs data using "shapes". These are filtered views
+    // on database tables that Electric keeps in sync for you.
+    shapeOptions: {
+      url: "https://api.electric-sql.cloud/v1/shape",
+      params: {
+        table: "todos",
+      },
+    },
+    getKey: (item) => item.id,
+    schema: todoSchema,
+    onInsert: async ({ transaction }) => {
+      const response = await api.todos.create(transaction.mutations[0].modified)
 
-    return { txid: response.txid}
-  }
-  // You can also implement onUpdate, onDelete as needed.
-}))
+      return { txid: response.txid }
+    },
+    // You can also implement onUpdate, onDelete as needed.
+  })
+)
 
 const AddTodo = () => {
   return (
     <Button
-      onClick={() =>
-        todoCollection.insert({ text: "🔥 Make app faster" })
-      }
+      onClick={() => todoCollection.insert({ text: "🔥 Make app faster" })}
     />
   )
 }
@@ -1013,7 +1022,7 @@ npm install react-native-random-uuid
 Then import it at the entry point of your React Native app (e.g., in your `App.js` or `index.js`):
 
 ```javascript
-import 'react-native-random-uuid'
+import "react-native-random-uuid"
 ```
 
 This polyfill provides the `crypto.randomUUID()` function that TanStack DB uses internally for generating unique identifiers.
