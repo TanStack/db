@@ -29,7 +29,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.17.0",
   "peerDependencies": {
     "typescript": ">=4.7"
   },
