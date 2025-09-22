@@ -9,7 +9,6 @@ This page contains a curated list of community-created packages, tools, and reso
   - Local persistence using [Dexie.js](https://dexie.org) (IndexedDB wrapper)
   - Lightweight integration for browser-based storage
   - Install: `npm install tanstack-dexie-db-collection`
-  - **Note:** This is an unofficial package maintained by the community. Compatibility with future TanStack DB releases is not guaranteed.
 
 ### Contributing Your Package
 
