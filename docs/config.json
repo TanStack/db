@@ -88,6 +88,15 @@
       ]
     },
     {
+      "label": "Community",
+      "children": [
+        {
+          "label": "Resources & Packages",
+          "to": "community/resources"
+        }
+      ]
+    },
+    {
       "label": "API Reference",
       "children": [
         {
