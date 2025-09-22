@@ -5,7 +5,7 @@
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.1.23",
     "@tanstack/query-core": "^5.90.1",
-    "@tanstack/query-db-collection": "^0.2.20",
+    "@tanstack/query-db-collection": "workspace:*",
     "@tanstack/solid-db": "^0.1.21",
     "@tanstack/solid-router": "^1.131.50",
     "@tanstack/solid-start": "^1.131.50",
@@ -37,7 +37,7 @@
     "pg": "^8.16.3",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "vite": "^6.3.6",
+    "vite": "^7.1.7",
     "vite-plugin-solid": "^2.11.8"
   },
   "scripts": {
