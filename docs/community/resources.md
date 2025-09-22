@@ -14,10 +14,6 @@ This page contains a curated list of community-created packages, tools, and reso
 
 Have you created a collection adapter or integration? We'd love to feature it here! [Submit a PR](https://github.com/TanStack/db/pulls) to add your package.
 
-## Tools & Utilities
-
-*Coming soon! Share your TanStack DB development tools with the community.*
-
 ## Examples & Templates
 
 ### Starter Templates
