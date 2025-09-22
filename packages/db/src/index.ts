@@ -2,20 +2,21 @@
 // This helps catch issues where multiple versions are installed
 // import { MultipleInstancesError } from "./errors"
 
-const TANSTACK_DB_SINGLETON_KEY = Symbol.for('@tanstack/db_singleton_v1')
-const globalScope = (
-  typeof globalThis !== 'undefined' ? globalThis :
-  typeof window !== 'undefined' ? window :
-  typeof global !== 'undefined' ? global :
-  // eslint-disable-next-line @typescript-eslint/prefer-as-const
-  {} as any
-) as any
+const TANSTACK_DB_SINGLETON_KEY = Symbol.for(`@tanstack/db_singleton_v1`)
+const globalScope =
+  typeof globalThis !== `undefined`
+    ? globalThis
+    : typeof window !== `undefined`
+      ? window
+      : typeof global !== `undefined`
+        ? global
+        : ({} as any)
 
 // Get package info for better debugging
 const currentInstance = {
-  version: 'workspace',
+  version: `workspace`,
   loadedAt: new Date().toISOString(),
-  source: typeof __filename !== 'undefined' ? __filename : 'index.ts'
+  source: typeof __filename !== `undefined` ? __filename : `index.ts`,
 }
 
 // Check if another instance is already loaded
@@ -24,8 +25,10 @@ if (globalScope[TANSTACK_DB_SINGLETON_KEY]) {
   console.error(
     `Multiple instances of @tanstack/db detected!`,
     `\nThis usually happens when different packages depend on different versions of @tanstack/db.`,
-    `\nExisting instance:`, existingInstance,
-    `\nCurrent instance:`, currentInstance,
+    `\nExisting instance:`,
+    existingInstance,
+    `\nCurrent instance:`,
+    currentInstance,
     `\n\nTo fix this issue:`,
     `\n1. Ensure all packages use the same version of @tanstack/db`,
     `\n2. In workspaces, use pnpm overrides to force a single version:`,
