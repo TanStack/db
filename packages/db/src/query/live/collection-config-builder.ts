@@ -113,7 +113,6 @@ export class CollectionConfigBuilder<
       // no nested runs of the graph
       // which is possible if the `callback`
       // would call `maybeRunGraph` e.g. after it has loaded some more data
-      console.log(`IGNORING MAYBERUNGRAPH`)
       return
     }
 
@@ -128,11 +127,8 @@ export class CollectionConfigBuilder<
         syncState.subscribedToAllCollections
       ) {
         while (syncState.graph.pendingWork()) {
-          console.log(`RUNNING GRAPH`)
           syncState.graph.run()
-          console.log(`Calling callback`)
           callback?.()
-          console.log(`returned from callback`)
         }
 
         // On the initial run, we may need to do an empty commit to ensure that
