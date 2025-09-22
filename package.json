@@ -39,7 +39,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
-    "jsdom": "^26.1.0",
+    "jsdom": "^27.0.0",
     "knip": "^5.63.1",
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.2",

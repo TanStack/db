@@ -24,7 +24,7 @@
     "@electric-sql/client": "1.0.0",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "jsdom": "^26.1.0",
+    "jsdom": "^27.0.0",
     "solid-js": "^1.9.9",
     "vite-plugin-solid": "^2.11.8",
     "vitest": "^3.2.4"
