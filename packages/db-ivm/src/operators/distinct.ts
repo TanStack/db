@@ -36,6 +36,11 @@ export class DistinctOperator<
     // Compute the new multiplicity for each value
     for (const message of this.inputMessages()) {
       for (const [value, diff] of message.getInner()) {
+        console.log(`value: `, JSON.stringify(value, null, 2))
+        console.log(
+          `this.#by(value): `,
+          JSON.stringify(this.#by(value), null, 2)
+        )
         const hashedValue = hash(this.#by(value))
 
         const oldMultiplicity =
