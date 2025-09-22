@@ -670,12 +670,6 @@ importers:
       '@tanstack/db-ivm':
         specifier: workspace:*
         version: link:../db-ivm
-      '@tanstack/query-db-collection':
-        specifier: workspace:*
-        version: link:../query-db-collection
-      '@tanstack/react-db':
-        specifier: workspace:*
-        version: link:../react-db
       typescript:
         specifier: '>=4.7'
         version: 5.9.2
