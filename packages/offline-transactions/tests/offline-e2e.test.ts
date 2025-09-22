@@ -214,9 +214,7 @@ describe(`offline executor end-to-end`, () => {
 
     const replayEnv = createTestOfflineEnvironment({
       storage,
-      mutationFn: (
-        params: OfflineMutationFnParams & { attempt: number }
-      ) => {
+      mutationFn: (params: OfflineMutationFnParams & { attempt: number }) => {
         const mutations = params.transaction.mutations as Array<
           PendingMutation<TestItem>
         >
@@ -306,8 +304,9 @@ describe(`offline executor end-to-end`, () => {
     env.executor.dispose()
   })
 
-  it(`allows concurrent mutations on distinct keys`, async () => {
+  it(`processes mutations sequentially regardless of keys`, async () => {
     const pendingResolvers: Array<() => void> = []
+    // eslint-disable-next-line prefer-const
     let env: ReturnType<typeof createTestOfflineEnvironment> | undefined
 
     const deferredMutation = async (
@@ -375,10 +374,18 @@ describe(`offline executor end-to-end`, () => {
     const commitSecond = secondTx.commit()
 
     await flushMicrotasks()
-    expect(runtimeEnv.mutationCalls.length).toBe(2)
-    expect(pendingResolvers.length).toBe(2)
+    // With sequential processing, only one transaction executes at a time
+    expect(runtimeEnv.mutationCalls.length).toBe(1)
+    expect(pendingResolvers.length).toBe(1)
 
-    pendingResolvers.forEach((resolve) => resolve())
+    // Resolve the first transaction
+    pendingResolvers.shift()?.()
+    // Wait for the second transaction to start
+    await waitUntil(() => runtimeEnv.mutationCalls.length >= 2)
+    expect(pendingResolvers.length).toBe(1)
+
+    // Resolve the second transaction
+    pendingResolvers.shift()?.()
     await Promise.all([commitFirst, commitSecond, waitFirst, waitSecond])
 
     expect(runtimeEnv.serverState.get(`first`)?.value).toBe(`1`)

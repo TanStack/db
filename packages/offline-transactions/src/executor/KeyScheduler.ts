@@ -1,109 +1,46 @@
 import type { OfflineTransaction } from "../types"
 
 export class KeyScheduler {
-  private keyQueues: Map<string, Array<OfflineTransaction>> = new Map()
-  private runningKeys: Set<string> = new Set()
   private pendingTransactions: Array<OfflineTransaction> = []
+  private isRunning = false
 
   schedule(transaction: OfflineTransaction): void {
     this.pendingTransactions.push(transaction)
-    this.organizeQueues()
+    // Sort by creation time to maintain FIFO order
+    this.pendingTransactions.sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    )
   }
 
-  private organizeQueues(): void {
-    this.keyQueues.clear()
-
-    for (const transaction of this.pendingTransactions) {
-      for (const key of transaction.keys) {
-        if (!this.keyQueues.has(key)) {
-          this.keyQueues.set(key, [])
-        }
-        this.keyQueues.get(key)!.push(transaction)
-      }
+  getNextBatch(_maxConcurrency: number): Array<OfflineTransaction> {
+    // For sequential processing, we ignore maxConcurrency and only process one transaction at a time
+    if (this.isRunning || this.pendingTransactions.length === 0) {
+      return []
     }
 
-    for (const [, transactions] of this.keyQueues) {
-      transactions.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-    }
-  }
+    // Find the first transaction that's ready to run
+    const readyTransaction = this.pendingTransactions.find((tx) =>
+      this.isReadyToRun(tx)
+    )
 
-  getNextBatch(maxConcurrency: number): Array<OfflineTransaction> {
-    const batch: Array<OfflineTransaction> = []
-    const seenTransactions = new Set<string>()
-    const currentlyRunningCount = this.runningKeys.size
-
-    if (currentlyRunningCount >= maxConcurrency) {
-      return batch
-    }
-
-    const remainingCapacity = maxConcurrency - currentlyRunningCount
-
-    for (const [key, transactions] of this.keyQueues) {
-      if (this.runningKeys.has(key)) {
-        continue
-      }
-
-      if (batch.length >= remainingCapacity) {
-        break
-      }
-
-      const nextTransaction = transactions.find(
-        (tx) => !seenTransactions.has(tx.id) && this.isReadyToRun(tx)
-      )
-
-      if (nextTransaction) {
-        const hasConflict = this.hasKeyConflictWithBatch(nextTransaction, batch)
-
-        if (!hasConflict) {
-          batch.push(nextTransaction)
-          seenTransactions.add(nextTransaction.id)
-        }
-      }
-    }
-
-    return batch
+    return readyTransaction ? [readyTransaction] : []
   }
 
   private isReadyToRun(transaction: OfflineTransaction): boolean {
     return Date.now() >= transaction.nextAttemptAt
   }
 
-  private hasKeyConflictWithBatch(
-    transaction: OfflineTransaction,
-    batch: Array<OfflineTransaction>
-  ): boolean {
-    const transactionKeys = new Set(transaction.keys)
-
-    for (const batchTransaction of batch) {
-      for (const key of batchTransaction.keys) {
-        if (transactionKeys.has(key)) {
-          return true
-        }
-      }
-    }
-
-    return false
-  }
-
-  markStarted(transaction: OfflineTransaction): void {
-    for (const key of transaction.keys) {
-      this.runningKeys.add(key)
-    }
+  markStarted(_transaction: OfflineTransaction): void {
+    this.isRunning = true
   }
 
   markCompleted(transaction: OfflineTransaction): void {
     this.removeTransaction(transaction)
-    this.markFinished(transaction)
+    this.isRunning = false
   }
 
-  markFailed(transaction: OfflineTransaction): void {
-    this.markFinished(transaction)
-  }
-
-  private markFinished(transaction: OfflineTransaction): void {
-    for (const key of transaction.keys) {
-      this.runningKeys.delete(key)
-    }
+  markFailed(_transaction: OfflineTransaction): void {
+    this.isRunning = false
   }
 
   private removeTransaction(transaction: OfflineTransaction): void {
@@ -112,7 +49,6 @@ export class KeyScheduler {
     )
     if (index >= 0) {
       this.pendingTransactions.splice(index, 1)
-      this.organizeQueues()
     }
   }
 
@@ -122,7 +58,10 @@ export class KeyScheduler {
     )
     if (index >= 0) {
       this.pendingTransactions[index] = transaction
-      this.organizeQueues()
+      // Re-sort to maintain FIFO order after update
+      this.pendingTransactions.sort(
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+      )
     }
   }
 
@@ -131,13 +70,12 @@ export class KeyScheduler {
   }
 
   getRunningCount(): number {
-    return this.runningKeys.size
+    return this.isRunning ? 1 : 0
   }
 
   clear(): void {
-    this.keyQueues.clear()
-    this.runningKeys.clear()
     this.pendingTransactions = []
+    this.isRunning = false
   }
 
   getAllPendingTransactions(): Array<OfflineTransaction> {
@@ -153,6 +91,9 @@ export class KeyScheduler {
         this.pendingTransactions[index] = updatedTx
       }
     }
-    this.organizeQueues()
+    // Re-sort to maintain FIFO order after updates
+    this.pendingTransactions.sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    )
   }
 }
