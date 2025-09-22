@@ -32,14 +32,28 @@ export class DistinctOperator<T> extends UnaryOperator<T> {
     // Compute the new multiplicity for each value
     for (const message of this.inputMessages()) {
       for (const [value, diff] of message.getInner()) {
+        console.log(`value in distinct:`, JSON.stringify(value, null, 2))
+        console.log(`diff in distinct:`, JSON.stringify(diff, null, 2))
         const hashedValue = hash(this.#by(value))
+        console.log(`by in distinct:`, JSON.stringify(this.#by(value), null, 2))
+        console.log(
+          `hashedValue in distinct:`,
+          JSON.stringify(hashedValue, null, 2)
+        )
 
         const oldMultiplicity =
           updatedValues.get(hashedValue)?.[0] ??
           this.#values.get(hashedValue) ??
           0
+        console.log(
+          `oldMultiplicity in distinct:`,
+          JSON.stringify(oldMultiplicity, null, 2)
+        )
         const newMultiplicity = oldMultiplicity + diff
-
+        console.log(
+          `newMultiplicity in distinct:`,
+          JSON.stringify(newMultiplicity, null, 2)
+        )
         updatedValues.set(hashedValue, [newMultiplicity, value])
       }
     }

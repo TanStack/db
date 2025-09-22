@@ -675,6 +675,11 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
       })
 
       test(`distinct with join operations`, () => {
+        console.log(`**************************************************`)
+        console.log(`**************************************************`)
+        console.log(`**************************************************`)
+        console.log(`**************************************************`)
+        console.log(`**************************************************`)
         // Create a simple departments collection to join with
         const departmentsData = [
           { id: `Engineering`, budget: 1000000 },
@@ -707,10 +712,11 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
               .distinct(),
         })
 
-        // There are 3 distinct departments that have active users
-        expect(distinctJoinedData.size).toBe(3)
-
         const results = Array.from(distinctJoinedData.values())
+
+        // There are 3 distinct departments that have active users
+        console.log(`results:`, JSON.stringify(results, null, 2))
+        expect(distinctJoinedData.size).toBe(3)
 
         // Should have distinct combinations of department
         const combinations = results.map((r) => `${r.department}`)
