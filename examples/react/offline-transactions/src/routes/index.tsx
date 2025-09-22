@@ -119,13 +119,6 @@ function Home() {
             </div>
           </div>
         </div>
-
-        <div className="mt-8 text-center">
-          <p className="text-gray-500 text-sm">
-            Like Nephi's compass that worked by faith and diligence, these demos
-            work best when you actively test offline scenarios.
-          </p>
-        </div>
       </div>
     </div>
   )

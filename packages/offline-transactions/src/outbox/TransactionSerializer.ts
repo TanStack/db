@@ -20,7 +20,6 @@ export class TransactionSerializer {
   }
 
   serialize(transaction: OfflineTransaction): string {
-    console.log(`serialize`, transaction)
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
       createdAt: transaction.createdAt,

@@ -82,10 +82,6 @@ export class TransactionExecutor {
       // Signal success to the waiting transaction
       this.offlineExecutor.resolveTransaction(transaction.id, result)
     } catch (error) {
-      console.log(
-        `executeTransaction caught error for ${transaction.id}:`,
-        error
-      )
       await this.handleError(transaction, error as Error)
     }
   }
@@ -167,6 +163,9 @@ export class TransactionExecutor {
     for (const transaction of filteredTransactions) {
       this.scheduler.schedule(transaction)
     }
+
+    // Reset retry delays for all loaded transactions so they can run immediately
+    this.resetRetryDelays()
 
     // Schedule retry timer for loaded transactions
     this.scheduleNextRetry()

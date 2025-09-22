@@ -149,7 +149,6 @@ export class OfflineExecutor {
   private async loadAndReplayTransactions(): Promise<void> {
     try {
       await this.executor.loadPendingTransactions()
-
       await this.executor.executeAll()
     } catch (error) {
       console.warn(`Failed to load and replay transactions:`, error)
@@ -239,7 +238,6 @@ export class OfflineExecutor {
   // Method for TransactionExecutor to signal completion
   resolveTransaction(transactionId: string, result: any): void {
     const deferred = this.pendingTransactionPromises.get(transactionId)
-    console.log(`resolving transaction`, { transactionId }, deferred)
     if (deferred) {
       deferred.resolve(result)
       this.pendingTransactionPromises.delete(transactionId)

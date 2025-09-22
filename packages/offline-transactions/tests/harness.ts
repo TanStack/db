@@ -140,6 +140,7 @@ export function createTestOfflineEnvironment(
   waitForLeader: () => Promise<void>
   leader: FakeLeaderElection
   serverState: Map<string, TestItem>
+  applyMutations: (mutations: Array<PendingMutation<TestItem>>) => void
 } {
   const mutationFnName = options.mutationFnName ?? `syncData`
   const storage = options.storage ?? new FakeStorageAdapter()
@@ -149,13 +150,7 @@ export function createTestOfflineEnvironment(
   const { collection, controller } = createDefaultCollection()
   const serverState = new Map<string, TestItem>()
 
-  const defaultMutation: TestMutationFn = async (params) => {
-    const mutations = params.transaction.mutations as Array<
-      PendingMutation<TestItem>
-    >
-
-    await Promise.resolve()
-
+  const applyMutations = (mutations: Array<PendingMutation<TestItem>>) => {
     controller.begin()
 
     for (const mutation of mutations) {
@@ -206,6 +201,14 @@ export function createTestOfflineEnvironment(
 
     controller.commit()
     controller.markReady()
+  }
+
+  const defaultMutation: TestMutationFn = (params) => {
+    const mutations = params.transaction.mutations as Array<
+      PendingMutation<TestItem>
+    >
+
+    applyMutations(mutations)
 
     return { ok: true, mutations }
   }
@@ -263,5 +266,6 @@ export function createTestOfflineEnvironment(
     waitForLeader,
     leader,
     serverState,
+    applyMutations,
   }
 }

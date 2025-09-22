@@ -55,7 +55,6 @@ export class OfflineTransaction {
           version: 1,
         }
 
-        console.log(`starting to persist`)
         try {
           await this.persistTransaction(offlineTransaction)
 
@@ -67,7 +66,6 @@ export class OfflineTransaction {
           this.executor.rejectTransaction(this.offlineId, normalizedError)
           throw error
         }
-        console.log(`done persisting`)
 
         return
       },
