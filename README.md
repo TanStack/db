@@ -1,4 +1,3 @@
-
 <div align="center">
   <img src="./media/header_db.png" >
 </div>
@@ -34,17 +33,16 @@
 ###  [Become a Sponsor!](https://github.com/sponsors/tannerlinsley/)
 </div>
 
-# TanStack DB 
+# TanStack DB
 
 > Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
 
 A reactive client store that lets you build fast, sync‑driven apps with a backend‑agnostic real‑time data layer:
 
-- Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates  
-- Fine‑grained reactivity to minimize component re‑rendering  
-- Robust transaction primitives for optimistic mutations with sync & lifecycle support  
+- Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates
+- Fine‑grained reactivity to minimize component re‑rendering
+- Robust transaction primitives for optimistic mutations with sync & lifecycle support
 - Normalized data model that keeps backends simple and consistent
-
 
 <a href="https://tanstack.com/db" style="font-weight:bold" >Read the docs →</a>
 <br />
@@ -101,7 +99,6 @@ A reactive client store that lets you build fast, sync‑driven apps with a back
 </tr>
 </table>
 
-
 <div align="center">
 <img src="./media/partner_logo.svg" alt="DB & you?" height="65">
 <p>
@@ -111,7 +108,6 @@ We're looking for TanStack DB Partners to join our mission! Partner with us to p
 </div>
 
 ## Explore the TanStack Ecosystem
-
 
 - <a href="https://github.com/tanstack/config"><b>TanStack Config</b></a> – Tooling for JS/TS packages
 - <a href="https://github.com/tanstack/devtools"><b>TanStack DevTools</b></a> – Unified devtools panel
