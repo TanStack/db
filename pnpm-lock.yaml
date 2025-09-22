@@ -10,7 +10,7 @@ overrides:
   '@tanstack/react-db': workspace:*
   '@tanstack/offline-transactions': workspace:*
 
-pnpmfileChecksum: sha256-LLQDCdpG1DEu3vIwTRL4D8rzYzRQu9+Az0lK9IwXFx4=
+pnpmfileChecksum: sha256-PWDKLEtYr7WAzwKAKmFednYERF5OFDKcRonW93aOwc8=
 
 importers:
 
