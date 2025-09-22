@@ -4,7 +4,7 @@
 
 ## ✅ Checklist
 
-- [ ] I have followed the steps in the [Contributing guide](https://github.com/TanStack/form/blob/main/CONTRIBUTING.md).
+- [ ] I have followed the steps in the [Contributing guide](https://github.com/TanStack/db/blob/main/CONTRIBUTING.md).
 - [ ] I have tested this code locally with `pnpm test:pr`.
 
 ## 🚀 Release Impact
