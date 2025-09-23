@@ -150,6 +150,18 @@ export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 export type OperationType = `insert` | `update` | `delete`
 
+export type OnLoadMoreOptions = {
+  where?: BasicExpression<boolean>
+  orderBy?: OrderBy
+  limit?: number
+}
+
+export type CleanupFn = () => void
+
+export type SyncConfigRes = {
+  cleanup?: CleanupFn
+  onLoadMore?: (options: OnLoadMoreOptions) => void | Promise<void>
+}
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -161,7 +173,7 @@ export interface SyncConfig<
     commit: () => void
     markReady: () => void
     truncate: () => void
-  }) => void
+  }) => void | CleanupFn | SyncConfigRes
 
   /**
    * Get the sync metadata for insert operations
