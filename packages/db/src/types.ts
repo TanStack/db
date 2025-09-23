@@ -162,6 +162,7 @@ export type SyncConfigRes = {
   cleanup?: CleanupFn
   onLoadMore?: (options: OnLoadMoreOptions) => void | Promise<void>
 }
+
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
