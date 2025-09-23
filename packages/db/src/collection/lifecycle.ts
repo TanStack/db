@@ -121,7 +121,7 @@ export class CollectionLifecycleManager<
 
     // Always notify dependents when markReady is called, after status is set
     // This ensures live queries get notified when their dependencies become ready
-    if (this.collection._changes.changeListeners.size > 0) {
+    if (this.collection._changes.changeSubscriptions.size > 0) {
       this.collection._changes.emitEmptyReadyEvent()
     }
   }

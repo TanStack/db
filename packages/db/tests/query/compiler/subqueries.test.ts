@@ -174,6 +174,7 @@ describe(`Query2 Subqueries`, () => {
         { issues: issuesInput },
         { issues: issuesCollection },
         {},
+        {},
         new Set(),
         {}
       )
@@ -269,6 +270,9 @@ describe(`Query2 Subqueries`, () => {
 
       const builtQuery = getQueryIR(query)
 
+      const usersSubscription = usersCollection.subscribeChanges(() => {})
+      const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
@@ -281,6 +285,10 @@ describe(`Query2 Subqueries`, () => {
           users: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
+        {
+          [usersCollection.id]: usersSubscription,
+          [issuesCollection.id]: issuesSubscription,
+        },
         { issues: dummyCallbacks, users: dummyCallbacks },
         lazyCollections,
         {}
@@ -348,6 +356,7 @@ describe(`Query2 Subqueries`, () => {
         builtQuery,
         { issues: issuesInput },
         { issues: issuesCollection },
+        {},
         {},
         new Set(),
         {}

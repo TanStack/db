@@ -15,7 +15,6 @@ import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
 import type { IndexOptions } from "../indexes/index-options.js"
 import type {
-  ChangeListener,
   ChangeMessage,
   CollectionConfig,
   CollectionStatus,
@@ -34,6 +33,7 @@ import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { BTreeIndex } from "../indexes/btree-index.js"
 import type { IndexProxy } from "../indexes/lazy-index.js"
+import { CollectionSubscription } from "../collection-subscription"
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -754,8 +754,8 @@ export class CollectionImpl<
    * })
    */
   public currentStateAsChanges(
-    options: CurrentStateAsChangesOptions<TOutput> = {}
-  ): Array<ChangeMessage<TOutput>> {
+    options: CurrentStateAsChangesOptions = {}
+  ): Array<ChangeMessage<TOutput>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -766,23 +766,23 @@ export class CollectionImpl<
    * @returns Unsubscribe function - Call this to stop listening for changes
    * @example
    * // Basic subscription
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   changes.forEach(change => {
    *     console.log(`${change.type}: ${change.key}`, change.value)
    *   })
    * })
    *
-   * // Later: unsubscribe()
+   * // Later: subscription.unsubscribe()
    *
    * @example
    * // Include current state immediately
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, { includeInitialState: true })
    *
    * @example
    * // Subscribe only to changes matching a condition
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
@@ -791,7 +791,7 @@ export class CollectionImpl<
    *
    * @example
    * // Subscribe using a pre-compiled expression
-   * const unsubscribe = collection.subscribeChanges((changes) => {
+   * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
@@ -800,22 +800,9 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {}
-  ): () => void {
+    options: SubscribeChangesOptions = {}
+  ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
-  }
-
-  /**
-   * Subscribe to changes for a specific key
-   */
-  public subscribeChangesKey(
-    key: TKey,
-    listener: ChangeListener<TOutput, TKey>,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
-  ): () => void {
-    return this._changes.subscribeChangesKey(key, listener, {
-      includeInitialState,
-    })
   }
 
   /**

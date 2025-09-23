@@ -34,8 +34,8 @@
     "todo-app/**/*.tsx",
     "examples/**/*.ts",
     "examples/**/*.tsx",
-    "eslint.config.mjs",
-    "scripts/verify-links.ts"
+    "eslint.config.js",
+    "scripts/*.ts"
   ],
   "exclude": ["node_modules"]
 }

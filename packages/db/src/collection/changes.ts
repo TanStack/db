@@ -1,10 +1,8 @@
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { createFilteredCallback } from "../change-events"
+import { CollectionSubscription } from "../collection-subscription.js"
 import { NegativeActiveSubscribersError } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { CollectionImpl } from "./index.js"
 import type {
-  ChangeListener,
   ChangeMessage,
   SubscribeChangesOptions,
 } from "../types"
@@ -16,11 +14,7 @@ export class CollectionChangesManager<
   TInput extends object = TOutput,
 > {
   public activeSubscribersCount = 0
-  public changeListeners = new Set<ChangeListener<TOutput, TKey>>()
-  public changeKeyListeners = new Map<
-    TKey,
-    Set<ChangeListener<TOutput, TKey>>
-  >()
+  public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
 
@@ -36,15 +30,9 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    // Emit empty array directly to all listeners
-    for (const listener of this.changeListeners) {
-      listener([])
-    }
-    // Emit to key-specific listeners
-    for (const [_key, keyListeners] of this.changeKeyListeners) {
-      for (const listener of keyListeners) {
-        listener([])
-      }
+    // Emit empty array directly to all subscribers
+    for (const subscription of this.changeSubscriptions) {
+      subscription.emitEvents([])
     }
   }
 
@@ -75,30 +63,8 @@ export class CollectionChangesManager<
     if (eventsToEmit.length === 0) return
 
     // Emit to all listeners
-    for (const listener of this.changeListeners) {
-      listener(eventsToEmit)
-    }
-
-    // Emit to key-specific listeners
-    if (this.changeKeyListeners.size > 0) {
-      // Group changes by key, but only for keys that have listeners
-      const changesByKey = new Map<TKey, Array<ChangeMessage<TOutput, TKey>>>()
-      for (const change of eventsToEmit) {
-        if (this.changeKeyListeners.has(change.key)) {
-          if (!changesByKey.has(change.key)) {
-            changesByKey.set(change.key, [])
-          }
-          changesByKey.get(change.key)!.push(change)
-        }
-      }
-
-      // Emit batched changes to each key's listeners
-      for (const [key, keyChanges] of changesByKey) {
-        const keyListeners = this.changeKeyListeners.get(key)!
-        for (const listener of keyListeners) {
-          listener(keyChanges)
-        }
-      }
+    for (const subscription of this.changeSubscriptions) {
+      subscription.emitEvents(eventsToEmit)
     }
   }
 
@@ -107,78 +73,27 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {}
-  ): () => void {
+    options: SubscribeChangesOptions = {}
+  ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
 
-    // Auto-index for where expressions if enabled
-    if (options.whereExpression) {
-      ensureIndexForExpression(options.whereExpression, this.collection)
-    }
-
-    // Create a filtered callback if where clause is provided
-    const filteredCallback =
-      options.where || options.whereExpression
-        ? createFilteredCallback(callback, options)
-        : callback
+    const subscription = new CollectionSubscription(this.collection, callback, {
+      ...options,
+      onUnsubscribe: () => {
+        this.removeSubscriber()
+        this.changeSubscriptions.delete(subscription)
+      },
+    })
 
     if (options.includeInitialState) {
-      // First send the current state as changes (filtered if needed)
-      const initialChanges = this.collection.currentStateAsChanges({
-        where: options.where,
-        whereExpression: options.whereExpression,
-      })
-      filteredCallback(initialChanges)
+      subscription.requestSnapshot()
     }
 
     // Add to batched listeners
-    this.changeListeners.add(filteredCallback)
+    this.changeSubscriptions.add(subscription)
 
-    return () => {
-      this.changeListeners.delete(filteredCallback)
-      this.removeSubscriber()
-    }
-  }
-
-  /**
-   * Subscribe to changes for a specific key
-   */
-  public subscribeChangesKey(
-    key: TKey,
-    listener: ChangeListener<TOutput, TKey>,
-    { includeInitialState = false }: { includeInitialState?: boolean } = {}
-  ): () => void {
-    // Start sync and track subscriber
-    this.addSubscriber()
-
-    if (!this.changeKeyListeners.has(key)) {
-      this.changeKeyListeners.set(key, new Set())
-    }
-
-    if (includeInitialState) {
-      // First send the current state as changes
-      listener([
-        {
-          type: `insert`,
-          key,
-          value: this.collection.get(key)!,
-        },
-      ])
-    }
-
-    this.changeKeyListeners.get(key)!.add(listener)
-
-    return () => {
-      const listeners = this.changeKeyListeners.get(key)
-      if (listeners) {
-        listeners.delete(listener)
-        if (listeners.size === 0) {
-          this.changeKeyListeners.delete(key)
-        }
-      }
-      this.removeSubscriber()
-    }
+    return subscription
   }
 
   /**

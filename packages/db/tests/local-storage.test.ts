@@ -201,13 +201,13 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Should load the existing data
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Existing Todo`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should handle corrupted storage data gracefully`, () => {
@@ -255,7 +255,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       const todo: Todo = {
         id: `1`,
@@ -296,7 +296,7 @@ describe(`localStorage collection`, () => {
       parsed = JSON.parse(storedData!)
       expect(parsed[`1`]).toBeUndefined()
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should call mutation handlers when provided and still persist data`, async () => {
@@ -317,7 +317,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       const todo: Todo = {
         id: `1`,
@@ -358,7 +358,7 @@ describe(`localStorage collection`, () => {
       parsed = JSON.parse(storedData!)
       expect(parsed[`1`]).toBeUndefined()
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should perform insert operations and update storage`, async () => {
@@ -423,7 +423,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Update the todo - this automatically creates a transaction and calls onUpdate
       const tx = collection.update(`1`, (draft) => {
@@ -439,7 +439,7 @@ describe(`localStorage collection`, () => {
       expect(parsed[`1`].versionKey).not.toBe(`initial-version`) // Should have new version key
       expect(parsed[`1`].data.title).toBe(`Updated Todo`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should perform delete operations and update storage`, async () => {
@@ -468,7 +468,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Delete the todo - this automatically creates a transaction and calls onDelete
       const tx = collection.delete(`1`)
@@ -481,7 +481,7 @@ describe(`localStorage collection`, () => {
       const parsed = JSON.parse(storedData!)
       expect(parsed[`1`]).toBeUndefined()
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
   })
 
@@ -497,7 +497,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Simulate data being added from another tab
       const newTodoData = {
@@ -532,7 +532,7 @@ describe(`localStorage collection`, () => {
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`From Another Tab`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should ignore storage events for different keys`, () => {
@@ -673,7 +673,7 @@ describe(`localStorage collection`, () => {
       )
 
       // Subscribe to trigger sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Initial`)
@@ -709,7 +709,7 @@ describe(`localStorage collection`, () => {
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)?.title).toBe(`Updated`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should not trigger unnecessary updates for same version key`, () => {

@@ -791,13 +791,13 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`cleaned-up`)
 
       // Access collection data to restart sync
-      const unsubscribe = testCollection.subscribeChanges(() => {})
+      const subscription = testCollection.subscribeChanges(() => {})
 
       // Should have started a new stream
       expect(mockSubscribe).toHaveBeenCalledTimes(2)
       expect(testCollection.status).toBe(`loading`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should handle stream errors gracefully`, () => {
@@ -1073,8 +1073,8 @@ describe(`Electric Integration`, () => {
       expect(testCollection.size).toBe(2)
 
       // Subscribe and then unsubscribe to trigger GC timer
-      const unsubscribe = testCollection.subscribeChanges(() => {})
-      unsubscribe()
+      const subscription = testCollection.subscribeChanges(() => {})
+      subscription.unsubscribe()
 
       // Collection should still be ready before GC timer fires
       expect(testCollection.status).toBe(`ready`)
@@ -1091,7 +1091,7 @@ describe(`Electric Integration`, () => {
       const initialMockCallCount = mockSubscribe.mock.calls.length
 
       // Subscribe again - this should restart the sync
-      const newUnsubscribe = testCollection.subscribeChanges(() => {})
+      const newSubscription = testCollection.subscribeChanges(() => {})
 
       // Should have created a new stream
       expect(mockSubscribe.mock.calls.length).toBe(initialMockCallCount + 1)
@@ -1125,7 +1125,7 @@ describe(`Electric Integration`, () => {
       // Old data should not be present (collection was cleaned)
       expect(testCollection.has(2)).toBe(false)
 
-      newUnsubscribe()
+      newSubscription.unsubscribe()
 
       // Restore real timers
       vi.useRealTimers()

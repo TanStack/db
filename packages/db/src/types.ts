@@ -2,9 +2,7 @@ import type { IStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "./collection/index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
-
-import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
-import type { BasicExpression } from "./query/ir.js"
+import type { BasicExpression, OrderBy } from "./query/ir.js"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -541,27 +539,28 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 /**
  * Options for subscribing to collection changes
  */
-export interface SubscribeChangesOptions<
-  T extends object = Record<string, unknown>,
-> {
+export interface SubscribeChangesOptions {
   /** Whether to include the current state as initial changes */
   includeInitialState?: boolean
-  /** Filter changes using a where expression */
-  where?: (row: SingleRowRefProxy<T>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+}
+
+export interface SubscribeChangesSnapshotOptions
+  extends Omit<SubscribeChangesOptions, `includeInitialState`> {
+  orderBy?: OrderBy
+  limit?: number
 }
 
 /**
  * Options for getting current state as changes
  */
-export interface CurrentStateAsChangesOptions<
-  T extends object = Record<string, unknown>,
-> {
-  /** Filter the current state using a where expression */
-  where?: (row: SingleRowRefProxy<T>) => any
+export interface CurrentStateAsChangesOptions {
   /** Pre-compiled expression for filtering the current state */
-  whereExpression?: BasicExpression<boolean>
+  where?: BasicExpression<boolean>
+  orderBy?: OrderBy
+  limit?: number
+  optimizedOnly?: boolean
 }
 
 /**
