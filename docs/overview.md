@@ -138,8 +138,8 @@ const updateTodo = createOptimisticAction<{ id: string }>({
 This combines to support a model of uni-directional data flow, extending the redux/flux style state management pattern beyond the client, to take in the server as well:
 
 <figure>
-  <a href="./unidirectional-data-flow.lg.png" target="_blank">
-    <img src="./unidirectional-data-flow.png" />
+  <a href="https://raw.githubusercontent.com/TanStack/db/main/docs/unidirectional-data-flow.lg.png" target="_blank">
+    <img src="https://raw.githubusercontent.com/TanStack/db/main/docs/unidirectional-data-flow.png" />
   </a>
 </figure>
 
