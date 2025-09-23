@@ -12,12 +12,14 @@ import {
   ExpectedNumberInAwaitTxIdError,
   TimeoutWaitingForTxIdError,
 } from "./errors"
+import { compileSQL } from "./sql-compiler"
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   Fn,
   InsertMutationFnParams,
+  OnLoadMoreOptions,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -416,15 +418,42 @@ function createElectricSync<T extends Row<unknown>>(
         }
       })
 
-      // Return the unsubscribe function
-      return () => {
-        // Unsubscribe from the stream
-        unsubscribeStream()
-        // Abort the abort controller to stop the stream
-        abortController.abort()
+      return {
+        onLoadMore: (opts) => onLoadMore(params, opts),
+        cleanup: () => {
+          // Unsubscribe from the stream
+          unsubscribeStream()
+          // Abort the abort controller to stop the stream
+          abortController.abort()
+        },
       }
     },
     // Expose the getSyncMetadata function
     getSyncMetadata,
   }
+}
+
+async function onLoadMore<T extends Row<unknown>>(
+  syncParams: Parameters<SyncConfig<T>[`sync`]>[0],
+  options: OnLoadMoreOptions
+) {
+  const { begin, write, commit } = syncParams
+
+  // TODO: optimize this by keeping track of which snapshot have been loaded already
+  //       and only load this one if it's not a subset of the ones that have been loaded already
+
+  const snapshotParams = compileSQL<T>(options)
+
+  const snapshot = await requestSnapshot(snapshotParams)
+
+  begin()
+
+  snapshot.data.forEach((row) => {
+    write({
+      type: `insert`,
+      value: row.value,
+    })
+  })
+
+  commit()
 }
