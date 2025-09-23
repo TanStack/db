@@ -25,6 +25,7 @@ import type {
   InferSchemaOutput,
   InsertConfig,
   NonSingleResult,
+  OnLoadMoreOptions,
   OperationConfig,
   SingleResult,
   SubscribeChangesOptions,
@@ -360,6 +361,18 @@ export class CollectionImpl<
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /**
+   * Requests the sync layer to load more data.
+   * @param options Options to control what data is being loaded
+   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
+   *          If data loading is synchronous, the data is loaded when the method returns.
+   */
+  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
+    if (this._sync.syncOnLoadMoreFn) {
+      return this._sync.syncOnLoadMoreFn(options)
+    }
   }
 
   /**
