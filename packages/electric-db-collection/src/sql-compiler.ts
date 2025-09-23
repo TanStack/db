@@ -48,6 +48,8 @@ function compileBasicExpression(
       return exp.path[0]!
     case `func`:
       return compileFunction(exp, params)
+    default:
+      throw new Error(`Unknown expression type`)
   }
 }
 
