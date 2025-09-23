@@ -318,7 +318,11 @@ function sendChangesToInput(
       multiSetArray.push([[key, change.value], -1])
     }
   }
-  input.sendData(new MultiSet(multiSetArray))
+
+  if (multiSetArray.length !== 0) {
+    input.sendData(new MultiSet(multiSetArray))
+  }
+
   return multiSetArray.length
 }
 

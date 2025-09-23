@@ -477,7 +477,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         emptyCollection.utils.commit()
 
         expect(emptyDistinct.size).toBe(1)
-        const department = emptyDistinct.get(1)
+        const department = emptyDistinct.toArray[0]
         expect(department?.department).toBe(`Test`)
       })
 
