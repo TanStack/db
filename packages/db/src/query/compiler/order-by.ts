@@ -6,13 +6,14 @@ import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
 import { replaceAggregatesByRefs } from "./group-by.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
-import type { OrderByClause, QueryIR, Select } from "../ir.js"
+import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 import type { BaseIndex } from "../../indexes/base-index.js"
 import type { Collection } from "../../collection/index.js"
 
 export type OrderByOptimizationInfo = {
+  orderBy: OrderBy
   offset: number
   limit: number
   comparator: (
@@ -163,6 +164,7 @@ export function processOrderBy(
           comparator,
           valueExtractorForRawRow,
           index,
+          orderBy: orderByClause,
         }
 
         optimizableOrderByCollections[followRefCollection.id] =

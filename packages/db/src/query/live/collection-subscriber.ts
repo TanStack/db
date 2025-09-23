@@ -128,7 +128,7 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const { offset, limit, comparator, dataNeeded, index } =
+    const { orderBy, offset, limit, comparator, dataNeeded, index } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -168,6 +168,7 @@ export class CollectionSubscriber<
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
     subscription.requestLimitedSnapshot({
       limit: offset + limit,
+      orderBy,
     })
 
     return subscription
@@ -225,7 +226,7 @@ export class CollectionSubscriber<
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
   private loadNextItems(n: number, subscription: CollectionSubscription) {
-    const { valueExtractorForRawRow } =
+    const { orderBy, valueExtractorForRawRow } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -235,6 +236,7 @@ export class CollectionSubscriber<
       : biggestSentRow
     // Take the `n` items after the biggest sent value
     subscription.requestLimitedSnapshot({
+      orderBy,
       limit: n,
       minValue: biggestSentValue,
     })
