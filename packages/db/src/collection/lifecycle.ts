@@ -38,7 +38,7 @@ export class CollectionLifecycleManager<
     this.id = id
   }
 
-  bind(deps: {
+  setDeps(deps: {
     indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
     events: CollectionEventsManager
     changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>

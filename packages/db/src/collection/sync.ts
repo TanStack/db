@@ -36,7 +36,7 @@ export class CollectionSyncManager<
     this.id = id
   }
 
-  bind(deps: {
+  setDeps(deps: {
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>

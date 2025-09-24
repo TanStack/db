@@ -69,7 +69,7 @@ export class CollectionStateManager<
     }
   }
 
-  bind(deps: {
+  setDeps(deps: {
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
     changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>

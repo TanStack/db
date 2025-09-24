@@ -50,7 +50,7 @@ export class CollectionMutationsManager<
     this.config = config
   }
 
-  bind(deps: {
+  setDeps(deps: {
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     collection: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>

@@ -33,7 +33,7 @@ export class CollectionChangesManager<
    */
   constructor() {}
 
-  public bind(deps: {
+  public setDeps(deps: {
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
     sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
     events: CollectionEventsManager

@@ -237,38 +237,38 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
-    this._changes.bind({
+    this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
     })
-    this._events.bind({
+    this._events.setDeps({
       collection: this, // Required for adding to emitted events
     })
-    this._indexes.bind({
+    this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
     })
-    this._lifecycle.bind({
+    this._lifecycle.setDeps({
       changes: this._changes,
       events: this._events,
       indexes: this._indexes,
       state: this._state,
       sync: this._sync,
     })
-    this._mutations.bind({
+    this._mutations.setDeps({
       collection: this, // Required for passing to config.onInsert/onUpdate/onDelete and annotating mutations
       lifecycle: this._lifecycle,
       state: this._state,
     })
-    this._state.bind({
+    this._state.setDeps({
       collection: this, // Required for filtering events to only include this collection
       lifecycle: this._lifecycle,
       changes: this._changes,
       indexes: this._indexes,
     })
-    this._sync.bind({
+    this._sync.setDeps({
       collection: this, // Required for passing to config.sync callback
       state: this._state,
       lifecycle: this._lifecycle,

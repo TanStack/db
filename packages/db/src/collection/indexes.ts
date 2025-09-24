@@ -28,7 +28,7 @@ export class CollectionIndexesManager<
 
   constructor() {}
 
-  bind(deps: {
+  setDeps(deps: {
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   }) {

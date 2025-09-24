@@ -56,7 +56,7 @@ export class CollectionEventsManager {
 
   constructor() {}
 
-  bind(deps: { collection: Collection<any, any, any, any, any> }) {
+  setDeps(deps: { collection: Collection<any, any, any, any, any> }) {
     this.collection = deps.collection
   }
 
