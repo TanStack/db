@@ -7,11 +7,6 @@ import type { CollectionSyncManager } from "./sync.js"
 import type { CollectionEventsManager } from "./events.js"
 import type { CollectionImpl } from "./index.js"
 
-// depends on:
-// - lifecycle
-// - sync
-// - events
-
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
