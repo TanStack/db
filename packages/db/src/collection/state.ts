@@ -25,6 +25,7 @@ export class CollectionStateManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
+  public config!: CollectionConfig<TOutput, TKey, TSchema>
   public collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
@@ -55,6 +56,7 @@ export class CollectionStateManager<
    * Creates a new CollectionState manager
    */
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+    this.config = config
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b)
     )
@@ -77,6 +79,135 @@ export class CollectionStateManager<
     this.lifecycle = deps.lifecycle
     this.changes = deps.changes
     this.indexes = deps.indexes
+  }
+
+  /**
+   * Get the current value for a key (virtual derived state)
+   */
+  public get(key: TKey): TOutput | undefined {
+    const { optimisticDeletes, optimisticUpserts, syncedData } = this
+    // Check if optimistically deleted
+    if (optimisticDeletes.has(key)) {
+      return undefined
+    }
+
+    // Check optimistic upserts first
+    if (optimisticUpserts.has(key)) {
+      return optimisticUpserts.get(key)
+    }
+
+    // Fall back to synced data
+    return syncedData.get(key)
+  }
+
+  /**
+   * Check if a key exists in the collection (virtual derived state)
+   */
+  public has(key: TKey): boolean {
+    const { optimisticDeletes, optimisticUpserts, syncedData } = this
+    // Check if optimistically deleted
+    if (optimisticDeletes.has(key)) {
+      return false
+    }
+
+    // Check optimistic upserts first
+    if (optimisticUpserts.has(key)) {
+      return true
+    }
+
+    // Fall back to synced data
+    return syncedData.has(key)
+  }
+
+  /**
+   * Get all keys (virtual derived state)
+   */
+  public *keys(): IterableIterator<TKey> {
+    const { syncedData, optimisticDeletes, optimisticUpserts } = this
+    // Yield keys from synced data, skipping any that are deleted.
+    for (const key of syncedData.keys()) {
+      if (!optimisticDeletes.has(key)) {
+        yield key
+      }
+    }
+    // Yield keys from upserts that were not already in synced data.
+    for (const key of optimisticUpserts.keys()) {
+      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
+        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
+        // but it's safer to keep it.
+        yield key
+      }
+    }
+  }
+
+  /**
+   * Get all values (virtual derived state)
+   */
+  public *values(): IterableIterator<TOutput> {
+    for (const key of this.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield value
+      }
+    }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *entries(): IterableIterator<[TKey, TOutput]> {
+    for (const key of this.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield [key, value]
+      }
+    }
+  }
+
+  /**
+   * Get all entries (virtual derived state)
+   */
+  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
+    for (const [key, value] of this.entries()) {
+      yield [key, value]
+    }
+  }
+
+  /**
+   * Execute a callback for each entry in the collection
+   */
+  public forEach(
+    callbackfn: (value: TOutput, key: TKey, index: number) => void
+  ): void {
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
+  }
+
+  /**
+   * Create a new array with the results of calling a function for each entry in the collection
+   */
+  public map<U>(
+    callbackfn: (value: TOutput, key: TKey, index: number) => U
+  ): Array<U> {
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
+  }
+
+  /**
+   * Check if the given collection is this collection
+   * @param collection The collection to check
+   * @returns True if the given collection is this collection, false otherwise
+   */
+  private isThisCollection(
+    collection: CollectionImpl<any, any, any, any, any>
+  ): boolean {
+    return collection === this.collection
   }
 
   /**
@@ -108,7 +239,7 @@ export class CollectionStateManager<
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
       for (const mutation of transaction.mutations) {
-        if (mutation.collection === this.collection && mutation.optimistic) {
+        if (this.isThisCollection(mutation.collection) && mutation.optimistic) {
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -173,7 +304,7 @@ export class CollectionStateManager<
           // We can infer this by checking if we have no remaining optimistic mutations for this key
           const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
             tx.mutations.some(
-              (m) => m.collection === this.collection && m.key === event.key
+              (m) => this.isThisCollection(m.collection) && m.key === event.key
             )
           )
 
@@ -230,7 +361,7 @@ export class CollectionStateManager<
     ])
 
     for (const key of allKeys) {
-      const currentValue = this.collection.get(key)
+      const currentValue = this.get(key)
       const previousValue = this.getPreviousValue(
         key,
         previousUpserts,
@@ -335,7 +466,7 @@ export class CollectionStateManager<
         // No pre-captured state, capture it now for pure sync operations
         currentVisibleState = new Map<TKey, TOutput>()
         for (const key of changedKeys) {
-          const currentValue = this.collection.get(key)
+          const currentValue = this.get(key)
           if (currentValue !== undefined) {
             currentVisibleState.set(key, currentValue)
           }
@@ -343,8 +474,7 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
-      const rowUpdateMode =
-        this.collection.config.sync.rowUpdateMode || `partial`
+      const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
 
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
@@ -448,7 +578,10 @@ export class CollectionStateManager<
         for (const tx of this.transactions.values()) {
           if ([`completed`, `failed`].includes(tx.state)) continue
           for (const mutation of tx.mutations) {
-            if (mutation.collection !== this.collection || !mutation.optimistic)
+            if (
+              !this.isThisCollection(mutation.collection) ||
+              !mutation.optimistic
+            )
               continue
             const key = mutation.key as TKey
             switch (mutation.type) {
@@ -510,7 +643,7 @@ export class CollectionStateManager<
         }
 
         // Ensure listeners are active before emitting this critical batch
-        if (!this.collection.isReady()) {
+        if (this.lifecycle.status !== `ready`) {
           this.lifecycle.setStatus(`ready`)
         }
       }
@@ -527,7 +660,7 @@ export class CollectionStateManager<
         if (![`completed`, `failed`].includes(transaction.state)) {
           for (const mutation of transaction.mutations) {
             if (
-              mutation.collection === this.collection &&
+              this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
               switch (mutation.type) {
@@ -556,7 +689,7 @@ export class CollectionStateManager<
         if (transaction.state === `completed`) {
           for (const mutation of transaction.mutations) {
             if (
-              mutation.collection === this.collection &&
+              this.isThisCollection(mutation.collection) &&
               changedKeys.has(mutation.key)
             ) {
               completedOptimisticOps.set(mutation.key, {
@@ -571,7 +704,7 @@ export class CollectionStateManager<
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
-        const newVisibleValue = this.collection.get(key) // This returns the new derived state
+        const newVisibleValue = this.get(key) // This returns the new derived state
 
         // Check if this sync operation is redundant with a completed optimistic operation
         const completedOp = completedOptimisticOps.get(key)
@@ -694,7 +827,7 @@ export class CollectionStateManager<
     // Only capture current visible state for keys that will be affected by sync operations
     // This is much more efficient than capturing the entire collection state
     for (const key of syncedKeys) {
-      const currentValue = this.collection.get(key)
+      const currentValue = this.get(key)
       if (currentValue !== undefined) {
         this.preSyncVisibleState.set(key, currentValue)
       }

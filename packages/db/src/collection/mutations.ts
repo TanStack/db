@@ -19,6 +19,7 @@ import {
 import type { Collection, CollectionImpl } from "./index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
+  CollectionConfig,
   InsertConfig,
   OperationConfig,
   PendingMutation,
@@ -41,8 +42,13 @@ export class CollectionMutationsManager<
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
+  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private id: string
 
-  constructor() {}
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+    this.id = id
+    this.config = config
+  }
 
   bind(deps: {
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
@@ -68,16 +74,14 @@ export class CollectionMutationsManager<
     type: `insert` | `update`,
     key?: TKey
   ): TOutput | never {
-    if (!this.collection.config.schema) return data as TOutput
+    if (!this.config.schema) return data as TOutput
 
-    const standardSchema = this.ensureStandardSchema(
-      this.collection.config.schema
-    )
+    const standardSchema = this.ensureStandardSchema(this.config.schema)
 
     // For updates, we need to merge with the existing data before validation
     if (type === `update` && key) {
       // Get the existing data for this key
-      const existingData = this.collection.get(key)
+      const existingData = this.state.get(key)
 
       if (
         existingData &&
@@ -141,7 +145,7 @@ export class CollectionMutationsManager<
       throw new UndefinedKeyError(item)
     }
 
-    return `KEY::${this.collection.id}/${key}`
+    return `KEY::${this.id}/${key}`
   }
 
   /**
@@ -153,7 +157,7 @@ export class CollectionMutationsManager<
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
-    if (!ambientTransaction && !this.collection.config.onInsert) {
+    if (!ambientTransaction && !this.config.onInsert) {
       throw new MissingInsertHandlerError()
     }
 
@@ -166,8 +170,8 @@ export class CollectionMutationsManager<
       const validatedData = this.validateData(item, `insert`)
 
       // Check if an item with this ID already exists in the collection
-      const key = this.collection.getKeyFromItem(validatedData)
-      if (this.collection.has(key)) {
+      const key = this.config.getKey(validatedData)
+      if (this.state.has(key)) {
         throw new DuplicateKeyError(key)
       }
       const globalKey = this.generateGlobalKey(key, item)
@@ -188,7 +192,7 @@ export class CollectionMutationsManager<
         globalKey,
         key,
         metadata: config?.metadata as unknown,
-        syncMetadata: this.collection.config.sync.getSyncMetadata?.() || {},
+        syncMetadata: this.config.sync.getSyncMetadata?.() || {},
         optimistic: config?.optimistic ?? true,
         type: `insert`,
         createdAt: new Date(),
@@ -213,7 +217,7 @@ export class CollectionMutationsManager<
       const directOpTransaction = createTransaction<TOutput>({
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
-          return await this.collection.config.onInsert!({
+          return await this.config.onInsert!({
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
@@ -260,7 +264,7 @@ export class CollectionMutationsManager<
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onUpdate handler early
-    if (!ambientTransaction && !this.collection.config.onUpdate) {
+    if (!ambientTransaction && !this.config.onUpdate) {
       throw new MissingUpdateHandlerError()
     }
 
@@ -278,7 +282,7 @@ export class CollectionMutationsManager<
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keysArray.map((key) => {
-      const item = this.collection.get(key)
+      const item = this.state.get(key)
       if (!item) {
         throw new UpdateKeyNotFoundError(key)
       }
@@ -333,8 +337,8 @@ export class CollectionMutationsManager<
         )
 
         // Check if the ID of the item is being changed
-        const originalItemId = this.collection.getKeyFromItem(originalItem)
-        const modifiedItemId = this.collection.getKeyFromItem(modifiedItem)
+        const originalItemId = this.config.getKey(originalItem)
+        const modifiedItemId = this.config.getKey(modifiedItem)
 
         if (originalItemId !== modifiedItemId) {
           throw new KeyUpdateNotAllowedError(originalItemId, modifiedItemId)
@@ -406,7 +410,7 @@ export class CollectionMutationsManager<
     const directOpTransaction = createTransaction<TOutput>({
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
-        return this.collection.config.onUpdate!({
+        return this.config.onUpdate!({
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
@@ -443,7 +447,7 @@ export class CollectionMutationsManager<
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
-    if (!ambientTransaction && !this.collection.config.onDelete) {
+    if (!ambientTransaction && !this.config.onDelete) {
       throw new MissingDeleteHandlerError()
     }
 
@@ -461,19 +465,19 @@ export class CollectionMutationsManager<
     > = []
 
     for (const key of keysArray) {
-      if (!this.collection.has(key)) {
+      if (!this.state.has(key)) {
         throw new DeleteKeyNotFoundError(key)
       }
-      const globalKey = this.generateGlobalKey(key, this.collection.get(key)!)
+      const globalKey = this.generateGlobalKey(key, this.state.get(key)!)
       const mutation: PendingMutation<
         TOutput,
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
         mutationId: crypto.randomUUID(),
-        original: this.collection.get(key)!,
-        modified: this.collection.get(key)!,
-        changes: this.collection.get(key)!,
+        original: this.state.get(key)!,
+        modified: this.state.get(key)!,
+        changes: this.state.get(key)!,
         globalKey,
         key,
         metadata: config?.metadata as unknown,
@@ -507,7 +511,7 @@ export class CollectionMutationsManager<
       autoCommit: true,
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
-        return this.collection.config.onDelete!({
+        return this.config.onDelete!({
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,

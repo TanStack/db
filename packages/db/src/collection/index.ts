@@ -233,21 +233,21 @@ export class CollectionImpl<
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
     this._lifecycle = new CollectionLifecycleManager(config, this.id)
-    this._mutations = new CollectionMutationsManager()
+    this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
-    this._sync = new CollectionSyncManager(config)
+    this._sync = new CollectionSyncManager(config, this.id)
 
     this._changes.bind({
+      collection: this, // Required for passing to CollectionSubscription
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
-      collection: this,
     })
     this._events.bind({
-      collection: this,
+      collection: this, // Required for adding to emitted events
     })
     this._indexes.bind({
-      collection: this,
+      state: this._state,
       lifecycle: this._lifecycle,
     })
     this._lifecycle.bind({
@@ -258,18 +258,18 @@ export class CollectionImpl<
       sync: this._sync,
     })
     this._mutations.bind({
+      collection: this, // Required for passing to config.onInsert/onUpdate/onDelete and annotating mutations
       lifecycle: this._lifecycle,
       state: this._state,
-      collection: this,
     })
     this._state.bind({
-      collection: this,
+      collection: this, // Required for filtering events to only include this collection
       lifecycle: this._lifecycle,
       changes: this._changes,
       indexes: this._indexes,
     })
     this._sync.bind({
-      collection: this,
+      collection: this, // Required for passing to config.sync callback
       state: this._state,
       lifecycle: this._lifecycle,
     })
@@ -305,13 +305,7 @@ export class CollectionImpl<
    * })
    */
   public onFirstReady(callback: () => void): void {
-    // If already ready, call immediately
-    if (this._lifecycle.hasBeenReady) {
-      callback()
-      return
-    }
-
-    this._lifecycle.onFirstReadyCallbacks.push(callback)
+    return this._lifecycle.onFirstReady(callback)
   }
 
   /**
@@ -350,38 +344,14 @@ export class CollectionImpl<
    * Get the current value for a key (virtual derived state)
    */
   public get(key: TKey): TOutput | undefined {
-    const { optimisticDeletes, optimisticUpserts, syncedData } = this._state
-    // Check if optimistically deleted
-    if (optimisticDeletes.has(key)) {
-      return undefined
-    }
-
-    // Check optimistic upserts first
-    if (optimisticUpserts.has(key)) {
-      return optimisticUpserts.get(key)
-    }
-
-    // Fall back to synced data
-    return syncedData.get(key)
+    return this._state.get(key)
   }
 
   /**
    * Check if a key exists in the collection (virtual derived state)
    */
   public has(key: TKey): boolean {
-    const { optimisticDeletes, optimisticUpserts, syncedData } = this._state
-    // Check if optimistically deleted
-    if (optimisticDeletes.has(key)) {
-      return false
-    }
-
-    // Check optimistic upserts first
-    if (optimisticUpserts.has(key)) {
-      return true
-    }
-
-    // Fall back to synced data
-    return syncedData.has(key)
+    return this._state.has(key)
   }
 
   /**
@@ -395,54 +365,28 @@ export class CollectionImpl<
    * Get all keys (virtual derived state)
    */
   public *keys(): IterableIterator<TKey> {
-    const { syncedData, optimisticDeletes, optimisticUpserts } = this._state
-    // Yield keys from synced data, skipping any that are deleted.
-    for (const key of syncedData.keys()) {
-      if (!optimisticDeletes.has(key)) {
-        yield key
-      }
-    }
-    // Yield keys from upserts that were not already in synced data.
-    for (const key of optimisticUpserts.keys()) {
-      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
-        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
-        // but it's safer to keep it.
-        yield key
-      }
-    }
+    yield* this._state.keys()
   }
 
   /**
    * Get all values (virtual derived state)
    */
   public *values(): IterableIterator<TOutput> {
-    for (const key of this.keys()) {
-      const value = this.get(key)
-      if (value !== undefined) {
-        yield value
-      }
-    }
+    yield* this._state.values()
   }
 
   /**
    * Get all entries (virtual derived state)
    */
   public *entries(): IterableIterator<[TKey, TOutput]> {
-    for (const key of this.keys()) {
-      const value = this.get(key)
-      if (value !== undefined) {
-        yield [key, value]
-      }
-    }
+    yield* this._state.entries()
   }
 
   /**
    * Get all entries (virtual derived state)
    */
   public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
-    for (const [key, value] of this.entries()) {
-      yield [key, value]
-    }
+    yield* this._state[Symbol.iterator]()
   }
 
   /**
@@ -451,10 +395,7 @@ export class CollectionImpl<
   public forEach(
     callbackfn: (value: TOutput, key: TKey, index: number) => void
   ): void {
-    let index = 0
-    for (const [key, value] of this.entries()) {
-      callbackfn(value, key, index++)
-    }
+    return this._state.forEach(callbackfn)
   }
 
   /**
@@ -463,12 +404,7 @@ export class CollectionImpl<
   public map<U>(
     callbackfn: (value: TOutput, key: TKey, index: number) => U
   ): Array<U> {
-    const result: Array<U> = []
-    let index = 0
-    for (const [key, value] of this.entries()) {
-      result.push(callbackfn(value, key, index++))
-    }
-    return result
+    return this._state.map(callbackfn)
   }
 
   public getKeyFromItem(item: TOutput): TKey {

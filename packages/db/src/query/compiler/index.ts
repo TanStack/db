@@ -13,6 +13,7 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelect } from "./select.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
@@ -28,7 +29,6 @@ import type {
   ResultStream,
 } from "../../types.js"
 import type { QueryCache, QueryMapping } from "./types.js"
-import { CollectionSubscription } from "../../collection-subscription.js"
 
 /**
  * Result of query compilation including both the pipeline and collection-specific WHERE clauses

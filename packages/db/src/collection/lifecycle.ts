@@ -185,6 +185,21 @@ export class CollectionLifecycleManager<
     }
   }
 
+  /**
+   * Register a callback to be executed when the collection first becomes ready
+   * Useful for preloading collections
+   * @param callback Function to call when the collection first becomes ready
+   */
+  public onFirstReady(callback: () => void): void {
+    // If already ready, call immediately
+    if (this.hasBeenReady) {
+      callback()
+      return
+    }
+
+    this.onFirstReadyCallbacks.push(callback)
+  }
+
   public cleanup(): void {
     this.events.cleanup()
     this.sync.cleanup()

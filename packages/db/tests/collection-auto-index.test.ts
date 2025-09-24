@@ -11,12 +11,12 @@ import {
 } from "../src/query/builder/functions"
 import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
 import { createLiveQueryCollection } from "../src"
+import { PropRef } from "../src/query/ir"
 import {
   createIndexUsageTracker,
   expectIndexUsage,
   withIndexTracking,
 } from "./utils"
-import { PropRef } from "../src/query/ir"
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()

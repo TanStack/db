@@ -5,12 +5,12 @@ import {
 } from "../query/builder/ref-proxy"
 import { BTreeIndex } from "../indexes/btree-index"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionImpl } from "./index.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index"
 import type { ChangeMessage } from "../types"
 import type { IndexOptions } from "../indexes/index-options"
 import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
 import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionStateManager } from "./state"
 
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
@@ -19,7 +19,7 @@ export class CollectionIndexesManager<
   TInput extends object = TOutput,
 > {
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
-  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
   public resolvedIndexes = new Map<number, BaseIndex<TKey>>()
@@ -29,10 +29,10 @@ export class CollectionIndexesManager<
   constructor() {}
 
   bind(deps: {
-    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   }) {
-    this.collection = deps.collection
+    this.state = deps.state
     this.lifecycle = deps.lifecycle
   }
 
@@ -60,7 +60,7 @@ export class CollectionIndexesManager<
       config.name,
       resolver,
       config.options,
-      this.collection.entries()
+      this.state.entries()
     )
 
     this.lazyIndexes.set(indexId, lazyIndex)
@@ -105,7 +105,7 @@ export class CollectionIndexesManager<
         const resolvedIndex = await lazyIndex.resolve()
 
         // Build index with current data
-        resolvedIndex.build(this.collection.entries())
+        resolvedIndex.build(this.state.entries())
 
         this.resolvedIndexes.set(indexId, resolvedIndex)
         return { indexId, resolvedIndex }
@@ -124,7 +124,7 @@ export class CollectionIndexesManager<
     lazyIndex: LazyIndexWrapper<TKey>
   ): Promise<BaseIndex<TKey>> {
     const resolvedIndex = await lazyIndex.resolve()
-    resolvedIndex.build(this.collection.entries())
+    resolvedIndex.build(this.state.entries())
     this.resolvedIndexes.set(indexId, resolvedIndex)
     return resolvedIndex
   }

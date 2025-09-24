@@ -23,6 +23,7 @@ export class CollectionSyncManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private id: string
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
@@ -30,8 +31,9 @@ export class CollectionSyncManager<
   /**
    * Creates a new CollectionSyncManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
     this.config = config
+    this.id = id
   }
 
   bind(deps: {
@@ -51,8 +53,8 @@ export class CollectionSyncManager<
   public startSync(): void {
     const state = this.state
     if (
-      this.collection.status !== `idle` &&
-      this.collection.status !== `cleaned-up`
+      this.lifecycle.status !== `idle` &&
+      this.lifecycle.status !== `cleaned-up`
     ) {
       return // Already started or in progress
     }
@@ -80,7 +82,7 @@ export class CollectionSyncManager<
           if (pendingTransaction.committed) {
             throw new SyncTransactionAlreadyCommittedWriteError()
           }
-          const key = this.collection.getKeyFromItem(messageWithoutKey.value)
+          const key = this.config.getKey(messageWithoutKey.value)
 
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
@@ -94,7 +96,7 @@ export class CollectionSyncManager<
               !hasPendingDeleteForKey &&
               !isTruncateTransaction
             ) {
-              throw new DuplicateKeySyncError(key, this.collection.id)
+              throw new DuplicateKeySyncError(key, this.id)
             }
           }
 
@@ -124,7 +126,7 @@ export class CollectionSyncManager<
 
           // Update status to initialCommit when transitioning from loading
           // This indicates we're in the process of committing the first transaction
-          if (this.collection.status === `loading`) {
+          if (this.lifecycle.status === `loading`) {
             this.lifecycle.setStatus(`initialCommit`)
           }
 
@@ -176,25 +178,25 @@ export class CollectionSyncManager<
     }
 
     this.preloadPromise = new Promise<void>((resolve, reject) => {
-      if (this.collection.status === `ready`) {
+      if (this.lifecycle.status === `ready`) {
         resolve()
         return
       }
 
-      if (this.collection.status === `error`) {
+      if (this.lifecycle.status === `error`) {
         reject(new CollectionIsInErrorStateError())
         return
       }
 
       // Register callback BEFORE starting sync to avoid race condition
-      this.collection.onFirstReady(() => {
+      this.lifecycle.onFirstReady(() => {
         resolve()
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
       if (
-        this.collection.status === `idle` ||
-        this.collection.status === `cleaned-up`
+        this.lifecycle.status === `idle` ||
+        this.lifecycle.status === `cleaned-up`
       ) {
         try {
           this.startSync()
@@ -219,15 +221,12 @@ export class CollectionSyncManager<
       queueMicrotask(() => {
         if (error instanceof Error) {
           // Preserve the original error and stack trace
-          const wrappedError = new SyncCleanupError(this.collection.id, error)
+          const wrappedError = new SyncCleanupError(this.id, error)
           wrappedError.cause = error
           wrappedError.stack = error.stack
           throw wrappedError
         } else {
-          throw new SyncCleanupError(
-            this.collection.id,
-            error as Error | string
-          )
+          throw new SyncCleanupError(this.id, error as Error | string)
         }
       })
     }
