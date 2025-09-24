@@ -403,11 +403,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     const hasCalled = new Set()
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
-        mutation.collection.onTransactionStateChange()
+        mutation.collection._state.onTransactionStateChange()
 
         // Only call commitPendingTransactions if there are pending sync transactions
-        if (mutation.collection.pendingSyncedTransactions.length > 0) {
-          mutation.collection.commitPendingTransactions()
+        if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
+          mutation.collection._state.commitPendingTransactions()
         }
 
         hasCalled.add(mutation.collection.id)

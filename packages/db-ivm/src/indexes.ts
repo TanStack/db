@@ -1,60 +1,238 @@
+/**
+ * # Optimized Index Data Structure
+ *
+ * Multi-level index that adapts storage strategy based on data patterns to minimize memory
+ * usage, eliminate wasteful lookups, and avoid hashing whenever possible.
+ *
+ * ## Storage Strategy
+ *
+ * **Single value**: `IndexMap['key'] → [value, multiplicity]` (no hashing needed)
+ *
+ * **Multiple unprefixed values**: Direct ValueMap (avoids NO_PREFIX lookup)
+ * ```
+ * IndexMap['key'] → ValueMap { hash(value1) → [value1, mult1], ... }
+ * ```
+ *
+ * **Values with prefixes**: PrefixMap uses prefix keys directly (no hashing)
+ * ```
+ * IndexMap['key'] → PrefixMap { 'prefix1' → [value1, mult1], NO_PREFIX → ValueMap{...} }
+ * ```
+ *
+ * **Multiple values per prefix**: ValueMap within PrefixMap (hash only suffixes)
+ * ```
+ * PrefixMap['prefix'] → ValueMap { hash(suffix1) → [full_value1, mult1], ... }
+ * ```
+ *
+ * ## Dynamic Evolution
+ *
+ * Structure automatically evolves as data is added:
+ * - Single → ValueMap (when both values unprefixed)
+ * - Single → PrefixMap (when at least one prefixed)
+ * - ValueMap → PrefixMap (adding prefixed value to unprefixed)
+ *
+ * Prefixes extracted from array values: `['prefix', 'suffix']` → prefix='prefix'
+ */
+
 import { MultiSet } from "./multiset.js"
-import { HashIndex } from "./hashIndex.js"
-import { ValueIndex } from "./valueIndex.js"
-import { concatIterable, mapIterable } from "./utils.js"
+import { hash } from "./hashing/index.js"
+import type { Hash } from "./hashing/index.js"
+
+// We use a symbol to represent the absence of a prefix, unprefixed values a stored
+// against this key.
+const NO_PREFIX = Symbol(`NO_PREFIX`)
+type NO_PREFIX = typeof NO_PREFIX
+
+// A single value is a tuple of the value and the multiplicity.
+type SingleValue<TValue> = [TValue, number]
+
+// Base map type for the index. Stores single values, prefix maps, or value maps against a key.
+type IndexMap<TKey, TValue, TPrefix> = Map<
+  TKey,
+  SingleValue<TValue> | PrefixMap<TValue, TPrefix> | ValueMap<TValue>
+>
+
+// Second level map type for the index, stores single values or value maps against a prefix.
+class PrefixMap<TValue, TPrefix> extends Map<
+  TPrefix | NO_PREFIX,
+  SingleValue<TValue> | ValueMap<TValue>
+> {
+  /**
+   * Add a value to the PrefixMap. Returns true if the map becomes empty after the operation.
+   */
+  addValue(value: TValue, multiplicity: number): boolean {
+    if (multiplicity === 0) return this.size === 0
+
+    const prefix = getPrefix<TValue, TPrefix>(value)
+    const valueMapOrSingleValue = this.get(prefix)
+
+    if (isSingleValue(valueMapOrSingleValue)) {
+      const [currentValue, currentMultiplicity] = valueMapOrSingleValue
+      const currentPrefix = getPrefix<TValue, TPrefix>(currentValue)
+
+      if (currentPrefix !== prefix) {
+        throw new Error(`Mismatching prefixes, this should never happen`)
+      }
+
+      if (currentValue === value || hash(currentValue) === hash(value)) {
+        // Same value, update multiplicity
+        const newMultiplicity = currentMultiplicity + multiplicity
+        if (newMultiplicity === 0) {
+          this.delete(prefix)
+        } else {
+          this.set(prefix, [value, newMultiplicity])
+        }
+      } else {
+        // Different suffixes, need to create ValueMap
+        const valueMap = new ValueMap<TValue>()
+        valueMap.set(hash(currentValue), valueMapOrSingleValue)
+        valueMap.set(hash(value), [value, multiplicity])
+        this.set(prefix, valueMap)
+      }
+    } else if (valueMapOrSingleValue === undefined) {
+      // No existing value for this prefix
+      this.set(prefix, [value, multiplicity])
+    } else {
+      // Existing ValueMap
+      const isEmpty = valueMapOrSingleValue.addValue(value, multiplicity)
+      if (isEmpty) {
+        this.delete(prefix)
+      }
+    }
+
+    return this.size === 0
+  }
+}
+
+// Third level map type for the index, stores single values or value maps against a hash.
+class ValueMap<TValue> extends Map<Hash, [TValue, number]> {
+  /**
+   * Add a value to the ValueMap. Returns true if the map becomes empty after the operation.
+   * @param value - The full value to store
+   * @param multiplicity - The multiplicity to add
+   * @param hashKey - Optional hash key to use instead of hashing the full value (used when in PrefixMap context)
+   */
+  addValue(value: TValue, multiplicity: number): boolean {
+    if (multiplicity === 0) return this.size === 0
+
+    const key = hash(value)
+    const currentValue = this.get(key)
+
+    if (currentValue) {
+      const [, currentMultiplicity] = currentValue
+      const newMultiplicity = currentMultiplicity + multiplicity
+      if (newMultiplicity === 0) {
+        this.delete(key)
+      } else {
+        this.set(key, [value, newMultiplicity])
+      }
+    } else {
+      this.set(key, [value, multiplicity])
+    }
+
+    return this.size === 0
+  }
+}
 
 /**
  * A map from a difference collection trace's keys -> (value, multiplicities) that changed.
  * Used in operations like join and reduce where the operation needs to
  * exploit the key-value structure of the data to run efficiently.
  */
-export class Index<K, V> {
+export class Index<TKey, TValue, TPrefix = any> {
   /*
-   * This is a hybrid Index that composes a ValueIndex and a HashIndex.
-   * Keys that have only one value are stored in the ValueIndex.
-   * Keys that have multiple values are stored in the HashIndex, the hash distinguishes between the values.
-   * This reduces the amount of hashes we need to compute since often times only a small portion of the keys are updated
-   * so we don't have to hash the keys that are never updated.
-   *
-   * Note: The `valueIndex` and `hashIndex` have disjoint keys.
-   *       When a key that has only one value gets a new distinct value,
-   *       it is added to the `hashIndex` and removed from the `valueIndex` and vice versa.
+   * This index maintains a nested map of keys -> (value, multiplicities), where:
+   * - initially the values are stored against the key as a single value tuple
+   * - when a key gets additional values, the values are stored against the key in a
+   *   prefix map
+   * - the prefix is extract where possible from values that are structured as
+   *   [rowPrimaryKey, rowValue], as they are in the Tanstack DB query pipeline.
+   * - only when there are multiple values for a given prefix do we fall back to a
+   *   hash to identify identical values, storing them in a third level value map.
    */
-  #valueIndex: ValueIndex<K, V>
-  #hashIndex: HashIndex<K, V>
+  #inner: IndexMap<TKey, TValue, TPrefix>
 
   constructor() {
-    this.#valueIndex = new ValueIndex<K, V>()
-    this.#hashIndex = new HashIndex<K, V>()
+    this.#inner = new Map()
   }
 
+  /**
+   * This method returns a string representation of the index.
+   * @param indent - Whether to indent the string representation.
+   * @returns A string representation of the index.
+   */
   toString(indent = false): string {
-    return `Index(\n  ${this.#valueIndex.toString(indent)},\n  ${this.#hashIndex.toString(indent)}\n)`
+    return `Index(${JSON.stringify(
+      [...this.entries()],
+      undefined,
+      indent ? 2 : undefined
+    )})`
   }
 
-  get(key: K): Array<[V, number]> {
-    if (this.#valueIndex.has(key)) {
-      return [this.#valueIndex.get(key)!]
-    }
-    return this.#hashIndex.get(key)
+  /**
+   * The size of the index.
+   */
+  get size(): number {
+    return this.#inner.size
   }
 
-  getMultiplicity(key: K, value: V): number {
-    if (this.#valueIndex.has(key)) {
-      return this.#valueIndex.getMultiplicity(key)
+  /**
+   * This method checks if the index has a given key.
+   * @param key - The key to check.
+   * @returns True if the index has the key, false otherwise.
+   */
+  has(key: TKey): boolean {
+    return this.#inner.has(key)
+  }
+
+  /**
+   * This method returns all values for a given key.
+   * @param key - The key to get the values for.
+   * @returns An array of value tuples [value, multiplicity].
+   */
+  get(key: TKey): Array<[TValue, number]> {
+    return [...this.getIterator(key)]
+  }
+
+  /**
+   * This method returns an iterator over all values for a given key.
+   * @param key - The key to get the values for.
+   * @returns An iterator of value tuples [value, multiplicity].
+   */
+  *getIterator(key: TKey): Iterable<[TValue, number]> {
+    const mapOrSingleValue = this.#inner.get(key)
+    if (isSingleValue(mapOrSingleValue)) {
+      yield mapOrSingleValue
+    } else if (mapOrSingleValue === undefined) {
+      return
+    } else if (mapOrSingleValue instanceof ValueMap) {
+      // Direct ValueMap - all values have NO_PREFIX
+      for (const valueTuple of mapOrSingleValue.values()) {
+        yield valueTuple
+      }
+    } else {
+      // PrefixMap - iterate through all prefixes
+      for (const singleValueOrValueMap of mapOrSingleValue.values()) {
+        if (isSingleValue(singleValueOrValueMap)) {
+          yield singleValueOrValueMap
+        } else {
+          for (const valueTuple of singleValueOrValueMap.values()) {
+            yield valueTuple
+          }
+        }
+      }
     }
-    return this.#hashIndex.getMultiplicity(key, value)
   }
 
   /**
    * This returns an iterator that iterates over all key-value pairs.
    * @returns An iterable of all key-value pairs (and their multiplicities) in the index.
    */
-  #entries(): Iterable<[K, [V, number]]> {
-    return concatIterable(
-      this.#valueIndex.entries(),
-      this.#hashIndex.entriesIterator()
-    )
+  *entries(): Iterable<[TKey, [TValue, number]]> {
+    for (const key of this.#inner.keys()) {
+      for (const valueTuple of this.getIterator(key)) {
+        yield [key, valueTuple]
+      }
+    }
   }
 
   /**
@@ -63,90 +241,156 @@ export class Index<K, V> {
    * It returns an iterator that you can use if you need to iterate over the values for a given key.
    * @returns An iterator of all *keys* in the index and their corresponding value iterator.
    */
-  *#entriesIterators(): Iterable<[K, Iterable<[V, number]>]> {
-    for (const [key, [value, multiplicity]] of this.#valueIndex.entries()) {
-      yield [key, new Map<V, number>([[value, multiplicity]])]
+  *entriesIterators(): Iterable<[TKey, Iterable<[TValue, number]>]> {
+    for (const key of this.#inner.keys()) {
+      yield [key, this.getIterator(key)]
     }
-    for (const [key, valueMap] of this.#hashIndex.entries()) {
-      yield [
+  }
+
+  /**
+   * This method adds a value to the index.
+   * @param key - The key to add the value to.
+   * @param valueTuple - The value tuple [value, multiplicity] to add to the index.
+   */
+  addValue(key: TKey, valueTuple: SingleValue<TValue>) {
+    const [value, multiplicity] = valueTuple
+    // If the multiplicity is 0, do nothing
+    if (multiplicity === 0) return
+
+    const mapOrSingleValue = this.#inner.get(key)
+
+    if (mapOrSingleValue === undefined) {
+      // First value for this key
+      this.#inner.set(key, valueTuple)
+      return
+    }
+
+    if (isSingleValue(mapOrSingleValue)) {
+      // Handle transition from single value to map
+      this.#handleSingleValueTransition(
         key,
-        mapIterable(valueMap, ([_hash, [value, multiplicity]]) => [
-          value,
-          multiplicity,
-        ]),
-      ]
-    }
-  }
-
-  has(key: K): boolean {
-    return this.#valueIndex.has(key) || this.#hashIndex.has(key)
-  }
-
-  get size(): number {
-    return this.#valueIndex.size + this.#hashIndex.size
-  }
-
-  addValue(key: K, value: [V, number]): void {
-    const containedInValueIndex = this.#valueIndex.has(key)
-    const containedInHashIndex = this.#hashIndex.has(key)
-
-    if (containedInHashIndex && containedInValueIndex) {
-      throw new Error(
-        `Key ${key} is contained in both the value index and the hash index. This should never happen because they should have disjoint keysets.`
+        mapOrSingleValue,
+        value,
+        multiplicity
       )
-    }
-
-    if (!containedInValueIndex && !containedInHashIndex) {
-      // This is the first time we see the key
-      // Add it to the value index
-      this.#valueIndex.addValue(key, value)
       return
     }
 
-    if (containedInValueIndex) {
-      // This key is already in the value index
-      // It could be that it's the same value or a different one
-      // If it's a different value we will need to remove the key from the value index
-      // and add the key and its two values to the hash index
-      try {
-        this.#valueIndex.addValue(key, value)
-      } catch {
-        // This is a different value, need to move the key to the hash index
-        const existingValue = this.#valueIndex.get(key)!
-        this.#valueIndex.delete(key)
-        this.#hashIndex.addValue(key, existingValue)
-        this.#hashIndex.addValue(key, value)
+    if (mapOrSingleValue instanceof ValueMap) {
+      // Handle existing ValueMap
+      const prefix = getPrefix<TValue, TPrefix>(value)
+      if (prefix !== NO_PREFIX) {
+        // Convert ValueMap to PrefixMap since we have a prefixed value
+        const prefixMap = new PrefixMap<TValue, TPrefix>()
+        prefixMap.set(NO_PREFIX, mapOrSingleValue)
+        prefixMap.set(prefix, valueTuple)
+        this.#inner.set(key, prefixMap)
+      } else {
+        // Add to existing ValueMap
+        const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
+        if (isEmpty) {
+          this.#inner.delete(key)
+        }
       }
-      return
-    }
-
-    if (containedInHashIndex) {
-      // This key is already in the hash index so it already has two or more values.
-      // However, this new value and multiplicity could cause an existing value to be removed
-      // and lead to the key having only a single value in which case we need to move it back to the value index
-      const singleRemainingValue = this.#hashIndex.addValue(key, value)
-      if (singleRemainingValue) {
-        // The key only has a single remaining value so we need to move it back to the value index
-        this.#hashIndex.delete(key)
-        this.#valueIndex.addValue(key, singleRemainingValue)
+    } else {
+      // Handle existing PrefixMap
+      const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
+      if (isEmpty) {
+        this.#inner.delete(key)
       }
-      return
     }
   }
 
-  append(other: Index<K, V>): void {
-    for (const [key, value] of other.#entries()) {
+  /**
+   * Handle the transition from a single value to either a ValueMap or PrefixMap
+   */
+  #handleSingleValueTransition(
+    key: TKey,
+    currentSingleValue: SingleValue<TValue>,
+    newValue: TValue,
+    multiplicity: number
+  ) {
+    const [currentValue, currentMultiplicity] = currentSingleValue
+
+    // Check for exact same value (reference equality)
+    if (currentValue === newValue) {
+      const newMultiplicity = currentMultiplicity + multiplicity
+      if (newMultiplicity === 0) {
+        this.#inner.delete(key)
+      } else {
+        this.#inner.set(key, [newValue, newMultiplicity])
+      }
+      return
+    }
+
+    // Get prefixes for both values
+    const newPrefix = getPrefix<TValue, TPrefix>(newValue)
+    const currentPrefix = getPrefix<TValue, TPrefix>(currentValue)
+
+    // Check if they're the same value by prefix/suffix comparison
+    if (
+      currentPrefix === newPrefix &&
+      (currentValue === newValue || hash(currentValue) === hash(newValue))
+    ) {
+      const newMultiplicity = currentMultiplicity + multiplicity
+      if (newMultiplicity === 0) {
+        this.#inner.delete(key)
+      } else {
+        this.#inner.set(key, [newValue, newMultiplicity])
+      }
+      return
+    }
+
+    // Different values - choose appropriate map type
+    if (currentPrefix === NO_PREFIX && newPrefix === NO_PREFIX) {
+      // Both have NO_PREFIX, use ValueMap directly
+      const valueMap = new ValueMap<TValue>()
+      valueMap.set(hash(currentValue), currentSingleValue)
+      valueMap.set(hash(newValue), [newValue, multiplicity])
+      this.#inner.set(key, valueMap)
+    } else {
+      // At least one has a prefix, use PrefixMap
+      const prefixMap = new PrefixMap<TValue, TPrefix>()
+
+      if (currentPrefix === newPrefix) {
+        // Same prefix, different suffixes - need ValueMap within PrefixMap
+        const valueMap = new ValueMap<TValue>()
+        valueMap.set(hash(currentValue), currentSingleValue)
+        valueMap.set(hash(newValue), [newValue, multiplicity])
+        prefixMap.set(currentPrefix, valueMap)
+      } else {
+        // Different prefixes - store as separate single values
+        prefixMap.set(currentPrefix, currentSingleValue)
+        prefixMap.set(newPrefix, [newValue, multiplicity])
+      }
+
+      this.#inner.set(key, prefixMap)
+    }
+  }
+
+  /**
+   * This method appends another index to the current index.
+   * @param other - The index to append to the current index.
+   */
+  append(other: Index<TKey, TValue>): void {
+    for (const [key, value] of other.entries()) {
       this.addValue(key, value)
     }
   }
 
-  join<V2>(other: Index<K, V2>): MultiSet<[K, [V, V2]]> {
-    const result: Array<[[K, [V, V2]], number]> = []
-
+  /**
+   * This method joins two indexes.
+   * @param other - The index to join with the current index.
+   * @returns A multiset of the joined values.
+   */
+  join<TValue2>(
+    other: Index<TKey, TValue2>
+  ): MultiSet<[TKey, [TValue, TValue2]]> {
+    const result: Array<[[TKey, [TValue, TValue2]], number]> = []
     // We want to iterate over the smaller of the two indexes to reduce the
     // number of operations we need to do.
     if (this.size <= other.size) {
-      for (const [key, valueIt] of this.#entriesIterators()) {
+      for (const [key, valueIt] of this.entriesIterators()) {
         if (!other.has(key)) continue
         const otherValues = other.get(key)
         for (const [val1, mul1] of valueIt) {
@@ -158,7 +402,7 @@ export class Index<K, V> {
         }
       }
     } else {
-      for (const [key, otherValueIt] of other.#entriesIterators()) {
+      for (const [key, otherValueIt] of other.entriesIterators()) {
         if (!this.has(key)) continue
         const values = this.get(key)
         for (const [val2, mul2] of otherValueIt) {
@@ -173,4 +417,35 @@ export class Index<K, V> {
 
     return new MultiSet(result)
   }
+}
+
+/**
+ * This function extracts the prefix from a value.
+ * @param value - The value to extract the prefix from.
+ * @returns The prefix and the suffix.
+ */
+function getPrefix<TValue, TPrefix>(value: TValue): TPrefix | NO_PREFIX {
+  // If the value is an array and the first element is a string or number, then the
+  // first element is the prefix. This is used to distinguish between values without
+  // the need for hashing unless there are multiple values for the same prefix.
+  if (
+    Array.isArray(value) &&
+    (typeof value[0] === `string` ||
+      typeof value[0] === `number` ||
+      typeof value[0] === `bigint`)
+  ) {
+    return value[0] as TPrefix
+  }
+  return NO_PREFIX
+}
+
+/**
+ * This function checks if a value is a single value.
+ * @param value - The value to check.
+ * @returns True if the value is a single value, false otherwise.
+ */
+function isSingleValue<TValue>(
+  value: SingleValue<TValue> | unknown
+): value is SingleValue<TValue> {
+  return Array.isArray(value)
 }

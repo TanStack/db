@@ -113,9 +113,9 @@ describe(`RxDB Integration`, () => {
       expect(collection.get(`2`)).toEqual(initialItems[1])
 
       // Verify the synced data
-      expect(collection.syncedData.size).toBe(initialItems.length)
-      expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
-      expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
+      expect(collection._state.syncedData.size).toBe(initialItems.length)
+      expect(collection._state.syncedData.get(`1`)).toEqual(initialItems[0])
+      expect(collection._state.syncedData.get(`2`)).toEqual(initialItems[1])
 
       await db.remove()
     })
@@ -127,7 +127,7 @@ describe(`RxDB Integration`, () => {
 
       // All docs should be present after initial sync
       expect(collection.size).toBe(docsAmount)
-      expect(collection.syncedData.size).toBe(docsAmount)
+      expect(collection._state.syncedData.size).toBe(docsAmount)
 
       // Spot-check a few positions
       expect(collection.get(`1`)).toEqual({ id: `1`, name: `Item 1` })
@@ -225,12 +225,12 @@ describe(`RxDB Integration`, () => {
       await rxCollection.insert({ id: `3`, name: `Item 3` })
 
       // Access collection data to restart sync
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       await collection.toArrayWhenReady()
       expect(collection.get(`3`).name).toEqual(`Item 3`)
 
-      unsubscribe()
+      subscription.unsubscribe()
       await db.remove()
     })
   })

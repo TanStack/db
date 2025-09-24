@@ -1,17 +1,17 @@
 {
   "name": "@tanstack/rxdb-db-collection",
   "description": "RxDB collection for TanStack DB",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "dependencies": {
-    "rxdb": "16.17.2",
+    "rxdb": "16.19.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.7.0",
-    "debug": "^4.4.1"
+    "@tanstack/store": "^0.7.7",
+    "debug": "^4.4.3"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {
@@ -32,7 +32,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.17.0",
   "peerDependencies": {
     "rxdb": ">=16.17.2",
     "typescript": ">=4.7"

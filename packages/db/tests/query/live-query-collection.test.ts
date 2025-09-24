@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { Temporal } from "temporal-polyfill"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import {
   createLiveQueryCollection,
   eq,
@@ -306,12 +306,12 @@ describe(`createLiveQueryCollection`, () => {
       gcTime: 1,
     })
 
-    const unsubscribe = liveQuery.subscribeChanges(() => {})
+    const subscription = liveQuery.subscribeChanges(() => {})
     await liveQuery.preload()
     expect(liveQuery.status).toBe(`ready`)
 
     // Unsubscribe and wait for GC to run and cleanup to complete
-    unsubscribe()
+    subscription.unsubscribe()
     const deadline = Date.now() + 500
     while (liveQuery.status !== `cleaned-up` && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1))
@@ -390,14 +390,14 @@ describe(`createLiveQueryCollection`, () => {
     expect(nestedLQ.status).toBe(`ready`)
 
     // First subscription cycle
-    const unsubscribe1 = nestedLQ.subscribeChanges(() => {})
+    const subscription1 = nestedLQ.subscribeChanges(() => {})
 
     // Verify we still have data after subscribing
     expect(nestedLQ.size).toBe(2)
     expect(nestedLQ.status).toBe(`ready`)
 
     // Unsubscribe and wait for GC
-    unsubscribe1()
+    subscription1.unsubscribe()
     const deadline1 = Date.now() + 500
     while (nestedLQ.status !== `cleaned-up` && Date.now() < deadline1) {
       await new Promise((r) => setTimeout(r, 1))
@@ -407,7 +407,7 @@ describe(`createLiveQueryCollection`, () => {
     // Try multiple resubscribe cycles to increase chance of reproduction
     for (let i = 0; i < 3; i++) {
       // Resubscribe
-      const unsubscribe2 = nestedLQ.subscribeChanges(() => {})
+      const subscription2 = nestedLQ.subscribeChanges(() => {})
 
       // Wait for the collection to potentially recover
       await new Promise((r) => setTimeout(r, 50))
@@ -416,7 +416,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(nestedLQ.size).toBe(2)
 
       // Unsubscribe and wait for GC again
-      unsubscribe2()
+      subscription2.unsubscribe()
       const deadline2 = Date.now() + 500
       while (nestedLQ.status !== `cleaned-up` && Date.now() < deadline2) {
         await new Promise((r) => setTimeout(r, 1))
@@ -428,7 +428,7 @@ describe(`createLiveQueryCollection`, () => {
     }
 
     // Final verification - resubscribe one more time and ensure data is available
-    const finalUnsubscribe = nestedLQ.subscribeChanges(() => {})
+    const finalSubscription = nestedLQ.subscribeChanges(() => {})
 
     // Wait for the collection to become ready
     const finalDeadline = Date.now() + 1000
@@ -439,7 +439,7 @@ describe(`createLiveQueryCollection`, () => {
     expect(nestedLQ.status).toBe(`ready`)
     expect(nestedLQ.size).toBe(2)
 
-    finalUnsubscribe()
+    finalSubscription.unsubscribe()
   })
 
   it(`should handle temporal values correctly in live queries`, async () => {

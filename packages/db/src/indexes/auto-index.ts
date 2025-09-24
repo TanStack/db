@@ -1,6 +1,6 @@
 import { BTreeIndex } from "./btree-index"
 import type { BasicExpression } from "../query/ir"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`

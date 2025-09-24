@@ -325,7 +325,7 @@ export function useLiveQuery(
     })
 
     // Subscribe to collection changes with granular updates
-    currentUnsubscribe = currentCollection.subscribeChanges(
+    const subscription = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         untrack(() => {
@@ -346,8 +346,13 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status state on every change
         status = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
+
+    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
 
     // Preload collection data if not already started
     if (currentCollection.status === `idle`) {

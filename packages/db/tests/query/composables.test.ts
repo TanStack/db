@@ -10,7 +10,7 @@ import {
   lte,
   upper,
 } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 import type { Ref } from "../../src/query/index.js"
 

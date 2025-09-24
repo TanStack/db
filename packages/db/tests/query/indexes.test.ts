@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection"
+import { createCollection } from "../../src/collection/index.js"
 
 import { createLiveQueryCollection } from "../../src/query/live-query-collection"
 import {
@@ -775,9 +775,16 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done an index lookup on the 1st collection to find matching items
-        // i.e. items with id "1"
+        // We should have done 2 index lookups:
+        // 1. to find active items
+        // 2. to find items with matching IDs
         expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            type: `index`,
+            operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
           {
             type: `index`,
             operation: `in`,
@@ -1173,6 +1180,12 @@ describe(`Query Index Optimization`, () => {
 
         // We should have done an index lookup on the 1st collection to find active items
         expect(tracker1.stats.queriesExecuted).toEqual([
+          {
+            field: `status`,
+            operation: `eq`,
+            type: `index`,
+            value: `active`,
+          },
           {
             type: `index`,
             operation: `in`,

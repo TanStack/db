@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { Query } from "../../../src/query/builder/index.js"
-import { CollectionImpl } from "../../../src/collection.js"
+import { CollectionImpl } from "../../../src/collection/index.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
 import type { ExtractContext } from "../../../src/query/builder/index.js"
 import type { GetResult } from "../../../src/query/builder/types.js"

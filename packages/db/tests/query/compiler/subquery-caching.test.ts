@@ -3,7 +3,7 @@ import { D2 } from "@tanstack/db-ivm"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection.js"
+import type { CollectionImpl } from "../../../src/collection/index.js"
 
 describe(`Subquery Caching`, () => {
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
@@ -52,6 +52,7 @@ describe(`Subquery Caching`, () => {
       inputs,
       { users: usersCollection },
       {},
+      {},
       new Set(),
       {},
       cache1
@@ -67,6 +68,7 @@ describe(`Subquery Caching`, () => {
       mainQuery,
       inputs,
       { users: usersCollection },
+      {},
       {},
       new Set(),
       {},
@@ -86,6 +88,7 @@ describe(`Subquery Caching`, () => {
       inputs,
       { users: usersCollection },
       {},
+      {},
       new Set(),
       {},
       cache2
@@ -104,6 +107,7 @@ describe(`Subquery Caching`, () => {
       inputs,
       { users: usersCollection },
       {},
+      {},
       new Set(),
       {},
       cache2
@@ -112,6 +116,7 @@ describe(`Subquery Caching`, () => {
       subquery,
       inputs,
       { users: usersCollection },
+      {},
       {},
       new Set(),
       {},
@@ -148,6 +153,7 @@ describe(`Subquery Caching`, () => {
       inputs,
       { users: usersCollection },
       {},
+      {},
       new Set(),
       {},
       sharedCache
@@ -159,6 +165,7 @@ describe(`Subquery Caching`, () => {
       subquery,
       inputs,
       { users: usersCollection },
+      {},
       {},
       new Set(),
       {},
@@ -204,6 +211,7 @@ describe(`Subquery Caching`, () => {
       inputs,
       { users: usersCollection },
       {},
+      {},
       new Set(),
       {},
       sharedCache
@@ -212,6 +220,7 @@ describe(`Subquery Caching`, () => {
       subquery,
       inputs,
       { users: usersCollection },
+      {},
       {},
       new Set(),
       {},
@@ -274,6 +283,7 @@ describe(`Subquery Caching`, () => {
       outerQuery,
       inputs,
       { users: usersCollection },
+      {},
       {},
       new Set(),
       {},
