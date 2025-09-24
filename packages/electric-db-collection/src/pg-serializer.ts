@@ -3,6 +3,10 @@ export function serialize(value: unknown): string {
     return `'${value}'`
   }
 
+  if (typeof value === `number`) {
+    return value.toString()
+  }
+
   if (value === null || value === undefined) {
     return `NULL`
   }
@@ -19,9 +23,5 @@ export function serialize(value: unknown): string {
     return `ARRAY[${value.map(serialize).join(`,`)}]`
   }
 
-  if (typeof value === `object`) {
-    throw new Error(`Cannot serialize object: ${JSON.stringify(value)}`)
-  }
-
-  return value.toString()
+  throw new Error(`Cannot serialize value: ${JSON.stringify(value)}`)
 }
