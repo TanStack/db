@@ -1,4 +1,10 @@
+import { serialize } from "./pg-serializer"
+import type { ExternalSubsetParamsRecord } from "@electric-sql/client"
 import type { IR, OnLoadMoreOptions } from "@tanstack/db"
+
+export type CompiledSqlRecord = Omit<ExternalSubsetParamsRecord, `params`> & {
+  params?: Array<unknown>
+}
 
 export function compileSQL<T>(
   options: OnLoadMoreOptions
@@ -6,7 +12,7 @@ export function compileSQL<T>(
   const { where, orderBy, limit } = options
 
   const params: Array<T> = []
-  const compiledSQL: ExternalSubsetParamsRecord = { params }
+  const compiledSQL: CompiledSqlRecord = { params }
 
   if (where) {
     // TODO: this only works when the where expression's PropRefs directly reference a column of the collection
@@ -22,7 +28,20 @@ export function compileSQL<T>(
     compiledSQL.limit = limit
   }
 
-  return compiledSQL
+  // Serialize the values in the params array into PG formatted strings
+  // and transform the array into a Record<string, string>
+  const paramsRecord = params.reduce(
+    (acc, param, index) => {
+      acc[`${index + 1}`] = serialize(param)
+      return acc
+    },
+    {} as Record<string, string>
+  )
+
+  return {
+    ...compiledSQL,
+    params: paramsRecord,
+  }
 }
 
 /**
@@ -134,15 +153,12 @@ function getOpName(name: string): string {
     concat: `CONCAT`,
     coalesce: `COALESCE`,
   }
-  return opNames[name as keyof typeof opNames] || name
-}
 
-// TODO: remove this type once we rebase on top of Ilia's PR
-//       that type will be exported by Ilia's PR
-export type ExternalSubsetParamsRecord = {
-  where?: string
-  params?: Record<string, any>
-  limit?: number
-  offset?: number
-  orderBy?: string
+  const opName = opNames[name as keyof typeof opNames]
+
+  if (!opName) {
+    throw new Error(`Unknown operator/function: ${name}`)
+  }
+
+  return opName
 }
