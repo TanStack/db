@@ -439,22 +439,15 @@ async function onLoadMore<T extends Row<unknown>>(
   options: OnLoadMoreOptions
 ) {
   const { begin, write, commit } = syncParams
-
-  // TODO: optimize this by keeping track of which snapshot have been loaded already
-  //       and only load this one if it's not a subset of the ones that have been loaded already
-
   const snapshotParams = compileSQL<T>(options)
-
   const snapshot = await stream.requestSnapshot(snapshotParams)
 
   begin()
-
   snapshot.data.forEach((row) => {
     write({
       type: `insert`,
       value: row.value,
     })
   })
-
   commit()
 }
