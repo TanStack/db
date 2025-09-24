@@ -1,9 +1,9 @@
+import { ensureIndexForExpression } from "../indexes/auto-index.js"
+import { and } from "../query/index.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
-} from "../change-events.js"
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and } from "../query/index.js"
+} from "./change-events.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { BaseIndex } from "../indexes/base-index.js"
 import type { ChangeMessage } from "../types.js"

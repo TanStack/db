@@ -2,7 +2,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from "../errors"
-import { currentStateAsChanges } from "../change-events"
+import { currentStateAsChanges } from "./change-events"
 
 import { CollectionStateManager } from "./state"
 import { CollectionChangesManager } from "./changes"
