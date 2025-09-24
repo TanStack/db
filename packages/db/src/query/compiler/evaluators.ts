@@ -142,13 +142,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        let a = argA(data)
-        let b = argB(data)
-        if (a instanceof Date) {
-          a = a.getTime()
-        }
-        if (b instanceof Date) {
-          b = b.getTime()
+        const a = argA(data)
+        const b = argB(data)
+        if (a instanceof Date && b instanceof Date) {
+          return a.valueOf() == b.valueOf()
         }
         return a === b
       }

@@ -24,8 +24,7 @@ type Order = {
   customer_id: number
   amount: number
   status: string
-  date: string
-  date_instance: Date
+  date: Date
   product_category: string
   quantity: number
   discount: number
@@ -65,8 +64,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 1,
     amount: 100,
     status: `completed`,
-    date: `2023-01-01`,
-    date_instance: new Date(`2023-01-01`),
+    date: new Date(`2023-01-01`),
     product_category: `electronics`,
     quantity: 2,
     discount: 0,
@@ -103,8 +101,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 1,
     amount: 200,
     status: `completed`,
-    date: `2023-01-15`,
-    date_instance: new Date(`2023-01-15`),
+    date: new Date(`2023-01-15`),
     product_category: `electronics`,
     quantity: 1,
     discount: 10,
@@ -137,8 +134,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 2,
     amount: 150,
     status: `pending`,
-    date: `2023-01-20`,
-    date_instance: new Date(`2023-01-20`),
+    date: new Date(`2023-01-20`),
     product_category: `books`,
     quantity: 3,
     discount: 5,
@@ -171,8 +167,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 2,
     amount: 300,
     status: `completed`,
-    date: `2023-02-01`,
-    date_instance: new Date(`2023-02-01`),
+    date: new Date(`2023-02-01`),
     product_category: `electronics`,
     quantity: 1,
     discount: 0,
@@ -183,8 +178,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 3,
     amount: 250,
     status: `pending`,
-    date: `2023-02-10`,
-    date_instance: new Date(`2023-02-10`),
+    date: new Date(`2023-02-10`),
     product_category: `books`,
     quantity: 5,
     discount: 15,
@@ -195,8 +189,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 3,
     amount: 75,
     status: `cancelled`,
-    date: `2023-02-15`,
-    date_instance: new Date(`2023-02-15`),
+    date: new Date(`2023-02-15`),
     product_category: `electronics`,
     quantity: 1,
     discount: 0,
@@ -207,8 +200,7 @@ const sampleOrders: Array<Order> = [
     customer_id: 1,
     amount: 400,
     status: `completed`,
-    date: `2023-03-01`,
-    date_instance: new Date(`2023-03-01`),
+    date: new Date(`2023-03-01`),
     product_category: `books`,
     quantity: 2,
     discount: 20,
@@ -250,8 +242,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 avg_amount: avg(orders.amount),
                 min_amount: min(orders.amount),
                 max_amount: max(orders.amount),
-                min_date: min(orders.date_instance),
-                max_date: max(orders.date_instance),
+                min_date: min(orders.date),
+                max_date: max(orders.date),
               })),
         })
 
@@ -763,13 +755,13 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 min_amount: min(orders.amount),
                 max_amount: max(orders.amount),
                 spending_range: max(orders.amount), // We'll calculate range in the filter
-                last_date: max(orders.date_instance),
+                last_date: max(orders.date),
               }))
               .having(({ orders }) =>
                 and(
                   gte(min(orders.amount), 75),
                   gte(max(orders.amount), 300),
-                  gte(max(orders.date_instance), new Date(`2020-09-17`))
+                  gte(max(orders.date), new Date(`2020-09-17`))
                 )
               ),
         })
@@ -862,8 +854,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           customer_id: 1,
           amount: 500,
           status: `completed`,
-          date: `2023-03-15`,
-          date_instance: new Date(`2023-03-15`),
+          date: new Date(`2023-03-15`),
           product_category: `electronics`,
           quantity: 2,
           discount: 0,
@@ -884,8 +875,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           customer_id: 4,
           amount: 350,
           status: `pending`,
-          date: `2023-03-20`,
-          date_instance: new Date(`2023-03-20`),
+          date: new Date(`2023-03-20`),
           product_category: `books`,
           quantity: 1,
           discount: 5,
@@ -1066,8 +1056,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           customer_id: 1,
           amount: 100,
           status: `completed`,
-          date: `2023-01-01`,
-          date_instance: new Date(`2023-01-01`),
+          date: new Date(`2023-01-01`),
           product_category: `electronics`,
           quantity: 1,
           discount: 0,
@@ -1352,7 +1341,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           customer_id: 999,
           amount: 500,
           status: `completed`,
-          date: `2023-03-01`,
+          date: new Date(`2023-03-01`),
           product_category: `luxury`,
           quantity: 1,
           discount: 0,

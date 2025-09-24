@@ -51,7 +51,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 
   // If both are dates, compare them
   if (a instanceof Date && b instanceof Date) {
-    return a.getTime() - b.getTime()
+    return a.valueOf() - b.valueOf()
   }
 
   // If at least one of the values is an object, use stable IDs for comparison

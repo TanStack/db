@@ -361,6 +361,8 @@ function getAggregateFunction(aggExpr: Aggregate) {
       : value != null
         ? Number(value)
         : 0
+  }
+
   // Create a raw value extractor function for the expression to aggregate
   const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     return compiledExpr(namespacedRow)

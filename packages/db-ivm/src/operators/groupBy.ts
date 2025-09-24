@@ -214,19 +214,21 @@ export function avg<T>(
  * Creates a min aggregate function that computes the minimum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function min<T, V>(
+export function min<T, V extends number | Date | bigint>(
   valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, never, V> {
+): AggregateFunction<T, V, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
     reduce: (values) => {
-      let minValue = Number.POSITIVE_INFINITY as V
+      let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (Number(value) < Number(minValue)) {
+        if (minValue && value < minValue) {
+          minValue = value
+        } else if (!minValue) {
           minValue = value
         }
       }
-      return minValue === Number.POSITIVE_INFINITY ? (0 as V) : minValue
+      return minValue ?? (0 as V)
     },
   }
 }
@@ -235,19 +237,21 @@ export function min<T, V>(
  * Creates a max aggregate function that computes the maximum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function max<T, V>(
+export function max<T, V extends number | Date | bigint>(
   valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, never, V> {
+): AggregateFunction<T, V, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
     reduce: (values) => {
-      let maxValue = Number.NEGATIVE_INFINITY as V
+      let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (Number(value) > Number(maxValue)) {
+        if (maxValue && value > maxValue) {
+          maxValue = value
+        } else if (!maxValue) {
           maxValue = value
         }
       }
-      return maxValue === Number.NEGATIVE_INFINITY ? (0 as V) : maxValue
+      return maxValue ?? (0 as V)
     },
   }
 }
