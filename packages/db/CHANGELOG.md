@@ -1,5 +1,54 @@
 # @tanstack/db
 
+## 0.3.2
+
+### Patch Changes
+
+- Added a new events system for subscribing to status changes and other internal events. ([#555](https://github.com/TanStack/db/pull/555))
+
+## 0.3.1
+
+### Patch Changes
+
+- Fix `stateWhenReady()` and `toArrayWhenReady()` methods to consistently wait for collections to be ready by using `preload()` internally. This ensures the collection starts loading if needed rather than just waiting passively. ([#565](https://github.com/TanStack/db/pull/565))
+
+## 0.3.0
+
+### Minor Changes
+
+- Fix transaction error handling to match documented behavior and preserve error identity ([#558](https://github.com/TanStack/db/pull/558))
+
+  ### Breaking Changes
+  - `commit()` now throws errors when the mutation function fails (previously returned a failed transaction)
+
+  ### Bug Fixes
+  1. **Fixed commit() not throwing errors** - The `commit()` method now properly throws errors when the mutation function fails, matching the documented behavior. Both `await tx.commit()` and `await tx.isPersisted.promise` now work correctly in try/catch blocks.
+
+  ### Migration Guide
+
+  If you were catching errors from `commit()` by checking the transaction state:
+
+  ```js
+  // Before - commit() didn't throw
+  await tx.commit()
+  if (tx.state === "failed") {
+    console.error("Failed:", tx.error)
+  }
+
+  // After - commit() now throws
+  try {
+    await tx.commit()
+  } catch (error) {
+    console.error("Failed:", error)
+  }
+  ```
+
+### Patch Changes
+
+- Improve mutation merging from crude replacement to sophisticated merge logic ([#557](https://github.com/TanStack/db/pull/557))
+
+  Previously, mutations were simply replaced when operating on the same item. Now mutations are intelligently merged based on their operation types (insert vs update vs delete), reducing network overhead and better preserving user intent.
+
 ## 0.2.5
 
 ### Patch Changes

@@ -166,7 +166,7 @@ describe(`Query collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18)) // eslint-disable-line @typescript-eslint/no-unnecessary-condition
+          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
           .select(({ user }) => ({
             id: user.id,
             name: user.name,

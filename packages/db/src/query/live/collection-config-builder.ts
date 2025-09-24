@@ -2,6 +2,7 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import type { CollectionSubscription } from "../../collection-subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection.js"
@@ -41,6 +42,8 @@ export class CollectionConfigBuilder<
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
+  private isGraphRunning = false
+
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
@@ -48,6 +51,8 @@ export class CollectionConfigBuilder<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
+  // Map of collection ID to subscription
+  readonly subscriptions: Record<string, CollectionSubscription> = {}
   // Map of collection IDs to functions that load keys for that lazy collection
   lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
   // Set of collection IDs that are lazy collections
@@ -104,25 +109,41 @@ export class CollectionConfigBuilder<
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
-    const { begin, commit, markReady } = config
+    if (this.isGraphRunning) {
+      // no nested runs of the graph
+      // which is possible if the `callback`
+      // would call `maybeRunGraph` e.g. after it has loaded some more data
+      return
+    }
 
-    // We only run the graph if all the collections are ready
-    if (
-      this.allCollectionsReadyOrInitialCommit() &&
-      syncState.subscribedToAllCollections
-    ) {
-      syncState.graph.run()
-      const ready = callback?.() ?? true
-      // On the initial run, we may need to do an empty commit to ensure that
-      // the collection is initialized
-      if (syncState.messagesCount === 0) {
-        begin()
-        commit()
+    this.isGraphRunning = true
+
+    try {
+      const { begin, commit, markReady } = config
+
+      // We only run the graph if all the collections are ready
+      if (
+        this.allCollectionsReadyOrInitialCommit() &&
+        syncState.subscribedToAllCollections
+      ) {
+        while (syncState.graph.pendingWork()) {
+          syncState.graph.run()
+          callback?.()
+        }
+
+        // On the initial run, we may need to do an empty commit to ensure that
+        // the collection is initialized
+        if (syncState.messagesCount === 0) {
+          begin()
+          commit()
+        }
+        // Mark the collection as ready after the first successful run
+        if (this.allCollectionsReady()) {
+          markReady()
+        }
       }
-      // Mark the collection as ready after the first successful run
-      if (ready && this.allCollectionsReady()) {
-        markReady()
-      }
+    } finally {
+      this.isGraphRunning = false
     }
   }
 
@@ -189,6 +210,7 @@ export class CollectionConfigBuilder<
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
+      this.subscriptions,
       this.lazyCollectionsCallbacks,
       this.lazyCollections,
       this.optimizableOrderByCollections
@@ -320,17 +342,21 @@ export class CollectionConfigBuilder<
           syncState,
           this
         )
-        collectionSubscriber.subscribe()
 
-        const loadMore =
-          collectionSubscriber.loadMoreIfNeeded.bind(collectionSubscriber)
+        const subscription = collectionSubscriber.subscribe()
+        this.subscriptions[collectionId] = subscription
+
+        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+          collectionSubscriber,
+          subscription
+        )
 
         return loadMore
       }
     )
 
     const loadMoreDataCallback = () => {
-      loaders.map((loader) => loader()) // .every((doneLoading) => doneLoading)
+      loaders.map((loader) => loader())
       return true
     }
 
