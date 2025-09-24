@@ -262,10 +262,10 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions({
         queryClient,
         queryKey: [`schema-priority`],
-        // @ts-expect-error – queryFn doesn't match the schema type
         queryFn: async () => {
           return [] as Array<UserType>
         },
+        // @ts-expect-error – queryFn doesn't match the schema type
         schema: userSchema,
         getKey: (item) => item.id,
       })
