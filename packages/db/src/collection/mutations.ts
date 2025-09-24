@@ -28,6 +28,8 @@ import type {
   UtilsRecord,
   WritableDeep,
 } from "../types"
+import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionStateManager } from "./state"
 
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
@@ -36,9 +38,21 @@ export class CollectionMutationsManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  constructor(
-    public collection: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
-  ) {}
+  private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
+
+  constructor() {}
+
+  bind(deps: {
+    lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+    collection: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
+  }) {
+    this.lifecycle = deps.lifecycle
+    this.state = deps.state
+    this.collection = deps.collection
+  }
 
   private ensureStandardSchema(schema: unknown): StandardSchema<TOutput> {
     // If the schema already implements the standard-schema interface, return it
@@ -134,8 +148,8 @@ export class CollectionMutationsManager<
    * Inserts one or more items into the collection
    */
   insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
-    this.collection._lifecycle.validateCollectionUsable(`insert`)
-    const _state = this.collection._state
+    this.lifecycle.validateCollectionUsable(`insert`)
+    const state = this.state
     const ambientTransaction = getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
@@ -189,9 +203,9 @@ export class CollectionMutationsManager<
     if (ambientTransaction) {
       ambientTransaction.applyMutations(mutations)
 
-      _state.transactions.set(ambientTransaction.id, ambientTransaction)
-      _state.scheduleTransactionCleanup(ambientTransaction)
-      _state.recomputeOptimisticState(true)
+      state.transactions.set(ambientTransaction.id, ambientTransaction)
+      state.scheduleTransactionCleanup(ambientTransaction)
+      state.recomputeOptimisticState(true)
 
       return ambientTransaction
     } else {
@@ -215,9 +229,9 @@ export class CollectionMutationsManager<
       directOpTransaction.commit()
 
       // Add the transaction to the collection's transactions store
-      _state.transactions.set(directOpTransaction.id, directOpTransaction)
-      _state.scheduleTransactionCleanup(directOpTransaction)
-      _state.recomputeOptimisticState(true)
+      state.transactions.set(directOpTransaction.id, directOpTransaction)
+      state.scheduleTransactionCleanup(directOpTransaction)
+      state.recomputeOptimisticState(true)
 
       return directOpTransaction
     }
@@ -240,8 +254,8 @@ export class CollectionMutationsManager<
       throw new MissingUpdateArgumentError()
     }
 
-    const _state = this.collection._state
-    this.collection._lifecycle.validateCollectionUsable(`update`)
+    const state = this.state
+    this.lifecycle.validateCollectionUsable(`update`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -345,7 +359,7 @@ export class CollectionMutationsManager<
           globalKey,
           key,
           metadata: config.metadata as unknown,
-          syncMetadata: (_state.syncedMetadata.get(key) || {}) as Record<
+          syncMetadata: (state.syncedMetadata.get(key) || {}) as Record<
             string,
             unknown
           >,
@@ -371,7 +385,7 @@ export class CollectionMutationsManager<
       })
       emptyTransaction.commit()
       // Schedule cleanup for empty transaction
-      _state.scheduleTransactionCleanup(emptyTransaction)
+      state.scheduleTransactionCleanup(emptyTransaction)
       return emptyTransaction
     }
 
@@ -379,9 +393,9 @@ export class CollectionMutationsManager<
     if (ambientTransaction) {
       ambientTransaction.applyMutations(mutations)
 
-      _state.transactions.set(ambientTransaction.id, ambientTransaction)
-      _state.scheduleTransactionCleanup(ambientTransaction)
-      _state.recomputeOptimisticState(true)
+      state.transactions.set(ambientTransaction.id, ambientTransaction)
+      state.scheduleTransactionCleanup(ambientTransaction)
+      state.recomputeOptimisticState(true)
 
       return ambientTransaction
     }
@@ -409,9 +423,9 @@ export class CollectionMutationsManager<
 
     // Add the transaction to the collection's transactions store
 
-    _state.transactions.set(directOpTransaction.id, directOpTransaction)
-    _state.scheduleTransactionCleanup(directOpTransaction)
-    _state.recomputeOptimisticState(true)
+    state.transactions.set(directOpTransaction.id, directOpTransaction)
+    state.scheduleTransactionCleanup(directOpTransaction)
+    state.recomputeOptimisticState(true)
 
     return directOpTransaction
   }
@@ -423,8 +437,8 @@ export class CollectionMutationsManager<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
-    const _state = this.collection._state
-    this.collection._lifecycle.validateCollectionUsable(`delete`)
+    const state = this.state
+    this.lifecycle.validateCollectionUsable(`delete`)
 
     const ambientTransaction = getActiveTransaction()
 
@@ -463,7 +477,7 @@ export class CollectionMutationsManager<
         globalKey,
         key,
         metadata: config?.metadata as unknown,
-        syncMetadata: (_state.syncedMetadata.get(key) || {}) as Record<
+        syncMetadata: (state.syncedMetadata.get(key) || {}) as Record<
           string,
           unknown
         >,
@@ -481,9 +495,9 @@ export class CollectionMutationsManager<
     if (ambientTransaction) {
       ambientTransaction.applyMutations(mutations)
 
-      _state.transactions.set(ambientTransaction.id, ambientTransaction)
-      _state.scheduleTransactionCleanup(ambientTransaction)
-      _state.recomputeOptimisticState(true)
+      state.transactions.set(ambientTransaction.id, ambientTransaction)
+      state.scheduleTransactionCleanup(ambientTransaction)
+      state.recomputeOptimisticState(true)
 
       return ambientTransaction
     }
@@ -508,9 +522,9 @@ export class CollectionMutationsManager<
     directOpTransaction.applyMutations(mutations)
     directOpTransaction.commit()
 
-    _state.transactions.set(directOpTransaction.id, directOpTransaction)
-    _state.scheduleTransactionCleanup(directOpTransaction)
-    _state.recomputeOptimisticState(true)
+    state.transactions.set(directOpTransaction.id, directOpTransaction)
+    state.scheduleTransactionCleanup(directOpTransaction)
+    state.recomputeOptimisticState(true)
 
     return directOpTransaction
   }

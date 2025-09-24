@@ -48,14 +48,16 @@ export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
 ) => void
 
 export class CollectionEventsManager {
-  private collection: Collection<any, any, any, any, any>
+  private collection!: Collection<any, any, any, any, any>
   private listeners = new Map<
     keyof AllCollectionEvents,
     Set<CollectionEventHandler<any>>
   >()
 
-  constructor(collection: Collection<any, any, any, any, any>) {
-    this.collection = collection
+  constructor() {}
+
+  bind(deps: { collection: Collection<any, any, any, any, any> }) {
+    this.collection = deps.collection
   }
 
   on<T extends keyof AllCollectionEvents>(

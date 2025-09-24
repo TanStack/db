@@ -2,8 +2,15 @@ import { deepEquals } from "../utils"
 import { SortedMap } from "../SortedMap"
 import type { Transaction } from "../transactions"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage, OptimisticChangeMessage } from "../types"
+import type {
+  ChangeMessage,
+  CollectionConfig,
+  OptimisticChangeMessage,
+} from "../types"
 import type { CollectionImpl } from "./index.js"
+import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionChangesManager } from "./changes"
+import type { CollectionIndexesManager } from "./indexes"
 
 interface PendingSyncedTransaction<T extends object = Record<string, unknown>> {
   committed: boolean
@@ -18,7 +25,10 @@ export class CollectionStateManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  public collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  public collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
+  public indexes!: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -44,19 +54,29 @@ export class CollectionStateManager<
   /**
    * Creates a new CollectionState manager
    */
-  constructor(collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>) {
-    this.collection = collection
-
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b)
     )
 
     // Set up data storage with optional comparison function
-    if (collection.config.compare) {
-      this.syncedData = new SortedMap<TKey, TOutput>(collection.config.compare)
+    if (config.compare) {
+      this.syncedData = new SortedMap<TKey, TOutput>(config.compare)
     } else {
       this.syncedData = new Map<TKey, TOutput>()
     }
+  }
+
+  bind(deps: {
+    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
+    indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+  }) {
+    this.collection = deps.collection
+    this.lifecycle = deps.lifecycle
+    this.changes = deps.changes
+    this.indexes = deps.indexes
   }
 
   /**
@@ -166,19 +186,16 @@ export class CollectionStateManager<
 
       // Update indexes for the filtered events
       if (filteredEvents.length > 0) {
-        this.collection._indexes.updateIndexes(filteredEvents)
+        this.indexes.updateIndexes(filteredEvents)
       }
-      this.collection._changes.emitEvents(filteredEvents, triggeredByUserAction)
+      this.changes.emitEvents(filteredEvents, triggeredByUserAction)
     } else {
       // Update indexes for all events
       if (filteredEventsBySyncStatus.length > 0) {
-        this.collection._indexes.updateIndexes(filteredEventsBySyncStatus)
+        this.indexes.updateIndexes(filteredEventsBySyncStatus)
       }
       // Emit all events if no pending sync transactions
-      this.collection._changes.emitEvents(
-        filteredEventsBySyncStatus,
-        triggeredByUserAction
-      )
+      this.changes.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
   }
 
@@ -494,7 +511,7 @@ export class CollectionStateManager<
 
         // Ensure listeners are active before emitting this critical batch
         if (!this.collection.isReady()) {
-          this.collection._lifecycle.setStatus(`ready`)
+          this.lifecycle.setStatus(`ready`)
         }
       }
 
@@ -602,11 +619,11 @@ export class CollectionStateManager<
 
       // Update indexes for all events before emitting
       if (events.length > 0) {
-        this.collection._indexes.updateIndexes(events)
+        this.indexes.updateIndexes(events)
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.collection._changes.emitEvents(events, true)
+      this.changes.emitEvents(events, true)
 
       this.pendingSyncedTransactions = uncommittedSyncedTransactions
 
@@ -621,8 +638,8 @@ export class CollectionStateManager<
       // Call any registered one-time commit listeners
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
-        const callbacks = [...this.collection._lifecycle.onFirstReadyCallbacks]
-        this.collection._lifecycle.onFirstReadyCallbacks = []
+        const callbacks = [...this.lifecycle.onFirstReadyCallbacks]
+        this.lifecycle.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
       }
     }
@@ -691,8 +708,7 @@ export class CollectionStateManager<
   public onTransactionStateChange(): void {
     // Check if commitPendingTransactions will be called after this
     // by checking if there are pending sync transactions (same logic as in transactions.ts)
-    this.collection._changes.shouldBatchEvents =
-      this.pendingSyncedTransactions.length > 0
+    this.changes.shouldBatchEvents = this.pendingSyncedTransactions.length > 0
 
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
     this.capturePreSyncVisibleState()

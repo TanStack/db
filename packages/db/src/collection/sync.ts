@@ -8,8 +8,10 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage } from "../types"
+import type { ChangeMessage, CollectionConfig } from "../types"
 import type { CollectionImpl } from "./index.js"
+import type { CollectionStateManager } from "./state"
+import type { CollectionLifecycleManager } from "./lifecycle"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -17,22 +19,37 @@ export class CollectionSyncManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
+  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private config!: CollectionConfig<TOutput, TKey, TSchema>
+
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
 
   /**
    * Creates a new CollectionSyncManager instance
    */
-  constructor(
-    public collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
-  ) {}
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+    this.config = config
+  }
+
+  bind(deps: {
+    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+    lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  }) {
+    this.collection = deps.collection
+    this.state = deps.state
+    this.lifecycle = deps.lifecycle
+  }
 
   /**
    * Start the sync process for this collection
    * This is called when the collection is first accessed or preloaded
    */
   public startSync(): void {
-    const _state = this.collection._state
+    const state = this.state
     if (
       this.collection.status !== `idle` &&
       this.collection.status !== `cleaned-up`
@@ -40,13 +57,13 @@ export class CollectionSyncManager<
       return // Already started or in progress
     }
 
-    this.collection._lifecycle.setStatus(`loading`)
+    this.lifecycle.setStatus(`loading`)
 
     try {
-      const cleanupFn = this.collection.config.sync.sync({
+      const cleanupFn = this.config.sync.sync({
         collection: this.collection,
         begin: () => {
-          _state.pendingSyncedTransactions.push({
+          state.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
             deletedKeys: new Set(),
@@ -54,8 +71,8 @@ export class CollectionSyncManager<
         },
         write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
           const pendingTransaction =
-            _state.pendingSyncedTransactions[
-              _state.pendingSyncedTransactions.length - 1
+            state.pendingSyncedTransactions[
+              state.pendingSyncedTransactions.length - 1
             ]
           if (!pendingTransaction) {
             throw new NoPendingSyncTransactionWriteError()
@@ -67,7 +84,7 @@ export class CollectionSyncManager<
 
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
-            const insertingIntoExistingSynced = _state.syncedData.has(key)
+            const insertingIntoExistingSynced = state.syncedData.has(key)
             const hasPendingDeleteForKey =
               pendingTransaction.deletedKeys.has(key)
             const isTruncateTransaction = pendingTransaction.truncate === true
@@ -93,8 +110,8 @@ export class CollectionSyncManager<
         },
         commit: () => {
           const pendingTransaction =
-            _state.pendingSyncedTransactions[
-              _state.pendingSyncedTransactions.length - 1
+            state.pendingSyncedTransactions[
+              state.pendingSyncedTransactions.length - 1
             ]
           if (!pendingTransaction) {
             throw new NoPendingSyncTransactionCommitError()
@@ -108,18 +125,18 @@ export class CollectionSyncManager<
           // Update status to initialCommit when transitioning from loading
           // This indicates we're in the process of committing the first transaction
           if (this.collection.status === `loading`) {
-            this.collection._lifecycle.setStatus(`initialCommit`)
+            this.lifecycle.setStatus(`initialCommit`)
           }
 
-          _state.commitPendingTransactions()
+          state.commitPendingTransactions()
         },
         markReady: () => {
-          this.collection._lifecycle.markReady()
+          this.lifecycle.markReady()
         },
         truncate: () => {
           const pendingTransaction =
-            _state.pendingSyncedTransactions[
-              _state.pendingSyncedTransactions.length - 1
+            state.pendingSyncedTransactions[
+              state.pendingSyncedTransactions.length - 1
             ]
           if (!pendingTransaction) {
             throw new NoPendingSyncTransactionWriteError()
@@ -144,7 +161,7 @@ export class CollectionSyncManager<
       // Store cleanup function if provided
       this.syncCleanupFn = typeof cleanupFn === `function` ? cleanupFn : null
     } catch (error) {
-      this.collection._lifecycle.setStatus(`error`)
+      this.lifecycle.setStatus(`error`)
       throw error
     }
   }

@@ -5,6 +5,10 @@ import {
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { CollectionImpl } from "./index.js"
 import type { CollectionStatus } from "../types"
+import type { CollectionEventsManager } from "./events"
+import type { CollectionIndexesManager } from "./indexes"
+import type { CollectionChangesManager } from "./changes"
+import type { CollectionSyncManager } from "./sync"
 
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
@@ -12,6 +16,12 @@ export class CollectionLifecycleManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
+  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private indexes!: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+  private events!: CollectionEventsManager
+  private changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
+  private sync!: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+
   public status: CollectionStatus = `idle`
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
@@ -21,9 +31,21 @@ export class CollectionLifecycleManager<
   /**
    * Creates a new CollectionLifecycleManager instance
    */
-  constructor(
-    public collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
-  ) {}
+  constructor() {}
+
+  bind(deps: {
+    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
+    changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
+    sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  }) {
+    this.collection = deps.collection
+    this.indexes = deps.indexes
+    this.events = deps.events
+    this.changes = deps.changes
+    this.sync = deps.sync
+  }
 
   /**
    * Validates state transitions to prevent invalid status changes
@@ -67,15 +89,15 @@ export class CollectionLifecycleManager<
     this.status = newStatus
 
     // Resolve indexes when collection becomes ready
-    if (newStatus === `ready` && !this.collection._indexes.isIndexesResolved) {
+    if (newStatus === `ready` && !this.indexes.isIndexesResolved) {
       // Resolve indexes asynchronously without blocking
-      this.collection._indexes.resolveAllIndexes().catch((error) => {
+      this.indexes.resolveAllIndexes().catch((error) => {
         console.warn(`Failed to resolve indexes:`, error)
       })
     }
 
     // Emit event
-    this.collection._events.emitStatusChange(newStatus, previousStatus)
+    this.events.emitStatusChange(newStatus, previousStatus)
   }
 
   /**
@@ -88,7 +110,7 @@ export class CollectionLifecycleManager<
         throw new CollectionInErrorStateError(operation, this.collection.id)
       case `cleaned-up`:
         // Automatically restart the collection when operations are called on cleaned-up collections
-        this.collection._sync.startSync()
+        this.sync.startSync()
         break
     }
   }
@@ -121,8 +143,8 @@ export class CollectionLifecycleManager<
 
     // Always notify dependents when markReady is called, after status is set
     // This ensures live queries get notified when their dependencies become ready
-    if (this.collection._changes.changeSubscriptions.size > 0) {
-      this.collection._changes.emitEmptyReadyEvent()
+    if (this.changes.changeSubscriptions.size > 0) {
+      this.changes.emitEmptyReadyEvent()
     }
   }
 
@@ -143,7 +165,7 @@ export class CollectionLifecycleManager<
     }
 
     this.gcTimeoutId = setTimeout(() => {
-      if (this.collection._changes.activeSubscribersCount === 0) {
+      if (this.changes.activeSubscribersCount === 0) {
         // We call the main collection cleanup, not just the one for the
         // lifecycle manager
         this.collection.cleanup()

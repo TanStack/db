@@ -11,6 +11,7 @@ import { CollectionSyncManager } from "./sync"
 import { CollectionIndexesManager } from "./indexes"
 import { CollectionMutationsManager } from "./mutations"
 import { CollectionEventsManager } from "./events.js"
+import type { CollectionSubscription } from "../collection-subscription"
 import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
 import type { IndexOptions } from "../indexes/index-options.js"
@@ -33,7 +34,6 @@ import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { BTreeIndex } from "../indexes/btree-index.js"
 import type { IndexProxy } from "../indexes/lazy-index.js"
-import { CollectionSubscription } from "../collection-subscription"
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -227,36 +227,50 @@ export class CollectionImpl<
       autoIndex: config.autoIndex ?? `eager`,
     }
 
-    this._events = new CollectionEventsManager(this)
-    this._state = new CollectionStateManager<TOutput, TKey, TSchema, TInput>(
-      this
-    )
-    this._changes = new CollectionChangesManager<
-      TOutput,
-      TKey,
-      TSchema,
-      TInput
-    >(this)
-    this._lifecycle = new CollectionLifecycleManager<
-      TOutput,
-      TKey,
-      TSchema,
-      TInput
-    >(this)
-    this._sync = new CollectionSyncManager<TOutput, TKey, TSchema, TInput>(this)
-    this._indexes = new CollectionIndexesManager<
-      TOutput,
-      TKey,
-      TSchema,
-      TInput
-    >(this)
-    this._mutations = new CollectionMutationsManager<
-      TOutput,
-      TKey,
-      TUtils,
-      TSchema,
-      TInput
-    >(this)
+    this._changes = new CollectionChangesManager()
+    this._events = new CollectionEventsManager()
+    this._indexes = new CollectionIndexesManager()
+    this._lifecycle = new CollectionLifecycleManager()
+    this._mutations = new CollectionMutationsManager()
+    this._state = new CollectionStateManager(config)
+    this._sync = new CollectionSyncManager(config)
+
+    this._changes.bind({
+      lifecycle: this._lifecycle,
+      sync: this._sync,
+      events: this._events,
+      collection: this,
+    })
+    this._events.bind({
+      collection: this,
+    })
+    this._indexes.bind({
+      collection: this,
+      lifecycle: this._lifecycle,
+    })
+    this._lifecycle.bind({
+      collection: this,
+      indexes: this._indexes,
+      events: this._events,
+      changes: this._changes,
+      sync: this._sync,
+    })
+    this._mutations.bind({
+      lifecycle: this._lifecycle,
+      state: this._state,
+      collection: this,
+    })
+    this._state.bind({
+      collection: this,
+      lifecycle: this._lifecycle,
+      changes: this._changes,
+      indexes: this._indexes,
+    })
+    this._sync.bind({
+      collection: this,
+      state: this._state,
+      lifecycle: this._lifecycle,
+    })
 
     // Only start sync immediately if explicitly enabled
     if (config.startSync === true) {

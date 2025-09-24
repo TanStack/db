@@ -10,6 +10,7 @@ import type { BaseIndex, IndexResolver } from "../indexes/base-index"
 import type { ChangeMessage } from "../types"
 import type { IndexOptions } from "../indexes/index-options"
 import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
+import type { CollectionLifecycleManager } from "./lifecycle"
 
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
@@ -17,14 +18,23 @@ export class CollectionIndexesManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
+  private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+
   public lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
   public resolvedIndexes = new Map<number, BaseIndex<TKey>>()
   public isIndexesResolved = false
   public indexCounter = 0
 
-  constructor(
-    public collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
-  ) {}
+  constructor() {}
+
+  bind(deps: {
+    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  }) {
+    this.collection = deps.collection
+    this.lifecycle = deps.lifecycle
+  }
 
   /**
    * Creates an index on a collection for faster queries.
@@ -33,7 +43,7 @@ export class CollectionIndexesManager<
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
     config: IndexOptions<TResolver> = {}
   ): IndexProxy<TKey> {
-    this.collection._lifecycle.validateCollectionUsable(`createIndex`)
+    this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
     const singleRowRefProxy = createSingleRowRefProxy<TOutput>()

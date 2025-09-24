@@ -1,11 +1,16 @@
 import { CollectionSubscription } from "../collection-subscription.js"
 import { NegativeActiveSubscribersError } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { ChangeMessage, SubscribeChangesOptions } from "../types"
+import type { CollectionLifecycleManager } from "./lifecycle.js"
+import type { CollectionSyncManager } from "./sync.js"
+import type { CollectionEventsManager } from "./events.js"
 import type { CollectionImpl } from "./index.js"
-import type {
-  ChangeMessage,
-  SubscribeChangesOptions,
-} from "../types"
+
+// depends on:
+// - lifecycle
+// - sync
+// - events
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -13,6 +18,11 @@ export class CollectionChangesManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
+  private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private sync!: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  private events!: CollectionEventsManager
+  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+
   public activeSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
@@ -21,9 +31,19 @@ export class CollectionChangesManager<
   /**
    * Creates a new CollectionChangesManager instance
    */
-  constructor(
-    public collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
-  ) {}
+  constructor() {}
+
+  public bind(deps: {
+    lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
+    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  }) {
+    this.lifecycle = deps.lifecycle
+    this.sync = deps.sync
+    this.events = deps.events
+    this.collection = deps.collection
+  }
 
   /**
    * Emit an empty ready event to notify subscribers that the collection is ready
@@ -102,17 +122,17 @@ export class CollectionChangesManager<
   private addSubscriber(): void {
     const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
-    this.collection._lifecycle.cancelGCTimer()
+    this.lifecycle.cancelGCTimer()
 
     // Start sync if collection was cleaned up
     if (
-      this.collection.status === `cleaned-up` ||
-      this.collection.status === `idle`
+      this.lifecycle.status === `cleaned-up` ||
+      this.lifecycle.status === `idle`
     ) {
-      this.collection._sync.startSync()
+      this.sync.startSync()
     }
 
-    this.collection._events.emitSubscribersChange(
+    this.events.emitSubscribersChange(
       this.activeSubscribersCount,
       previousSubscriberCount
     )
@@ -126,12 +146,12 @@ export class CollectionChangesManager<
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
-      this.collection._lifecycle.startGCTimer()
+      this.lifecycle.startGCTimer()
     } else if (this.activeSubscribersCount < 0) {
       throw new NegativeActiveSubscribersError()
     }
 
-    this.collection._events.emitSubscribersChange(
+    this.events.emitSubscribersChange(
       this.activeSubscribersCount,
       previousSubscriberCount
     )
