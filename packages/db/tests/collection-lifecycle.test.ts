@@ -200,21 +200,21 @@ describe(`Collection Lifecycle Management`, () => {
       })
 
       // No subscribers initially
-      expect(collection._changes.activeSubscribersCount).toBe(0)
+      expect(collection.subscriberCount).toBe(0)
 
       // Subscribe to changes
       const subscription1 = collection.subscribeChanges(() => {})
-      expect(collection._changes.activeSubscribersCount).toBe(1)
+      expect(collection.subscriberCount).toBe(1)
 
       const subscription2 = collection.subscribeChanges(() => {})
-      expect(collection._changes.activeSubscribersCount).toBe(2)
+      expect(collection.subscriberCount).toBe(2)
 
       // Unsubscribe
       subscription1.unsubscribe()
-      expect(collection._changes.activeSubscribersCount).toBe(1)
+      expect(collection.subscriberCount).toBe(1)
 
       subscription2.unsubscribe()
-      expect(collection._changes.activeSubscribersCount).toBe(0)
+      expect(collection.subscriberCount).toBe(0)
     })
 
     it(`should handle rapid subscribe/unsubscribe correctly`, () => {
@@ -230,9 +230,9 @@ describe(`Collection Lifecycle Management`, () => {
       // Subscribe and immediately unsubscribe multiple times
       for (let i = 0; i < 5; i++) {
         const subscription = collection.subscribeChanges(() => {})
-        expect(collection._changes.activeSubscribersCount).toBe(1)
+        expect(collection.subscriberCount).toBe(1)
         subscription.unsubscribe()
-        expect(collection._changes.activeSubscribersCount).toBe(0)
+        expect(collection.subscriberCount).toBe(0)
 
         // Should start GC timer each time
         expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)

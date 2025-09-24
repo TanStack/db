@@ -184,19 +184,21 @@ export class CollectionImpl<
   public utils: Record<string, Fn> = {}
 
   // Managers
-  public _events: CollectionEventsManager
-  public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
-  public _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
-  public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
-  public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
-  public _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
-  public _mutations: CollectionMutationsManager<
+  private _events: CollectionEventsManager
+  private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
+  private _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+  private _mutations: CollectionMutationsManager<
     TOutput,
     TKey,
     TUtils,
     TSchema,
     TInput
   >
+  // The core state of the collection is "public" so that is accessible in tests
+  // and for debugging
+  public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   /**
    * Creates a new Collection instance
