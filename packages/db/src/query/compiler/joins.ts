@@ -37,7 +37,7 @@ import type {
   NamespacedRow,
 } from "../../types.js"
 import type { QueryCache, QueryMapping } from "./types.js"
-import type { CollectionSubscription } from "../../collection-subscription.js"
+import type { CollectionSubscription } from "../../collection/subscription.js"
 
 export type LoadKeysFn = (key: Set<string | number>) => void
 export type LazyCollectionCallbacks = {

@@ -7,7 +7,7 @@ import type { ChangeMessage, SyncConfig } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression } from "../ir.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
-import type { CollectionSubscription } from "../../collection-subscription.js"
+import type { CollectionSubscription } from "../../collection/subscription.js"
 
 export class CollectionSubscriber<
   TContext extends Context,

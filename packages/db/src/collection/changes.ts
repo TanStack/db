@@ -1,5 +1,5 @@
-import { CollectionSubscription } from "../collection-subscription.js"
 import { NegativeActiveSubscribersError } from "../errors"
+import { CollectionSubscription } from "./subscription.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage, SubscribeChangesOptions } from "../types"
 import type { CollectionLifecycleManager } from "./lifecycle.js"
