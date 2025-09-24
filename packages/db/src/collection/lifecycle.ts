@@ -3,12 +3,12 @@ import {
   InvalidCollectionStatusTransitionError,
 } from "../errors"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { CollectionImpl } from "./index.js"
-import type { CollectionStatus } from "../types"
+import type { CollectionConfig, CollectionStatus } from "../types"
 import type { CollectionEventsManager } from "./events"
 import type { CollectionIndexesManager } from "./indexes"
 import type { CollectionChangesManager } from "./changes"
 import type { CollectionSyncManager } from "./sync"
+import type { CollectionStateManager } from "./state"
 
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
@@ -16,11 +16,13 @@ export class CollectionLifecycleManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private config: CollectionConfig<TOutput, TKey, TSchema>
+  private id: string
   private indexes!: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private events!: CollectionEventsManager
   private changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   private sync!: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public status: CollectionStatus = `idle`
   public hasBeenReady = false
@@ -31,20 +33,23 @@ export class CollectionLifecycleManager<
   /**
    * Creates a new CollectionLifecycleManager instance
    */
-  constructor() {}
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+    this.config = config
+    this.id = id
+  }
 
   bind(deps: {
-    collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
     events: CollectionEventsManager
     changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
     sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   }) {
-    this.collection = deps.collection
     this.indexes = deps.indexes
     this.events = deps.events
     this.changes = deps.changes
     this.sync = deps.sync
+    this.state = deps.state
   }
 
   /**
@@ -71,11 +76,7 @@ export class CollectionLifecycleManager<
     }
 
     if (!validTransitions[from].includes(to)) {
-      throw new InvalidCollectionStatusTransitionError(
-        from,
-        to,
-        this.collection.id
-      )
+      throw new InvalidCollectionStatusTransitionError(from, to, this.id)
     }
   }
 
@@ -107,7 +108,7 @@ export class CollectionLifecycleManager<
   public validateCollectionUsable(operation: string): void {
     switch (this.status) {
       case `error`:
-        throw new CollectionInErrorStateError(operation, this.collection.id)
+        throw new CollectionInErrorStateError(operation, this.id)
       case `cleaned-up`:
         // Automatically restart the collection when operations are called on cleaned-up collections
         this.sync.startSync()
@@ -157,7 +158,7 @@ export class CollectionLifecycleManager<
       clearTimeout(this.gcTimeoutId)
     }
 
-    const gcTime = this.collection.config.gcTime ?? 300000 // 5 minutes default
+    const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, GC is disabled
     if (gcTime === 0) {
@@ -168,7 +169,7 @@ export class CollectionLifecycleManager<
       if (this.changes.activeSubscribersCount === 0) {
         // We call the main collection cleanup, not just the one for the
         // lifecycle manager
-        this.collection.cleanup()
+        this.cleanup()
       }
     }, gcTime)
   }
@@ -185,6 +186,12 @@ export class CollectionLifecycleManager<
   }
 
   public cleanup(): void {
+    this.events.cleanup()
+    this.sync.cleanup()
+    this.state.cleanup()
+    this.changes.cleanup()
+    this.indexes.cleanup()
+
     if (this.gcTimeoutId) {
       clearTimeout(this.gcTimeoutId)
       this.gcTimeoutId = null

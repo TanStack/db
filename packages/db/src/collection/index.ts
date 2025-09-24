@@ -232,7 +232,7 @@ export class CollectionImpl<
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
-    this._lifecycle = new CollectionLifecycleManager()
+    this._lifecycle = new CollectionLifecycleManager(config, this.id)
     this._mutations = new CollectionMutationsManager()
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config)
@@ -251,10 +251,10 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
     })
     this._lifecycle.bind({
-      collection: this,
-      indexes: this._indexes,
-      events: this._events,
       changes: this._changes,
+      events: this._events,
+      indexes: this._indexes,
+      state: this._state,
       sync: this._sync,
     })
     this._mutations.bind({
@@ -866,11 +866,6 @@ export class CollectionImpl<
    * This can be called manually or automatically by garbage collection
    */
   public async cleanup(): Promise<void> {
-    this._events.cleanup()
-    this._sync.cleanup()
-    this._state.cleanup()
-    this._changes.cleanup()
-    this._indexes.cleanup()
     this._lifecycle.cleanup()
     return Promise.resolve()
   }
