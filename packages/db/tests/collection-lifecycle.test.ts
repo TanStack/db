@@ -25,6 +25,10 @@ describe(`Collection Lifecycle Management`, () => {
       timeoutCallbacks.delete(id)
     })
 
+    // Mock requestIdleCallback - in tests, it falls back to setTimeout
+    // which we're already mocking, so the idle callback will be triggered
+    // through our mockSetTimeout
+
     global.setTimeout = mockSetTimeout as any
     global.clearTimeout = mockClearTimeout as any
   })
@@ -41,6 +45,14 @@ describe(`Collection Lifecycle Management`, () => {
       callback()
       timeoutCallbacks.delete(id)
     }
+  }
+
+  const triggerAllTimeouts = () => {
+    const callbacks = Array.from(timeoutCallbacks.entries())
+    callbacks.forEach(([id, callback]) => {
+      callback()
+      timeoutCallbacks.delete(id)
+    })
   }
 
   describe(`Collection Status Tracking`, () => {
@@ -300,13 +312,17 @@ describe(`Collection Lifecycle Management`, () => {
       const subscription = collection.subscribeChanges(() => {})
       subscription.unsubscribe()
 
-      expect(collection.status).toBe(`loading`) // or "ready"
+      expect(collection.status).toBe(`loading`)
 
-      // Trigger GC timeout
-      const timerId = mockSetTimeout.mock.results[0]?.value
-      if (timerId) {
-        triggerTimeout(timerId)
+      // Trigger GC timeout - this will schedule the idle cleanup
+      const gcTimerId = mockSetTimeout.mock.results[0]?.value
+      if (gcTimerId) {
+        triggerTimeout(gcTimerId)
       }
+
+      // Now trigger all remaining timeouts to handle the idle callback
+      // (which is implemented via setTimeout in our polyfill)
+      triggerAllTimeouts()
 
       expect(collection.status).toBe(`cleaned-up`)
     })
