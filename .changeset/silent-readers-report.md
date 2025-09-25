@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+"@tanstack/db": patch
 ---
 
 Implement idle cleanup for collection garbage collection
