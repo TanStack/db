@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection.js"
+import { CollectionImpl } from "../../../src/collection/index.js"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { avg, count, eq, sum } from "../../../src/query/builder/functions.js"
 

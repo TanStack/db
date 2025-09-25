@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import type { CollectionConfig, SyncConfig, UtilsRecord } from "../src/types"
 
 // Mock utility functions for testing

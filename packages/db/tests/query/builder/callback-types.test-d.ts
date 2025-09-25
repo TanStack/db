@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
-import { createCollection } from "../../../src/collection.js"
+import { createCollection } from "../../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../../utils.js"
 import { Query } from "../../../src/query/builder/index.js"
 import {

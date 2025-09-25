@@ -138,8 +138,8 @@ const updateTodo = createOptimisticAction<{ id: string }>({
 This combines to support a model of uni-directional data flow, extending the redux/flux style state management pattern beyond the client, to take in the server as well:
 
 <figure>
-  <a href="./unidirectional-data-flow.lg.png" target="_blank">
-    <img src="./unidirectional-data-flow.png" />
+  <a href="https://raw.githubusercontent.com/TanStack/db/main/docs/unidirectional-data-flow.lg.png" target="_blank">
+    <img src="https://raw.githubusercontent.com/TanStack/db/main/docs/unidirectional-data-flow.png" />
   </a>
 </figure>
 
@@ -878,6 +878,44 @@ tx.mutate(() => {
   // Wait for server confirmation for complex change
   auditCollection.insert(auditRecord, { optimistic: false })
 })
+```
+
+##### Common workflow: Wait for persistence before navigation
+
+A common pattern with `optimistic: false` is to wait for the mutation to complete before navigating to a new page or showing success feedback:
+
+```typescript
+const handleCreatePost = async (postData) => {
+  // Insert without optimistic updates
+  const tx = postsCollection.insert(postData, { optimistic: false })
+
+  try {
+    // Wait for write to server and sync back to complete
+    await tx.isPersisted.promise
+
+    // Server write and sync back were successful - safe to navigate
+    navigate(`/posts/${postData.id}`)
+  } catch (error) {
+    // Show error toast or notification
+    toast.error('Failed to create post: ' + error.message)
+  }
+}
+
+// Works with updates and deletes too
+const handleUpdateTodo = async (todoId, changes) => {
+  const tx = todoCollection.update(
+    todoId,
+    { optimistic: false },
+    (draft) => Object.assign(draft, changes)
+  )
+
+  try {
+    await tx.isPersisted.promise
+    navigate('/todos')
+  } catch (error) {
+    toast.error('Failed to update todo: ' + error.message)
+  }
+}
 ```
 
 ## Usage examples

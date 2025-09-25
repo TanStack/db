@@ -4,6 +4,7 @@ import { MultiSet } from "../../src/multiset.js"
 import { distinct } from "../../src/operators/distinct.js"
 import { output } from "../../src/operators/output.js"
 import { MessageTracker, assertResults } from "../test-utils.js"
+import { hash } from "../../src/hashing/index.js"
 
 describe(`Operators`, () => {
   describe(`Efficient distinct operation`, () => {
@@ -39,9 +40,9 @@ function testDistinct() {
 
     expect(data).toEqual([
       [
-        [[1, `a`], 1],
-        [[2, `b`], 1],
-        [[2, `c`], 1],
+        [[hash([1, `a`]), `a`], 1],
+        [[hash([2, `b`]), `b`], 1],
+        [[hash([2, `c`]), `c`], 1],
       ],
     ])
   })
@@ -74,7 +75,7 @@ function testDistinct() {
 
     graph.run()
 
-    const data = messages.map((m) => m.getInner())[0]
+    const data = messages.map((m) => m.getInner())[0]!
     const countries = data
       .map(([[_, value], multiplicity]) => [value.country, multiplicity])
       .sort()
@@ -118,8 +119,8 @@ function testDistinct() {
       `distinct with updates - initial`,
       initialResult,
       [
-        [1, `a`],
-        [1, `b`],
+        [hash([1, `a`]), `a`],
+        [hash([1, `b`]), `b`],
       ], // Should have both distinct values
       4 // Max expected messages
     )
@@ -140,7 +141,7 @@ function testDistinct() {
     assertResults(
       `distinct with updates - second batch`,
       secondResult,
-      [[1, `c`]], // Should only have 'c' remaining
+      [[hash([1, `c`]), `c`]], // Should only have 'c' remaining
       4 // Max expected messages
     )
 
@@ -186,9 +187,9 @@ function testDistinct() {
 
     expect(data).toEqual([
       [
-        [[`key1`, 1], 1],
-        [[`key1`, 2], 1],
-        [[`key2`, 1], 1],
+        [[hash([`key1`, 1]), 1], 1],
+        [[hash([`key1`, 2]), 2], 1],
+        [[hash([`key2`, 1]), 1], 1],
       ],
     ])
   })
@@ -224,8 +225,8 @@ function testDistinct() {
       `distinct with multiple batches that cancel out`,
       result,
       [
-        [`key1`, 1], // Should remain (multiplicity 2 -> 1 in distinct)
-        [`key2`, 1], // Should remain (multiplicity 2 -> 1 in distinct)
+        [hash([`key1`, 1]), 1], // Should remain (multiplicity 2 -> 1 in distinct)
+        [hash([`key2`, 1]), 1], // Should remain (multiplicity 2 -> 1 in distinct)
       ],
       6 // Max expected messages (generous upper bound)
     )

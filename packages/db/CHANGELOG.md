@@ -1,5 +1,20 @@
 # @tanstack/db
 
+## 0.4.0
+
+### Minor Changes
+
+- Let collection.subscribeChanges return a subscription object. Move all data loading code related to optimizations into that subscription object. ([#564](https://github.com/TanStack/db/pull/564))
+
+### Patch Changes
+
+- optimise the live query graph execution by removing recursive calls to graph.run ([#564](https://github.com/TanStack/db/pull/564))
+
+- Refactor the main Collection class into smaller classes to make it easier to maintain. ([#560](https://github.com/TanStack/db/pull/560))
+
+- Updated dependencies [[`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58), [`89b1c41`](https://github.com/TanStack/db/commit/89b1c414937b021186cf128300d279d1cb4f51fe)]:
+  - @tanstack/db-ivm@0.1.8
+
 ## 0.3.2
 
 ### Patch Changes

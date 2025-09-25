@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection.js"
+import { createCollection } from "../src/collection/index.js"
 
 describe(`Collection Events System`, () => {
   let collection: ReturnType<typeof createCollection>
@@ -51,7 +51,7 @@ describe(`Collection Events System`, () => {
       const subscribersChangeListener = vi.fn()
       collection.on(`subscribers:change`, subscribersChangeListener)
 
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       expect(subscribersChangeListener).toHaveBeenCalledWith({
         type: `subscribers:change`,
@@ -60,7 +60,7 @@ describe(`Collection Events System`, () => {
         subscriberCount: 1,
       })
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
   })
 
@@ -102,7 +102,7 @@ describe(`Collection Events System`, () => {
       collection.on(`subscribers:change`, subscribersListener)
 
       collection.startSyncImmediate()
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       expect(statusListener.mock.calls[0]?.[0]).toMatchObject({
         type: `status:change`,
@@ -118,7 +118,7 @@ describe(`Collection Events System`, () => {
         subscriberCount: expect.any(Number),
       })
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
   })
 

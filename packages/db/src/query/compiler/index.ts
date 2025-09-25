@@ -13,6 +13,7 @@ import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
 import { processSelect } from "./select.js"
+import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
@@ -21,7 +22,7 @@ import type {
   QueryRef,
 } from "../ir.js"
 import type { LazyCollectionCallbacks } from "./joins.js"
-import type { Collection } from "../../collection.js"
+import type { Collection } from "../../collection/index.js"
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
@@ -53,6 +54,7 @@ export function compileQuery(
   rawQuery: QueryIR,
   inputs: Record<string, KeyedStream>,
   collections: Record<string, Collection<any, any, any, any, any>>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -88,6 +90,7 @@ export function compileQuery(
     query.from,
     allInputs,
     collections,
+    subscriptions,
     callbacks,
     lazyCollections,
     optimizableOrderByCollections,
@@ -120,6 +123,7 @@ export function compileQuery(
       cache,
       queryMapping,
       collections,
+      subscriptions,
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
@@ -323,6 +327,7 @@ function processFrom(
   from: CollectionRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
+  subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
@@ -346,6 +351,7 @@ function processFrom(
         originalQuery,
         allInputs,
         collections,
+        subscriptions,
         callbacks,
         lazyCollections,
         optimizableOrderByCollections,

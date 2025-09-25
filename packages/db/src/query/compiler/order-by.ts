@@ -11,7 +11,7 @@ import type { OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 import type { BaseIndex } from "../../indexes/base-index.js"
-import type { Collection } from "../../collection.js"
+import type { Collection } from "../../collection/index.js"
 
 export type OrderByOptimizationInfo = {
   offset: number

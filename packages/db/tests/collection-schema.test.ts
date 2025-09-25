@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { z } from "zod"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { SchemaValidationError } from "../src/errors"
 import { createTransaction } from "../src/transactions"
 import type {
@@ -64,7 +64,7 @@ describe(`Collection Schema Validation`, () => {
     })
 
     // Add the validated insert data to the update collection
-    ;(updateCollection as any).syncedData.set(`1`, validatedInsert)
+    updateCollection._state.syncedData.set(`1`, validatedInsert)
 
     const updateData = {
       name: `Jane Doe`,
@@ -116,7 +116,7 @@ describe(`Collection Schema Validation`, () => {
     const validatedInsert = collection.validateData(insertData, `insert`)
 
     // Manually add the item to the collection's synced data for testing
-    ;(collection as any).syncedData.set(`1`, validatedInsert)
+    collection._state.syncedData.set(`1`, validatedInsert)
 
     // Test update validation with only modified fields
     const updateData = {
@@ -176,7 +176,7 @@ describe(`Collection Schema Validation`, () => {
     expect(validatedInsert.email).toBe(`john@example.com`)
 
     // Manually add the item to the collection's synced data for testing
-    ;(collection as any).syncedData.set(`1`, validatedInsert)
+    collection._state.syncedData.set(`1`, validatedInsert)
 
     // Test update validation without providing defaulted fields
     const updateData = {
@@ -248,7 +248,7 @@ describe(`Collection Schema Validation`, () => {
     expect(typeof validatedInsert.age).toBe(`number`)
 
     // Add to collection for update testing
-    ;(collection as any).syncedData.set(`1`, validatedInsert)
+    collection._state.syncedData.set(`1`, validatedInsert)
 
     // Test that update validation accepts input type for new fields
     const updateData = {

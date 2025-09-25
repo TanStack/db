@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection"
-import type { CollectionImpl } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
+import type { CollectionImpl } from "../src/collection/index.js"
 import type { SyncConfig } from "../src/types"
 
 type Item = { id: string; name: string }

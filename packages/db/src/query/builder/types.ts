@@ -1,4 +1,4 @@
-import type { CollectionImpl } from "../../collection.js"
+import type { CollectionImpl } from "../../collection/index.js"
 import type {
   Aggregate,
   BasicExpression,
