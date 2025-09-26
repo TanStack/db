@@ -2,6 +2,11 @@ import {
   CollectionInErrorStateError,
   InvalidCollectionStatusTransitionError,
 } from "../errors"
+import {
+  safeCancelIdleCallback,
+  safeRequestIdleCallback,
+} from "../utils/browser-polyfills"
+import type { IdleCallbackDeadline } from "../utils/browser-polyfills"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { CollectionConfig, CollectionStatus } from "../types"
 import type { CollectionEventsManager } from "./events"
@@ -9,46 +14,6 @@ import type { CollectionIndexesManager } from "./indexes"
 import type { CollectionChangesManager } from "./changes"
 import type { CollectionSyncManager } from "./sync"
 import type { CollectionStateManager } from "./state"
-
-// Type definitions for requestIdleCallback - compatible with existing browser types
-type IdleCallbackDeadline = {
-  didTimeout: boolean
-  timeRemaining: () => number
-}
-
-type IdleCallbackFunction = (deadline: IdleCallbackDeadline) => void
-
-const requestIdleCallbackPolyfill = (
-  callback: IdleCallbackFunction
-): number => {
-  // Use a very small timeout for the polyfill to simulate idle time
-  const timeout = 0
-  const timeoutId = setTimeout(() => {
-    callback({
-      didTimeout: true, // Always indicate timeout for the polyfill
-      timeRemaining: () => 50, // Return some time remaining for polyfill
-    })
-  }, timeout)
-  return timeoutId as unknown as number
-}
-
-const cancelIdleCallbackPolyfill = (id: number): void => {
-  clearTimeout(id as unknown as ReturnType<typeof setTimeout>)
-}
-
-const safeRequestIdleCallback: (
-  callback: IdleCallbackFunction,
-  options?: { timeout?: number }
-) => number =
-  typeof window !== `undefined` && `requestIdleCallback` in window
-    ? (callback, options) =>
-        (window as any).requestIdleCallback(callback, options)
-    : (callback, _options) => requestIdleCallbackPolyfill(callback)
-
-const safeCancelIdleCallback: (id: number) => void =
-  typeof window !== `undefined` && `cancelIdleCallback` in window
-    ? (id) => (window as any).cancelIdleCallback(id)
-    : cancelIdleCallbackPolyfill
 
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
