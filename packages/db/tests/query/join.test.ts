@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
+import { concat, createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 
@@ -947,6 +947,30 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         // Other users should have department names
         const alice = results.find((r) => r.user_name === `Alice`)
         expect(alice?.department_name).toBe(`Engineering`)
+      })
+
+      test(`should handle joins with computed expressions`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) =>
+                  eq(
+                    concat(`dept`, user.department_id),
+                    concat(`dept`, dept.id)
+                  ),
+                `inner`
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
+
+        expect(joinQuery.size).toBe(3)
       })
     })
 
