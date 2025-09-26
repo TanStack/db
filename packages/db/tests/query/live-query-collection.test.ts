@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection.js"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
+import { Temporal } from "temporal-polyfill"
+import { createCollection } from "../../src/collection/index.js"
+import {
+  createLiveQueryCollection,
+  eq,
+  liveQueryCollectionOptions,
+} from "../../src/query/index.js"
 import { Query } from "../../src/query/builder/index.js"
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
-} from "../utls.js"
+} from "../utils.js"
 import type { ChangeMessage } from "../../src/types.js"
 
 // Sample user type for tests
@@ -301,12 +306,12 @@ describe(`createLiveQueryCollection`, () => {
       gcTime: 1,
     })
 
-    const unsubscribe = liveQuery.subscribeChanges(() => {})
+    const subscription = liveQuery.subscribeChanges(() => {})
     await liveQuery.preload()
     expect(liveQuery.status).toBe(`ready`)
 
     // Unsubscribe and wait for GC to run and cleanup to complete
-    unsubscribe()
+    subscription.unsubscribe()
     const deadline = Date.now() + 500
     while (liveQuery.status !== `cleaned-up` && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1))
@@ -315,6 +320,187 @@ describe(`createLiveQueryCollection`, () => {
 
     // Resubscribe should not throw (would throw "Graph already finalized" without the fix)
     expect(() => liveQuery.subscribeChanges(() => {})).not.toThrow()
+  })
+
+  it(`nested live query should not go blank after GC and resubscribe`, async () => {
+    type Thread = { id: string; last_email_id: string; last_sent_at: number }
+    type LabelByEmail = { email_id: string; label: string }
+
+    const threads = createCollection(
+      mockSyncCollectionOptions<Thread>({
+        id: `threads-for-nested-gc-repro-collection`,
+        getKey: (t) => t.id,
+        initialData: [
+          { id: `t1`, last_email_id: `e1`, last_sent_at: 3 },
+          { id: `t2`, last_email_id: `e2`, last_sent_at: 2 },
+        ],
+      })
+    )
+
+    const labelsByEmail = createCollection(
+      mockSyncCollectionOptions<LabelByEmail>({
+        id: `labels-for-nested-gc-repro-collection`,
+        getKey: (l) => l.email_id,
+        initialData: [
+          { email_id: `e1`, label: `inbox` },
+          { email_id: `e2`, label: `work` },
+        ],
+      })
+    )
+
+    // Source live query (pre-created)
+    const sourceLQ = createCollection({
+      ...liveQueryCollectionOptions({
+        query: (q: any) =>
+          q
+            .from({ thread: threads })
+            .orderBy(({ thread }: any) => thread.last_sent_at, {
+              direction: `desc`,
+            }),
+        startSync: true,
+        gcTime: 5,
+      }),
+      id: `source-lq`,
+    })
+
+    // Nested live query built from the source live query
+    const nestedLQ = createCollection({
+      ...liveQueryCollectionOptions({
+        query: (q: any) =>
+          q
+            .from({ thread: sourceLQ })
+            .join(
+              { label: labelsByEmail },
+              ({ thread, label }: any) =>
+                eq(thread.last_email_id, label.email_id),
+              `inner`
+            )
+            .orderBy(({ thread }: any) => thread.last_sent_at, {
+              direction: `desc`,
+            }),
+        startSync: true,
+        gcTime: 5,
+      }),
+      id: `nested-lq`,
+    })
+
+    // Wait for initial sync
+    await nestedLQ.preload()
+    expect(nestedLQ.size).toBe(2)
+    expect(nestedLQ.status).toBe(`ready`)
+
+    // First subscription cycle
+    const subscription1 = nestedLQ.subscribeChanges(() => {})
+
+    // Verify we still have data after subscribing
+    expect(nestedLQ.size).toBe(2)
+    expect(nestedLQ.status).toBe(`ready`)
+
+    // Unsubscribe and wait for GC
+    subscription1.unsubscribe()
+    const deadline1 = Date.now() + 500
+    while (nestedLQ.status !== `cleaned-up` && Date.now() < deadline1) {
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    expect(nestedLQ.status).toBe(`cleaned-up`)
+
+    // Try multiple resubscribe cycles to increase chance of reproduction
+    for (let i = 0; i < 3; i++) {
+      // Resubscribe
+      const subscription2 = nestedLQ.subscribeChanges(() => {})
+
+      // Wait for the collection to potentially recover
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(nestedLQ.status).toBe(`ready`)
+      expect(nestedLQ.size).toBe(2)
+
+      // Unsubscribe and wait for GC again
+      subscription2.unsubscribe()
+      const deadline2 = Date.now() + 500
+      while (nestedLQ.status !== `cleaned-up` && Date.now() < deadline2) {
+        await new Promise((r) => setTimeout(r, 1))
+      }
+      expect(nestedLQ.status).toBe(`cleaned-up`)
+
+      // Small delay between cycles
+      await new Promise((r) => setTimeout(r, 20))
+    }
+
+    // Final verification - resubscribe one more time and ensure data is available
+    const finalSubscription = nestedLQ.subscribeChanges(() => {})
+
+    // Wait for the collection to become ready
+    const finalDeadline = Date.now() + 1000
+    while (nestedLQ.status !== `ready` && Date.now() < finalDeadline) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    expect(nestedLQ.status).toBe(`ready`)
+    expect(nestedLQ.size).toBe(2)
+
+    finalSubscription.unsubscribe()
+  })
+
+  it(`should handle temporal values correctly in live queries`, async () => {
+    // Define a type with temporal values
+    type Task = {
+      id: number
+      name: string
+      duration: Temporal.Duration
+    }
+
+    // Initial data with temporal duration
+    const initialTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 1 }),
+    }
+
+    // Create a collection with temporal values
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-tasks`,
+        getKey: (task) => task.id,
+        initialData: [initialTask],
+      })
+    )
+
+    // Create a live query collection that includes the temporal value
+    const liveQuery = createLiveQueryCollection((q) =>
+      q.from({ task: taskCollection })
+    )
+
+    await liveQuery.preload()
+
+    // After initial sync, the live query should see the row with the temporal value
+    expect(liveQuery.size).toBe(1)
+    const initialResult = liveQuery.get(1)
+    expect(initialResult).toBeDefined()
+    expect(initialResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(initialResult!.duration.hours).toBe(1)
+
+    // Simulate backend change: update the temporal value to 10 hours
+    const updatedTask: Task = {
+      id: 1,
+      name: `Test Task`,
+      duration: Temporal.Duration.from({ hours: 10 }),
+    }
+
+    // Update the task in the collection (simulating backend sync)
+    taskCollection.utils.begin()
+    taskCollection.utils.write({
+      type: `update`,
+      value: updatedTask,
+    })
+    taskCollection.utils.commit()
+
+    // The live query should now contain the new temporal value
+    const updatedResult = liveQuery.get(1)
+    expect(updatedResult).toBeDefined()
+    expect(updatedResult!.duration).toBeInstanceOf(Temporal.Duration)
+    expect(updatedResult!.duration.hours).toBe(10)
+    expect(updatedResult!.duration.total({ unit: `hours` })).toBe(10)
   })
 
   for (const autoIndex of [`eager`, `off`] as const) {
@@ -404,4 +590,57 @@ describe(`createLiveQueryCollection`, () => {
       expect(result.challenge2?.value).toBe(200)
     })
   }
+
+  it(`should handle updates in live queries with custom getKey correctly`, async () => {
+    type Task = {
+      id: number
+      name: string
+    }
+
+    const initialTask: Task = {
+      id: 1,
+      name: `Test Task`,
+    }
+
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-tasks`,
+        getKey: (task) => `source:${task.id}`,
+        initialData: [initialTask],
+      })
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) => q.from({ task: taskCollection }),
+      getKey: (task) => `live:${task.id}`, // return a different key from the source
+    })
+
+    await liveQuery.preload()
+
+    // After initial sync, the live query should see the row with the value
+    expect(liveQuery.size).toBe(1)
+    const initialResult = liveQuery.get(`live:1`)
+    expect(initialResult).toBeDefined()
+    expect(initialResult!.name).toBe(`Test Task`)
+
+    // Simulate backend change
+    const updatedTask: Task = {
+      id: 1,
+      name: `Updated Task`,
+    }
+
+    // Update the task in the collection (simulating backend sync)
+    taskCollection.utils.begin()
+    taskCollection.utils.write({
+      type: `update`,
+      value: updatedTask,
+    })
+    taskCollection.utils.commit()
+
+    // The live query should now contain the new value
+    expect(liveQuery.size).toBe(1)
+    const updatedResult = liveQuery.get(`live:1`)
+    expect(updatedResult).toBeDefined()
+    expect(updatedResult!.name).toBe(`Updated Task`)
+  })
 })

@@ -254,8 +254,10 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    // The collection should be cleared but remain in ready state
-    expect(collection.state.size).toBe(0)
+    // The collection should still have old data because truncate is in pending
+    // transaction. This is the intended behavior of the collection, you should have
+    // the old data until the next up-to-date message.
+    expect(collection.state.size).toBe(2)
     expect(collection.status).toBe(`ready`)
 
     // Send new data after must-refetch
@@ -464,7 +466,7 @@ describe(`Electric Integration`, () => {
 
       await transaction.isPersisted.promise
 
-      transaction = collection.transactions.get(transaction.id)!
+      transaction = collection._state.transactions.get(transaction.id)!
 
       // Verify the mutation function was called correctly
       expect(testMutationFn).toHaveBeenCalledTimes(1)
@@ -626,7 +628,7 @@ describe(`Electric Integration`, () => {
       })
 
       // If awaitTxId wasn't called automatically, this wouldn't be true.
-      expect(testCollection.syncedData.size).toEqual(0)
+      expect(testCollection._state.syncedData.size).toEqual(0)
 
       // Verify that our onInsert handler was called
       expect(onInsert).toHaveBeenCalled()
@@ -639,7 +641,7 @@ describe(`Electric Integration`, () => {
         id: 1,
         name: `Direct Persistence User`,
       })
-      expect(testCollection.syncedData.size).toEqual(1)
+      expect(testCollection._state.syncedData.size).toEqual(1)
     })
   })
 
@@ -789,13 +791,13 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`cleaned-up`)
 
       // Access collection data to restart sync
-      const unsubscribe = testCollection.subscribeChanges(() => {})
+      const subscription = testCollection.subscribeChanges(() => {})
 
       // Should have started a new stream
       expect(mockSubscribe).toHaveBeenCalledTimes(2)
       expect(testCollection.status).toBe(`loading`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should handle stream errors gracefully`, () => {
@@ -852,7 +854,7 @@ describe(`Electric Integration`, () => {
       }).not.toThrow()
 
       // Should have processed the valid message without issues
-      expect(testCollection.syncedData.size).toBe(0) // Still pending until up-to-date
+      expect(testCollection._state.syncedData.size).toBe(0) // Still pending until up-to-date
 
       // Send up-to-date to commit
       expect(() => {
@@ -1027,6 +1029,106 @@ describe(`Electric Integration`, () => {
       // Txids should be tracked (converted to strings internally)
       await expect(testCollection.utils.awaitTxId(300)).resolves.toBe(true)
       await expect(testCollection.utils.awaitTxId(400)).resolves.toBe(true)
+    })
+
+    it(`should resync after garbage collection and new subscription`, () => {
+      // Use fake timers for this test
+      vi.useFakeTimers()
+
+      const config = {
+        id: `gc-resync-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+        gcTime: 100, // Short GC time for testing
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Populate collection with initial data
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Initial User` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `Another User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Verify initial data is present
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.size).toBe(2)
+
+      // Subscribe and then unsubscribe to trigger GC timer
+      const subscription = testCollection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+
+      // Collection should still be ready before GC timer fires
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(2)
+
+      // Fast-forward time to trigger GC (past the 100ms gcTime)
+      vi.advanceTimersByTime(150)
+
+      // Collection should be cleaned up
+      expect(testCollection.status).toBe(`cleaned-up`)
+      expect(testCollection.size).toBe(0)
+
+      // Reset mock call count for new subscription
+      const initialMockCallCount = mockSubscribe.mock.calls.length
+
+      // Subscribe again - this should restart the sync
+      const newSubscription = testCollection.subscribeChanges(() => {})
+
+      // Should have created a new stream
+      expect(mockSubscribe.mock.calls.length).toBe(initialMockCallCount + 1)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Send new data to simulate resync
+      subscriber([
+        {
+          key: `3`,
+          value: { id: 3, name: `Resynced User` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `1`,
+          value: { id: 1, name: `Updated User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Verify the collection has resynced with new data
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Updated User` })
+      expect(testCollection.get(3)).toEqual({ id: 3, name: `Resynced User` })
+      expect(testCollection.size).toBe(2)
+
+      // Old data should not be present (collection was cleaned)
+      expect(testCollection.has(2)).toBe(false)
+
+      newSubscription.unsubscribe()
+
+      // Restore real timers
+      vi.useRealTimers()
     })
   })
 })

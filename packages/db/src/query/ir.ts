@@ -3,7 +3,7 @@ This is the intermediate representation of the query.
 */
 
 import type { CompareOptions } from "./builder/types"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 import type { NamespacedRow } from "../types"
 
 export interface QueryIR {
@@ -27,7 +27,7 @@ export interface QueryIR {
 export type From = CollectionRef | QueryRef
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate
+  [alias: string]: BasicExpression | Aggregate | Select
 }
 
 export type Join = Array<JoinClause>
@@ -129,6 +129,19 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   ) {
     super()
   }
+}
+
+/**
+ * Runtime helper to detect IR expression-like objects.
+ * Prefer this over ad-hoc local implementations to keep behavior consistent.
+ */
+export function isExpressionLike(value: any): boolean {
+  return (
+    value instanceof Aggregate ||
+    value instanceof Func ||
+    value instanceof PropRef ||
+    value instanceof Value
+  )
 }
 
 /**

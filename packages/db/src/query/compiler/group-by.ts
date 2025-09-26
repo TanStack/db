@@ -130,7 +130,7 @@ export function processGroupBy(
     if (havingClauses && havingClauses.length > 0) {
       for (const havingClause of havingClauses) {
         const havingExpression = getHavingExpression(havingClause)
-        const transformedHavingClause = transformHavingClause(
+        const transformedHavingClause = replaceAggregatesByRefs(
           havingExpression,
           selectClause || {}
         )
@@ -265,7 +265,7 @@ export function processGroupBy(
   if (havingClauses && havingClauses.length > 0) {
     for (const havingClause of havingClauses) {
       const havingExpression = getHavingExpression(havingClause)
-      const transformedHavingClause = transformHavingClause(
+      const transformedHavingClause = replaceAggregatesByRefs(
         havingExpression,
         selectClause || {}
       )
@@ -349,12 +349,17 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return typeof value === `number` ? value : value != null ? Number(value) : 0
   }
 
+  // Create a raw value extractor function for the expression to aggregate
+  const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+    return compiledExpr(namespacedRow)
+  }
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
       return sum(valueExtractor)
     case `count`:
-      return count() // count() doesn't need a value extractor
+      return count(rawValueExtractor)
     case `avg`:
       return avg(valueExtractor)
     case `min`:
@@ -367,11 +372,12 @@ function getAggregateFunction(aggExpr: Aggregate) {
 }
 
 /**
- * Transforms a HAVING clause to replace Agg expressions with references to computed values
+ * Transforms basic expressions and aggregates to replace Agg expressions with references to computed values
  */
-function transformHavingClause(
+export function replaceAggregatesByRefs(
   havingExpr: BasicExpression | Aggregate,
-  selectClause: Select
+  selectClause: Select,
+  resultAlias: string = `result`
 ): BasicExpression {
   switch (havingExpr.type) {
     case `agg`: {
@@ -380,7 +386,7 @@ function transformHavingClause(
       for (const [alias, selectExpr] of Object.entries(selectClause)) {
         if (selectExpr.type === `agg` && aggregatesEqual(aggExpr, selectExpr)) {
           // Replace with a reference to the computed aggregate
-          return new PropRef([`result`, alias])
+          return new PropRef([resultAlias, alias])
         }
       }
       // If no matching aggregate found in SELECT, throw error
@@ -392,7 +398,7 @@ function transformHavingClause(
       // Transform function arguments recursively
       const transformedArgs = funcExpr.args.map(
         (arg: BasicExpression | Aggregate) =>
-          transformHavingClause(arg, selectClause)
+          replaceAggregatesByRefs(arg, selectClause)
       )
       return new Func(funcExpr.name, transformedArgs)
     }
@@ -404,7 +410,7 @@ function transformHavingClause(
         const alias = refExpr.path[0]!
         if (selectClause[alias]) {
           // This is a reference to a SELECT alias, convert to result.alias
-          return new PropRef([`result`, alias])
+          return new PropRef([resultAlias, alias])
         }
       }
       // Return as-is for other refs

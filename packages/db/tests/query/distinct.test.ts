@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { concat, createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createCollection } from "../../src/collection/index.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 import { DistinctRequiresSelectError } from "../../src/errors"
+import { count, eq, gte, not } from "../../src/query/builder/functions.js"
 
 // Sample data types for comprehensive DISTINCT testing
 type User = {
@@ -476,7 +477,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         emptyCollection.utils.commit()
 
         expect(emptyDistinct.size).toBe(1)
-        const department = emptyDistinct.get(1)
+        const department = emptyDistinct.toArray[0]
         expect(department?.department).toBe(`Test`)
       })
 
@@ -544,6 +545,177 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         )
         expect(locations).toContain(`Senior`)
         expect(locations).toContain(`Junior`)
+      })
+    })
+
+    describe(`Distinct with Other Operators`, () => {
+      let usersCollection: ReturnType<typeof createUsersCollection>
+
+      beforeEach(() => {
+        usersCollection = createUsersCollection(autoIndex)
+      })
+
+      test(`distinct with groupBy - should work with aggregates`, () => {
+        const distinctGroupedData = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .groupBy(({ users }) => users.department)
+              .select(({ users }) => ({
+                department: users.department,
+                user_count: count(users.id),
+              }))
+              .distinct(),
+        })
+
+        // Should have 3 distinct department groups: Engineering, Marketing, Sales
+        expect(distinctGroupedData.size).toBe(3)
+
+        const departments = Array.from(distinctGroupedData.values())
+        const departmentNames = departments.map((d) => d.department).sort()
+        const userCounts = departments.map((d) => d.user_count).sort()
+        expect(departmentNames).toEqual([`Engineering`, `Marketing`, `Sales`])
+        expect(userCounts).toEqual([1, 2, 5])
+
+        // Check that counts are correct
+        const engineeringGroup = departments.find(
+          (d) => d.department === `Engineering`
+        )
+        expect(engineeringGroup?.user_count).toBe(5) // John, Jane, Alice, Diana, Frank
+      })
+
+      test(`distinct with filter - should apply distinct after filtering`, () => {
+        const distinctFilteredUsers = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .where(({ users }) => not(eq(users.country, `USA`)))
+              .select(({ users }) => ({ country: users.country }))
+              .distinct(),
+        })
+
+        expect(distinctFilteredUsers.size).toBe(2)
+
+        const countries = Array.from(distinctFilteredUsers.values()).map(
+          (u) => u.country
+        )
+        expect(countries).toContain(`Canada`)
+        expect(countries).toContain(`UK`)
+      })
+
+      test(`distinct with orderBy - should maintain distinct results in order`, () => {
+        const distinctOrderedCountries = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .orderBy(({ users }) => users.country, `asc`)
+              .select(({ users }) => ({ country: users.country }))
+              .distinct(),
+        })
+
+        expect(distinctOrderedCountries.size).toBe(3)
+
+        const orderedCountries = distinctOrderedCountries.toArray.map(
+          (u) => u.country
+        )
+        expect(orderedCountries).toEqual([`Canada`, `UK`, `USA`])
+      })
+
+      test(`distinct with multiple chained operators`, () => {
+        const complexQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .where(({ users }) => gte(users.salary, 75000))
+              .orderBy(({ users }) => users.department, `asc`)
+              .select(({ users }) => ({
+                department: users.department,
+                role: users.role,
+              }))
+              .distinct(),
+        })
+
+        // Should have distinct department-role combinations for users with salary >= 75000
+        const results = complexQuery.toArray
+        expect(results.length).toBeGreaterThan(0)
+
+        // Check that we have distinct combinations
+        const combinations = results.map((r) => `${r.department}-${r.role}`)
+        const uniqueCombinations = [...new Set(combinations)]
+        expect(combinations.length).toBe(uniqueCombinations.length)
+      })
+
+      test(`groupBy with distinct on aggregated results`, () => {
+        const groupedDistinctSalaries = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .groupBy(({ users }) => users.city)
+              .select(({ users }) => ({
+                count: count(users.id),
+              }))
+              .distinct(),
+        })
+
+        // There are 3 distinct counts of users per city
+        expect(groupedDistinctSalaries.size).toBe(3)
+
+        const counts = Array.from(groupedDistinctSalaries.values()).map(
+          (result) => result.count
+        )
+
+        // All average salaries should be unique (distinct)
+        const uniqueCounts = [...new Set(counts)]
+        expect(counts.length).toBe(uniqueCounts.length)
+      })
+
+      test(`distinct with join operations`, () => {
+        // Create a simple departments collection to join with
+        const departmentsData = [
+          { id: `Engineering`, budget: 1000000 },
+          { id: `Marketing`, budget: 500000 },
+          { id: `Sales`, budget: 750000 },
+        ]
+
+        const departmentsCollection = createCollection(
+          mockSyncCollectionOptions({
+            id: `test-departments`,
+            getKey: (dept) => dept.id,
+            initialData: departmentsData,
+            autoIndex,
+          })
+        )
+
+        const distinctJoinedData = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ users: usersCollection })
+              .join(
+                { departments: departmentsCollection },
+                ({ users, departments }) => eq(users.department, departments.id)
+              )
+              .where(({ users }) => eq(users.active, true))
+              .select(({ departments }) => ({
+                department: departments?.id,
+              }))
+              .distinct(),
+        })
+
+        // There are 3 distinct departments that have active users
+        expect(distinctJoinedData.size).toBe(3)
+
+        const results = Array.from(distinctJoinedData.values())
+
+        // Should have distinct combinations of department
+        const combinations = results.map((r) => `${r.department}`)
+        const uniqueCombinations = [...new Set(combinations)]
+        expect(combinations.length).toBe(uniqueCombinations.length)
       })
     })
   })

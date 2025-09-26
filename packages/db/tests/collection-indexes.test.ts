@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import {
   and,
@@ -13,8 +13,9 @@ import {
   lte,
   or,
 } from "../src/query/builder/functions"
-import { expectIndexUsage, withIndexTracking } from "./utls"
-import type { Collection } from "../src/collection"
+import { PropRef } from "../src/query/ir"
+import { expectIndexUsage, withIndexTracking } from "./utils"
+import type { Collection } from "../src/collection/index.js"
 import type { MutationFn, PendingMutation } from "../src/types"
 
 interface TestItem {
@@ -192,7 +193,7 @@ describe(`Collection Indexes`, () => {
       const changes: Array<any> = []
 
       // Subscribe to all changes
-      const unsubscribe = collection.subscribeChanges((items) => {
+      const subscription = collection.subscribeChanges((items) => {
         changes.push(...items)
       })
 
@@ -217,15 +218,23 @@ describe(`Collection Indexes`, () => {
       expect(changes[0]?.type).toBe(`insert`)
       expect(changes[0]?.value.name).toBe(`Frank`)
 
-      unsubscribe()
+      subscription.unsubscribe()
     })
 
     it(`should reflect updates in collection state and subscriptions`, async () => {
       const changes: Array<any> = []
 
-      const unsubscribe = collection.subscribeChanges((items) => {
-        changes.push(...items)
-      })
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          changes.push(...items)
+        },
+        {
+          includeInitialState: true,
+        }
+      )
+
+      // Clear the changes array
+      changes.length = 0
 
       const tx = createTransaction({ mutationFn })
       tx.mutate(() =>
@@ -246,15 +255,52 @@ describe(`Collection Indexes`, () => {
       expect(changes[0]?.type).toBe(`update`)
       expect(changes[0]?.value.status).toBe(`inactive`)
 
-      unsubscribe()
+      subscription.unsubscribe()
+    })
+
+    it(`should send insert to subscription when updating collection state that has not yet been sent over the subscription`, async () => {
+      const changes: Array<any> = []
+
+      const subscription = collection.subscribeChanges((items) => {
+        changes.push(...items)
+      })
+
+      const tx = createTransaction({ mutationFn })
+      tx.mutate(() =>
+        collection.update(`1`, (draft) => {
+          draft.status = `inactive`
+          draft.age = 26
+        })
+      )
+      await tx.isPersisted.promise
+
+      // Updated item should be in collection state
+      const updatedItem = collection.get(`1`)
+      expect(updatedItem?.status).toBe(`inactive`)
+      expect(updatedItem?.age).toBe(26)
+
+      // Should trigger subscription
+      expect(changes).toHaveLength(1)
+      expect(changes[0]?.type).toBe(`insert`)
+      expect(changes[0]?.value.status).toBe(`inactive`)
+
+      subscription.unsubscribe()
     })
 
     it(`should reflect deletions in collection state and subscriptions`, async () => {
       const changes: Array<any> = []
 
-      const unsubscribe = collection.subscribeChanges((items) => {
-        changes.push(...items)
-      })
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          changes.push(...items)
+        },
+        {
+          includeInitialState: true,
+        }
+      )
+
+      // Clear the changes
+      changes.length = 0
 
       const tx = createTransaction({ mutationFn })
       tx.mutate(() => collection.delete(`1`))
@@ -275,20 +321,45 @@ describe(`Collection Indexes`, () => {
       )
       expect(deleteEvents.length).toBe(changes.length) // All events should be the same delete
 
-      unsubscribe()
+      subscription.unsubscribe()
+    })
+
+    it(`should filter out deletions in collection state if that key was not sent by the subscription`, async () => {
+      const changes: Array<any> = []
+
+      const subscription = collection.subscribeChanges((items) => {
+        changes.push(...items)
+      })
+
+      const tx = createTransaction({ mutationFn })
+      tx.mutate(() => collection.delete(`1`))
+      await tx.isPersisted.promise
+
+      // Item should be removed from collection state
+      expect(collection.size).toBe(4)
+      expect(collection.get(`1`)).toBeUndefined()
+
+      // Should trigger subscription (may be called multiple times in test environment)
+      expect(changes.length).toBeGreaterThanOrEqual(0)
+
+      subscription.unsubscribe()
     })
 
     it(`should handle filtered subscriptions correctly with mutations`, async () => {
       const activeChanges: Array<any> = []
 
-      const unsubscribe = collection.subscribeChanges(
+      const subscription = collection.subscribeChanges(
         (items) => {
           activeChanges.push(...items)
         },
         {
-          where: (row) => eq(row.status, `active`),
+          whereExpression: eq(new PropRef([`status`]), `active`),
+          includeInitialState: true,
         }
       )
+
+      // Clear the changes
+      activeChanges.length = 0
 
       // Change inactive item to active (should trigger)
       const tx1 = createTransaction({ mutationFn })
@@ -318,7 +389,49 @@ describe(`Collection Indexes`, () => {
       expect(activeChanges[0]?.key).toBe(`1`)
       expect(activeChanges[0]?.value.status).toBe(`active`) // Should be the previous value
 
-      unsubscribe()
+      subscription.unsubscribe()
+    })
+
+    it(`should not send delete change on move-out when the key was never sent to the subscribers`, async () => {
+      const activeChanges: Array<any> = []
+
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          activeChanges.push(...items)
+        },
+        {
+          whereExpression: eq(new PropRef([`status`]), `active`),
+        }
+      )
+
+      // Change inactive item to active (should trigger)
+      const tx1 = createTransaction({ mutationFn })
+      tx1.mutate(() =>
+        collection.update(`2`, (draft) => {
+          draft.status = `active`
+        })
+      )
+      await tx1.isPersisted.promise
+
+      expect(activeChanges).toHaveLength(1)
+      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+
+      // Change active item to inactive (should trigger delete event for item leaving filter)
+      activeChanges.length = 0
+      const tx2 = createTransaction({ mutationFn })
+      tx2.mutate(() =>
+        collection.update(`1`, (draft) => {
+          draft.status = `inactive`
+        })
+      )
+      await tx2.isPersisted.promise
+
+      // Subscriber shoiuld not receive any changes
+      // because it is not aware of that key
+      // so it should also not receive the delete of that key
+      expect(activeChanges).toHaveLength(0)
+
+      subscription.unsubscribe()
     })
   })
 
@@ -330,8 +443,8 @@ describe(`Collection Indexes`, () => {
     it(`should perform equality queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => eq(row.age, 25),
-        })
+          where: eq(new PropRef([`age`]), 25),
+        })!
 
         expect(result).toHaveLength(1)
         expect(result[0]?.value.name).toBe(`Alice`)
@@ -349,8 +462,8 @@ describe(`Collection Indexes`, () => {
     it(`should perform greater than queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => gt(row.age, 28),
-        })
+          where: gt(new PropRef([`age`]), 28),
+        })!
 
         expect(result).toHaveLength(2)
         const names = result.map((r) => r.value.name).sort()
@@ -369,8 +482,8 @@ describe(`Collection Indexes`, () => {
     it(`should perform greater than or equal queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => gte(row.age, 28),
-        })
+          where: gte(new PropRef([`age`]), 28),
+        })!
 
         expect(result).toHaveLength(3)
         const names = result.map((r) => r.value.name).sort()
@@ -389,8 +502,8 @@ describe(`Collection Indexes`, () => {
     it(`should perform less than queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => lt(row.age, 28),
-        })
+          where: lt(new PropRef([`age`]), 28),
+        })!
 
         expect(result).toHaveLength(2)
         const names = result.map((r) => r.value.name).sort()
@@ -409,8 +522,8 @@ describe(`Collection Indexes`, () => {
     it(`should perform less than or equal queries`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => lte(row.age, 28),
-        })
+          where: lte(new PropRef([`age`]), 28),
+        })!
 
         expect(result).toHaveLength(3)
         const names = result.map((r) => r.value.name).sort()
@@ -431,8 +544,8 @@ describe(`Collection Indexes`, () => {
         // This should work but use full scan since it's not a simple comparison
         // Using a complex expression that can't be optimized with indexes
         const result = collection.currentStateAsChanges({
-          where: (row) => gt(length(row.name), 3),
-        })
+          where: gt(length(new PropRef([`name`])), 3),
+        })!
 
         expect(result).toHaveLength(3) // Alice, Charlie, Diana (names longer than 3 chars)
         const names = result.map((r) => r.value.name).sort()
@@ -452,8 +565,8 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // This should use index optimization
         const result = collection.currentStateAsChanges({
-          where: (row) => eq(row.age, 25),
-        })
+          where: eq(new PropRef([`age`]), 25),
+        })!
 
         expect(result).toHaveLength(1)
         expect(result[0]?.value.name).toBe(`Alice`)
@@ -481,13 +594,13 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Test multiple range operations
         const eqResult = collection.currentStateAsChanges({
-          where: (row) => eq(row.age, 25),
+          where: eq(new PropRef([`age`]), 25),
         })
         const gtResult = collection.currentStateAsChanges({
-          where: (row) => gt(row.age, 30),
+          where: gt(new PropRef([`age`]), 30),
         })
         const lteResult = collection.currentStateAsChanges({
-          where: (row) => lte(row.age, 28),
+          where: lte(new PropRef([`age`]), 28),
         })
 
         expect(eqResult).toHaveLength(1)
@@ -523,8 +636,8 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // This should fall back to full scan
         const result = collection.currentStateAsChanges({
-          where: (row) => gt(length(row.name), 3),
-        })
+          where: gt(length(new PropRef([`name`])), 3),
+        })!
 
         expect(result).toHaveLength(3) // Alice, Charlie, Diana
 
@@ -546,7 +659,7 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query on a field without an index (status)
         const result = collection.currentStateAsChanges({
-          where: (row) => eq(row.status, `active`),
+          where: eq(new PropRef([`status`]), `active`),
         })
 
         expect(result).toHaveLength(3) // Alice, Charlie, Eve
@@ -572,8 +685,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Test the key case: range query with AND
         const result = collection.currentStateAsChanges({
-          where: (row) => and(gt(row.age, 25), lt(row.age, 35)),
-        })
+          where: and(
+            gt(new PropRef([`age`]), 25),
+            lt(new PropRef([`age`]), 35)
+          ),
+        })!
 
         expect(result).toHaveLength(2) // Bob (30), Diana (28)
         const names = result.map((r) => r.value.name).sort()
@@ -601,8 +717,11 @@ describe(`Collection Indexes`, () => {
     it(`should optimize AND queries with multiple field conditions`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => and(eq(row.status, `active`), gte(row.age, 25)),
-        })
+          where: and(
+            eq(new PropRef([`status`]), `active`),
+            gte(new PropRef([`age`]), 25)
+          ),
+        })!
 
         expect(result).toHaveLength(2) // Alice (25, active), Charlie (35, active)
         const names = result.map((r) => r.value.name).sort()
@@ -636,8 +755,8 @@ describe(`Collection Indexes`, () => {
     it(`should optimize OR queries using indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => or(eq(row.age, 25), eq(row.age, 35)),
-        })
+          where: or(eq(new PropRef([`age`]), 25), eq(new PropRef([`age`]), 35)),
+        })!
 
         expect(result).toHaveLength(2) // Alice (25), Charlie (35)
         const names = result.map((r) => r.value.name).sort()
@@ -671,8 +790,8 @@ describe(`Collection Indexes`, () => {
     it(`should optimize inArray queries using indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => inArray(row.status, [`active`, `pending`]),
-        })
+          where: inArray(new PropRef([`status`]), [`active`, `pending`]),
+        })!
 
         expect(result).toHaveLength(4) // Alice, Charlie, Eve (active), Diana (pending)
         const names = result.map((r) => r.value.name).sort()
@@ -701,12 +820,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // (age >= 25 AND age <= 30) OR status = 'pending'
         const result = collection.currentStateAsChanges({
-          where: (row) =>
-            or(
-              and(gte(row.age, 25), lte(row.age, 30)),
-              eq(row.status, `pending`)
-            ),
-        })
+          where: or(
+            and(gte(new PropRef([`age`]), 25), lte(new PropRef([`age`]), 30)),
+            eq(new PropRef([`status`]), `pending`)
+          ),
+        })!
 
         expect(result).toHaveLength(3) // Alice (25), Bob (30), Diana (28, pending)
         const names = result.map((r) => r.value.name).sort()
@@ -741,12 +859,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Mix of optimizable and non-optimizable conditions
         const result = collection.currentStateAsChanges({
-          where: (row) =>
-            and(
-              eq(row.status, `active`), // Can optimize with index
-              gt(row.age, 24) // Can also optimize - will be AND combined
-            ),
-        })
+          where: and(
+            eq(new PropRef([`status`]), `active`), // Can optimize with index
+            gt(new PropRef([`age`]), 24) // Can also optimize - will be AND combined
+          ),
+        })!
 
         expect(result).toHaveLength(2) // Alice (25), Charlie (35) - both active and age > 24
         const names = result.map((r) => r.value.name).sort()
@@ -766,12 +883,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query on a field without an index (name)
         const result = collection.currentStateAsChanges({
-          where: (row) =>
-            and(
-              eq(row.age, 25), // Has index
-              eq(row.name, `Alice`) // No index on name
-            ),
-        })
+          where: and(
+            eq(new PropRef([`age`]), 25), // Has index
+            eq(new PropRef([`name`]), `Alice`) // No index on name
+          ),
+        })!
 
         expect(result).toHaveLength(1) // Alice (25, name Alice)
         expect(result[0]?.value.name).toBe(`Alice`)
@@ -790,8 +906,8 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Only complex expressions that can't be optimized
         const result = collection.currentStateAsChanges({
-          where: (row) => gt(length(row.name), 3),
-        })
+          where: gt(length(new PropRef([`name`])), 3),
+        })!
 
         expect(result).toHaveLength(3) // Alice, Charlie, Diana (names > 3 chars)
         const names = result.map((r) => r.value.name).sort()
@@ -811,12 +927,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Complex expression involving function calls - no simple field comparisons
         const result = collection.currentStateAsChanges({
-          where: (row) =>
-            and(
-              gt(length(row.name), 4), // Complex - can't optimize (Alice=5, Charlie=7, Diana=5)
-              gt(length(row.status), 6) // Complex - can't optimize (only "inactive" = 8 > 6)
-            ),
-        })
+          where: and(
+            gt(length(new PropRef([`name`])), 4), // Complex - can't optimize (Alice=5, Charlie=7, Diana=5)
+            gt(length(new PropRef([`status`])), 6) // Complex - can't optimize (only "inactive" = 8 > 6)
+          ),
+        })!
 
         expect(result).toHaveLength(1) // Only Diana has name>4 AND status>6 (Diana name=5, status="pending"=7)
         const names = result.map((r) => r.value.name).sort()
@@ -836,12 +951,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // OR with complex conditions that can't be optimized
         const result = collection.currentStateAsChanges({
-          where: (row) =>
-            or(
-              gt(length(row.name), 6), // Complex - can't optimize (only Charlie has name length 7 > 6)
-              gt(length(row.status), 7) // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
-            ),
-        })
+          where: or(
+            gt(length(new PropRef([`name`])), 6), // Complex - can't optimize (only Charlie has name length 7 > 6)
+            gt(length(new PropRef([`status`])), 7) // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
+          ),
+        })!
 
         expect(result).toHaveLength(2) // Charlie (name length 7 > 6), Bob (status length 8 > 7)
         const names = result.map((r) => r.value.name).sort()
@@ -861,8 +975,11 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query only on fields without indexes (name and score fields don't have indexes)
         const result = collection.currentStateAsChanges({
-          where: (row) => and(eq(row.name, `Alice`), eq(row.score!, 95)),
-        })
+          where: and(
+            eq(new PropRef([`name`]), `Alice`),
+            eq(new PropRef([`score`]), 95)
+          ),
+        })!
 
         expect(result).toHaveLength(1) // Alice
         expect(result[0]?.value.name).toBe(`Alice`)
@@ -883,11 +1000,10 @@ describe(`Collection Indexes`, () => {
       // First: partial optimization (age index + name filter)
       withIndexTracking(collection, (tracker1) => {
         const result1 = collection.currentStateAsChanges({
-          where: (row) =>
-            and(
-              eq(row.age, 25), // Can optimize - has index
-              eq(row.name, `Alice`) // Can't optimize - no index
-            ),
+          where: and(
+            eq(new PropRef([`age`]), 25), // Can optimize - has index
+            eq(new PropRef([`name`]), `Alice`) // Can't optimize - no index
+          ),
         })
 
         expect(result1).toHaveLength(1) // Alice via partial optimization
@@ -902,11 +1018,10 @@ describe(`Collection Indexes`, () => {
       // Second: full scan (no optimizable conditions)
       withIndexTracking(collection, (tracker2) => {
         const result2 = collection.currentStateAsChanges({
-          where: (row) =>
-            and(
-              eq(row.name, `Alice`), // Can't optimize - no index
-              gt(length(row.name), 3) // Can't optimize - complex expression
-            ),
+          where: and(
+            eq(new PropRef([`name`]), `Alice`), // Can't optimize - no index
+            gt(length(new PropRef([`name`])), 3) // Can't optimize - complex expression
+          ),
         })
 
         expect(result2).toHaveLength(1) // Alice via full scan
@@ -936,17 +1051,17 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         // Query using age index
         const ageQuery = collection.currentStateAsChanges({
-          where: (row) => gte(row.age, 30),
+          where: gte(new PropRef([`age`]), 30),
         })
 
         // Query using status index
         const statusQuery = collection.currentStateAsChanges({
-          where: (row) => eq(row.status, `active`),
+          where: eq(new PropRef([`status`]), `active`),
         })
 
         // Query using name index
         const nameQuery = collection.currentStateAsChanges({
-          where: (row) => eq(row.name, `Alice`),
+          where: eq(new PropRef([`name`]), `Alice`),
         })
 
         expect(ageQuery).toHaveLength(2) // Bob (30), Charlie (35)
@@ -987,11 +1102,11 @@ describe(`Collection Indexes`, () => {
         const changes: Array<any> = []
 
         // Subscribe with a where clause that should use index
-        const unsubscribe = collection.subscribeChanges(
+        const subscription = collection.subscribeChanges(
           (items) => changes.push(...items),
           {
             includeInitialState: true,
-            where: (row) => eq(row.status, `active`),
+            whereExpression: eq(new PropRef([`status`]), `active`),
           }
         )
 
@@ -1005,7 +1120,7 @@ describe(`Collection Indexes`, () => {
           fullScanCallCount: 0,
         })
 
-        unsubscribe()
+        subscription.unsubscribe()
       })
     })
   })
@@ -1020,13 +1135,13 @@ describe(`Collection Indexes`, () => {
       await withIndexTracking(collection, async (tracker) => {
         const changes: Array<any> = []
 
-        const unsubscribe = collection.subscribeChanges(
+        const subscription = collection.subscribeChanges(
           (items) => {
             changes.push(...items)
           },
           {
             includeInitialState: true,
-            where: (row) => eq(row.status, `active`),
+            whereExpression: eq(new PropRef([`status`]), `active`),
           }
         )
 
@@ -1093,7 +1208,7 @@ describe(`Collection Indexes`, () => {
         expect(changes[0]?.key).toBe(`1`)
         expect(changes[0]?.value.status).toBe(`active`) // Should be the previous value
 
-        unsubscribe()
+        subscription.unsubscribe()
       })
     })
 
@@ -1101,13 +1216,13 @@ describe(`Collection Indexes`, () => {
       await withIndexTracking(collection, async (tracker) => {
         const changes: Array<any> = []
 
-        const unsubscribe = collection.subscribeChanges(
+        const subscription = collection.subscribeChanges(
           (items) => {
             changes.push(...items)
           },
           {
             includeInitialState: true,
-            where: (row) => gte(row.age, 30),
+            whereExpression: gte(new PropRef([`age`]), 30),
           }
         )
 
@@ -1138,7 +1253,7 @@ describe(`Collection Indexes`, () => {
         expect(changes).toHaveLength(1)
         expect(changes[0]?.value.name).toBe(`Diana`)
 
-        unsubscribe()
+        subscription.unsubscribe()
       })
     })
 
@@ -1148,13 +1263,13 @@ describe(`Collection Indexes`, () => {
       await withIndexTracking(collection, (tracker) => {
         const changes: Array<any> = []
 
-        const unsubscribe = collection.subscribeChanges(
+        const subscription = collection.subscribeChanges(
           (items) => {
             changes.push(...items)
           },
           {
             includeInitialState: true,
-            where: (row) => eq(row.status, `active`),
+            whereExpression: eq(new PropRef([`status`]), `active`),
           }
         )
 
@@ -1168,7 +1283,7 @@ describe(`Collection Indexes`, () => {
           fullScanCallCount: 0,
         })
 
-        unsubscribe()
+        subscription.unsubscribe()
       })
     })
   })
@@ -1234,22 +1349,22 @@ describe(`Collection Indexes`, () => {
       withIndexTracking(specialCollection, (tracker) => {
         // Query for zero age
         const zeroAgeResult = specialCollection.currentStateAsChanges({
-          where: (row) => eq(row.age, 0),
-        })
+          where: eq(new PropRef([`age`]), 0),
+        })!
         expect(zeroAgeResult).toHaveLength(1)
         expect(zeroAgeResult[0]?.value.name).toBe(`Zero Age`)
 
         // Query for negative age
         const negativeAgeResult = specialCollection.currentStateAsChanges({
-          where: (row) => eq(row.age, -5),
-        })
+          where: eq(new PropRef([`age`]), -5),
+        })!
         expect(negativeAgeResult).toHaveLength(1)
         expect(negativeAgeResult[0]?.value.name).toBe(`Negative Age`)
 
         // Query for ages greater than negative
         const gtNegativeResult = specialCollection.currentStateAsChanges({
-          where: (row) => gt(row.age, -1),
-        })
+          where: gt(new PropRef([`age`]), -1),
+        })!
         expect(gtNegativeResult.length).toBeGreaterThan(0) // Should find positive ages
 
         // Verify all queries used indexes
@@ -1319,8 +1434,8 @@ describe(`Collection Indexes`, () => {
       // Test that index-optimized queries work with the updated data
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
-          where: (row) => gte(row.age, 50),
-        })
+          where: gte(new PropRef([`age`]), 50),
+        })!
 
         // Should find items with age >= 50 using index
         expect(result.length).toBeGreaterThanOrEqual(1)

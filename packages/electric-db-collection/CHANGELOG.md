@@ -1,5 +1,137 @@
 # @tanstack/electric-db-collection
 
+## 0.1.25
+
+### Patch Changes
+
+- Updated dependencies [[`8cd0876`](https://github.com/TanStack/db/commit/8cd0876b50bc7c1a614365318d5e74c2f32a0f80)]:
+  - @tanstack/db@0.4.1
+
+## 0.1.24
+
+### Patch Changes
+
+- Refactor the main Collection class into smaller classes to make it easier to maintain. ([#560](https://github.com/TanStack/db/pull/560))
+
+- Updated dependencies [[`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58), [`ac6250a`](https://github.com/TanStack/db/commit/ac6250a879e95718e8d911732c10fb3388569f0f), [`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58)]:
+  - @tanstack/db@0.4.0
+
+## 0.1.23
+
+### Patch Changes
+
+- Pull in the latest version of @electric-sql/client instead of pinning it ([#572](https://github.com/TanStack/db/pull/572))
+
+- Updated dependencies [[`cacfca2`](https://github.com/TanStack/db/commit/cacfca2d1b430c34a05202128fd3affa4bff54d6)]:
+  - @tanstack/db@0.3.2
+
+## 0.1.22
+
+### Patch Changes
+
+- Updated dependencies [[`5f51f35`](https://github.com/TanStack/db/commit/5f51f35d2c9543766a00cc5eea1374c62798b34e)]:
+  - @tanstack/db@0.3.1
+
+## 0.1.21
+
+### Patch Changes
+
+- Updated dependencies [[`c557a14`](https://github.com/TanStack/db/commit/c557a1488650ea9081b671a4ac278d55c59ac9cc), [`b5c87f7`](https://github.com/TanStack/db/commit/b5c87f71dbb534e4f1c660cf010e2cb6c0446ec5)]:
+  - @tanstack/db@0.3.0
+
+## 0.1.20
+
+### Patch Changes
+
+- Refactor of the types of collection config factories for better type inference. ([#530](https://github.com/TanStack/db/pull/530))
+
+- Define BaseCollectionConfig interface and let all collections extend it. ([#531](https://github.com/TanStack/db/pull/531))
+
+- Updated dependencies [[`b03894d`](https://github.com/TanStack/db/commit/b03894db05e063629a3660e03b31a80a48558dd5), [`3968087`](https://github.com/TanStack/db/commit/39680877fdc1993733933d2def13217bd18fa254)]:
+  - @tanstack/db@0.2.5
+
+## 0.1.19
+
+### Patch Changes
+
+- Updated dependencies [[`92febbf`](https://github.com/TanStack/db/commit/92febbf1feaa1d46f8cc4d7a4ea0d44cd5f85256), [`b487430`](https://github.com/TanStack/db/commit/b4874308813f95232f3361de539cec104ed55170)]:
+  - @tanstack/db@0.2.4
+
+## 0.1.18
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`b162556`](https://github.com/TanStack/db/commit/b1625565df44b0824501297f7ef14ae1cd450b49)]:
+  - @tanstack/db@0.2.3
+
+## 0.1.17
+
+### Patch Changes
+
+- fix AbortController re-initialization after a collection is garbage collected ([#523](https://github.com/TanStack/db/pull/523))
+
+## 0.1.16
+
+### Patch Changes
+
+- Updated dependencies [[`33515c6`](https://github.com/TanStack/db/commit/33515c69befc557add2cf828354ee378100f3977)]:
+  - @tanstack/db@0.2.2
+
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies [[`620ebea`](https://github.com/TanStack/db/commit/620ebea96eb3fbeec66701b949de9920c4084c17)]:
+  - @tanstack/db@0.2.1
+
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies [[`08303e6`](https://github.com/TanStack/db/commit/08303e645974db97e10b2aca0031abcbce027dd6), [`bafeaa1`](https://github.com/TanStack/db/commit/bafeaa1e9f161ac2200ce86537e442b2aa8e2a5b), [`1814f8c`](https://github.com/TanStack/db/commit/1814f8cc3c0e831c82f8053b86fbbbd737e4f34b), [`31acdf2`](https://github.com/TanStack/db/commit/31acdf2a96411da327f93f0d30fa78d884422969), [`e41ed7e`](https://github.com/TanStack/db/commit/e41ed7e1ff1d94dd3ce0c48b6321f66b8ea044fd), [`51954d8`](https://github.com/TanStack/db/commit/51954d8c5d64291d136159bce293e0ad00a19f88)]:
+  - @tanstack/db@0.2.0
+
+## 0.1.13
+
+### Patch Changes
+
+- Updated dependencies [[`cc4c34a`](https://github.com/TanStack/db/commit/cc4c34a6b40c81c83aa10c8d00dfc0a3d33c56db)]:
+  - @tanstack/db@0.1.12
+
+## 0.1.12
+
+### Patch Changes
+
+- Updated dependencies [[`b869f68`](https://github.com/TanStack/db/commit/b869f68f0109b3126509f202a38855cee38b4276)]:
+  - @tanstack/db@0.1.11
+
+## 0.1.11
+
+### Patch Changes
+
+- Updated dependencies [[`eb8fd18`](https://github.com/TanStack/db/commit/eb8fd18c50ee03b72cb06e4d7ef25f214367950b), [`e59a355`](https://github.com/TanStack/db/commit/e59a3551e75bac9dd166e14c911d9491e3a67b9a), [`074aab0`](https://github.com/TanStack/db/commit/074aab0477a7c55e9e0f19a705b96ed2619e2afb), [`d469c39`](https://github.com/TanStack/db/commit/d469c39a7bdc034fa4fbc533010573b3515f239f)]:
+  - @tanstack/db@0.1.10
+
+## 0.1.10
+
+### Patch Changes
+
+- Updated dependencies [[`d64b4a8`](https://github.com/TanStack/db/commit/d64b4a8b692a213c7ad58faaf66f5f5fd50bef66)]:
+  - @tanstack/db@0.1.9
+
+## 0.1.9
+
+### Patch Changes
+
+- fix the handling of an electric must-refetch message so that the truncate is handled in the same transaction as the next up-to-date, ensuring you don't get a momentary empty collection. ([#460](https://github.com/TanStack/db/pull/460))
+
+- fix disabling of gc by setting `gcTime: 0` on the collection options ([#463](https://github.com/TanStack/db/pull/463))
+
+- Updated dependencies [[`1c5e206`](https://github.com/TanStack/db/commit/1c5e206d00d0a99f8419f0d00429b5a3c6cdc76e), [`4d20004`](https://github.com/TanStack/db/commit/4d2000488b9b5abf85c05801633297528af0eff6), [`968602e`](https://github.com/TanStack/db/commit/968602e4ffc597eaa559219daf22d6ef6321162a)]:
+  - @tanstack/db@0.1.8
+
 ## 0.1.8
 
 ### Patch Changes

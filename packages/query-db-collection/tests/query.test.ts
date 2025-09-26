@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
 import { createCollection } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
+import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
   CollectionImpl,
   DeleteMutationFnParams,
@@ -85,9 +86,9 @@ describe(`QueryCollection`, () => {
     expect(collection.get(`2`)).toEqual(initialItems[1])
 
     // Verify the synced data
-    expect(collection.syncedData.size).toBe(initialItems.length)
-    expect(collection.syncedData.get(`1`)).toEqual(initialItems[0])
-    expect(collection.syncedData.get(`2`)).toEqual(initialItems[1])
+    expect(collection._state.syncedData.size).toBe(initialItems.length)
+    expect(collection._state.syncedData.get(`1`)).toEqual(initialItems[0])
+    expect(collection._state.syncedData.get(`2`)).toEqual(initialItems[1])
   })
 
   it(`should update collection when query data changes`, async () => {
@@ -177,7 +178,9 @@ describe(`QueryCollection`, () => {
       .spyOn(console, `error`)
       .mockImplementation(() => {})
 
-    const queryFn = vi
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
       .mockRejectedValueOnce(testError)
@@ -229,7 +232,11 @@ describe(`QueryCollection`, () => {
       .mockImplementation(() => {})
 
     // Mock queryFn to return invalid data (not an array of objects)
-    const queryFn = vi.fn().mockResolvedValue(`not an array` as any)
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
+      .fn()
+      .mockResolvedValue(`not an array` as any)
 
     const options = queryCollectionOptions({
       id: `test`,
@@ -271,7 +278,9 @@ describe(`QueryCollection`, () => {
     // First query returns the initial item
     // Second query returns a new object with the same properties (different reference)
     // Third query returns an object with an actual change
-    const queryFn = vi
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
       .mockResolvedValueOnce([{ ...initialItem }]) // Same data, different object reference
@@ -658,8 +667,8 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`ready`)
 
       // Add explicit subscribers to test cleanup with active subscribers
-      const unsubscribe1 = collection.subscribeChanges(() => {})
-      const unsubscribe2 = collection.subscribeChanges(() => {})
+      const subscription1 = collection.subscribeChanges(() => {})
+      const subscription2 = collection.subscribeChanges(() => {})
       expect(collection.subscriberCount).toBe(2)
 
       // Cleanup the collection which should trigger sync cleanup
@@ -676,8 +685,8 @@ describe(`QueryCollection`, () => {
       expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
 
       // Verify subscribers can be safely cleaned up after collection cleanup
-      unsubscribe1()
-      unsubscribe2()
+      subscription1.unsubscribe()
+      subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
 
       // Restore spies
@@ -708,8 +717,8 @@ describe(`QueryCollection`, () => {
       })
 
       // Add subscribers to test consistency during multiple cleanups
-      const unsubscribe1 = collection.subscribeChanges(() => {})
-      const unsubscribe2 = collection.subscribeChanges(() => {})
+      const subscription1 = collection.subscribeChanges(() => {})
+      const subscription2 = collection.subscribeChanges(() => {})
       expect(collection.subscriberCount).toBe(2)
 
       // Call cleanup multiple times - subscriber count should remain consistent
@@ -725,9 +734,9 @@ describe(`QueryCollection`, () => {
       expect(collection.subscriberCount).toBe(2) // Still consistent
 
       // Verify subscribers can be safely unsubscribed after multiple cleanups
-      unsubscribe1()
+      subscription1.unsubscribe()
       expect(collection.subscriberCount).toBe(1)
-      unsubscribe2()
+      subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
     })
 
@@ -758,7 +767,7 @@ describe(`QueryCollection`, () => {
       expect(collection.subscriberCount).toBe(0) // startSync: true with no explicit subscribers
 
       // Add a subscriber before cleanup
-      const preCleanupUnsubscribe = collection.subscribeChanges(() => {})
+      const preCleanupSubscription = collection.subscribeChanges(() => {})
       expect(collection.subscriberCount).toBe(1)
 
       // Cleanup - should handle active subscribers gracefully
@@ -767,17 +776,17 @@ describe(`QueryCollection`, () => {
 
       // Subscriber count should remain tracked even after cleanup
       expect(collection.subscriberCount).toBe(1)
-      preCleanupUnsubscribe() // Clean up old subscriber
+      preCleanupSubscription.unsubscribe() // Clean up old subscriber
       expect(collection.subscriberCount).toBe(0)
 
       // Access collection data to restart sync with new subscriber
-      const postCleanupUnsubscribe = collection.subscribeChanges(() => {})
+      const postCleanupSubscription = collection.subscribeChanges(() => {})
       expect(collection.subscriberCount).toBe(1) // Subscriber count tracking works after restart
 
       // Should restart sync (might be ready immediately if query is cached)
       expect([`loading`, `ready`]).toContain(collection.status)
 
-      postCleanupUnsubscribe()
+      postCleanupSubscription.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
     })
 
@@ -823,13 +832,13 @@ describe(`QueryCollection`, () => {
       removeQueriesSpy.mockClear()
 
       // Restart by accessing collection
-      const unsubscribe = collection.subscribeChanges(() => {})
+      const subscription = collection.subscribeChanges(() => {})
 
       // Should restart sync
       expect([`loading`, `ready`]).toContain(collection.status)
 
       // Cleanup again to verify the new sync cleanup works
-      unsubscribe()
+      subscription.unsubscribe()
       await collection.cleanup()
       await flushPromises()
 
@@ -985,10 +994,10 @@ describe(`QueryCollection`, () => {
       const changeHandler1 = vi.fn()
       const changeHandler2 = vi.fn()
 
-      const unsubscribe1 = collection.subscribeChanges(changeHandler1)
+      const subscription1 = collection.subscribeChanges(changeHandler1)
       expect(collection.subscriberCount).toBe(1) // 0 → 1
 
-      const unsubscribe2 = collection.subscribeChanges(changeHandler2)
+      const subscription2 = collection.subscribeChanges(changeHandler2)
       expect(collection.subscriberCount).toBe(2) // 1 → 2
 
       // Change the data and trigger a refetch
@@ -1005,7 +1014,7 @@ describe(`QueryCollection`, () => {
       expect(changeHandler2).toHaveBeenCalled()
 
       // Unsubscribe one and verify count tracking
-      unsubscribe1()
+      subscription1.unsubscribe()
       expect(collection.subscriberCount).toBe(1) // 2 → 1
 
       changeHandler1.mockClear()
@@ -1025,7 +1034,7 @@ describe(`QueryCollection`, () => {
       expect(changeHandler2).toHaveBeenCalled()
 
       // Final cleanup - verify query remains active due to startSync: true
-      unsubscribe2()
+      subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0) // 1 → 0
       expect(collection.status).toBe(`ready`) // Still ready due to startSync: true
     })
@@ -1157,7 +1166,7 @@ describe(`QueryCollection`, () => {
       expect(collection2.status).toBe(`idle`) // Inactive due to startSync: false + no subscribers
 
       // Add subscriber to collection2 -> should now activate
-      const unsubscribe = collection2.subscribeChanges(() => {})
+      const subscription = collection2.subscribeChanges(() => {})
 
       await vi.waitFor(() => expect(collection2.status).toBe(`ready`))
 
@@ -1165,7 +1174,7 @@ describe(`QueryCollection`, () => {
       expect(queryFn2).toHaveBeenCalled() // Now called due to subscriber
 
       // Remove subscriber -> query may still be active but subscriber count drops
-      unsubscribe()
+      subscription.unsubscribe()
       expect(collection2.subscriberCount).toBe(0)
 
       // Verify the core logic: startSync || subscriberCount > 0
@@ -1722,6 +1731,37 @@ describe(`QueryCollection`, () => {
     expect(collection.status).toBe(`ready`)
   })
 
+  it(`should read the state of a query that is already ready`, async () => {
+    // Populate the query cache, so the query will immediately be loaded
+    const queryKey = [`raceConditionTest`]
+    const initialItems: Array<TestItem> = [
+      { id: `1`, name: `Cached Item 1` },
+      { id: `2`, name: `Cached Item 2` },
+    ]
+    const queryFn: (
+      context: QueryFunctionContext<any>
+    ) => Promise<Array<TestItem>> = vi.fn().mockReturnValue(initialItems)
+    await queryClient.prefetchQuery({ queryKey, queryFn })
+
+    // The collection should immediately be ready
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 60000, // uses the prefetched value without a refetch
+      })
+    )
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(2)
+    expect(Array.from(collection.values())).toEqual(
+      expect.arrayContaining(initialItems)
+    )
+  })
+
   describe(`subscriber count tracking and auto-subscription`, () => {
     it(`should not auto-subscribe when startSync=false and no subscribers`, async () => {
       const queryKey = [`noSubscriptionTest`]
@@ -1770,7 +1810,7 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`idle`)
 
       // Add a subscriber -> should subscribe and load data
-      const unsubscribe1 = collection.subscribeChanges(() => {})
+      const subscription1 = collection.subscribeChanges(() => {})
 
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
@@ -1781,20 +1821,333 @@ describe(`QueryCollection`, () => {
 
       // Add another subscriber - should not trigger additional queries
       const initialCallCount = queryFn.mock.calls.length
-      const unsubscribe2 = collection.subscribeChanges(() => {})
+      const subscription2 = collection.subscribeChanges(() => {})
       expect(collection.subscriberCount).toBe(2)
 
       await flushPromises()
       expect(queryFn.mock.calls.length).toBe(initialCallCount) // No additional calls
 
       // Remove first subscriber - should still be subscribed
-      unsubscribe1()
+      subscription1.unsubscribe()
       expect(collection.subscriberCount).toBe(1)
       expect(collection.status).toBe(`ready`)
 
       // Remove last subscriber -> query should remain active but collection subscriber count drops to 0
-      unsubscribe2()
+      subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
+    })
+  })
+
+  describe(`Error Handling`, () => {
+    // Helper to create test collection with common configuration
+    const createErrorHandlingTestCollection = (
+      testId: string,
+      queryFn: ReturnType<typeof vi.fn>
+    ) => {
+      const config: QueryCollectionConfig<TestItem> = {
+        id: testId,
+        queryClient,
+        queryKey: [testId],
+        queryFn,
+        getKey,
+        startSync: true,
+        retry: false,
+      }
+      const options = queryCollectionOptions(config)
+      return createCollection(options)
+    }
+
+    it(`should track error state, count, and support recovery`, async () => {
+      const initialData = [{ id: `1`, name: `Item 1` }]
+      const updatedData = [{ id: `1`, name: `Updated Item 1` }]
+      const errors = [new Error(`First error`), new Error(`Second error`)]
+
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce(initialData) // Initial success
+        .mockRejectedValueOnce(errors[0]) // First error
+        .mockRejectedValueOnce(errors[1]) // Second error
+        .mockResolvedValueOnce(updatedData) // Recovery
+
+      const collection = createErrorHandlingTestCollection(
+        `error-tracking-test`,
+        queryFn
+      )
+
+      // Wait for initial success - no errors
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.utils.lastError()).toBeUndefined()
+        expect(collection.utils.isError()).toBe(false)
+        expect(collection.utils.errorCount()).toBe(0)
+      })
+
+      // First error - count increments
+      await collection.utils.refetch()
+      await vi.waitFor(() => {
+        expect(collection.utils.lastError()).toBe(errors[0])
+        expect(collection.utils.errorCount()).toBe(1)
+        expect(collection.utils.isError()).toBe(true)
+      })
+
+      // Second error - count increments again
+      await collection.utils.refetch()
+      await vi.waitFor(() => {
+        expect(collection.utils.lastError()).toBe(errors[1])
+        expect(collection.utils.errorCount()).toBe(2)
+        expect(collection.utils.isError()).toBe(true)
+      })
+
+      // Successful refetch resets error state
+      await collection.utils.refetch()
+      await vi.waitFor(() => {
+        expect(collection.utils.lastError()).toBeUndefined()
+        expect(collection.utils.isError()).toBe(false)
+        expect(collection.utils.errorCount()).toBe(0)
+        expect(collection.get(`1`)).toEqual(updatedData[0])
+      })
+    })
+
+    it(`should support manual error recovery with clearError`, async () => {
+      const recoveryData = [{ id: `1`, name: `Item 1` }]
+      const testError = new Error(`Test error`)
+
+      const queryFn = vi
+        .fn()
+        .mockRejectedValueOnce(testError)
+        .mockResolvedValueOnce(recoveryData)
+        .mockRejectedValueOnce(testError)
+
+      const collection = createErrorHandlingTestCollection(
+        `clear-error-test`,
+        queryFn
+      )
+
+      // Wait for initial error
+      await vi.waitFor(() => {
+        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.errorCount()).toBe(1)
+      })
+
+      // Manual error clearing triggers refetch
+      await collection.utils.clearError()
+
+      expect(collection.utils.lastError()).toBeUndefined()
+      expect(collection.utils.isError()).toBe(false)
+      expect(collection.utils.errorCount()).toBe(0)
+
+      await vi.waitFor(() => {
+        expect(collection.get(`1`)).toEqual(recoveryData[0])
+      })
+
+      // Refetch on rejection should throw an error
+      await expect(collection.utils.clearError()).rejects.toThrow(testError)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount()).toBe(1)
+    })
+
+    it(`should maintain collection functionality despite errors and persist error state`, async () => {
+      const initialData = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+      const testError = new Error(`Query error`)
+
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce(initialData)
+        .mockRejectedValue(testError)
+
+      const collection = createErrorHandlingTestCollection(
+        `functionality-with-errors-test`,
+        queryFn
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      // Cause error
+      await collection.utils.refetch()
+      await vi.waitFor(() => {
+        expect(collection.utils.errorCount()).toBe(1)
+        expect(collection.utils.isError()).toBe(true)
+      })
+
+      // Collection operations still work with cached data
+      expect(collection.size).toBe(2)
+      expect(collection.get(`1`)).toEqual(initialData[0])
+      expect(collection.get(`2`)).toEqual(initialData[1])
+
+      // Manual write operations work and clear error state
+      const newItem = { id: `3`, name: `Manual Item` }
+      collection.utils.writeInsert(newItem)
+      expect(collection.size).toBe(3)
+      expect(collection.get(`3`)).toEqual(newItem)
+
+      await flushPromises()
+
+      // Manual writes clear error state
+      expect(collection.utils.lastError()).toBeUndefined()
+      expect(collection.utils.isError()).toBe(false)
+      expect(collection.utils.errorCount()).toBe(0)
+
+      // Create error state again for persistence test
+      await collection.utils.refetch()
+      await vi.waitFor(() => expect(collection.utils.isError()).toBe(true))
+
+      const originalError = collection.utils.lastError()
+      const originalErrorCount = collection.utils.errorCount()
+
+      // Read-only operations don't affect error state
+      expect(collection.has(`1`)).toBe(true)
+      const changeHandler = vi.fn()
+      const subscription = collection.subscribeChanges(changeHandler)
+
+      expect(collection.utils.lastError()).toBe(originalError)
+      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount()).toBe(originalErrorCount)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should handle custom error objects correctly`, async () => {
+      interface CustomError {
+        code: string
+        message: string
+        details?: Record<string, unknown>
+      }
+      const customError: CustomError = {
+        code: `NETWORK_ERROR`,
+        message: `Failed to fetch data`,
+        details: { retryAfter: 5000 },
+      }
+
+      // Start with error immediately - no initial success needed
+      const queryFn = vi.fn().mockRejectedValue(customError)
+
+      const config: QueryCollectionConfig<
+        TestItem,
+        typeof queryFn,
+        CustomError
+      > = {
+        id: `custom-error-test`,
+        queryClient,
+        queryKey: [`custom-error-test`],
+        queryFn,
+        getKey,
+        startSync: true,
+        retry: false,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for collection to be ready (even with error)
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.utils.isError()).toBe(true)
+      })
+
+      // Verify custom error is accessible with all its properties
+      const lastError = collection.utils.lastError()
+      expect(lastError).toBe(customError)
+      expect(lastError?.code).toBe(`NETWORK_ERROR`)
+      expect(lastError?.message).toBe(`Failed to fetch data`)
+      expect(lastError?.details?.retryAfter).toBe(5000)
+      expect(collection.utils.errorCount()).toBe(1)
+    })
+
+    it(`should persist error state after collection cleanup`, async () => {
+      const testError = new Error(`Persistent error`)
+
+      // Start with error immediately
+      const queryFn = vi.fn().mockRejectedValue(testError)
+
+      const collection = createErrorHandlingTestCollection(
+        `error-persistence-cleanup-test`,
+        queryFn
+      )
+
+      // Wait for collection to be ready (even with error)
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.utils.isError()).toBe(true)
+      })
+
+      // Verify error state before cleanup
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.errorCount()).toBe(1)
+
+      // Cleanup collection
+      await collection.cleanup()
+      expect(collection.status).toBe(`cleaned-up`)
+
+      // Error state should persist after cleanup
+      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.errorCount()).toBe(1)
+    })
+
+    it(`should increment errorCount only after final failure when using Query retries`, async () => {
+      const testError = new Error(`Retry test error`)
+      const retryCount = 2
+      const totalAttempts = retryCount + 1
+
+      // Create a queryFn that fails consistently
+      const queryFn = vi.fn().mockRejectedValue(testError)
+
+      // Create collection with retry enabled (2 retries = 3 total attempts)
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `retry-semantics-test`,
+        queryClient,
+        queryKey: [`retry-semantics-test`],
+        queryFn,
+        getKey,
+        startSync: true,
+        retry: retryCount, // This will result in 3 total attempts (initial + 2 retries)
+        retryDelay: 5, // Short delay for faster tests
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for all retry attempts to complete and final failure
+      await vi.waitFor(
+        () => {
+          expect(collection.status).toBe(`ready`) // Should be ready even with error
+          expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
+          expect(collection.utils.isError()).toBe(true)
+        },
+        { timeout: 2000 }
+      )
+
+      // Error count should only increment once after all retries are exhausted
+      // This ensures we track "consecutive post-retry failures," not per-attempt failures
+      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
+
+      // Reset attempt counter for second test
+      queryFn.mockClear()
+
+      // Trigger another refetch which should also retry and fail
+      await collection.utils.refetch()
+
+      // Wait for the second set of retries to complete
+      await vi.waitFor(
+        () => {
+          expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
+        },
+        { timeout: 2000 }
+      )
+
+      // Error count should now be 2 (two post-retry failures)
+      expect(collection.utils.errorCount()).toBe(2)
+      expect(collection.utils.lastError()).toBe(testError)
+      expect(collection.utils.isError()).toBe(true)
     })
   })
 })

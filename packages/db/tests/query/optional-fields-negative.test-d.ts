@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createCollection } from "../../src/collection/index.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Test types with optional fields
 type UserWithOptional = {
@@ -153,7 +153,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           )
           .select(({ user, dept }) => ({
             user_name: user.name,
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
             dept_name: dept?.name, // Should be string | undefined due to left join
           })),
     })

@@ -13,8 +13,10 @@ import {
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
+  Fn,
   InsertMutationFnParams,
   SyncConfig,
   UpdateMutationFnParams,
@@ -45,207 +47,25 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-type ResolveType<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  unknown extends GetExtensions<TExplicit>
-    ? [TSchema] extends [never]
-      ? TFallback
-      : InferSchemaOutput<TSchema>
-    : TExplicit
-
 /**
  * Configuration interface for Electric collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
- *
- * @remarks
- * Type resolution follows a priority order:
- * 1. If you provide an explicit type via generic parameter, it will be used
- * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
- * 3. If neither explicit type nor schema is provided, the fallback type will be used
- *
- * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * @template T - The type of items in the collection
+ * @template TSchema - The schema type for validation
  */
 export interface ElectricCollectionConfig<
-  TExplicit extends Row<unknown> = Row<unknown>,
+  T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
-> {
+> extends BaseCollectionConfig<
+    T,
+    string | number,
+    TSchema,
+    Record<string, Fn>,
+    { txid: Txid | Array<Txid> }
+  > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  shapeOptions: ShapeStreamOptions<
-    GetExtensions<ResolveType<TExplicit, TSchema, TFallback>>
-  >
-
-  /**
-   * All standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
-
-  /**
-   * Optional asynchronous handler function called before an insert operation
-   * Must return an object containing a txid number or array of txids
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
-   * @example
-   * // Basic Electric insert handler - MUST return { txid: number }
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   const result = await api.todos.create({
-   *     data: newItem
-   *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
-   * }
-   *
-   * @example
-   * // Insert handler with multiple items - return array of txids
-   * onInsert: async ({ transaction }) => {
-   *   const items = transaction.mutations.map(m => m.modified)
-   *   const results = await Promise.all(
-   *     items.map(item => api.todos.create({ data: item }))
-   *   )
-   *   return { txid: results.map(r => r.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Insert handler with error handling
-   * onInsert: async ({ transaction }) => {
-   *   try {
-   *     const newItem = transaction.mutations[0].modified
-   *     const result = await api.createTodo(newItem)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     console.error('Insert failed:', error)
-   *     throw error // This will cause the transaction to fail
-   *   }
-   * }
-   *
-   * @example
-   * // Insert handler with batch operation - single txid
-   * onInsert: async ({ transaction }) => {
-   *   const items = transaction.mutations.map(m => m.modified)
-   *   const result = await api.todos.createMany({
-   *     data: items
-   *   })
-   *   return { txid: result.txid } // Single txid for batch operation
-   * }
-   */
-  onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
-
-  /**
-   * Optional asynchronous handler function called before an update operation
-   * Must return an object containing a txid number or array of txids
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
-   * @example
-   * // Basic Electric update handler - MUST return { txid: number }
-   * onUpdate: async ({ transaction }) => {
-   *   const { original, changes } = transaction.mutations[0]
-   *   const result = await api.todos.update({
-   *     where: { id: original.id },
-   *     data: changes // Only the changed fields
-   *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
-   * }
-   *
-   * @example
-   * // Update handler with multiple items - return array of txids
-   * onUpdate: async ({ transaction }) => {
-   *   const updates = await Promise.all(
-   *     transaction.mutations.map(m =>
-   *       api.todos.update({
-   *         where: { id: m.original.id },
-   *         data: m.changes
-   *       })
-   *     )
-   *   )
-   *   return { txid: updates.map(u => u.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Update handler with optimistic rollback
-   * onUpdate: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   try {
-   *     const result = await api.updateTodo(mutation.original.id, mutation.changes)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     // Transaction will automatically rollback optimistic changes
-   *     console.error('Update failed, rolling back:', error)
-   *     throw error
-   *   }
-   * }
-   */
-  onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
-
-  /**
-   * Optional asynchronous handler function called before a delete operation
-   * Must return an object containing a txid number or array of txids
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to an object with txid or txids
-   * @example
-   * // Basic Electric delete handler - MUST return { txid: number }
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   const result = await api.todos.delete({
-   *     id: mutation.original.id
-   *   })
-   *   return { txid: result.txid } // Required for Electric sync matching
-   * }
-   *
-   * @example
-   * // Delete handler with multiple items - return array of txids
-   * onDelete: async ({ transaction }) => {
-   *   const deletes = await Promise.all(
-   *     transaction.mutations.map(m =>
-   *       api.todos.delete({
-   *         where: { id: m.key }
-   *       })
-   *     )
-   *   )
-   *   return { txid: deletes.map(d => d.txid) } // Array of txids
-   * }
-   *
-   * @example
-   * // Delete handler with batch operation - single txid
-   * onDelete: async ({ transaction }) => {
-   *   const idsToDelete = transaction.mutations.map(m => m.original.id)
-   *   const result = await api.todos.deleteMany({
-   *     ids: idsToDelete
-   *   })
-   *   return { txid: result.txid } // Single txid for batch operation
-   * }
-   *
-   * @example
-   * // Delete handler with optimistic rollback
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   try {
-   *     const result = await api.deleteTodo(mutation.original.id)
-   *     return { txid: result.txid }
-   *   } catch (error) {
-   *     // Transaction will automatically rollback optimistic changes
-   *     console.error('Delete failed, rolling back:', error)
-   *     throw error
-   *   }
-   * }
-   *
-   */
-  onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<{ txid: Txid | Array<Txid> }>
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -282,24 +102,46 @@ export interface ElectricCollectionUtils extends UtilsRecord {
 /**
  * Creates Electric collection options for use with a standard Collection
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template T - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the Electric collection
  * @returns Collection options with utilities
  */
-export function electricCollectionOptions<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
->(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
+
+// Overload for when schema is provided
+export function electricCollectionOptions<T extends StandardSchemaV1>(
+  config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
+    schema: T
+  }
+): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema: T
+}
+
+// Overload for when no schema is provided
+export function electricCollectionOptions<T extends Row<unknown>>(
+  config: ElectricCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, string | number> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: never // no schema in the result
+}
+
+export function electricCollectionOptions(
+  config: ElectricCollectionConfig<any, any>
+): CollectionConfig<any, string | number, any> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: any
+} {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
-  const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
-    config.shapeOptions,
-    {
-      seenTxids,
-    }
-  )
+  const sync = createElectricSync<any>(config.shapeOptions, {
+    seenTxids,
+  })
 
   /**
    * Wait for a specific transaction ID to be synced
@@ -338,13 +180,9 @@ export function electricCollectionOptions<
 
   // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnInsert = config.onInsert
-    ? async (
-        params: InsertMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: InsertMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
+
         const handlerResult = (await config.onInsert!(params)) ?? {}
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
@@ -364,13 +202,9 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (
-        params: UpdateMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: UpdateMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
-        // eslint-disable-next-line
+
         const handlerResult = (await config.onUpdate!(params)) ?? {}
         const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
 
@@ -390,11 +224,7 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (
-        params: DeleteMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: DeleteMutationFnParams<any>) => {
         const handlerResult = await config.onDelete!(params)
         if (!handlerResult.txid) {
           throw new ElectricDeleteHandlerMustReturnTxIdError()
@@ -461,32 +291,50 @@ function createElectricSync<T extends Row<unknown>>(
     }
   }
 
-  // Abort controller for the stream - wraps the signal if provided
-  const abortController = new AbortController()
-  if (shapeOptions.signal) {
-    shapeOptions.signal.addEventListener(`abort`, () => {
-      abortController.abort()
-    })
-    if (shapeOptions.signal.aborted) {
-      abortController.abort()
-    }
-  }
-
   let unsubscribeStream: () => void
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate } = params
+      const { begin, write, commit, markReady, truncate, collection } = params
+
+      // Abort controller for the stream - wraps the signal if provided
+      const abortController = new AbortController()
+
+      if (shapeOptions.signal) {
+        shapeOptions.signal.addEventListener(
+          `abort`,
+          () => {
+            abortController.abort()
+          },
+          {
+            once: true,
+          }
+        )
+        if (shapeOptions.signal.aborted) {
+          abortController.abort()
+        }
+      }
+
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
+          // Note that Electric sends a 409 error on a `must-refetch` message, but the
+          // ShapeStream handled this and it will not reach this handler, therefor
+          // this markReady will not be triggers by a `must-refetch`.
           markReady()
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
+          } else {
+            console.error(
+              `An error occurred while syncing collection: ${collection.id}, \n` +
+                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
+                `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
+              errorParams
+            )
           }
 
           return
@@ -540,9 +388,8 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
-            // Commit the truncate transaction immediately
-            commit()
-            transactionStarted = false
+            // Reset hasUpToDate so we continue accumulating changes until next up-to-date
+            hasUpToDate = false
           }
         }
 

@@ -1,8 +1,8 @@
-import { createCollection } from "../collection.js"
+import { createCollection } from "../collection/index.js"
 import { CollectionConfigBuilder } from "./live/collection-config-builder.js"
 import type { LiveQueryCollectionConfig } from "./live/types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
-import type { Collection } from "../collection.js"
+import type { Collection } from "../collection/index.js"
 import type { CollectionConfig, UtilsRecord } from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
 
@@ -130,7 +130,7 @@ export function createLiveQueryCollection<
 
 /**
  * Bridge function that handles the type compatibility between query2's TResult
- * and core collection's ResolveType without exposing ugly type assertions to users
+ * and core collection's output type without exposing ugly type assertions to users
  */
 function bridgeToCreateCollection<
   TResult extends object,

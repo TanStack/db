@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createCollection } from "../../src/collection/index.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample types for subquery testing
 type Issue = {

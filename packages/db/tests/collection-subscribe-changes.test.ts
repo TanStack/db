@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
+import { PropRef } from "../src/query/ir"
 import type {
   ChangeMessage,
   ChangesPayload,
@@ -42,7 +43,7 @@ describe(`Collection.subscribeChanges`, () => {
     // await waitForChanges()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -61,7 +62,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(changes.every((change) => change.type === `insert`)).toBe(true)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should not emit initial collection state as insert changes by default`, () => {
@@ -92,13 +93,13 @@ describe(`Collection.subscribeChanges`, () => {
     // await waitForChanges()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Verify that callback was called with initial state
     expect(callback).toHaveBeenCalledTimes(0)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should emit changes from synced operations`, () => {
@@ -133,7 +134,7 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -210,7 +211,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(deleteChange.type).toBe(`delete`)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should emit changes from optimistic operations`, () => {
@@ -253,7 +254,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -339,7 +340,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(deleteChange.key).toBe(1)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should handle both synced and optimistic changes together`, async () => {
@@ -379,7 +380,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -487,7 +488,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(updateChange.value).toEqual({ id: 1, value: `updated synced value` })
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should only emit differences between states, not whole state`, async () => {
@@ -534,7 +535,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -603,7 +604,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(updateChange.key).toBe(1)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should correctly unsubscribe when returned function is called`, () => {
@@ -623,7 +624,7 @@ describe(`Collection.subscribeChanges`, () => {
     const mutationFn = async () => {}
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -634,7 +635,7 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Unsubscribe
-    unsubscribe()
+    subscription.unsubscribe()
 
     // Insert an item
     const tx = createTransaction({ mutationFn })
@@ -678,15 +679,15 @@ describe(`Collection.subscribeChanges`, () => {
       syncCollection.config.sync.sync({
         collection: syncCollection,
         begin: () => {
-          syncCollection.pendingSyncedTransactions.push({
+          syncCollection._state.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
           })
         },
         write: (messageWithoutKey: any) => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
           const message = { ...messageWithoutKey, key }
@@ -694,8 +695,8 @@ describe(`Collection.subscribeChanges`, () => {
         },
         commit: () => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           pendingTransaction.committed = true
           syncCollection.commitPendingTransactions()
@@ -708,9 +709,9 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes with a filter for active items only
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
-      where: (row) => eq(row.status, `active`),
+      whereExpression: eq(new PropRef([`status`]), `active`),
     })
 
     // Should only receive the active item in initial state
@@ -808,7 +809,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).not.toHaveBeenCalled()
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should emit delete events for all items when truncate is called`, async () => {
@@ -841,9 +842,14 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    })
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
 
     await collection.stateWhenReady()
 
@@ -851,6 +857,8 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.size).toBe(2)
     expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value 1` })
     expect(collection.state.get(2)).toEqual({ id: 2, value: `initial value 2` })
+
+    expect(changeEvents).toHaveLength(2)
 
     // Clear change events from initial state
     changeEvents.length = 0
@@ -911,9 +919,14 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    })
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
 
     await collection.stateWhenReady()
 
@@ -924,8 +937,8 @@ describe(`Collection.subscribeChanges`, () => {
     const tx2 = collection.insert({ id: 3, value: `optimistic insert` })
 
     // Verify optimistic state exists
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
-    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
     expect(collection.state.get(1)?.value).toBe(`optimistic update 1`)
     expect(collection.state.get(3)?.value).toBe(`optimistic insert`)
 
@@ -1017,9 +1030,14 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Listen to change events
-    collection.subscribeChanges((changes) => {
-      changeEvents.push(...changes)
-    })
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
 
     await collection.stateWhenReady()
 
@@ -1169,8 +1187,8 @@ describe(`Collection.subscribeChanges`, () => {
     f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
     f.commit()
 
-    // Expect delete then insert with optimistic value
-    expect(changeEvents.length).toBe(2)
+    // Expect delete, insert with optimistic value, and an empty event from markReady
+    expect(changeEvents.length).toBe(3)
     expect(changeEvents[0]).toEqual({
       type: `delete`,
       key: 1,
@@ -1244,7 +1262,9 @@ describe(`Collection.subscribeChanges`, () => {
         },
       },
     })
-    collection.subscribeChanges((c) => changeEvents.push(...c))
+    collection.subscribeChanges((c) => changeEvents.push(...c), {
+      includeInitialState: true,
+    })
     await collection.stateWhenReady()
 
     // Optimistic insert for id 2 (did not exist before)

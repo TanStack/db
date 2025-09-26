@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createCollection } from "../../src/collection/index.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
-import { eq, gt } from "../../src/query/builder/functions.js"
+import {
+  eq,
+  gt,
+  isUndefined,
+  max,
+  not,
+} from "../../src/query/builder/functions.js"
 
 type Person = {
   id: string
@@ -11,6 +17,22 @@ type Person = {
   email: string
   isActive: boolean
   team: string
+  profile?: {
+    bio: string
+    score: number
+    stats: {
+      tasksCompleted: number
+      rating: number
+    }
+  }
+  address?: {
+    city: string
+    country: string
+    coordinates: {
+      lat: number
+      lng: number
+    }
+  }
 }
 
 const initialPersons: Array<Person> = [
@@ -21,6 +43,22 @@ const initialPersons: Array<Person> = [
     email: `john.doe@example.com`,
     isActive: true,
     team: `team1`,
+    profile: {
+      bio: `Senior developer with 5 years experience`,
+      score: 85,
+      stats: {
+        tasksCompleted: 120,
+        rating: 4.5,
+      },
+    },
+    address: {
+      city: `New York`,
+      country: `USA`,
+      coordinates: {
+        lat: 40.7128,
+        lng: -74.006,
+      },
+    },
   },
   {
     id: `2`,
@@ -29,6 +67,22 @@ const initialPersons: Array<Person> = [
     email: `jane.doe@example.com`,
     isActive: true,
     team: `team2`,
+    profile: {
+      bio: `Junior developer`,
+      score: 92,
+      stats: {
+        tasksCompleted: 85,
+        rating: 4.8,
+      },
+    },
+    address: {
+      city: `Los Angeles`,
+      country: `USA`,
+      coordinates: {
+        lat: 34.0522,
+        lng: -118.2437,
+      },
+    },
   },
   {
     id: `3`,
@@ -37,6 +91,14 @@ const initialPersons: Array<Person> = [
     email: `john.smith@example.com`,
     isActive: true,
     team: `team1`,
+    profile: {
+      bio: `Lead engineer`,
+      score: 78,
+      stats: {
+        tasksCompleted: 200,
+        rating: 4.2,
+      },
+    },
   },
 ]
 
@@ -493,6 +555,57 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
+      it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .offset(1)
+            .limit(10)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results.map((r) => r.salary)).toEqual([
+          52_000, 55_000, 60_000, 65_000,
+        ])
+
+        // Now insert a new employee with highest salary
+        // this should now become part of the topK because
+        // the topK isn't full yet, so even though it's after the max sent value
+        // it should still be part of the topK
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 72_000,
+          hire_date: `2023-01-01`,
+        }
+
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [5, 52_000],
+          [3, 55_000],
+          [2, 60_000],
+          [4, 65_000],
+          [6, 72_000],
+        ])
+      })
+
       it(`applies incremental insert of a new row after the topK correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
           q
@@ -630,12 +743,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               ({ employees, departments }) =>
                 eq(employees.department_id, departments.id)
             )
-            .orderBy(({ departments }) => departments.name, `asc`)
+            .orderBy(({ departments }) => departments?.name, `asc`)
             .orderBy(({ employees }) => employees.salary, `desc`)
             .select(({ employees, departments }) => ({
               id: employees.id,
               employee_name: employees.name,
-              department_name: departments.name,
+              department_name: departments?.name,
               salary: employees.salary,
             }))
         )
@@ -660,6 +773,126 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
     })
 
+    describe(`OrderBy with GroupBy`, () => {
+      it(`should order grouped results correctly`, async () => {
+        type VehicleDocument = {
+          id: number
+          vin: string
+          updatedAt: number
+        }
+
+        const vehicleDocumentsData = [
+          { id: 1, vin: `1`, updatedAt: new Date(`2023-01-01`).getTime() },
+          { id: 2, vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+          { id: 3, vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+        ]
+
+        const vehicleDocumentCollection = createCollection(
+          mockSyncCollectionOptions<VehicleDocument>({
+            id: `vehicle-document-collection`,
+            getKey: (doc) => doc.id,
+            autoIndex: `eager`,
+            initialData: vehicleDocumentsData,
+          })
+        )
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ vehicleDocuments: vehicleDocumentCollection })
+              .groupBy((q) => q.vehicleDocuments.vin)
+              .orderBy((q) => q.vehicleDocuments.vin, `asc`)
+              .select((q) => ({
+                vin: q.vehicleDocuments.vin,
+              })),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+        expect(liveQuery.toArray).toEqual([{ vin: `1` }, { vin: `2` }])
+
+        // Insert a vehicle document
+        vehicleDocumentCollection.utils.begin()
+        vehicleDocumentCollection.utils.write({
+          type: `insert`,
+          value: {
+            id: 4,
+            vin: `3`,
+            updatedAt: new Date(`2023-01-03`).getTime(),
+          },
+        })
+        vehicleDocumentCollection.utils.commit()
+
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1` },
+          { vin: `2` },
+          { vin: `3` },
+        ])
+      })
+
+      it(`should order groups based on aggregates correctly`, async () => {
+        type VehicleDocument = {
+          id: number
+          vin: string
+          updatedAt: number
+        }
+
+        const vehicleDocumentsData = [
+          { id: 1, vin: `1`, updatedAt: new Date(`2023-01-01`).getTime() },
+          { id: 2, vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+          { id: 3, vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+        ]
+
+        const vehicleDocumentCollection = createCollection(
+          mockSyncCollectionOptions<VehicleDocument>({
+            id: `vehicle-document-collection`,
+            getKey: (doc) => doc.id,
+            autoIndex: `eager`,
+            initialData: vehicleDocumentsData,
+          })
+        )
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ vehicleDocuments: vehicleDocumentCollection })
+              .groupBy((q) => q.vehicleDocuments.vin)
+              .orderBy((q) => max(q.vehicleDocuments.updatedAt), `desc`)
+              .select((q) => ({
+                vin: q.vehicleDocuments.vin,
+                updatedAt: max(q.vehicleDocuments.updatedAt),
+              }))
+              .offset(0)
+              .limit(10),
+          startSync: true,
+        })
+
+        await liveQuery.stateWhenReady()
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+          { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+        ])
+
+        // Insert a vehicle document
+        vehicleDocumentCollection.utils.begin()
+        vehicleDocumentCollection.utils.write({
+          type: `insert`,
+          value: {
+            id: 4,
+            vin: `3`,
+            updatedAt: new Date(`2023-01-03`).getTime(),
+          },
+        })
+        vehicleDocumentCollection.utils.commit()
+
+        expect(liveQuery.toArray).toEqual([
+          { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
+          { vin: `3`, updatedAt: new Date(`2023-01-03`).getTime() },
+          { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
+        ])
+      })
+    })
+
     describe(`OrderBy with Where Clauses`, () => {
       it(`orders filtered results correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
@@ -679,6 +912,50 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         expect(results).toHaveLength(3) // Alice (50000) and Eve (52000) filtered out
         expect(results.map((r) => r.salary)).toEqual([55000, 60000, 65000])
+      })
+
+      it(`orders correctly with a limit`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(2)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(2)
+        expect(results.map((r) => r.salary)).toEqual([52000, 55000])
+        expect(results.map((r) => r.id)).toEqual([5, 3])
+      })
+
+      it(`returns a single row with limit 1`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .where(({ employees }) => gt(employees.salary, 50000))
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .limit(1)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+
+        expect(results).toHaveLength(1)
+        expect(results[0]!.id).toEqual(5)
+        expect(results[0]!.salary).toEqual(52000)
       })
     })
 
@@ -1146,6 +1423,92 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       })
     })
 
+    describe(`OrderBy Optimization Tests`, () => {
+      const itWhenAutoIndex = autoIndex === `eager` ? it : it.skip
+
+      itWhenAutoIndex(
+        `optimizes single-column orderBy when passed as single value`,
+        async () => {
+          // Patch getConfig to expose the builder on the returned config for test access
+          const { CollectionConfigBuilder } = await import(
+            `../../src/query/live/collection-config-builder.js`
+          )
+          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+            const cfg = originalGetConfig.call(this)
+            ;(cfg as any).__builder = this
+            return cfg
+          }
+
+          try {
+            const collection = createLiveQueryCollection((q) =>
+              q
+                .from({ employees: employeesCollection })
+                .orderBy(({ employees }) => employees.salary, `desc`)
+                .limit(3)
+                .select(({ employees }) => ({
+                  id: employees.id,
+                  name: employees.name,
+                  salary: employees.salary,
+                }))
+            )
+
+            await collection.preload()
+
+            const builder = (collection as any).config.__builder
+            expect(builder).toBeTruthy()
+            expect(
+              Object.keys(builder.optimizableOrderByCollections)
+            ).toContain(employeesCollection.id)
+          } finally {
+            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+          }
+        }
+      )
+
+      itWhenAutoIndex(
+        `optimizes single-column orderBy when passed as array with single element`,
+        async () => {
+          // Patch getConfig to expose the builder on the returned config for test access
+          const { CollectionConfigBuilder } = await import(
+            `../../src/query/live/collection-config-builder.js`
+          )
+          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+            const cfg = originalGetConfig.call(this)
+            ;(cfg as any).__builder = this
+            return cfg
+          }
+
+          try {
+            const collection = createLiveQueryCollection((q) =>
+              q
+                .from({ employees: employeesCollection })
+                .orderBy(({ employees }) => [employees.salary], `desc`)
+                .limit(3)
+                .select(({ employees }) => ({
+                  id: employees.id,
+                  name: employees.name,
+                  salary: employees.salary,
+                }))
+            )
+
+            await collection.preload()
+
+            const builder = (collection as any).config.__builder
+            expect(builder).toBeTruthy()
+            expect(
+              Object.keys(builder.optimizableOrderByCollections)
+            ).toContain(employeesCollection.id)
+          } finally {
+            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+          }
+        }
+      )
+    })
+
     describe(`String Comparison Tests`, () => {
       it(`handles case differently in lexical vs locale string comparison`, async () => {
         const numericEmployees = [
@@ -1221,6 +1584,262 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           `alice`,
           `bob`,
           `Charlie`,
+        ])
+      })
+    })
+
+    describe(`Nested Object OrderBy`, () => {
+      const createPersonsCollection = () => {
+        return createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `test-persons-nested`,
+            getKey: (person) => person.id,
+            initialData: initialPersons,
+            autoIndex,
+          })
+        )
+      }
+
+      let personsCollection: ReturnType<typeof createPersonsCollection>
+
+      beforeEach(() => {
+        personsCollection = createPersonsCollection()
+      })
+
+      it(`orders by nested object properties ascending`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile?.score, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile?.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.score)).toEqual([78, 85, 92]) // John Smith, John Doe, Jane Doe
+        expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
+          `John Doe`,
+          `Jane Doe`,
+        ])
+      })
+
+      it(`orders by nested object properties descending`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile?.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.score)).toEqual([92, 85, 78]) // Jane Doe, John Doe, John Smith
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+      })
+
+      it(`orders by deeply nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile?.stats.rating, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              rating: persons.profile?.stats.rating,
+              tasksCompleted: persons.profile?.stats.tasksCompleted,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+        expect(results.map((r) => r.rating)).toEqual([4.8, 4.5, 4.2]) // Jane, John Doe, John Smith
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+      })
+
+      it(`orders by multiple nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.team, `asc`)
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              team: persons.team,
+              score: persons.profile?.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+
+        // Should be ordered by team ASC, then score DESC within each team
+        // team1: John Doe (85), John Smith (78)
+        // team2: Jane Doe (92)
+        expect(results.map((r) => r.team)).toEqual([`team1`, `team1`, `team2`])
+        expect(results.map((r) => r.name)).toEqual([
+          `John Doe`,
+          `John Smith`,
+          `Jane Doe`,
+        ])
+        expect(results.map((r) => r.score)).toEqual([85, 78, 92])
+      })
+
+      it(`orders by coordinates (nested numeric properties)`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => not(isUndefined(persons.address)))
+            .orderBy(({ persons }) => persons.address?.coordinates.lat, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              city: persons.address?.city,
+              lat: persons.address?.coordinates.lat,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(2) // Only John Doe and Jane Doe have addresses
+        expect(results.map((r) => r.lat)).toEqual([34.0522, 40.7128]) // LA, then NY
+        expect(results.map((r) => r.city)).toEqual([`Los Angeles`, `New York`])
+      })
+
+      it(`handles null/undefined nested properties in ordering`, async () => {
+        // Add a person without profile for testing
+        const personWithoutProfile: Person = {
+          id: `4`,
+          name: `Test Person`,
+          age: 40,
+          email: `test@example.com`,
+          isActive: true,
+          team: `team3`,
+        }
+
+        personsCollection.utils.begin()
+        personsCollection.utils.write({
+          type: `insert`,
+          value: personWithoutProfile,
+        })
+        personsCollection.utils.commit()
+
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile?.score,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(4)
+
+        // Person without profile should have undefined score and be first (undefined sorts first)
+        expect(results.map((r) => r.score)).toEqual([undefined, 92, 85, 78])
+        expect(results[0]!.name).toBe(`Test Person`)
+      })
+
+      it(`maintains ordering during live updates of nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.profile?.score, `desc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              score: persons.profile?.score,
+            }))
+        )
+        await collection.preload()
+
+        // Initial order should be Jane (92), John Doe (85), John Smith (78)
+        let results = Array.from(collection.values())
+        expect(results.map((r) => r.name)).toEqual([
+          `Jane Doe`,
+          `John Doe`,
+          `John Smith`,
+        ])
+
+        // Update John Smith's score to be highest
+        const johnSmith = initialPersons.find((p) => p.id === `3`)!
+        const updatedJohnSmith: Person = {
+          ...johnSmith,
+          profile: {
+            ...johnSmith.profile!,
+            score: 95, // Higher than Jane's 92
+          },
+        }
+
+        personsCollection.utils.begin()
+        personsCollection.utils.write({
+          type: `update`,
+          value: updatedJohnSmith,
+        })
+        personsCollection.utils.commit()
+
+        // Order should now be John Smith (95), Jane (92), John Doe (85)
+        results = Array.from(collection.values())
+        expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
+          `Jane Doe`,
+          `John Doe`,
+        ])
+        expect(results.map((r) => r.score)).toEqual([95, 92, 85])
+      })
+
+      it(`handles string ordering on nested properties`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.address?.city, `asc`)
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              city: persons.address?.city,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(3)
+
+        // Should be ordered: undefined, Los Angeles, New York (undefined sorts first)
+        // Note: undefined values in ORDER BY sort first in our implementation
+        expect(results.map((r) => r.city)).toEqual([
+          undefined,
+          `Los Angeles`,
+          `New York`,
+        ])
+        expect(results.map((r) => r.name)).toEqual([
+          `John Smith`,
+          `Jane Doe`,
+          `John Doe`,
         ])
       })
     })

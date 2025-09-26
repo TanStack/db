@@ -9,7 +9,7 @@ import {
 } from "@tanstack/db"
 import { nextTick, ref, watchEffect } from "vue"
 import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 
 type Person = {
   id: string

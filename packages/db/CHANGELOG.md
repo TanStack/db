@@ -1,5 +1,228 @@
 # @tanstack/db
 
+## 0.4.1
+
+### Patch Changes
+
+- Implement idle cleanup for collection garbage collection ([#590](https://github.com/TanStack/db/pull/590))
+
+  Collection cleanup operations now use `requestIdleCallback()` to prevent blocking the UI thread during garbage collection. This improvement ensures better performance by scheduling cleanup during browser idle time rather than immediately when collections have no active subscribers.
+
+  **Key improvements:**
+  - Non-blocking cleanup operations that don't interfere with user interactions
+  - Automatic fallback to `setTimeout` for older browsers without `requestIdleCallback` support
+  - Proper callback management to prevent race conditions during cleanup rescheduling
+  - Maintains full backward compatibility with existing collection lifecycle behavior
+
+  This addresses performance concerns where collection cleanup could cause UI thread blocking during active application usage.
+
+## 0.4.0
+
+### Minor Changes
+
+- Let collection.subscribeChanges return a subscription object. Move all data loading code related to optimizations into that subscription object. ([#564](https://github.com/TanStack/db/pull/564))
+
+### Patch Changes
+
+- optimise the live query graph execution by removing recursive calls to graph.run ([#564](https://github.com/TanStack/db/pull/564))
+
+- Refactor the main Collection class into smaller classes to make it easier to maintain. ([#560](https://github.com/TanStack/db/pull/560))
+
+- Updated dependencies [[`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58), [`89b1c41`](https://github.com/TanStack/db/commit/89b1c414937b021186cf128300d279d1cb4f51fe)]:
+  - @tanstack/db-ivm@0.1.8
+
+## 0.3.2
+
+### Patch Changes
+
+- Added a new events system for subscribing to status changes and other internal events. ([#555](https://github.com/TanStack/db/pull/555))
+
+## 0.3.1
+
+### Patch Changes
+
+- Fix `stateWhenReady()` and `toArrayWhenReady()` methods to consistently wait for collections to be ready by using `preload()` internally. This ensures the collection starts loading if needed rather than just waiting passively. ([#565](https://github.com/TanStack/db/pull/565))
+
+## 0.3.0
+
+### Minor Changes
+
+- Fix transaction error handling to match documented behavior and preserve error identity ([#558](https://github.com/TanStack/db/pull/558))
+
+  ### Breaking Changes
+  - `commit()` now throws errors when the mutation function fails (previously returned a failed transaction)
+
+  ### Bug Fixes
+  1. **Fixed commit() not throwing errors** - The `commit()` method now properly throws errors when the mutation function fails, matching the documented behavior. Both `await tx.commit()` and `await tx.isPersisted.promise` now work correctly in try/catch blocks.
+
+  ### Migration Guide
+
+  If you were catching errors from `commit()` by checking the transaction state:
+
+  ```js
+  // Before - commit() didn't throw
+  await tx.commit()
+  if (tx.state === "failed") {
+    console.error("Failed:", tx.error)
+  }
+
+  // After - commit() now throws
+  try {
+    await tx.commit()
+  } catch (error) {
+    console.error("Failed:", error)
+  }
+  ```
+
+### Patch Changes
+
+- Improve mutation merging from crude replacement to sophisticated merge logic ([#557](https://github.com/TanStack/db/pull/557))
+
+  Previously, mutations were simply replaced when operating on the same item. Now mutations are intelligently merged based on their operation types (insert vs update vs delete), reducing network overhead and better preserving user intent.
+
+## 0.2.5
+
+### Patch Changes
+
+- Refactor of the types of collection config factories for better type inference. ([#530](https://github.com/TanStack/db/pull/530))
+
+- Define BaseCollectionConfig interface and let all collections extend it. ([#531](https://github.com/TanStack/db/pull/531))
+
+- Updated dependencies [[`c58cec9`](https://github.com/TanStack/db/commit/c58cec9eb3f5fc72453793cfd6842387621a63d3)]:
+  - @tanstack/db-ivm@0.1.7
+
+## 0.2.4
+
+### Patch Changes
+
+- optimise key loading into query graph ([#526](https://github.com/TanStack/db/pull/526))
+
+- Fix a bug where selecting a prop that used a built in object such as a Date would result in incorrect types in the result object. ([#524](https://github.com/TanStack/db/pull/524))
+
+- Updated dependencies [[`92febbf`](https://github.com/TanStack/db/commit/92febbf1feaa1d46f8cc4d7a4ea0d44cd5f85256)]:
+  - @tanstack/db-ivm@0.1.6
+
+## 0.2.3
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`a9878ad`](https://github.com/TanStack/db/commit/a9878ad58b71c3a2d10c03d75179a793bccf4ffc)]:
+  - @tanstack/db-ivm@0.1.5
+
+## 0.2.2
+
+### Patch Changes
+
+- fix a bug where a live query with a custom getKey would not update correctly because the source key was being used instead of the custom key for presence checks. ([#521](https://github.com/TanStack/db/pull/521))
+
+- Updated dependencies [[`c11eb51`](https://github.com/TanStack/db/commit/c11eb51fe24bb1c4c8529bcd34467af4e6542c71)]:
+  - @tanstack/db-ivm@0.1.4
+
+## 0.2.1
+
+### Patch Changes
+
+- export the new `isUndefined` and `isNull` query builder functions ([#515](https://github.com/TanStack/db/pull/515))
+
+## 0.2.0
+
+### Minor Changes
+
+- ## Enhanced Ref System with Nested Optional Properties ([#386](https://github.com/TanStack/db/pull/386))
+
+  Comprehensive refactor of the ref system to properly support nested structures and optionality, aligning the type system with JavaScript's optional chaining behavior.
+
+  ### ✨ New Features
+  - **Nested Optional Properties**: Full support for deeply nested optional objects (`employees.profile?.bio`, `orders.customer?.address?.street`)
+  - **Enhanced Type Safety**: Optional types now correctly typed as `RefProxy<T> | undefined` with optionality outside the ref
+  - **New Query Functions**: Added `isUndefined`, `isNull` for proper null/undefined checks
+  - **Improved JOIN Handling**: Fixed optionality in JOIN operations and multiple GROUP BY support
+
+  ### ⚠️ Breaking Changes
+
+  **IMPORTANT**: Code that previously ignored optionality now requires proper optional chaining syntax.
+
+  ```typescript
+  // Before (worked but type-unsafe)
+  employees.profile.bio // ❌ Now throws type error
+
+  // After (correct and type-safe)
+  employees.profile?.bio // ✅ Required syntax
+  ```
+
+  ### Migration
+
+  Add `?.` when accessing potentially undefined nested properties
+
+### Patch Changes
+
+- fix count aggregate function (evaluate only not null field values like SQL count) ([#453](https://github.com/TanStack/db/pull/453))
+
+- fix a bug where distinct was not applied to queries using a join ([#510](https://github.com/TanStack/db/pull/510))
+
+- Fix bug where too much data would be loaded when the lazy collection of a join contains an offset and/or limit clause. ([#508](https://github.com/TanStack/db/pull/508))
+
+- Refactored `select` improving spread (`...obj`) support and enabling nested projection. ([#389](https://github.com/TanStack/db/pull/389))
+
+- fix a bug that prevented chaining joins (joining collectionB to collectionA, then collectionC to collectionB) within one query without using a subquery ([#511](https://github.com/TanStack/db/pull/511))
+
+- Updated dependencies [[`08303e6`](https://github.com/TanStack/db/commit/08303e645974db97e10b2aca0031abcbce027dd6), [`0f6fb37`](https://github.com/TanStack/db/commit/0f6fb373d56177282552be5fb61e5bb32aeb09bb), [`0be4e2c`](https://github.com/TanStack/db/commit/0be4e2cf2b57a5e204f43c04457ddacc3532bd08)]:
+  - @tanstack/db-ivm@0.1.3
+
+## 0.1.12
+
+### Patch Changes
+
+- Fixes a bug where optimized joins would miss data ([#501](https://github.com/TanStack/db/pull/501))
+
+## 0.1.11
+
+### Patch Changes
+
+- fix: improve InvalidSourceError message clarity ([#488](https://github.com/TanStack/db/pull/488))
+
+  The InvalidSourceError now provides a clear, actionable error message that:
+  - Explicitly states the problem is passing a non-Collection/non-subquery to a live query
+  - Includes the alias name to help identify which source is problematic
+  - Provides guidance on what should be passed instead (Collection instances or QueryBuilder subqueries)
+
+  This replaces the generic "Invalid source" message with helpful debugging information.
+
+## 0.1.10
+
+### Patch Changes
+
+- Fixed an optimization bug where orderBy clauses using a single-column array were not recognized as optimizable. Queries that order by a single column are now correctly optimized even when specified as an array. ([#477](https://github.com/TanStack/db/pull/477))
+
+- fix an bug where a live query that used joins could become stuck empty when its remounted/resubscribed ([#484](https://github.com/TanStack/db/pull/484))
+
+- fixed a bug where a pending sync transaction could be applied early when an optimistic mutation was resolved or rolled back ([#482](https://github.com/TanStack/db/pull/482))
+
+- Add support for queries to order results based on aggregated values ([#481](https://github.com/TanStack/db/pull/481))
+
+## 0.1.9
+
+### Patch Changes
+
+- Fix handling of Temporal objects in proxy's deepClone and deepEqual functions ([#434](https://github.com/TanStack/db/pull/434))
+  - Temporal objects (like Temporal.ZonedDateTime) are now properly preserved during cloning instead of being converted to empty objects
+  - Added detection for all Temporal API object types via Symbol.toStringTag
+  - Temporal objects are returned directly from deepClone since they're immutable
+  - Added proper equality checking for Temporal objects using their built-in equals() method
+  - Prevents unnecessary proxy creation for immutable Temporal objects
+
+## 0.1.8
+
+### Patch Changes
+
+- Fix bug that caused initial query results to have too few rows when query has orderBy, limit, and where clauses. ([#461](https://github.com/TanStack/db/pull/461))
+
+- fix disabling of gc by setting `gcTime: 0` on the collection options ([#463](https://github.com/TanStack/db/pull/463))
+
+- docs: electric-collection reference page ([#429](https://github.com/TanStack/db/pull/429))
+
 ## 0.1.7
 
 ### Patch Changes

@@ -165,13 +165,16 @@ export function sum<T>(
 /**
  * Creates a count aggregate function
  */
-export function count<T>(): AggregateFunction<T, number, number> {
+export function count<T>(
+  valueExtractor: (value: T) => any = (v) => v
+): AggregateFunction<T, number, number> {
   return {
-    preMap: () => 1,
+    // Count only not-null values (the `== null` comparison gives true for both null and undefined)
+    preMap: (data: T) => (valueExtractor(data) == null ? 0 : 1),
     reduce: (values: Array<[number, number]>) => {
       let totalCount = 0
-      for (const [_, multiplicity] of values) {
-        totalCount += multiplicity
+      for (const [nullMultiplier, multiplicity] of values) {
+        totalCount += nullMultiplier * multiplicity
       }
       return totalCount
     },
