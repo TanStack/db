@@ -144,6 +144,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        if (a instanceof Date && b instanceof Date) {
+          return a.valueOf() == b.valueOf()
+        }
         return a === b
       }
     }

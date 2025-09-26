@@ -214,19 +214,21 @@ export function avg<T>(
  * Creates a min aggregate function that computes the minimum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function min<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
-): AggregateFunction<T, number, number> {
+export function min<T, V extends number | Date | bigint>(
+  valueExtractor: (value: T) => V = (v) => v as unknown as V
+): AggregateFunction<T, V, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
-    reduce: (values: Array<[number, number]>) => {
-      let minValue = Number.POSITIVE_INFINITY
+    reduce: (values) => {
+      let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (value < minValue) {
+        if (minValue && value < minValue) {
+          minValue = value
+        } else if (!minValue) {
           minValue = value
         }
       }
-      return minValue === Number.POSITIVE_INFINITY ? 0 : minValue
+      return minValue ?? (0 as V)
     },
   }
 }
@@ -235,19 +237,21 @@ export function min<T>(
  * Creates a max aggregate function that computes the maximum value in a group
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
-export function max<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
-): AggregateFunction<T, number, number> {
+export function max<T, V extends number | Date | bigint>(
+  valueExtractor: (value: T) => V = (v) => v as unknown as V
+): AggregateFunction<T, V, V> {
   return {
     preMap: (data: T) => valueExtractor(data),
-    reduce: (values: Array<[number, number]>) => {
-      let maxValue = Number.NEGATIVE_INFINITY
+    reduce: (values) => {
+      let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (value > maxValue) {
+        if (maxValue && value > maxValue) {
+          maxValue = value
+        } else if (!maxValue) {
           maxValue = value
         }
       }
-      return maxValue === Number.NEGATIVE_INFINITY ? 0 : maxValue
+      return maxValue ?? (0 as V)
     },
   }
 }
