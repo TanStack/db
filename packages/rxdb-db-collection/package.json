@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/rxdb-db-collection",
   "description": "RxDB collection for TanStack DB",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "dependencies": {
     "rxdb": "16.19.0",
     "@standard-schema/spec": "^1.0.0",
