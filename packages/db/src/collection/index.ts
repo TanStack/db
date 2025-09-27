@@ -133,8 +133,26 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
+    single?: never
   }
-): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>>
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
+  single?: never
+}
+
+// Overload for when schema is provided and single is true
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+    schema: T
+    utils?: TUtils
+    single: true
+  }
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
+  single: true
+}
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -146,8 +164,23 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
+    single?: never
   }
-): Collection<T, TKey, TUtils, never, T>
+): Collection<T, TKey, TUtils, never, T> & { single?: never }
+
+// Overload for when no schema is provided and single is true
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<T, TKey, never> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils?: TUtils
+    single: true
+  }
+): Collection<T, TKey, TUtils, never, T> & { single: true }
 
 // Implementation
 export function createCollection(

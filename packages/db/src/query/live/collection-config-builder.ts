@@ -7,7 +7,7 @@ import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection/index.js"
 import type {
-  CollectionConfig,
+  CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
   SyncConfig,
@@ -79,7 +79,7 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfig<TResult> {
+  getConfig(): CollectionConfigSingleRowOption<TResult> {
     return {
       id: this.id,
       getKey:

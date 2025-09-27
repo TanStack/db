@@ -573,7 +573,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-  single: TContext[`single`]
+  single: TContext[`single`] extends true ? true : false
 }
 
 /**

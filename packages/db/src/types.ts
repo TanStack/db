@@ -488,11 +488,6 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
-
-  /**
-   * If enabled the collection will return a single object instead of an array
-   */
-  single?: true
 }
 
 export interface CollectionConfig<
@@ -501,6 +496,18 @@ export interface CollectionConfig<
   TSchema extends StandardSchemaV1 = never,
 > extends BaseCollectionConfig<T, TKey, TSchema> {
   sync: SyncConfig<T, TKey>
+}
+
+// Only used for live query collections
+export interface CollectionConfigSingleRowOption<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> extends CollectionConfig<T, TKey, TSchema> {
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  single?: true
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<

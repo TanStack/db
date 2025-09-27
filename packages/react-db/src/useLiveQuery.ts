@@ -11,6 +11,7 @@ import type {
   GetResult,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  CollectionConfigSingleRowOption,
   QueryBuilder,
   WithResultSize,
 } from "@tanstack/db"
@@ -275,11 +276,31 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils>
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & { single?: never }
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
+  status: CollectionStatus // Can't be disabled for pre-created live query collections
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true // Always true for pre-created live query collections
+}
+
+// Overload 8: Accept pre-created live query collection with single: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & { single: true }
+): {
+  state: Map<TKey, TResult>
+  data: TResult | undefined
+  collection: Collection<TResult, TKey, TUtils> & { single: true }
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
@@ -478,7 +499,9 @@ export function useLiveQuery(
     } else {
       // Capture a stable view of entries for this snapshot to avoid tearing
       const entries = Array.from(snapshot.collection.entries())
-      const single = snapshot.collection.config.single
+      const config: CollectionConfigSingleRowOption<any, any, any> =
+        snapshot.collection.config
+      const single = config.single
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 
