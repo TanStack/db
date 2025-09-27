@@ -69,7 +69,7 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
     : TQueryFn
-
+  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -246,6 +246,19 @@ export interface QueryCollectionUtils<
  *     onDelete: async ({ transaction }) => {
  *       await api.deleteTodos(transaction.mutations.map(m => m.key))
  *     }
+ *   })
+ * )
+ *
+ * @example
+ * // The select option extracts the items array from a response with metadata
+ * const todosCollection = createCollection(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: async () => fetch('/api/todos').then(r => r.json()),
+ *     select: (data) => data.items, // Extract the array of items
+ *     queryClient,
+ *     schema: todoSchema,
+ *     getKey: (item) => item.id,
  *   })
  * )
  */
