@@ -262,10 +262,10 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions({
         queryClient,
         queryKey: [`schema-priority`],
-        // @ts-expect-error – queryFn doesn't match the schema type
         queryFn: async () => {
           return [] as Array<UserType>
         },
+        // @ts-expect-error – queryFn doesn't match the schema type
         schema: userSchema,
         getKey: (item) => item.id,
       })
@@ -298,6 +298,77 @@ describe(`Query collection type resolution tests`, () => {
 
       const collection = createCollection(options)
       expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+    })
+  })
+
+  describe(`select type inference`, () => {
+    it(`queryFn type inference`, () => {
+      const dataSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`x-queryFn-infer`],
+        queryFn: async (): Promise<Array<z.infer<typeof dataSchema>>> => {
+          return [] as Array<z.infer<typeof dataSchema>>
+        },
+        schema: dataSchema,
+        getKey: (item) => item.id,
+      })
+
+      type ExpectedType = z.infer<typeof dataSchema>
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
+    })
+
+    it(`select properly extracts array from wrapped response`, () => {
+      const userData = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      type UserDataType = z.infer<typeof userData>
+
+      type MetaDataType<T> = {
+        metaDataOne: string
+        metaDataTwo: string
+        data: T
+      }
+
+      const metaDataObject: ResponseType = {
+        metaDataOne: `example meta data`,
+        metaDataTwo: `example meta data`,
+        data: [
+          {
+            id: `1`,
+            name: `carter`,
+            email: `c@email.com`,
+          },
+        ],
+      }
+
+      type ResponseType = MetaDataType<Array<UserDataType>>
+
+      const selectUserData = (data: ResponseType) => {
+        return data.data
+      }
+
+      queryCollectionOptions({
+        queryClient,
+        queryKey: [`x-queryFn-infer`],
+        queryFn: async (): Promise<ResponseType> => {
+          return metaDataObject
+        },
+        select: selectUserData,
+        schema: userData,
+        getKey: (item) => item.id,
+      })
+
+      // Should infer ResponseType as select parameter type
+      expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
     })
   })
 })
