@@ -1,13 +1,13 @@
+import { ensureIndexForExpression } from "../indexes/auto-index.js"
+import { and } from "../query/index.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
-import { ensureIndexForExpression } from "./indexes/auto-index.js"
-import { and } from "./query/index.js"
-import type { BasicExpression } from "./query/ir.js"
-import type { BaseIndex } from "./indexes/base-index.js"
-import type { ChangeMessage } from "./types.js"
-import type { Collection } from "./collection.js"
+import type { BasicExpression } from "../query/ir.js"
+import type { BaseIndex } from "../indexes/base-index.js"
+import type { ChangeMessage } from "../types.js"
+import type { CollectionImpl } from "./index.js"
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
@@ -41,7 +41,7 @@ export class CollectionSubscription {
   private orderByIndex: BaseIndex<string | number> | undefined
 
   constructor(
-    private collection: Collection<any, any, any, any, any>,
+    private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
     private options: CollectionSubscriptionOptions
   ) {

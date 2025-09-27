@@ -6,7 +6,7 @@ import {
   gt,
   or,
 } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 
 // Complex nested type for testing with optional properties

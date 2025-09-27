@@ -1,17 +1,17 @@
 import {
   createSingleRowRefProxy,
   toExpression,
-} from "./query/builder/ref-proxy"
-import { compileSingleRowExpression } from "./query/compiler/evaluators.js"
-import { optimizeExpressionWithIndexes } from "./utils/index-optimization.js"
+} from "../query/builder/ref-proxy"
+import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
+import { optimizeExpressionWithIndexes } from "../utils/index-optimization.js"
 import type {
   ChangeMessage,
   CurrentStateAsChangesOptions,
   SubscribeChangesOptions,
-} from "./types"
-import type { Collection } from "./collection"
-import type { SingleRowRefProxy } from "./query/builder/ref-proxy"
-import type { BasicExpression } from "./query/ir.js"
+} from "../types"
+import type { Collection } from "./index.js"
+import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
+import type { BasicExpression } from "../query/ir.js"
 
 /**
  * Interface for a collection-like object that provides the necessary methods

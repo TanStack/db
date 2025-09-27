@@ -1,4 +1,4 @@
-import { CollectionImpl } from "../../collection.js"
+import { CollectionImpl } from "../../collection/index.js"
 import {
   Aggregate as AggregateExpr,
   CollectionRef,

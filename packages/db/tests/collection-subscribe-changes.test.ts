@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
 import { PropRef } from "../src/query/ir"
@@ -679,15 +679,15 @@ describe(`Collection.subscribeChanges`, () => {
       syncCollection.config.sync.sync({
         collection: syncCollection,
         begin: () => {
-          syncCollection.pendingSyncedTransactions.push({
+          syncCollection._state.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
           })
         },
         write: (messageWithoutKey: any) => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
           const message = { ...messageWithoutKey, key }
@@ -695,8 +695,8 @@ describe(`Collection.subscribeChanges`, () => {
         },
         commit: () => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           pendingTransaction.committed = true
           syncCollection.commitPendingTransactions()
@@ -937,8 +937,8 @@ describe(`Collection.subscribeChanges`, () => {
     const tx2 = collection.insert({ id: 3, value: `optimistic insert` })
 
     // Verify optimistic state exists
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
-    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
     expect(collection.state.get(1)?.value).toBe(`optimistic update 1`)
     expect(collection.state.get(3)?.value).toBe(`optimistic insert`)
 

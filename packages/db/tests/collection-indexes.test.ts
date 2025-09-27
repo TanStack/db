@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import {
   and,
@@ -15,7 +15,7 @@ import {
 } from "../src/query/builder/functions"
 import { PropRef } from "../src/query/ir"
 import { expectIndexUsage, withIndexTracking } from "./utils"
-import type { Collection } from "../src/collection"
+import type { Collection } from "../src/collection/index.js"
 import type { MutationFn, PendingMutation } from "../src/types"
 
 interface TestItem {

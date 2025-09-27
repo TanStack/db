@@ -1,5 +1,13 @@
 # @tanstack/db-ivm
 
+## 0.1.8
+
+### Patch Changes
+
+- Fix a bug with distinct operator ([#564](https://github.com/TanStack/db/pull/564))
+
+- Change the ivm indexes to use a three level `key->prefix->hash->value` structure, only falling back to structural hashing when there are multiple values for a single prefix. This removes all hashing during the initial run of a query delivering a 2-3x speedup. ([#549](https://github.com/TanStack/db/pull/549))
+
 ## 0.1.7
 
 ### Patch Changes

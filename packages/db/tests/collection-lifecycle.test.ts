@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection.js"
+import { createCollection } from "../src/collection/index.js"
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -25,6 +25,10 @@ describe(`Collection Lifecycle Management`, () => {
       timeoutCallbacks.delete(id)
     })
 
+    // Mock requestIdleCallback - in tests, it falls back to setTimeout
+    // which we're already mocking, so the idle callback will be triggered
+    // through our mockSetTimeout
+
     global.setTimeout = mockSetTimeout as any
     global.clearTimeout = mockClearTimeout as any
   })
@@ -41,6 +45,14 @@ describe(`Collection Lifecycle Management`, () => {
       callback()
       timeoutCallbacks.delete(id)
     }
+  }
+
+  const triggerAllTimeouts = () => {
+    const callbacks = Array.from(timeoutCallbacks.entries())
+    callbacks.forEach(([id, callback]) => {
+      callback()
+      timeoutCallbacks.delete(id)
+    })
   }
 
   describe(`Collection Status Tracking`, () => {
@@ -200,21 +212,21 @@ describe(`Collection Lifecycle Management`, () => {
       })
 
       // No subscribers initially
-      expect((collection as any).activeSubscribersCount).toBe(0)
+      expect(collection.subscriberCount).toBe(0)
 
       // Subscribe to changes
       const subscription1 = collection.subscribeChanges(() => {})
-      expect((collection as any).activeSubscribersCount).toBe(1)
+      expect(collection.subscriberCount).toBe(1)
 
       const subscription2 = collection.subscribeChanges(() => {})
-      expect((collection as any).activeSubscribersCount).toBe(2)
+      expect(collection.subscriberCount).toBe(2)
 
       // Unsubscribe
       subscription1.unsubscribe()
-      expect((collection as any).activeSubscribersCount).toBe(1)
+      expect(collection.subscriberCount).toBe(1)
 
       subscription2.unsubscribe()
-      expect((collection as any).activeSubscribersCount).toBe(0)
+      expect(collection.subscriberCount).toBe(0)
     })
 
     it(`should handle rapid subscribe/unsubscribe correctly`, () => {
@@ -230,9 +242,9 @@ describe(`Collection Lifecycle Management`, () => {
       // Subscribe and immediately unsubscribe multiple times
       for (let i = 0; i < 5; i++) {
         const subscription = collection.subscribeChanges(() => {})
-        expect((collection as any).activeSubscribersCount).toBe(1)
+        expect(collection.subscriberCount).toBe(1)
         subscription.unsubscribe()
-        expect((collection as any).activeSubscribersCount).toBe(0)
+        expect(collection.subscriberCount).toBe(0)
 
         // Should start GC timer each time
         expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
@@ -300,13 +312,17 @@ describe(`Collection Lifecycle Management`, () => {
       const subscription = collection.subscribeChanges(() => {})
       subscription.unsubscribe()
 
-      expect(collection.status).toBe(`loading`) // or "ready"
+      expect(collection.status).toBe(`loading`)
 
-      // Trigger GC timeout
-      const timerId = mockSetTimeout.mock.results[0]?.value
-      if (timerId) {
-        triggerTimeout(timerId)
+      // Trigger GC timeout - this will schedule the idle cleanup
+      const gcTimerId = mockSetTimeout.mock.results[0]?.value
+      if (gcTimerId) {
+        triggerTimeout(gcTimerId)
       }
+
+      // Now trigger all remaining timeouts to handle the idle callback
+      // (which is implemented via setTimeout in our polyfill)
+      triggerAllTimeouts()
 
       expect(collection.status).toBe(`cleaned-up`)
     })

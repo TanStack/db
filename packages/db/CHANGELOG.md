@@ -1,5 +1,36 @@
 # @tanstack/db
 
+## 0.4.1
+
+### Patch Changes
+
+- Implement idle cleanup for collection garbage collection ([#590](https://github.com/TanStack/db/pull/590))
+
+  Collection cleanup operations now use `requestIdleCallback()` to prevent blocking the UI thread during garbage collection. This improvement ensures better performance by scheduling cleanup during browser idle time rather than immediately when collections have no active subscribers.
+
+  **Key improvements:**
+  - Non-blocking cleanup operations that don't interfere with user interactions
+  - Automatic fallback to `setTimeout` for older browsers without `requestIdleCallback` support
+  - Proper callback management to prevent race conditions during cleanup rescheduling
+  - Maintains full backward compatibility with existing collection lifecycle behavior
+
+  This addresses performance concerns where collection cleanup could cause UI thread blocking during active application usage.
+
+## 0.4.0
+
+### Minor Changes
+
+- Let collection.subscribeChanges return a subscription object. Move all data loading code related to optimizations into that subscription object. ([#564](https://github.com/TanStack/db/pull/564))
+
+### Patch Changes
+
+- optimise the live query graph execution by removing recursive calls to graph.run ([#564](https://github.com/TanStack/db/pull/564))
+
+- Refactor the main Collection class into smaller classes to make it easier to maintain. ([#560](https://github.com/TanStack/db/pull/560))
+
+- Updated dependencies [[`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58), [`89b1c41`](https://github.com/TanStack/db/commit/89b1c414937b021186cf128300d279d1cb4f51fe)]:
+  - @tanstack/db-ivm@0.1.8
+
 ## 0.3.2
 
 ### Patch Changes
