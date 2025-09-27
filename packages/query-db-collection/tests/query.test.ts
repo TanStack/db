@@ -1427,7 +1427,6 @@ describe(`QueryCollection`, () => {
       const updatedItem = cacheAfterUpdate.find((item) => item.id === `1`)
       expect(updatedItem?.name).toBe(`Updated Item 1`)
       expect(updatedItem?.value).toBe(10) // Original value preserved
-      // console.log(cacheAfterUpdate)
       // Test writeDelete updates cache
       collection.utils.writeDelete(`2`)
 
