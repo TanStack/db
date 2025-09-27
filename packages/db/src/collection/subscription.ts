@@ -1,10 +1,10 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and } from "../query/index.js"
+import { and, gt, lt } from "../query/index.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
-import type { BasicExpression } from "../query/ir.js"
+import { Value, type BasicExpression, type OrderBy } from "../query/ir.js"
 import type { BaseIndex } from "../indexes/base-index.js"
 import type { ChangeMessage } from "../types.js"
 import type { CollectionImpl } from "./index.js"
@@ -15,8 +15,9 @@ type RequestSnapshotOptions = {
 }
 
 type RequestLimitedSnapshotOptions = {
-  minValue?: any
+  orderBy: OrderBy
   limit: number
+  minValue?: any
 }
 
 type CollectionSubscriptionOptions = {
@@ -117,6 +118,13 @@ export class CollectionSubscription {
       this.loadedInitialState = true
     }
 
+    // Request the sync layer to load more data
+    // don't await it, we will load the data into the collection when it comes in
+    this.collection.syncMore({
+      where: stateOpts.where,
+    })
+
+    // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
 
     if (snapshot === undefined) {
@@ -140,7 +148,12 @@ export class CollectionSubscription {
    * It uses that range index to load the items in the order of the index.
    * Note: it does not send keys that have already been sent before.
    */
-  requestLimitedSnapshot({ limit, minValue }: RequestLimitedSnapshotOptions) {
+  requestLimitedSnapshot({
+    orderBy,
+    limit,
+    minValue,
+  }: RequestLimitedSnapshotOptions) {
+    console.log("in requestLimitedSnapshot")
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -190,6 +203,23 @@ export class CollectionSubscription {
     }
 
     this.callback(changes)
+
+    let whereWithValueFilter = where
+    if (typeof minValue !== `undefined`) {
+      // Only request data that we haven't seen yet (i.e. is bigger than the minValue)
+      const { expression, compareOptions } = orderBy[0]!
+      const operator = compareOptions.direction === `asc` ? gt : lt
+      const valueFilter = operator(expression, new Value(minValue))
+      whereWithValueFilter = where ? and(where, valueFilter) : valueFilter
+    }
+
+    // Request the sync layer to load more data
+    // don't await it, we will load the data into the collection when it comes in
+    this.collection.syncMore({
+      where: whereWithValueFilter,
+      limit,
+      orderBy,
+    })
   }
 
   /**

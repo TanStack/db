@@ -12,12 +12,15 @@ import {
   ExpectedNumberInAwaitTxIdError,
   TimeoutWaitingForTxIdError,
 } from "./errors"
+import { compileSQL } from "./sql-compiler"
 import type {
   BaseCollectionConfig,
+  Collection,
   CollectionConfig,
   DeleteMutationFnParams,
   Fn,
   InsertMutationFnParams,
+  OnLoadMoreOptions,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -416,15 +419,21 @@ function createElectricSync<T extends Row<unknown>>(
         }
       })
 
-      // Return the unsubscribe function
-      return () => {
-        // Unsubscribe from the stream
-        unsubscribeStream()
-        // Abort the abort controller to stop the stream
-        abortController.abort()
+      return {
+        onLoadMore: (opts) => {
+          const snapshotParams = compileSQL<T>(opts)
+          return stream.requestSnapshot(snapshotParams)
+        },
+        cleanup: () => {
+          // Unsubscribe from the stream
+          unsubscribeStream()
+          // Abort the abort controller to stop the stream
+          abortController.abort()
+        },
       }
     },
     // Expose the getSyncMetadata function
     getSyncMetadata,
   }
 }
+
