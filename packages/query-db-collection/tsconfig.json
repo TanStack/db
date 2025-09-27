@@ -12,7 +12,9 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react",
     "paths": {
-      "@tanstack/store": ["../store/src"]
+      "@tanstack/store": ["../store/src"],
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"]
     }
   },
   "include": ["src", "tests", "vite.config.ts"],

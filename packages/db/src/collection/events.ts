@@ -70,7 +70,7 @@ export class CollectionEventsManager {
     this.listeners.get(event)!.add(callback)
 
     return () => {
-      this.listeners.get(event)!.delete(callback)
+      this.listeners.get(event)?.delete(callback)
     }
   }
 
