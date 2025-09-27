@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/collection/index.js"
+import type { Collection } from "../src/collection/index.js"
 
 describe(`Collection Events System`, () => {
-  let collection: ReturnType<typeof createCollection>
+  let collection: Collection
   let mockSync: ReturnType<typeof vi.fn>
 
   beforeEach(() => {

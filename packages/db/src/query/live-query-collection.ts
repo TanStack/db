@@ -35,12 +35,20 @@ export function liveQueryCollectionOptions<
   TResult extends object = GetResult<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
-): CollectionConfig<TResult> {
+): TContext extends {
+  single: true
+}
+  ? CollectionConfig<TResult> & { single: true }
+  : CollectionConfig<TResult> & { single?: never } {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
     TResult
   >(config)
-  return collectionConfigBuilder.getConfig()
+  return collectionConfigBuilder.getConfig() as TContext extends {
+    single: true
+  }
+    ? CollectionConfig<TResult> & { single: true }
+    : CollectionConfig<TResult> & { single?: never }
 }
 
 /**
@@ -83,7 +91,9 @@ export function createLiveQueryCollection<
   TResult extends object = GetResult<TContext>,
 >(
   query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
-): Collection<TResult, string | number, {}>
+): TContext extends { single: true }
+  ? Collection<TResult, string | number, {}> & { single: true }
+  : Collection<TResult, string | number, {}> & { single?: never }
 
 // Overload 2: Accept full config object with optional utilities
 export function createLiveQueryCollection<
@@ -92,7 +102,9 @@ export function createLiveQueryCollection<
   TUtils extends UtilsRecord = {},
 >(
   config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
-): Collection<TResult, string | number, TUtils>
+): TContext extends { single: true }
+  ? Collection<TResult, string | number, TUtils> & { single: true }
+  : Collection<TResult, string | number, TUtils> & { single?: never }
 
 // Implementation
 export function createLiveQueryCollection<
@@ -103,7 +115,9 @@ export function createLiveQueryCollection<
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-): Collection<TResult, string | number, TUtils> {
+): TContext extends { single: true }
+  ? Collection<TResult, string | number, TUtils> & { single: true }
+  : Collection<TResult, string | number, TUtils> & { single?: never } {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
     // Simple query function case
@@ -113,7 +127,11 @@ export function createLiveQueryCollection<
       ) => QueryBuilder<TContext>,
     }
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
-    return bridgeToCreateCollection(options)
+    return bridgeToCreateCollection(options) as TContext extends {
+      single: true
+    }
+      ? Collection<TResult, string | number, TUtils> & { single: true }
+      : Collection<TResult, string | number, TUtils> & { single?: never }
   } else {
     // Config object case
     const config = configOrQuery as LiveQueryCollectionConfig<
@@ -124,7 +142,9 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection({
       ...options,
       utils: config.utils,
-    })
+    }) as TContext extends { single: true }
+      ? Collection<TResult, string | number, TUtils> & { single: true }
+      : Collection<TResult, string | number, TUtils> & { single?: never }
   }
 }
 
