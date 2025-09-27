@@ -102,7 +102,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: Array<GetResult<TContext>> | undefined
+  data: WithResultSize<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -121,7 +121,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: Array<GetResult<TContext>> | undefined
+  data: WithResultSize<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -176,7 +176,7 @@ export function useLiveQuery<
     | Map<string | number, GetResult<TContext>>
     | Map<TKey, TResult>
     | undefined
-  data: Array<GetResult<TContext>> | Array<TResult> | undefined
+  data: WithResultSize<TContext> | Array<TResult> | undefined
   collection:
     | Collection<GetResult<TContext>, string | number, {}>
     | Collection<TResult, TKey, TUtils>
