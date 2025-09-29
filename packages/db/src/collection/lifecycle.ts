@@ -2,6 +2,11 @@ import {
   CollectionInErrorStateError,
   InvalidCollectionStatusTransitionError,
 } from "../errors"
+import {
+  safeCancelIdleCallback,
+  safeRequestIdleCallback,
+} from "../utils/browser-polyfills"
+import type { IdleCallbackDeadline } from "../utils/browser-polyfills"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { CollectionConfig, CollectionStatus } from "../types"
 import type { CollectionEventsManager } from "./events"
@@ -29,6 +34,7 @@ export class CollectionLifecycleManager<
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
   public gcTimeoutId: ReturnType<typeof setTimeout> | null = null
+  private idleCallbackId: number | null = null
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -167,9 +173,8 @@ export class CollectionLifecycleManager<
 
     this.gcTimeoutId = setTimeout(() => {
       if (this.changes.activeSubscribersCount === 0) {
-        // We call the main collection cleanup, not just the one for the
-        // lifecycle manager
-        this.cleanup()
+        // Schedule cleanup during idle time to avoid blocking the UI thread
+        this.scheduleIdleCleanup()
       }
     }, gcTime)
   }
@@ -182,6 +187,77 @@ export class CollectionLifecycleManager<
     if (this.gcTimeoutId) {
       clearTimeout(this.gcTimeoutId)
       this.gcTimeoutId = null
+    }
+    // Also cancel any pending idle cleanup
+    if (this.idleCallbackId !== null) {
+      safeCancelIdleCallback(this.idleCallbackId)
+      this.idleCallbackId = null
+    }
+  }
+
+  /**
+   * Schedule cleanup to run during browser idle time
+   * This prevents blocking the UI thread during cleanup operations
+   */
+  private scheduleIdleCleanup(): void {
+    // Cancel any existing idle callback
+    if (this.idleCallbackId !== null) {
+      safeCancelIdleCallback(this.idleCallbackId)
+    }
+
+    // Schedule cleanup with a timeout of 1 second
+    // This ensures cleanup happens even if the browser is busy
+    this.idleCallbackId = safeRequestIdleCallback(
+      (deadline) => {
+        // Perform cleanup if we still have no subscribers
+        if (this.changes.activeSubscribersCount === 0) {
+          const cleanupCompleted = this.performCleanup(deadline)
+          // Only clear the callback ID if cleanup actually completed
+          if (cleanupCompleted) {
+            this.idleCallbackId = null
+          }
+        } else {
+          // No need to cleanup, clear the callback ID
+          this.idleCallbackId = null
+        }
+      },
+      { timeout: 1000 }
+    )
+  }
+
+  /**
+   * Perform cleanup operations, optionally in chunks during idle time
+   * @returns true if cleanup was completed, false if it was rescheduled
+   */
+  private performCleanup(deadline?: IdleCallbackDeadline): boolean {
+    // If we have a deadline, we can potentially split cleanup into chunks
+    // For now, we'll do all cleanup at once but check if we have time
+    const hasTime =
+      !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
+
+    if (hasTime) {
+      // Perform all cleanup operations
+      this.events.cleanup()
+      this.sync.cleanup()
+      this.state.cleanup()
+      this.changes.cleanup()
+      this.indexes.cleanup()
+
+      if (this.gcTimeoutId) {
+        clearTimeout(this.gcTimeoutId)
+        this.gcTimeoutId = null
+      }
+
+      this.hasBeenReady = false
+      this.onFirstReadyCallbacks = []
+
+      // Set status to cleaned-up
+      this.setStatus(`cleaned-up`)
+      return true
+    } else {
+      // If we don't have time, reschedule for the next idle period
+      this.scheduleIdleCleanup()
+      return false
     }
   }
 
@@ -201,21 +277,13 @@ export class CollectionLifecycleManager<
   }
 
   public cleanup(): void {
-    this.events.cleanup()
-    this.sync.cleanup()
-    this.state.cleanup()
-    this.changes.cleanup()
-    this.indexes.cleanup()
-
-    if (this.gcTimeoutId) {
-      clearTimeout(this.gcTimeoutId)
-      this.gcTimeoutId = null
+    // Cancel any pending idle cleanup
+    if (this.idleCallbackId !== null) {
+      safeCancelIdleCallback(this.idleCallbackId)
+      this.idleCallbackId = null
     }
 
-    this.hasBeenReady = false
-    this.onFirstReadyCallbacks = []
-
-    // Set status to cleaned-up
-    this.setStatus(`cleaned-up`)
+    // Perform cleanup immediately (used when explicitly called)
+    this.performCleanup()
   }
 }

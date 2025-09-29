@@ -1,3 +1,8 @@
+---
+title: Community Resources
+id: community-resources
+---
+
 # Community Resources
 
 This page contains a curated list of community-created packages, tools, and resources that extend or complement TanStack DB.
@@ -5,7 +10,7 @@ This page contains a curated list of community-created packages, tools, and reso
 ## Community Packages
 
 ### Dexie.js Integration (Unofficial)
-- **[tanstack-dexie-db-collection](https://github.com/yourusername/tanstack-dexie-db-collection)** - Community-maintained Dexie.js adapter for TanStack DB
+- **[tanstack-dexie-db-collection](https://github.com/HimanshuKumarDutt094/tanstack-dexie-db-collection)** - Community-maintained Dexie.js adapter for TanStack DB
   - Local persistence using [Dexie.js](https://dexie.org) (IndexedDB wrapper)
   - Lightweight integration for browser-based storage
   - Install: `npm install tanstack-dexie-db-collection`
