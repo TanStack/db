@@ -631,10 +631,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   findOne(): QueryBuilder<TContext & SingleResult> {
     return new BaseQueryBuilder({
       ...this.query,
-      // force to get only one result
       limit: 1,
-      // and the first result
-      offset: 0,
       singleResult: true,
     })
   }
