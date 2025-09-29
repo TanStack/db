@@ -1,6 +1,6 @@
+import * as React from "react"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
 import { useLiveQuery } from "@tanstack/react-db"
-import { useEffect } from "react"
 import { projectCollection, todoCollection } from "@/lib/collections"
 import { authClient } from "@/lib/auth-client"
 
@@ -33,7 +33,7 @@ function IndexRedirect() {
   const navigate = useNavigate()
   const { data: projects } = useLiveQuery((q) => q.from({ projectCollection }))
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (projects.length > 0) {
       const firstProject = projects[0]
       navigate({
