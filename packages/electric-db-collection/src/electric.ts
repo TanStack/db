@@ -16,12 +16,10 @@ import {
 import { compileSQL } from "./sql-compiler"
 import type {
   BaseCollectionConfig,
-  Collection,
   CollectionConfig,
   DeleteMutationFnParams,
   Fn,
   InsertMutationFnParams,
-  OnLoadMoreOptions,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -498,9 +496,9 @@ function createElectricSync<T extends Row<unknown>>(
       })
 
       return {
-        onLoadMore: (opts) => {
+        onLoadMore: async (opts) => {
           const snapshotParams = compileSQL<T>(opts)
-          return stream.requestSnapshot(snapshotParams)
+          await stream.requestSnapshot(snapshotParams)
         },
         cleanup: () => {
           // Unsubscribe from the stream
@@ -514,4 +512,3 @@ function createElectricSync<T extends Row<unknown>>(
     getSyncMetadata,
   }
 }
-
