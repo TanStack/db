@@ -96,8 +96,11 @@ export class CollectionLifecycleManager<
     allowReady: boolean = false
   ): void {
     if (newStatus === `ready` && !allowReady) {
+      // setStatus('ready') is an internal method that should not be called directly
+      // Instead, use markReady to transition to ready triggering the necessary events
+      // and side effects.
       throw new CollectionStateError(
-        `Cannot set status to anything other than ready, must use markReady instead`
+        `You can't directly call "setStatus('ready'). You must use markReady instead.`
       )
     }
     this.validateStatusTransition(this.status, newStatus)
