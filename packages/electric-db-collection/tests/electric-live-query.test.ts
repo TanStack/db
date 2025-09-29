@@ -386,13 +386,6 @@ describe.each([
 
     // The live query should not have emitted any changes
     // because there were no actual data changes
-    // BUG: Currently emits empty change arrays on up-to-date messages
-    if (changeNotifications.length > 0) {
-      console.log(
-        `BUG DETECTED: Live query emitted ${changeNotifications.length} change notifications on up-to-date with no data changes:`,
-        changeNotifications
-      )
-    }
     expect(changeNotifications).toHaveLength(0)
 
     // Verify the collection is still in ready state
@@ -435,13 +428,6 @@ describe.each([
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Should not have emitted any changes despite multiple up-to-date messages
-    // BUG: Currently emits empty change arrays for each up-to-date message
-    if (changeNotifications.length > 0) {
-      console.log(
-        `BUG DETECTED: Live query emitted ${changeNotifications.length} change notifications on multiple up-to-date messages with no data changes:`,
-        changeNotifications
-      )
-    }
     expect(changeNotifications).toHaveLength(0)
 
     // Verify collection state is still correct
