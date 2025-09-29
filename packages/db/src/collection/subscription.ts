@@ -1,5 +1,5 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and } from "../query/index.js"
+import { and } from "../query/builder/functions.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
