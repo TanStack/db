@@ -1,7 +1,6 @@
 import { MultiSet } from "../multiset.js"
 import { reduce } from "./reduce.js"
-import type { IStreamBuilder, PipedOperator } from "../types"
-import type { KeyValue } from "../types.js"
+import type { IStreamBuilder, KeyValue, PipedOperator } from "../types"
 
 interface TopKOptions {
   limit?: number
