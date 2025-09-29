@@ -1,5 +1,6 @@
-import * as React from "react"
+import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
+import type { FormEvent } from "react"
 import { authClient } from "@/lib/auth-client"
 
 export const Route = createFileRoute(`/login`)({
@@ -8,12 +9,12 @@ export const Route = createFileRoute(`/login`)({
 })
 
 function Layout() {
-  const [email, setEmail] = React.useState(``)
-  const [password, setPassword] = React.useState(``)
-  const [isLoading, setIsLoading] = React.useState(false)
-  const [currentError, setError] = React.useState(``)
+  const [email, setEmail] = useState(``)
+  const [password, setPassword] = useState(``)
+  const [isLoading, setIsLoading] = useState(false)
+  const [currentError, setError] = useState(``)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError(``)

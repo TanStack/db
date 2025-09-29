@@ -1,4 +1,4 @@
-import * as React from "react"
+import { useEffect, useState } from "react"
 import {
   Link,
   Outlet,
@@ -17,14 +17,14 @@ export const Route = createFileRoute(`/_authenticated`)({
 function AuthenticatedLayout() {
   const { data: session, isPending } = authClient.useSession()
   const navigate = useNavigate()
-  const [showNewProjectForm, setShowNewProjectForm] = React.useState(false)
-  const [newProjectName, setNewProjectName] = React.useState(``)
+  const [showNewProjectForm, setShowNewProjectForm] = useState(false)
+  const [newProjectName, setNewProjectName] = useState(``)
 
   const { data: projects, isLoading } = useLiveQuery((q) =>
     q.from({ projectCollection })
   )
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (session && projects.length === 0 && !isLoading) {
       projectCollection.insert({
         id: Math.floor(Math.random() * 100000),
