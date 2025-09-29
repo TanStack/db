@@ -355,7 +355,6 @@ function getAggregateFunction(aggExpr: Aggregate) {
     NamespacedRow,
   ]) => {
     const value = compiledExpr(namespacedRow)
-    // Ensure we return a number for numeric aggregate functions
     return typeof value === `number` || value instanceof Date
       ? value
       : value != null

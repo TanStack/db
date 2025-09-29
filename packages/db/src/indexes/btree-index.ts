@@ -1,5 +1,5 @@
 import { BTree } from "../utils/btree.js"
-import { defaultComparator } from "../utils/comparison.js"
+import { defaultComparator, normalizeValue } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
@@ -72,7 +72,7 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = this.normalizeMapKey(indexedValue)
+    const normalizedValue = normalizeValue(indexedValue)
 
     // Check if this value already exists
     if (this.valueMap.has(normalizedValue)) {
@@ -105,7 +105,7 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = this.normalizeMapKey(indexedValue)
+    const normalizedValue = normalizeValue(indexedValue)
 
     if (this.valueMap.has(normalizedValue)) {
       const keySet = this.valueMap.get(normalizedValue)!
@@ -201,7 +201,7 @@ export class BTreeIndex<
    * Performs an equality lookup
    */
   equalityLookup(value: any): Set<TKey> {
-    const normalizedValue = this.normalizeMapKey(value)
+    const normalizedValue = normalizeValue(value)
     return new Set(this.valueMap.get(normalizedValue) ?? [])
   }
 
@@ -213,8 +213,8 @@ export class BTreeIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    const normalizedFrom = this.normalizeMapKey(from)
-    const normalizedTo = this.normalizeMapKey(to)
+    const normalizedFrom = normalizeValue(from)
+    const normalizedTo = normalizeValue(to)
     const fromKey = normalizedFrom ?? this.orderedEntries.minKey()
     const toKey = normalizedTo ?? this.orderedEntries.maxKey()
 
@@ -249,7 +249,7 @@ export class BTreeIndex<
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
     const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
-    let key = this.normalizeMapKey(from)
+    let key = normalizeValue(from)
 
     while ((key = nextKey(key)) && result.length < n) {
       const keys = this.valueMap.get(key)
@@ -275,7 +275,7 @@ export class BTreeIndex<
     const result = new Set<TKey>()
 
     for (const value of values) {
-      const normalizedValue = this.normalizeMapKey(value)
+      const normalizedValue = normalizeValue(value)
       const keys = this.valueMap.get(normalizedValue)
       if (keys) {
         keys.forEach((key) => result.add(key))
@@ -298,16 +298,5 @@ export class BTreeIndex<
 
   get valueMapData(): Map<any, Set<TKey>> {
     return this.valueMap
-  }
-
-  /**
-   * Normalizes values for use as Map keys to ensure proper equality and range queries
-   * For Date objects, uses timestamp.
-   */
-  private normalizeMapKey(value: any): any {
-    if (value instanceof Date) {
-      return value.valueOf()
-    }
-    return value
   }
 }

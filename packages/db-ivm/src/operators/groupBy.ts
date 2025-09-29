@@ -210,48 +210,64 @@ export function avg<T>(
   }
 }
 
+type CanMinMax = number | Date | bigint
+
 /**
  * Creates a min aggregate function that computes the minimum value in a group
- * @param valueExtractor Function to extract a numeric value from each data entry
+ * @param valueExtractor Function to extract a comparable value from each data entry
  */
-export function min<T, V extends number | Date | bigint>(
-  valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, V, V> {
+export function min<T extends CanMinMax>(): AggregateFunction<
+  T,
+  T | undefined,
+  T | undefined
+>
+export function min<T, V extends CanMinMax>(
+  valueExtractor: (value: T) => V
+): AggregateFunction<T, V | undefined, V | undefined>
+export function min<T, V extends CanMinMax>(
+  valueExtractor?: (value: T) => V
+): AggregateFunction<T, V | undefined, V | undefined> {
+  const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {
-    preMap: (data: T) => valueExtractor(data),
+    preMap: (data: T) => extractor(data),
     reduce: (values) => {
       let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (minValue && value < minValue) {
-          minValue = value
-        } else if (!minValue) {
+        if (!minValue || !value || value < minValue) {
           minValue = value
         }
       }
-      return minValue ?? (0 as V)
+      return minValue
     },
   }
 }
 
 /**
  * Creates a max aggregate function that computes the maximum value in a group
- * @param valueExtractor Function to extract a numeric value from each data entry
+ * @param valueExtractor Function to extract a comparable value from each data entry
  */
-export function max<T, V extends number | Date | bigint>(
-  valueExtractor: (value: T) => V = (v) => v as unknown as V
-): AggregateFunction<T, V, V> {
+export function max<T extends CanMinMax>(): AggregateFunction<
+  T,
+  T | undefined,
+  T | undefined
+>
+export function max<T, V extends CanMinMax>(
+  valueExtractor: (value: T) => V
+): AggregateFunction<T, V | undefined, V | undefined>
+export function max<T, V extends CanMinMax>(
+  valueExtractor?: (value: T) => V
+): AggregateFunction<T, V | undefined, V | undefined> {
+  const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {
-    preMap: (data: T) => valueExtractor(data),
+    preMap: (data: T) => extractor(data),
     reduce: (values) => {
       let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (maxValue && value > maxValue) {
-          maxValue = value
-        } else if (!maxValue) {
+        if (!maxValue || !value || value > maxValue) {
           maxValue = value
         }
       }
-      return maxValue ?? (0 as V)
+      return maxValue
     },
   }
 }

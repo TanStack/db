@@ -3,6 +3,7 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from "../../errors.js"
+import { normalizeValue } from "../../utils/comparison.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
@@ -142,11 +143,8 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = argA(data)
-        const b = argB(data)
-        if (a instanceof Date && b instanceof Date) {
-          return a.valueOf() == b.valueOf()
-        }
+        const a = normalizeValue(argA(data))
+        const b = normalizeValue(argB(data))
         return a === b
       }
     }

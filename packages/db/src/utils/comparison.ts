@@ -51,7 +51,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 
   // If both are dates, compare them
   if (a instanceof Date && b instanceof Date) {
-    return a.valueOf() - b.valueOf()
+    return a.getTime() - b.getTime()
   }
 
   // If at least one of the values is an object, use stable IDs for comparison
@@ -110,3 +110,13 @@ export const defaultComparator = makeComparator({
   nulls: `first`,
   stringSort: `locale`,
 })
+
+/**
+ * Normalize a value for comparison
+ */
+export function normalizeValue(value: any): any {
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+  return value
+}
