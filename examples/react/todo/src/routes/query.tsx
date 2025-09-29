@@ -1,4 +1,3 @@
-import * as React from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useLiveQuery } from "@tanstack/react-db"
 import { queryConfigCollection, queryTodoCollection } from "../lib/collections"
