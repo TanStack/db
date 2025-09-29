@@ -19,6 +19,11 @@ export default [
       stylistic: stylisticPlugin,
       prettier: prettierPlugin,
     },
+    settings: {
+      // import-x/* settings required for import/no-cycle.
+      "import-x/resolver": { typescript: true },
+      "import-x/extensions": [".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs"],
+    },
     rules: {
       "prettier/prettier": `error`,
       "stylistic/quotes": [`error`, `backtick`],
@@ -42,6 +47,7 @@ export default [
           leadingUnderscore: `allow`,
         },
       ],
+      "import/no-cycle": `error`,
     },
   },
 ]
