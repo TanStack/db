@@ -144,6 +144,11 @@ describe.each([
     subscriber(messages)
   }
 
+  function simulateUpToDateOnly() {
+    // Send only an up-to-date message with no data changes
+    subscriber([{ headers: { control: `up-to-date` } }])
+  }
+
   beforeEach(() => {
     electricCollection = createElectricUsersCollection()
   })
@@ -337,5 +342,113 @@ describe.each([
     // Both Electric collection and live query should be ready
     expect(testElectricCollection.status).toBe(`ready`)
     expect(liveQuery.status).toBe(`ready`)
+  })
+
+  it.only(`should not emit changes on up-to-date messages with no data changes`, async () => {
+    // Test to verify that up-to-date messages without actual data changes
+    // don't trigger unnecessary renders in live query collections
+
+    // Create a live query collection
+    const liveQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.active, true))
+          .select(({ user }) => ({
+            id: user.id,
+            name: user.name,
+            active: user.active,
+          })),
+    })
+
+    // Track changes emitted by the live query
+    const changeNotifications: Array<any> = []
+    const subscription = liveQuery.subscribeChanges((changes) => {
+      changeNotifications.push(changes)
+    })
+
+    // Initial sync with data
+    simulateInitialSync()
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(3) // Only active users
+
+    // Clear any initial change notifications
+    changeNotifications.length = 0
+
+    // Send an up-to-date message with no data changes
+    // This simulates the scenario where Electric sends up-to-date
+    // but there are no actual changes to the data
+    simulateUpToDateOnly()
+
+    // Wait a tick to ensure any async operations complete
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // The live query should not have emitted any changes
+    // because there were no actual data changes
+    // BUG: Currently emits empty change arrays on up-to-date messages
+    if (changeNotifications.length > 0) {
+      console.log(
+        `BUG DETECTED: Live query emitted ${changeNotifications.length} change notifications on up-to-date with no data changes:`,
+        changeNotifications
+      )
+    }
+    expect(changeNotifications).toHaveLength(0)
+
+    // Verify the collection is still in ready state
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(3)
+
+    // Clean up
+    subscription.unsubscribe()
+  })
+
+  it(`should not emit changes on multiple consecutive up-to-date messages with no data changes`, async () => {
+    // Test to verify that multiple consecutive up-to-date messages
+    // without data changes don't accumulate unnecessary renders
+
+    const liveQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) => q.from({ user: electricCollection }),
+    })
+
+    // Track changes emitted by the live query
+    const changeNotifications: Array<any> = []
+    const subscription = liveQuery.subscribeChanges((changes) => {
+      changeNotifications.push(changes)
+    })
+
+    // Initial sync
+    simulateInitialSync()
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(4)
+
+    // Clear initial change notifications
+    changeNotifications.length = 0
+
+    // Send multiple up-to-date messages with no data changes
+    simulateUpToDateOnly()
+    simulateUpToDateOnly()
+    simulateUpToDateOnly()
+
+    // Wait for any async operations
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should not have emitted any changes despite multiple up-to-date messages
+    // BUG: Currently emits empty change arrays for each up-to-date message
+    if (changeNotifications.length > 0) {
+      console.log(
+        `BUG DETECTED: Live query emitted ${changeNotifications.length} change notifications on multiple up-to-date messages with no data changes:`,
+        changeNotifications
+      )
+    }
+    expect(changeNotifications).toHaveLength(0)
+
+    // Verify collection state is still correct
+    expect(liveQuery.status).toBe(`ready`)
+    expect(liveQuery.size).toBe(4)
+
+    // Clean up
+    subscription.unsubscribe()
   })
 })
