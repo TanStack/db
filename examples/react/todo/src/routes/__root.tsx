@@ -1,3 +1,4 @@
+import * as React from "react"
 import {
   HeadContent,
   Outlet,
@@ -28,11 +29,11 @@ export const Route = createRootRoute({
       },
     ],
   }),
-
+  shellComponent: RootDocument,
   component: () => (
-    <RootDocument>
+    <>
       <Outlet />
-    </RootDocument>
+    </>
   ),
 })
 

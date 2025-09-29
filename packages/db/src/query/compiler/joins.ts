@@ -204,7 +204,12 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    if (!limitedSubquery) {
+    // If join expressions contain computed values (like concat functions)
+    // we don't optimize the join because we don't have an index over the computed values
+    const hasComputedJoinExpr =
+      mainExpr.type === `func` || joinedExpr.type === `func`
+
+    if (!limitedSubquery && !hasComputedJoinExpr) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
