@@ -204,8 +204,8 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    // If join expressions are computed values (like concat functions), we can't optimize
-    // the join because followRef expects PropRef objects but gets Func objects instead
+    // If join expressions contain computed values (like concat functions)
+    // we don't optimize the join because we don't have an index over the computed values
     const hasComputedJoinExpr =
       mainExpr.type === `func` || joinedExpr.type === `func`
 
