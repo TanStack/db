@@ -17,10 +17,10 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { PropRef } from "../ir.js"
+import { PropRef, followRef } from "../ir.js"
 import { inArray } from "../builder/functions.js"
 import { compileExpression } from "./evaluators.js"
-import { compileQuery, followRef } from "./index.js"
+import { compileQuery } from "./index.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
