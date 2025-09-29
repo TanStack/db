@@ -290,10 +290,7 @@ export function compileQuery(
     cache.set(rawQuery, compilationResult)
 
     return compilationResult
-  } else if (
-    !query.single &&
-    (query.limit !== undefined || query.offset !== undefined)
-  ) {
+  } else if (query.limit !== undefined || query.offset !== undefined) {
     // If there's a limit or offset without orderBy, throw an error
     throw new LimitOffsetRequireOrderByError()
   }

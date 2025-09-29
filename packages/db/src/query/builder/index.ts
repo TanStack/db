@@ -617,7 +617,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
   /**
    * Specify that the query should return a single result
-   * @returns A QueryBuilder with single result enforced
+   * @returns A QueryBuilder that returns the first result
    *
    * @example
    * ```ts
@@ -628,11 +628,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   .findOne()
    *```
    */
-  findOne(): QueryBuilder<TContext & { single: true }> {
+  findOne(): QueryBuilder<TContext & { singleResult: true }> {
     return new BaseQueryBuilder({
       ...this.query,
       limit: 1,
-      single: true,
+      singleResult: true,
     })
   }
 

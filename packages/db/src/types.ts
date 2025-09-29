@@ -507,7 +507,7 @@ export interface CollectionConfigSingleRowOption<
   /**
    * If enabled the collection will return a single object instead of an array
    */
-  single?: true
+  singleResult?: true
 }
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
@@ -690,7 +690,7 @@ export type WritableDeep<T> = T extends BuiltIns
  * Utility type to infer the query result size (single row or an array)
  */
 export type WithResultSize<TContext extends Context> = TContext extends {
-  single: true
+  singleResult: true
 }
   ? GetResult<TContext> | undefined
   : Array<GetResult<TContext>>

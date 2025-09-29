@@ -93,7 +93,7 @@ export class CollectionConfigBuilder<
       onUpdate: this.config.onUpdate,
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
-      single: this.query.single,
+      singleResult: this.query.singleResult,
     }
   }
 

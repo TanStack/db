@@ -3,8 +3,30 @@ import { CollectionConfigBuilder } from "./live/collection-config-builder.js"
 import type { LiveQueryCollectionConfig } from "./live/types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
 import type { Collection } from "../collection/index.js"
-import type { CollectionConfig, UtilsRecord } from "../types.js"
+import type {
+  CollectionConfig,
+  CollectionConfigSingleRowOption,
+  UtilsRecord,
+} from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
+
+type CollectionConfigForContext<
+  TContext extends Context,
+  TResult extends object,
+> = TContext extends {
+  singleResult: true
+}
+  ? CollectionConfigSingleRowOption<TResult> & { singleResult: true }
+  : CollectionConfigSingleRowOption<TResult> & { singleResult?: never }
+
+type CollectionForContext<
+  TContext extends Context,
+  TResult extends object,
+> = TContext extends {
+  singleResult: true
+}
+  ? Collection<TResult> & { singleResult: true }
+  : Collection<TResult> & { singleResult?: never }
 
 /**
  * Creates live query collection options for use with createCollection
@@ -35,20 +57,15 @@ export function liveQueryCollectionOptions<
   TResult extends object = GetResult<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
-): TContext extends {
-  single: true
-}
-  ? CollectionConfig<TResult> & { single: true }
-  : CollectionConfig<TResult> & { single?: never } {
+): CollectionConfigForContext<TContext, TResult> {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
     TResult
   >(config)
-  return collectionConfigBuilder.getConfig() as TContext extends {
-    single: true
-  }
-    ? CollectionConfig<TResult> & { single: true }
-    : CollectionConfig<TResult> & { single?: never }
+  return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
+    TContext,
+    TResult
+  >
 }
 
 /**
@@ -91,9 +108,7 @@ export function createLiveQueryCollection<
   TResult extends object = GetResult<TContext>,
 >(
   query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
-): TContext extends { single: true }
-  ? Collection<TResult, string | number, {}> & { single: true }
-  : Collection<TResult, string | number, {}> & { single?: never }
+): CollectionForContext<TContext, TResult>
 
 // Overload 2: Accept full config object with optional utilities
 export function createLiveQueryCollection<
@@ -102,9 +117,7 @@ export function createLiveQueryCollection<
   TUtils extends UtilsRecord = {},
 >(
   config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
-): TContext extends { single: true }
-  ? Collection<TResult, string | number, TUtils> & { single: true }
-  : Collection<TResult, string | number, TUtils> & { single?: never }
+): CollectionForContext<TContext, TResult>
 
 // Implementation
 export function createLiveQueryCollection<
@@ -115,9 +128,7 @@ export function createLiveQueryCollection<
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-): TContext extends { single: true }
-  ? Collection<TResult, string | number, TUtils> & { single: true }
-  : Collection<TResult, string | number, TUtils> & { single?: never } {
+): CollectionForContext<TContext, TResult> {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
     // Simple query function case
@@ -127,11 +138,10 @@ export function createLiveQueryCollection<
       ) => QueryBuilder<TContext>,
     }
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
-    return bridgeToCreateCollection(options) as TContext extends {
-      single: true
-    }
-      ? Collection<TResult, string | number, TUtils> & { single: true }
-      : Collection<TResult, string | number, TUtils> & { single?: never }
+    return bridgeToCreateCollection(options) as CollectionForContext<
+      TContext,
+      TResult
+    >
   } else {
     // Config object case
     const config = configOrQuery as LiveQueryCollectionConfig<
@@ -142,9 +152,7 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection({
       ...options,
       utils: config.utils,
-    }) as TContext extends { single: true }
-      ? Collection<TResult, string | number, TUtils> & { single: true }
-      : Collection<TResult, string | number, TUtils> & { single?: never }
+    }) as CollectionForContext<TContext, TResult>
   }
 }
 

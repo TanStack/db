@@ -1,4 +1,5 @@
-import { expectTypeOf, describe, it } from "vitest"
+import { describe, expectTypeOf, it } from "vitest"
+import { renderHook } from "@testing-library/react"
 import { createCollection } from "../../db/src/collection/index"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import {
@@ -6,7 +7,6 @@ import {
   eq,
   liveQueryCollectionOptions,
 } from "../../db/src/query/index"
-import { renderHook } from "@testing-library/react"
 import { useLiveQuery } from "../src/useLiveQuery"
 
 type Person = {
@@ -81,7 +81,7 @@ describe(`useLiveQuery type assertions`, () => {
 
     const liveQueryCollection = createCollection(options)
 
-    expectTypeOf(liveQueryCollection).toExtend<{ single: true }>()
+    expectTypeOf(liveQueryCollection).toExtend<{ singleResult: true }>()
 
     const { result } = renderHook(() => {
       return useLiveQuery(liveQueryCollection)
@@ -107,7 +107,7 @@ describe(`useLiveQuery type assertions`, () => {
           .findOne(),
     })
 
-    expectTypeOf(liveQueryCollection).toExtend<{ single: true }>()
+    expectTypeOf(liveQueryCollection).toExtend<{ singleResult: true }>()
 
     const { result } = renderHook(() => {
       return useLiveQuery(liveQueryCollection)

@@ -6,12 +6,12 @@ import {
 } from "@tanstack/db"
 import type {
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
-  CollectionConfigSingleRowOption,
   QueryBuilder,
   WithResultSize,
 } from "@tanstack/db"
@@ -276,7 +276,9 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & { single?: never }
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & {
+    singleResult?: never
+  }
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
@@ -290,17 +292,19 @@ export function useLiveQuery<
   isEnabled: true // Always true for pre-created live query collections
 }
 
-// Overload 8: Accept pre-created live query collection with single: true
+// Overload 8: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & { single: true }
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & {
+    singleResult: true
+  }
 ): {
   state: Map<TKey, TResult>
   data: TResult | undefined
-  collection: Collection<TResult, TKey, TUtils> & { single: true }
+  collection: Collection<TResult, TKey, TUtils> & { singleResult: true }
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
@@ -501,7 +505,7 @@ export function useLiveQuery(
       const entries = Array.from(snapshot.collection.entries())
       const config: CollectionConfigSingleRowOption<any, any, any> =
         snapshot.collection.config
-      const single = config.single
+      const singleResult = config.singleResult
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 
@@ -516,7 +520,7 @@ export function useLiveQuery(
           if (!dataCache) {
             dataCache = entries.map(([, value]) => value)
           }
-          return single ? dataCache[0] : dataCache
+          return singleResult ? dataCache[0] : dataCache
         },
         collection: snapshot.collection,
         status: snapshot.collection.status,

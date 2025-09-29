@@ -48,7 +48,7 @@ export interface Context {
   // The result type after select (if select has been called)
   result?: any
   // Single result only (if findOne has been called)
-  single?: boolean
+  singleResult?: boolean
 }
 
 /**
@@ -573,7 +573,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-  single: TContext[`single`] extends true ? true : false
+  singleResult: TContext[`singleResult`] extends true ? true : false
 }
 
 /**

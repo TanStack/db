@@ -94,5 +94,5 @@ export interface LiveQueryCollectionConfig<
   /**
    * If enabled the collection will return a single object instead of an array
    */
-  single?: true
+  singleResult?: true
 }

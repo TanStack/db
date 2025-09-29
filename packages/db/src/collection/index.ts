@@ -50,7 +50,7 @@ export interface Collection<
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
-  readonly single?: true
+  readonly singleResult?: true
 }
 
 /**
@@ -133,13 +133,13 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-    single?: never
+    singleResult?: never
   }
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
-  single?: never
+  singleResult?: never
 }
 
-// Overload for when schema is provided and single is true
+// Overload for when schema is provided and singleResult is true
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
@@ -148,10 +148,10 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-    single: true
+    singleResult: true
   }
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
-  single: true
+  singleResult: true
 }
 
 // Overload for when no schema is provided
@@ -164,11 +164,11 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-    single?: never
+    singleResult?: never
   }
-): Collection<T, TKey, TUtils, never, T> & { single?: never }
+): Collection<T, TKey, TUtils, never, T> & { singleResult?: never }
 
-// Overload for when no schema is provided and single is true
+// Overload for when no schema is provided and singleResult is true
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
 export function createCollection<
   T extends object,
@@ -178,9 +178,9 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-    single: true
+    singleResult: true
   }
-): Collection<T, TKey, TUtils, never, T> & { single: true }
+): Collection<T, TKey, TUtils, never, T> & { singleResult: true }
 
 // Implementation
 export function createCollection(
