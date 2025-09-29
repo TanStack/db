@@ -1,5 +1,6 @@
 import {
   CollectionInErrorStateError,
+  CollectionStateError,
   InvalidCollectionStatusTransitionError,
 } from "../errors"
 import {
@@ -90,7 +91,15 @@ export class CollectionLifecycleManager<
    * Safely update the collection status with validation
    * @private
    */
-  public setStatus(newStatus: CollectionStatus): void {
+  public setStatus(
+    newStatus: CollectionStatus,
+    allowReady: boolean = false
+  ): void {
+    if (newStatus === `ready` && !allowReady) {
+      throw new CollectionStateError(
+        `Cannot set status to anything other than ready, must use markReady instead`
+      )
+    }
     this.validateStatusTransition(this.status, newStatus)
     const previousStatus = this.status
     this.status = newStatus
@@ -129,9 +138,10 @@ export class CollectionLifecycleManager<
    * @private - Should only be called by sync implementations
    */
   public markReady(): void {
+    this.validateStatusTransition(this.status, `ready`)
     // Can transition to ready from loading or initialCommit states
     if (this.status === `loading` || this.status === `initialCommit`) {
-      this.setStatus(`ready`)
+      this.setStatus(`ready`, true)
 
       // Call any registered first ready callbacks (only on first time becoming ready)
       if (!this.hasBeenReady) {
@@ -146,7 +156,6 @@ export class CollectionLifecycleManager<
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
       }
-
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
       if (this.changes.changeSubscriptions.size > 0) {

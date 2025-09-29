@@ -344,7 +344,7 @@ describe.each([
     expect(liveQuery.status).toBe(`ready`)
   })
 
-  it.only(`should not emit changes on up-to-date messages with no data changes`, async () => {
+  it(`should not emit changes on up-to-date messages with no data changes`, async () => {
     // Test to verify that up-to-date messages without actual data changes
     // don't trigger unnecessary renders in live query collections
 
