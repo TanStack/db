@@ -3,7 +3,6 @@ import type { Collection } from "./collection/index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 import type { BasicExpression, OrderBy } from "./query/ir.js"
-import type { Context, GetResult } from "./query/builder/types"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -498,17 +497,27 @@ export interface CollectionConfig<
   sync: SyncConfig<T, TKey>
 }
 
-// Only used for live query collections
-export interface CollectionConfigSingleRowOption<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = never,
-> extends CollectionConfig<T, TKey, TSchema> {
+export type SingleResult = {
+  singleResult: true
+}
+
+export type NonSingleResult = {
+  singleResult?: never
+}
+
+export type MaybeSingleResult = {
   /**
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true
 }
+
+// Only used for live query collections
+export type CollectionConfigSingleRowOption<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> = CollectionConfig<T, TKey, TSchema> & MaybeSingleResult
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>
@@ -685,12 +694,3 @@ export type WritableDeep<T> = T extends BuiltIns
           : T extends object
             ? WritableObjectDeep<T>
             : unknown
-
-/**
- * Utility type to infer the query result size (single row or an array)
- */
-export type WithResultSize<TContext extends Context> = TContext extends {
-  singleResult: true
-}
-  ? GetResult<TContext> | undefined
-  : Array<GetResult<TContext>>

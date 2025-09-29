@@ -1,4 +1,5 @@
 import type { CollectionImpl } from "../../collection/index.js"
+import type { SingleResult } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -623,6 +624,14 @@ export type ApplyJoinOptionalityToMergedSchema<
     : // New table is required for inner and right joins
       TNewSchema[K]
 }
+
+/**
+ * Utility type to infer the query result size (single row or an array)
+ */
+export type InferResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? GetResult<TContext> | undefined
+    : Array<GetResult<TContext>>
 
 /**
  * GetResult - Determines the final result type of a query

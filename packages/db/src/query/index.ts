@@ -9,6 +9,7 @@ export {
   type Context,
   type Source,
   type GetResult,
+  type InferResultType,
 } from "./builder/index.js"
 
 // Expression functions exports

@@ -8,6 +8,7 @@ import {
   liveQueryCollectionOptions,
 } from "../../db/src/query/index"
 import { useLiveQuery } from "../src/useLiveQuery"
+import type { SingleResult } from "../../db/src/types"
 
 type Person = {
   id: string
@@ -19,7 +20,7 @@ type Person = {
 }
 
 describe(`useLiveQuery type assertions`, () => {
-  it(`should type findOne query builder to return a single row`, async () => {
+  it(`should type findOne query builder to return a single row`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-2`,
@@ -40,7 +41,7 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
   })
 
-  it(`should type findOne config object to return a single row`, async () => {
+  it(`should type findOne config object to return a single row`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-2`,
@@ -62,7 +63,7 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
   })
 
-  it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, async () => {
+  it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-2`,
@@ -81,7 +82,7 @@ describe(`useLiveQuery type assertions`, () => {
 
     const liveQueryCollection = createCollection(options)
 
-    expectTypeOf(liveQueryCollection).toExtend<{ singleResult: true }>()
+    expectTypeOf(liveQueryCollection).toExtend<SingleResult>()
 
     const { result } = renderHook(() => {
       return useLiveQuery(liveQueryCollection)
@@ -90,7 +91,7 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
   })
 
-  it(`should type findOne collection using createLiveQueryCollection to return a single row`, async () => {
+  it(`should type findOne collection using createLiveQueryCollection to return a single row`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons-2`,
@@ -107,7 +108,7 @@ describe(`useLiveQuery type assertions`, () => {
           .findOne(),
     })
 
-    expectTypeOf(liveQueryCollection).toExtend<{ singleResult: true }>()
+    expectTypeOf(liveQueryCollection).toExtend<SingleResult>()
 
     const { result } = renderHook(() => {
       return useLiveQuery(liveQueryCollection)

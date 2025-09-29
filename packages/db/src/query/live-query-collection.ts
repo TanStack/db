@@ -6,6 +6,8 @@ import type { Collection } from "../collection/index.js"
 import type {
   CollectionConfig,
   CollectionConfigSingleRowOption,
+  NonSingleResult,
+  SingleResult,
   UtilsRecord,
 } from "../types.js"
 import type { Context, GetResult } from "./builder/types.js"
@@ -13,20 +15,16 @@ import type { Context, GetResult } from "./builder/types.js"
 type CollectionConfigForContext<
   TContext extends Context,
   TResult extends object,
-> = TContext extends {
-  singleResult: true
-}
-  ? CollectionConfigSingleRowOption<TResult> & { singleResult: true }
-  : CollectionConfigSingleRowOption<TResult> & { singleResult?: never }
+> = TContext extends SingleResult
+  ? CollectionConfigSingleRowOption<TResult> & SingleResult
+  : CollectionConfigSingleRowOption<TResult> & NonSingleResult
 
 type CollectionForContext<
   TContext extends Context,
   TResult extends object,
-> = TContext extends {
-  singleResult: true
-}
-  ? Collection<TResult> & { singleResult: true }
-  : Collection<TResult> & { singleResult?: never }
+> = TContext extends SingleResult
+  ? Collection<TResult> & SingleResult
+  : Collection<TResult> & NonSingleResult
 
 /**
  * Creates live query collection options for use with createCollection

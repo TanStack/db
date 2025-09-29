@@ -16,7 +16,7 @@ import {
   SubQueryMustHaveFromClauseError,
 } from "../../errors.js"
 import { createRefProxy, toExpression } from "./ref-proxy.js"
-import type { NamespacedRow } from "../../types.js"
+import type { NamespacedRow, SingleResult } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -628,10 +628,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   .findOne()
    *```
    */
-  findOne(): QueryBuilder<TContext & { singleResult: true }> {
+  findOne(): QueryBuilder<TContext & SingleResult> {
     return new BaseQueryBuilder({
       ...this.query,
+      // force to get only one result
       limit: 1,
+      // and the first result
+      offset: 0,
       singleResult: true,
     })
   }
@@ -838,4 +841,10 @@ export type ExtractContext<T> =
       : never
 
 // Export the types from types.ts for convenience
-export type { Context, Source, GetResult, RefLeaf as Ref } from "./types.js"
+export type {
+  Context,
+  Source,
+  GetResult,
+  RefLeaf as Ref,
+  InferResultType,
+} from "./types.js"

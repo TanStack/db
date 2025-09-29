@@ -24,7 +24,9 @@ import type {
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
+  NonSingleResult,
   OperationConfig,
+  SingleResult,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -133,11 +135,9 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-    singleResult?: never
-  }
-): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
-  singleResult?: never
-}
+  } & NonSingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  NonSingleResult
 
 // Overload for when schema is provided and singleResult is true
 export function createCollection<
@@ -148,11 +148,9 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-    singleResult: true
-  }
-): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & {
-  singleResult: true
-}
+  } & SingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  SingleResult
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -164,9 +162,8 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-    singleResult?: never
-  }
-): Collection<T, TKey, TUtils, never, T> & { singleResult?: never }
+  } & NonSingleResult
+): Collection<T, TKey, TUtils, never, T> & NonSingleResult
 
 // Overload for when no schema is provided and singleResult is true
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -178,9 +175,8 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-    singleResult: true
-  }
-): Collection<T, TKey, TUtils, never, T> & { singleResult: true }
+  } & SingleResult
+): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Implementation
 export function createCollection(

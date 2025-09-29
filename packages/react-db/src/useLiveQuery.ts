@@ -10,10 +10,12 @@ import type {
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
-  WithResultSize,
+  SingleResult,
 } from "@tanstack/db"
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
@@ -84,7 +86,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: WithResultSize<TContext>
+  data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
@@ -103,7 +105,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: WithResultSize<TContext> | undefined
+  data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -122,7 +124,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: WithResultSize<TContext> | undefined
+  data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -177,7 +179,7 @@ export function useLiveQuery<
     | Map<string | number, GetResult<TContext>>
     | Map<TKey, TResult>
     | undefined
-  data: WithResultSize<TContext> | Array<TResult> | undefined
+  data: InferResultType<TContext> | Array<TResult> | undefined
   collection:
     | Collection<GetResult<TContext>, string | number, {}>
     | Collection<TResult, TKey, TUtils>
@@ -230,7 +232,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: WithResultSize<TContext>
+  data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled for config objects
   isLoading: boolean
@@ -276,9 +278,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & {
-    singleResult?: never
-  }
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
@@ -298,13 +298,11 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & {
-    singleResult: true
-  }
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult
 ): {
   state: Map<TKey, TResult>
   data: TResult | undefined
-  collection: Collection<TResult, TKey, TUtils> & { singleResult: true }
+  collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
