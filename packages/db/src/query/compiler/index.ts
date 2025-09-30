@@ -291,11 +291,11 @@ export function compileQuery(
 
     return compilationResult
   } else if (query.limit !== undefined || query.offset !== undefined) {
-    // If there's a limit or offset w ithout orderBy, throw an error
+    // If there's a limit or offset without orderBy, throw an error
     throw new LimitOffsetRequireOrderByError()
   }
 
-  // Final step: extract the __sele ct_results and return tuple format (no orderBy)
+  // Final step: extract the __select_results and return tuple format (no orderBy)
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
       // Extract the final results from __select_results and return [key, [results, undefined]]
@@ -309,7 +309,7 @@ export function compileQuery(
   )
 
   const result = resultPipeline
-  // Cache the result before return ing (use original query as key)
+  // Cache the result before returning (use original query as key)
   const compilationResult = {
     collectionId: mainCollectionId,
     pipeline: result,
@@ -343,10 +343,10 @@ function processFrom(
       return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
-      // Find the original query for ca ching purposes
+      // Find the original query for caching purposes
       const originalQuery = queryMapping.get(from.query) || from.query
 
-      // Recursively compile the sub-qu ery with cache
+      // Recursively compile the sub-query with cache
       const subQueryResult = compileQuery(
         originalQuery,
         allInputs,
@@ -362,8 +362,8 @@ function processFrom(
       // Extract the pipeline from the  compilation result
       const subQueryInput = subQueryResult.pipeline
 
-      // Subqueries may return [key, [v alue, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
-      // We need to extract just the va lue for use in parent queries
+      // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
+      // We need to extract just the value for use in parent queries
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
@@ -384,7 +384,7 @@ function processFrom(
   }
 }
 
-// Helper to check if a value is  a Value expression
+// Helper to check if a value is a Value expression
 function isValue(raw: any): boolean {
   return (
     raw instanceof ValClass ||
@@ -392,7 +392,7 @@ function isValue(raw: any): boolean {
   )
 }
 
-// Helper to unwrap a Value expre ssion or return the value itself
+// Helper to unwrap a Value expression or return the value itself
 function unwrapValue(value: any): any {
   return isValue(value) ? value.value : value
 }
@@ -407,7 +407,7 @@ function mapNestedQueries(
   originalQuery: QueryIR,
   queryMapping: QueryMapping
 ): void {
-  // Map the FROM clause if it's a  QueryRef
+  // Map the FROM clause if it's a QueryRef
   if (
     optimizedQuery.from.type === `queryRef` &&
     originalQuery.from.type === `queryRef`
@@ -463,7 +463,7 @@ function getRefFromAlias(
 }
 
 /**
- * Follows the given referenc e in a query
+ * Follows the given reference in a query
  * until its finds the root field the reference points to.
  * @returns The collection, its alias, and the path to the root field in this collection
  */
@@ -477,9 +477,9 @@ export function followRef(
   }
 
   if (ref.path.length === 1) {
-    // This field should be part of t his collection
+    // This field should be part of this collection
     const field = ref.path[0]!
-    // is it part of the select claus e?
+    // is it part of the select clause?
     if (query.select) {
       const selectedField = query.select[field]
       if (selectedField && selectedField.type === `ref`) {
@@ -487,10 +487,10 @@ export function followRef(
       }
     }
 
-    // Either this field is not part  of the select clause
-    // and thus it must be part of th e collection itself
-    // or it is part of the select bu t is not a reference
-    // so we can stop here and don't  have to follow it
+    // Either this field is not part of the select clause
+    // and thus it must be part of the collection itself
+    // or it is part of the select but is not a reference
+    // so we can stop here and don't have to follow it
     return { collection, path: [field] }
   }
 
@@ -505,9 +505,9 @@ export function followRef(
     if (aliasRef.type === `queryRef`) {
       return followRef(aliasRef.query, new PropRef(rest), collection)
     } else {
-      // This is a reference to a colle ction
+      // This is a reference to a collection
       // we can't follow it further
-      // so the field must be on the co llection itself
+      // so the field must be on the collection itself
       return { collection: aliasRef.collection, path: rest }
     }
   }
