@@ -631,7 +631,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   findOne(): QueryBuilder<TContext & SingleResult> {
     return new BaseQueryBuilder({
       ...this.query,
-      limit: 1,
+      // TODO: enforcing return only one result with also a default orderBy if none is specified
+      // limit: 1,
       singleResult: true,
     })
   }
