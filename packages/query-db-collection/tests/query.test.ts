@@ -257,14 +257,13 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
         call[0].includes(
-          `[QueryCollection] queryFn did not return an array of objects`
+          `@tanstack/query-db-collection: queryFn must return an array of objects`
         )
       )
       expect(errorCallArgs).toBeDefined()
     })
 
     // The collection state should remain empty or unchanged
-    // Since we're not setting any initial data, we expect the state to be empty
     expect(collection.size).toBe(0)
 
     // Clean up the spy
@@ -515,7 +514,7 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
           call[0].includes(
-            `[QueryCollection] queryFn did not return an array of objects. Skipping update.`
+            `@tanstack/query-db-collection: select() must return an array of objects`
           )
         )
         expect(errorCallArgs).toBeDefined()

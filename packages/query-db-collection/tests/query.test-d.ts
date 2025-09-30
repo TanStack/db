@@ -323,6 +323,37 @@ describe(`Query collection type resolution tests`, () => {
       expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
     })
 
+    it(`should error when queryFn returns wrapped data without select`, () => {
+      const userData = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      type UserDataType = z.infer<typeof userData>
+
+      type WrappedResponse = {
+        metadata: string
+        data: Array<UserDataType>
+      }
+
+      queryCollectionOptions({
+        queryClient,
+        queryKey: [`wrapped-no-select`],
+        // @ts-expect-error - queryFn returns wrapped data but no select provided
+        queryFn: (): Promise<WrappedResponse> => {
+          return Promise.resolve({
+            metadata: `example`,
+            data: [],
+          })
+        },
+        // @ts-expect-error - schema type conflicts with queryFn return type
+        schema: userData,
+        // @ts-expect-error - item type is inferred as object due to type mismatch
+        getKey: (item) => item.id,
+      })
+    })
+
     it(`select properly extracts array from wrapped response`, () => {
       const userData = z.object({
         id: z.string(),

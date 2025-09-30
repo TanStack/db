@@ -409,6 +409,7 @@ export function queryCollectionOptions(
     throw new QueryClientRequiredError()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
     throw new GetKeyRequiredError()
   }
@@ -464,10 +465,11 @@ export function queryCollectionOptions(
           !Array.isArray(newItemsArray) ||
           newItemsArray.some((item) => typeof item !== `object`)
         ) {
-          console.error(
-            `[QueryCollection] queryFn did not return an array of objects. Skipping update.`,
-            newItemsArray
-          )
+          const errorMessage = select
+            ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+            : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+
+          console.error(errorMessage)
           return
         }
 
