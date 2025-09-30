@@ -644,7 +644,7 @@ export class CollectionStateManager<
 
         // Ensure listeners are active before emitting this critical batch
         if (this.lifecycle.status !== `ready`) {
-          this.lifecycle.setStatus(`ready`)
+          this.lifecycle.markReady()
         }
       }
 

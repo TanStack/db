@@ -451,8 +451,11 @@ export function queryCollectionOptions(
       any
     >(queryClient, observerOptions)
 
+    let isSubscribed = false
+    let actualUnsubscribeFn: (() => void) | null = null
+
     type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
-    const handleUpdate: UpdateHandler = (result) => {
+    const handleQueryResult: UpdateHandler = (result) => {
       if (result.isSuccess) {
         // Clear error state
         lastError = undefined
@@ -546,14 +549,45 @@ export function queryCollectionOptions(
       }
     }
 
-    const actualUnsubscribeFn = localObserver.subscribe(handleUpdate)
+    const subscribeToQuery = () => {
+      if (!isSubscribed) {
+        actualUnsubscribeFn = localObserver.subscribe(handleQueryResult)
+        isSubscribed = true
+      }
+    }
+
+    const unsubscribeFromQuery = () => {
+      if (isSubscribed && actualUnsubscribeFn) {
+        actualUnsubscribeFn()
+        actualUnsubscribeFn = null
+        isSubscribed = false
+      }
+    }
+
+    // If startSync=true or there are subscribers to the collection, subscribe to the query straight away
+    if (config.startSync || collection.subscriberCount > 0) {
+      subscribeToQuery()
+    }
+
+    // Set up event listener for subscriber changes
+    const unsubscribeFromCollectionEvents = collection.on(
+      `subscribers:change`,
+      ({ subscriberCount }) => {
+        if (subscriberCount > 0) {
+          subscribeToQuery()
+        } else if (subscriberCount === 0) {
+          unsubscribeFromQuery()
+        }
+      }
+    )
 
     // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial
     // state)
-    handleUpdate(localObserver.getCurrentResult())
+    handleQueryResult(localObserver.getCurrentResult())
 
     return async () => {
-      actualUnsubscribeFn()
+      unsubscribeFromCollectionEvents()
+      unsubscribeFromQuery()
       await queryClient.cancelQueries({ queryKey })
       queryClient.removeQueries({ queryKey })
     }
