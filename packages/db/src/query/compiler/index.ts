@@ -321,7 +321,7 @@ export function compileQuery(
 }
 
 /**
- * Processes the FROM clause  to extract the main table alias and input stream
+ * Processes the FROM clause to extract the main table alias and input stream
  */
 function processFrom(
   from: CollectionRef | QueryRef,
@@ -359,7 +359,7 @@ function processFrom(
         queryMapping
       )
 
-      // Extract the pipeline from the  compilation result
+      // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline
 
       // Subqueries may return [key, [value, orderByIndex]] (with ORDER BY) or [key, value] (without ORDER BY)
@@ -367,7 +367,7 @@ function processFrom(
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
-          // Unwrap Value expressions that  might have leaked through as the entire row
+          // Unwrap Value expressions that might have leaked through as the entire row
           const unwrapped = unwrapValue(value)
           return [key, unwrapped] as [unknown, any]
         })
