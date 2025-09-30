@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.3
+
+### Patch Changes
+
+- Remove circular imports to fix compatibility with Metro bundler ([#605](https://github.com/TanStack/db/pull/605))
+
 ## 0.4.2
 
 ### Patch Changes
