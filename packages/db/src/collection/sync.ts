@@ -11,13 +11,8 @@ import { deepEquals } from "../utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ChangeMessage,
-<<<<<<< HEAD
   CleanupFn,
   CollectionConfig,
-=======
-  CollectionConfig,
-  CleanupFn,
->>>>>>> 684c70ec (Add onLoadMore callback and call it from the requestSnapshot methods)
   OnLoadMoreOptions,
   SyncConfigRes,
 } from "../types"
@@ -99,7 +94,6 @@ export class CollectionSyncManager<
             }
             const key = this.config.getKey(messageWithoutKey.value)
 
-<<<<<<< HEAD
             let messageType = messageWithoutKey.type
 
             // Check if an item with this key already exists when inserting
@@ -177,71 +171,6 @@ export class CollectionSyncManager<
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
 
-=======
-            // Check if an item with this key already exists when inserting
-            if (messageWithoutKey.type === `insert`) {
-              const insertingIntoExistingSynced = this.state.syncedData.has(key)
-              const hasPendingDeleteForKey =
-                pendingTransaction.deletedKeys.has(key)
-              const isTruncateTransaction = pendingTransaction.truncate === true
-              // Allow insert after truncate in the same transaction even if it existed in syncedData
-              if (
-                insertingIntoExistingSynced &&
-                !hasPendingDeleteForKey &&
-                !isTruncateTransaction
-              ) {
-                throw new DuplicateKeySyncError(key, this.id)
-              }
-            }
-
-            const message: ChangeMessage<TOutput> = {
-              ...messageWithoutKey,
-              key,
-            }
-            pendingTransaction.operations.push(message)
-
-            if (messageWithoutKey.type === `delete`) {
-              pendingTransaction.deletedKeys.add(key)
-            }
-          },
-          commit: () => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionCommitError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedError()
-            }
-
-            pendingTransaction.committed = true
-
-            // Update status to initialCommit when transitioning from loading
-            // This indicates we're in the process of committing the first transaction
-            if (this.lifecycle.status === `loading`) {
-              this.lifecycle.setStatus(`initialCommit`)
-            }
-
-            this.state.commitPendingTransactions()
-          },
-          markReady: () => {
-            this.lifecycle.markReady()
-          },
-          truncate: () => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
-
->>>>>>> 684c70ec (Add onLoadMore callback and call it from the requestSnapshot methods)
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.deletedKeys.clear()
