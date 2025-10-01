@@ -22,6 +22,7 @@ import { createOfflineAction } from "./api/OfflineAction"
 // TanStack DB primitives
 
 // Replay
+import { withNestedSpan, withSpan } from "./telemetry/tracer"
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -138,15 +139,18 @@ export class OfflineExecutor {
   }
 
   private async initialize(): Promise<void> {
-    try {
-      const isLeader = await this.leaderElection.requestLeadership()
+    return withSpan(`executor.initialize`, {}, async (span) => {
+      try {
+        const isLeader = await this.leaderElection.requestLeadership()
+        span.setAttribute(`isLeader`, isLeader)
 
-      if (isLeader) {
-        await this.loadAndReplayTransactions()
+        if (isLeader) {
+          await this.loadAndReplayTransactions()
+        }
+      } catch (error) {
+        console.warn(`Failed to initialize offline executor:`, error)
       }
-    } catch (error) {
-      console.warn(`Failed to initialize offline executor:`, error)
-    }
+    })
   }
 
   private async loadAndReplayTransactions(): Promise<void> {
@@ -202,48 +206,64 @@ export class OfflineExecutor {
       throw new Error(`Unknown mutation function: ${options.mutationFnName}`)
     }
 
-    // Check leadership immediately and use the appropriate primitive
-    if (!this.isOfflineEnabled) {
-      // Non-leader: use createOptimisticAction directly with the resolved mutation function
-      // We need to wrap it to add the idempotency key
-      return createOptimisticAction({
-        mutationFn: (vars, params) =>
-          mutationFn({
-            ...vars,
-            ...params,
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        onMutate: options.onMutate,
-      })
-    }
+    // Return a wrapper that checks leadership status at call time
+    return (variables: T) => {
+      // Check leadership when action is called, not when it's created
+      if (!this.isOfflineEnabled) {
+        // Non-leader: use createOptimisticAction directly
+        const action = createOptimisticAction({
+          mutationFn: (vars, params) =>
+            mutationFn({
+              ...vars,
+              ...params,
+              idempotencyKey: crypto.randomUUID(),
+            }),
+          onMutate: options.onMutate,
+        })
+        return action(variables)
+      }
 
-    // Leader: use the offline action wrapper
-    return createOfflineAction(
-      options,
-      mutationFn,
-      this.persistTransaction.bind(this),
-      this
-    )
+      // Leader: use the offline action wrapper
+      const action = createOfflineAction(
+        options,
+        mutationFn,
+        this.persistTransaction.bind(this),
+        this
+      )
+      return action(variables)
+    }
   }
 
   private async persistTransaction(
     transaction: OfflineTransaction
   ): Promise<void> {
-    if (!this.isOfflineEnabled) {
-      this.resolveTransaction(transaction.id, undefined)
-      return
-    }
+    return withNestedSpan(
+      `executor.persistTransaction`,
+      {
+        "transaction.id": transaction.id,
+        "transaction.mutationFnName": transaction.mutationFnName,
+      },
+      async (span) => {
+        if (!this.isOfflineEnabled) {
+          span.setAttribute(`result`, `skipped_not_leader`)
+          this.resolveTransaction(transaction.id, undefined)
+          return
+        }
 
-    try {
-      await this.outbox.add(transaction)
-      await this.executor.execute(transaction)
-    } catch (error) {
-      console.error(
-        `Failed to persist offline transaction ${transaction.id}:`,
-        error
-      )
-      throw error
-    }
+        try {
+          await this.outbox.add(transaction)
+          await this.executor.execute(transaction)
+          span.setAttribute(`result`, `persisted`)
+        } catch (error) {
+          console.error(
+            `Failed to persist offline transaction ${transaction.id}:`,
+            error
+          )
+          span.setAttribute(`result`, `failed`)
+          throw error
+        }
+      }
+    )
   }
 
   // Method for OfflineTransaction to wait for completion
@@ -309,6 +329,10 @@ export class OfflineExecutor {
 
   getRunningCount(): number {
     return this.executor.getRunningCount()
+  }
+
+  getOnlineDetector(): DefaultOnlineDetector {
+    return this.onlineDetector
   }
 
   dispose(): void {

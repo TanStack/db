@@ -1,3 +1,4 @@
+import { context, trace } from "@opentelemetry/api"
 import { createTransaction } from "@tanstack/db"
 import { NonRetriableError } from "../types"
 import type { PendingMutation, Transaction } from "@tanstack/db"
@@ -39,9 +40,9 @@ export class OfflineTransaction {
       mutationFn: async () => {
         // This is the blocking mutationFn that waits for the executor
         // First persist the transaction to the outbox
-        const completionPromise = this.executor.waitForTransactionCompletion(
-          this.offlineId
-        )
+        const activeSpan = trace.getSpan(context.active())
+        const spanContext = activeSpan?.spanContext()
+
         const offlineTransaction: OfflineTransactionType = {
           id: this.offlineId,
           mutationFnName: this.mutationFnName,
@@ -52,6 +53,14 @@ export class OfflineTransaction {
           retryCount: 0,
           nextAttemptAt: Date.now(),
           metadata: this.metadata,
+          spanContext: spanContext
+            ? {
+                traceId: spanContext.traceId,
+                spanId: spanContext.spanId,
+                traceFlags: spanContext.traceFlags,
+                traceState: spanContext.traceState?.serialize(),
+              }
+            : undefined,
           version: 1,
         }
 
@@ -80,8 +89,7 @@ export class OfflineTransaction {
     })
 
     if (this.autoCommit) {
-      // Note: this will need to be handled differently since commit is now async
-      // For now, returning the transaction and letting caller handle commit
+      // Auto-commit for direct OfflineTransaction usage
       this.commit().catch((error) => {
         console.error(`Auto-commit failed:`, error)
         throw error

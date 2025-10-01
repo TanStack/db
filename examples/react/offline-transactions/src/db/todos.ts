@@ -144,7 +144,7 @@ export const todoAPI = {
 
           case `update`: {
             const todoData = mutation.modified as Partial<Todo>
-            const response = await fetchWithRetry(
+            const response = await fetch(
               `/api/todos/${(mutation.modified as Todo).id}`,
               {
                 method: `PUT`,
@@ -235,6 +235,8 @@ export function createTodoActions(offline: any) {
     },
   })
 
+  console.log(`creating offline actions`)
+
   return {
     addTodo: addTodoAction,
     toggleTodo: toggleTodoAction,
@@ -243,8 +245,11 @@ export function createTodoActions(offline: any) {
 }
 
 // IndexedDB offline executor
-export function createIndexedDBOfflineExecutor() {
-  return startOfflineExecutor({
+export async function createIndexedDBOfflineExecutor(otel?: {
+  endpoint: string
+  headers?: Record<string, string>
+}) {
+  const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
     storage: new IndexedDBAdapter(`offline-todos-indexeddb`, `transactions`),
     mutationFns: {
@@ -256,12 +261,30 @@ export function createIndexedDBOfflineExecutor() {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
     },
+    otel,
   })
+
+  // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
+  if (otel?.endpoint) {
+    const { initWebTracing } = await import(`~/otel-web`)
+    await initWebTracing({
+      endpoint: otel.endpoint,
+      headers: otel.headers,
+      onlineDetector: executor.getOnlineDetector(),
+    }).catch((error) => {
+      console.error(`Failed to initialize OpenTelemetry:`, error)
+    })
+  }
+
+  return executor
 }
 
 // localStorage offline executor
-export function createLocalStorageOfflineExecutor() {
-  return startOfflineExecutor({
+export async function createLocalStorageOfflineExecutor(otel?: {
+  endpoint: string
+  headers?: Record<string, string>
+}) {
+  const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
     storage: new LocalStorageAdapter(`offline-todos-ls:`),
     mutationFns: {
@@ -272,5 +295,20 @@ export function createLocalStorageOfflineExecutor() {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
     },
+    otel,
   })
+
+  // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
+  if (otel?.endpoint) {
+    const { initWebTracing } = await import(`~/otel-web`)
+    await initWebTracing({
+      endpoint: otel.endpoint,
+      headers: otel.headers,
+      onlineDetector: executor.getOnlineDetector(),
+    }).catch((error) => {
+      console.error(`Failed to initialize OpenTelemetry:`, error)
+    })
+  }
+
+  return executor
 }

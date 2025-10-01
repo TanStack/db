@@ -19,28 +19,43 @@ export class WebLocksLeader extends BaseLeaderElection {
     }
 
     try {
-      let releaseLock: (() => void) | null = null
-
-      const result = await navigator.locks.request(
+      // First try to acquire the lock with ifAvailable
+      const available = await navigator.locks.request(
         this.lockName,
         {
           mode: `exclusive`,
           ifAvailable: true,
         },
         async (lock) => {
-          if (lock) {
-            this.notifyLeadershipChange(true)
-            return new Promise<boolean>((resolve) => {
-              // Store the release function
-              releaseLock = () => resolve(true)
-              this.releaseLock = releaseLock
-            })
-          }
-          return false
+          return lock !== null
         }
       )
 
-      return result
+      if (!available) {
+        return false
+      }
+
+      // Lock is available, now acquire it for real and hold it
+      navigator.locks.request(
+        this.lockName,
+        {
+          mode: `exclusive`,
+        },
+        async (lock) => {
+          if (lock) {
+            this.notifyLeadershipChange(true)
+            // Hold the lock until released
+            return new Promise<void>((resolve) => {
+              this.releaseLock = () => {
+                this.notifyLeadershipChange(false)
+                resolve()
+              }
+            })
+          }
+        }
+      )
+
+      return true
     } catch (error) {
       if (error instanceof Error && error.name === `AbortError`) {
         return false
@@ -52,10 +67,9 @@ export class WebLocksLeader extends BaseLeaderElection {
 
   releaseLeadership(): void {
     if (this.releaseLock) {
-      this.releaseLock() // This will resolve the promise and release the lock
+      this.releaseLock()
       this.releaseLock = null
     }
-    this.notifyLeadershipChange(false)
   }
 
   private isWebLocksSupported(): boolean {

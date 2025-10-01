@@ -1,3 +1,4 @@
+import { withSyncSpan } from "../telemetry/tracer"
 import type { OfflineTransaction } from "../types"
 
 export class KeyScheduler {
@@ -5,25 +6,48 @@ export class KeyScheduler {
   private isRunning = false
 
   schedule(transaction: OfflineTransaction): void {
-    this.pendingTransactions.push(transaction)
-    // Sort by creation time to maintain FIFO order
-    this.pendingTransactions.sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+    withSyncSpan(
+      "scheduler.schedule",
+      {
+        "transaction.id": transaction.id,
+        "queueLength": this.pendingTransactions.length,
+      },
+      () => {
+        this.pendingTransactions.push(transaction)
+        // Sort by creation time to maintain FIFO order
+        this.pendingTransactions.sort(
+          (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+        )
+      }
     )
   }
 
   getNextBatch(_maxConcurrency: number): Array<OfflineTransaction> {
-    // For sequential processing, we ignore maxConcurrency and only process one transaction at a time
-    if (this.isRunning || this.pendingTransactions.length === 0) {
-      return []
-    }
+    return withSyncSpan(
+      "scheduler.getNextBatch",
+      { pendingCount: this.pendingTransactions.length },
+      (span) => {
+        // For sequential processing, we ignore maxConcurrency and only process one transaction at a time
+        if (this.isRunning || this.pendingTransactions.length === 0) {
+          span.setAttribute("result", "empty")
+          return []
+        }
 
-    // Find the first transaction that's ready to run
-    const readyTransaction = this.pendingTransactions.find((tx) =>
-      this.isReadyToRun(tx)
+        // Find the first transaction that's ready to run
+        const readyTransaction = this.pendingTransactions.find((tx) =>
+          this.isReadyToRun(tx)
+        )
+
+        if (readyTransaction) {
+          span.setAttribute("result", "found")
+          span.setAttribute("transaction.id", readyTransaction.id)
+        } else {
+          span.setAttribute("result", "none_ready")
+        }
+
+        return readyTransaction ? [readyTransaction] : []
+      }
     )
-
-    return readyTransaction ? [readyTransaction] : []
   }
 
   private isReadyToRun(transaction: OfflineTransaction): boolean {

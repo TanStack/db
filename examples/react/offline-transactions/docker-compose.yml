@@ -1,0 +1,24 @@
+services:
+  # OpenTelemetry Collector - handles CORS and forwards traces to Honeycomb
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      # Set your Honeycomb API key here or via .env file
+      - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY}
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4318:4318"    # OTLP HTTP endpoint with CORS support
+    restart: unless-stopped
+
+  # Optional: Local Jaeger for development
+  # Uncomment this and update otel-collector-config.yaml to use Jaeger instead
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   environment:
+  #     - COLLECTOR_OTLP_ENABLED=true
+  #   ports:
+  #     - "16686:16686"  # Jaeger UI
+  #     - "4317:4317"    # OTLP gRPC
+  #   restart: unless-stopped

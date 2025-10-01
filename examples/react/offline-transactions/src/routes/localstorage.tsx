@@ -11,11 +11,26 @@ function LocalStorageDemo() {
   const [offline, setOffline] = useState<any>(null)
 
   useEffect(() => {
-    const offlineExecutor = createLocalStorageOfflineExecutor()
-    setOffline(offlineExecutor)
+    let offlineExecutor: any
+
+    // To enable OpenTelemetry tracing, pass otel config:
+    // Jaeger:
+    // createLocalStorageOfflineExecutor({
+    //   endpoint: 'http://localhost:4318/v1/traces',
+    // }).then(setOffline)
+    // Honeycomb:
+    // createLocalStorageOfflineExecutor({
+    //   endpoint: 'https://api.honeycomb.io/v1/traces',
+    //   headers: { 'x-honeycomb-team': 'YOUR_API_KEY' },
+    // }).then(setOffline)
+
+    createLocalStorageOfflineExecutor().then((executor) => {
+      offlineExecutor = executor
+      setOffline(executor)
+    })
 
     return () => {
-      offlineExecutor.dispose()
+      offlineExecutor?.dispose()
     }
   }, [])
 

@@ -30,6 +30,13 @@ export interface SerializedError {
   stack?: string
 }
 
+export interface SerializedSpanContext {
+  traceId: string
+  spanId: string
+  traceFlags: number
+  traceState?: string
+}
+
 // In-memory representation with full PendingMutation objects
 export interface OfflineTransaction {
   id: string
@@ -42,6 +49,7 @@ export interface OfflineTransaction {
   nextAttemptAt: number
   lastError?: SerializedError
   metadata?: Record<string, any>
+  spanContext?: SerializedSpanContext
   version: 1
 }
 
@@ -57,6 +65,7 @@ export interface SerializedOfflineTransaction {
   nextAttemptAt: number
   lastError?: SerializedError
   metadata?: Record<string, any>
+  spanContext?: SerializedSpanContext
   version: 1
 }
 
@@ -72,6 +81,10 @@ export interface OfflineConfig {
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   leaderElection?: LeaderElection
+  otel?: {
+    endpoint: string
+    headers?: Record<string, string>
+  }
 }
 
 export interface StorageAdapter {

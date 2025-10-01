@@ -11,12 +11,29 @@ function IndexedDBDemo() {
   const [offline, setOffline] = useState<any>(null)
 
   useEffect(() => {
-    const offlineExecutor = createIndexedDBOfflineExecutor()
-    console.log({ offlineExecutor })
-    setOffline(offlineExecutor)
+    let offlineExecutor: any
+
+    // To enable OpenTelemetry tracing, pass otel config:
+    // Jaeger:
+    // createIndexedDBOfflineExecutor({
+    //   endpoint: 'http://localhost:4318/v1/traces',
+    // }).then(setOffline)
+    // Honeycomb:
+    // createIndexedDBOfflineExecutor({
+    //   endpoint: 'https://api.honeycomb.io/v1/traces',
+    //   headers: { 'x-honeycomb-team': 'YOUR_API_KEY' },
+    // }).then(setOffline)
+
+    createIndexedDBOfflineExecutor({
+      endpoint: 'http://localhost:4318/v1/traces',
+    }).then((executor) => {
+      offlineExecutor = executor
+      console.log({ offlineExecutor })
+      setOffline(executor)
+    })
 
     return () => {
-      offlineExecutor.dispose()
+      offlineExecutor?.dispose()
     }
   }, [])
 

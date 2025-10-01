@@ -1,3 +1,4 @@
+import { withSpan } from "../telemetry/tracer"
 import { TransactionSerializer } from "./TransactionSerializer"
 import type { OfflineTransaction, StorageAdapter } from "../types"
 import type { Collection } from "@tanstack/db"
@@ -20,51 +21,73 @@ export class OutboxManager {
   }
 
   async add(transaction: OfflineTransaction): Promise<void> {
-    const key = this.getStorageKey(transaction.id)
-    const serialized = this.serializer.serialize(transaction)
-    await this.storage.set(key, serialized)
+    return withSpan(
+      `outbox.add`,
+      {
+        "transaction.id": transaction.id,
+        "transaction.mutationFnName": transaction.mutationFnName,
+        "transaction.keyCount": transaction.keys.length,
+      },
+      async () => {
+        const key = this.getStorageKey(transaction.id)
+        const serialized = this.serializer.serialize(transaction)
+        await this.storage.set(key, serialized)
+      }
+    )
   }
 
   async get(id: string): Promise<OfflineTransaction | null> {
-    const key = this.getStorageKey(id)
-    const data = await this.storage.get(key)
+    return withSpan(`outbox.get`, { "transaction.id": id }, async (span) => {
+      const key = this.getStorageKey(id)
+      const data = await this.storage.get(key)
 
-    if (!data) {
-      return null
-    }
+      if (!data) {
+        span.setAttribute(`result`, `not_found`)
+        return null
+      }
 
-    try {
-      return this.serializer.deserialize(data)
-    } catch (error) {
-      console.warn(`Failed to deserialize transaction ${id}:`, error)
-      return null
-    }
+      try {
+        const transaction = this.serializer.deserialize(data)
+        span.setAttribute(`result`, `found`)
+        return transaction
+      } catch (error) {
+        console.warn(`Failed to deserialize transaction ${id}:`, error)
+        span.setAttribute(`result`, `deserialize_error`)
+        return null
+      }
+    })
   }
 
   async getAll(): Promise<Array<OfflineTransaction>> {
-    const keys = await this.storage.keys()
-    const transactionKeys = keys.filter((key) => key.startsWith(this.keyPrefix))
+    return withSpan(`outbox.getAll`, {}, async (span) => {
+      const keys = await this.storage.keys()
+      const transactionKeys = keys.filter((key) =>
+        key.startsWith(this.keyPrefix)
+      )
 
-    const transactions: Array<OfflineTransaction> = []
+      span.setAttribute(`transactionCount`, transactionKeys.length)
 
-    for (const key of transactionKeys) {
-      const data = await this.storage.get(key)
-      if (data) {
-        try {
-          const transaction = this.serializer.deserialize(data)
-          transactions.push(transaction)
-        } catch (error) {
-          console.warn(
-            `Failed to deserialize transaction from key ${key}:`,
-            error
-          )
+      const transactions: Array<OfflineTransaction> = []
+
+      for (const key of transactionKeys) {
+        const data = await this.storage.get(key)
+        if (data) {
+          try {
+            const transaction = this.serializer.deserialize(data)
+            transactions.push(transaction)
+          } catch (error) {
+            console.warn(
+              `Failed to deserialize transaction from key ${key}:`,
+              error
+            )
+          }
         }
       }
-    }
 
-    return transactions.sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-    )
+      return transactions.sort(
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+      )
+    })
   }
 
   async getByKeys(keys: Array<string>): Promise<Array<OfflineTransaction>> {
@@ -80,22 +103,28 @@ export class OutboxManager {
     id: string,
     updates: Partial<OfflineTransaction>
   ): Promise<void> {
-    const existing = await this.get(id)
-    if (!existing) {
-      throw new Error(`Transaction ${id} not found`)
-    }
+    return withSpan(`outbox.update`, { "transaction.id": id }, async () => {
+      const existing = await this.get(id)
+      if (!existing) {
+        throw new Error(`Transaction ${id} not found`)
+      }
 
-    const updated = { ...existing, ...updates }
-    await this.add(updated)
+      const updated = { ...existing, ...updates }
+      await this.add(updated)
+    })
   }
 
   async remove(id: string): Promise<void> {
-    const key = this.getStorageKey(id)
-    await this.storage.delete(key)
+    return withSpan(`outbox.remove`, { "transaction.id": id }, async () => {
+      const key = this.getStorageKey(id)
+      await this.storage.delete(key)
+    })
   }
 
   async removeMany(ids: Array<string>): Promise<void> {
-    await Promise.all(ids.map((id) => this.remove(id)))
+    return withSpan(`outbox.removeMany`, { count: ids.length }, async () => {
+      await Promise.all(ids.map((id) => this.remove(id)))
+    })
   }
 
   async clear(): Promise<void> {
