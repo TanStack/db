@@ -1,5 +1,5 @@
 import { Func, PropRef, Value } from "../ir.js"
-import type { BasicExpression } from "../ir.js"
+import type { BasicExpression, OrderBy } from "../ir.js"
 
 /**
  * Functions supported by the collection index system.
@@ -89,4 +89,27 @@ export function convertToBasicExpression(
     }
     return new Func(whereClause.name, args)
   }
+}
+
+export function convertOrderByToBasicExpression(
+  orderBy: OrderBy,
+  collectionAlias: string
+): OrderBy {
+  const normalizedOrderBy = orderBy.map((clause) => {
+    const basicExp = convertToBasicExpression(
+      clause.expression,
+      collectionAlias
+    )
+
+    if (!basicExp) {
+      throw new Error(`Failed to convert orderBy expression to a basic expression: ${clause.expression}`)
+    }
+
+    return {
+      ...clause,
+      expression: basicExp,
+    }
+  })
+
+  return normalizedOrderBy
 }
