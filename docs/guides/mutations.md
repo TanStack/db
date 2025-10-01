@@ -597,7 +597,7 @@ addTodoTx.mutate(() =>
   })
 )
 
-// User commits when ready
+// User commits when ready (e.g., when they hit save)
 addTodoTx.commit()
 ```
 
