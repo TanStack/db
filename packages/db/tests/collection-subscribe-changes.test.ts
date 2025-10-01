@@ -1379,4 +1379,141 @@ describe(`Collection.subscribeChanges`, () => {
     expect(changeEvents.length).toBe(0)
     expect(collection.state.has(1)).toBe(false)
   })
+
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback`, async () => {
+    const callback = vi.fn()
+
+    interface TestItem extends Record<string, unknown> {
+      id: number
+      number: number
+    }
+
+    let callBegin!: () => void
+    let callWrite!: (message: Omit<ChangeMessage<TestItem>, `key`>) => void
+    let callCommit!: () => void
+
+    // Create collection with pre-populated data
+    const collection = createCollection<TestItem>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          callBegin = begin
+          callWrite = write
+          callCommit = commit
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 0, number: 15 },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onDelete: ({ transaction }) => {
+        const { original } = transaction.mutations[0]
+
+        // IMMEDIATELY synchronously trigger the sync inside the onDelete callback promise
+        callBegin()
+        callWrite({ type: `delete`, value: original })
+        callCommit()
+
+        return Promise.resolve()
+      },
+    })
+
+    // Subscribe to changes
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    callback.mockReset()
+
+    // Delete item 0
+    collection.delete(0)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(callback.mock.calls.length).toBe(1)
+    expect(callback.mock.calls[0]![0]).toEqual([
+      {
+        type: `delete`,
+        key: 0,
+        value: { id: 0, number: 15 },
+      },
+    ])
+
+    subscription.unsubscribe()
+  })
+
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback after a short delay`, async () => {
+    const callback = vi.fn()
+
+    interface TestItem extends Record<string, unknown> {
+      id: number
+      number: number
+    }
+
+    let callBegin!: () => void
+    let callWrite!: (message: Omit<ChangeMessage<TestItem>, `key`>) => void
+    let callCommit!: () => void
+
+    // Create collection with pre-populated data
+    const collection = createCollection<TestItem>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          callBegin = begin
+          callWrite = write
+          callCommit = commit
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 0, number: 15 },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onDelete: async ({ transaction }) => {
+        const { original } = transaction.mutations[0]
+
+        // Simulate waiting for some async operation
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        // Synchronously trigger the sync inside the onDelete callback promise,
+        // but after a short delay.
+        // Ordering here is important to test for a race condition!
+        callBegin()
+        callWrite({ type: `delete`, value: original })
+        callCommit()
+      },
+    })
+
+    // Subscribe to changes
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    callback.mockReset()
+
+    // Delete item 0
+    collection.delete(0)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(callback.mock.calls.length).toBe(1)
+    expect(callback.mock.calls[0]![0]).toEqual([
+      {
+        type: `delete`,
+        key: 0,
+        value: { id: 0, number: 15 },
+      },
+    ])
+
+    subscription.unsubscribe()
+  })
 })
