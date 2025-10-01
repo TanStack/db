@@ -1186,6 +1186,190 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const results = Array.from(collection.values())
         expect(results).toHaveLength(0)
       })
+
+      it(`can use use orderBy in both ascending and descending order on the same column`, async () => {
+        type DateItem = {
+          id: string
+          date: Date
+        }
+
+        const dateCollection = createCollection(
+          mockSyncCollectionOptions<DateItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                date: new Date(`2025-09-15`),
+              },
+              {
+                id: `2`,
+                date: new Date(`2025-09-10`),
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const firstQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.date, `asc`)
+            .limit(1)
+            .select(({ numbers }) => ({
+              id: numbers.id,
+              date: numbers.date,
+            }))
+        )
+        await firstQuery.preload()
+
+        // This then tries to use an index on the date field but in the opposite direction
+        const orderByQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.date, `desc`)
+            .limit(1)
+            .select(({ numbers }) => ({
+              id: numbers.id,
+              date: numbers.date,
+            }))
+        )
+        await orderByQuery.preload()
+
+        const results = Array.from(orderByQuery.values())
+        expect(results).toHaveLength(1)
+
+        expect(results[0]!.id).toBe(`1`)
+        expect(results[0]!.date).toEqual(new Date(`2025-09-15`))
+      })
+
+      it(`can use orderBy when two different comparators are used on the same column`, async () => {
+        type DateItem = {
+          id: string
+          value: string
+        }
+
+        const dateCollection = createCollection(
+          mockSyncCollectionOptions<DateItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                value: `a`,
+              },
+              {
+                id: `2`,
+                value: `b`,
+              },
+              {
+                id: `3`,
+                value: `C`,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const query1 = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.value, {
+              direction: `asc`,
+              stringSort: `lexical`,
+            })
+        )
+        await query1.preload()
+
+        const results1 = Array.from(query1.values()).map((r) => r.value)
+        expect(results1).toEqual([`C`, `a`, `b`])
+
+        // This then tries to use an index on the date field but in the opposite direction
+        const query2 = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.value, {
+              direction: `asc`,
+              stringSort: `locale`,
+              locale: `en-US`,
+            })
+        )
+        await query2.preload()
+
+        const results2 = Array.from(query2.values()).map((r) => r.value)
+        expect(results2).toEqual([`a`, `b`, `C`])
+      })
+
+      it(`can use orderBy when nulls first vs nulls last are used on the same column`, async () => {
+        type NullableItem = {
+          id: string
+          value: number | null
+        }
+
+        const nullableCollection = createCollection(
+          mockSyncCollectionOptions<NullableItem>({
+            id: `test-nullable`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                value: 10,
+              },
+              {
+                id: `2`,
+                value: null,
+              },
+              {
+                id: `3`,
+                value: 5,
+              },
+              {
+                id: `4`,
+                value: null,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the value field with nulls first
+        const query1 = createLiveQueryCollection((q) =>
+          q
+            .from({ items: nullableCollection })
+            .orderBy(({ items }) => items.value, {
+              direction: `asc`,
+              nulls: `first`,
+            })
+            .select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+            }))
+        )
+        await query1.preload()
+
+        const results1 = Array.from(query1.values())
+        expect(results1.map((r) => r.value)).toEqual([null, null, 5, 10])
+
+        // This then tries to use an index on the value field but with nulls last
+        const query2 = createLiveQueryCollection((q) =>
+          q
+            .from({ items: nullableCollection })
+            .orderBy(({ items }) => items.value, {
+              direction: `asc`,
+              nulls: `last`,
+            })
+            .select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+            }))
+        )
+        await query2.preload()
+
+        const results2 = Array.from(query2.values())
+        expect(results2.map((r) => r.value)).toEqual([5, 10, null, null])
+      })
     })
 
     describe(`Nullable Column OrderBy`, () => {
