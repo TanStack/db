@@ -1380,7 +1380,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.has(1)).toBe(false)
   })
 
-  it(`only emit a single event when a sync mutation is triggered from inside an mutation handler callback`, async () => {
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback`, async () => {
     const callback = vi.fn()
 
     interface TestItem extends Record<string, unknown> {
@@ -1457,7 +1457,7 @@ describe(`Collection.subscribeChanges`, () => {
     subscription.unsubscribe()
   })
 
-  it(`only emit a single event when a sync mutation is triggered from inside an mutation handler callback after a short delay`, async () => {
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback after a short delay`, async () => {
     const callback = vi.fn()
 
     interface TestItem extends Record<string, unknown> {
