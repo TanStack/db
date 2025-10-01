@@ -669,6 +669,48 @@ export function queryCollectionOptions(
       handleQueryResult(observer.getCurrentResult())
     })
 
+    // Subscribe to the query client's cache to handle queries that are GCed by tanstack query
+    const unsubscribeQueryCache = queryClient
+      .getQueryCache()
+      .subscribe((event) => {
+        const hashedKey = event.query.queryHash
+        if (event.type === `removed`) {
+          cleanupQuery(hashedKey)
+        }
+      })
+
+    function cleanupQuery(hashedQueryKey: string) {
+      // Unsubscribe from the query's observer
+      unsubscribes.get(hashedQueryKey)?.()
+
+      // Get all the rows that are in the result of this query
+      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
+
+      // Remove the query from these rows
+      rowKeys.forEach((rowKey) => {
+        const queries = rowToQueries.get(rowKey) // set of queries that reference this row
+        if (queries && queries.size > 0) {
+          queries.delete(hashedQueryKey)
+          if (queries.size === 0) {
+            // Reference count dropped to 0, we can GC the row
+            rowToQueries.delete(rowKey)
+
+            if (collection.has(rowKey)) {
+              begin()
+              write({ type: `delete`, value: collection.get(rowKey) })
+              commit()
+            }
+          }
+        }
+      })
+
+      // Remove the query from the internal state
+      unsubscribes.delete(hashedQueryKey)
+      observers.delete(hashedQueryKey)
+      queryToRows.delete(hashedQueryKey)
+      hashToQueryKey.delete(hashedQueryKey)
+    }
+
     const cleanup = async () => {
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
@@ -679,6 +721,7 @@ export function queryCollectionOptions(
       queryToRows.clear()
       rowToQueries.clear()
       observers.clear()
+      unsubscribeQueryCache()
 
       await Promise.all(
         queryKeys.map(async (queryKey) => {
