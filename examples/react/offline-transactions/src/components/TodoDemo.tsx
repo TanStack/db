@@ -134,27 +134,31 @@ export function TodoDemo({
         {/* Status indicators */}
         <div className="flex flex-wrap gap-4 mb-6 text-sm">
           <div
-            className={`flex items-center gap-2 px-3 py-1 rounded-full ${isOnline
-              ? `bg-green-100 text-green-800`
-              : `bg-red-100 text-red-800`
-              }`}
+            className={`flex items-center gap-2 px-3 py-1 rounded-full ${
+              isOnline
+                ? `bg-green-100 text-green-800`
+                : `bg-red-100 text-red-800`
+            }`}
           >
             <div
-              className={`w-2 h-2 rounded-full ${isOnline ? `bg-green-500` : `bg-red-500`
-                }`}
+              className={`w-2 h-2 rounded-full ${
+                isOnline ? `bg-green-500` : `bg-red-500`
+              }`}
             />
             {isOnline ? `Online` : `Offline`}
           </div>
 
           <div
-            className={`flex items-center gap-2 px-3 py-1 rounded-full ${offline?.isOfflineEnabled
-              ? `bg-blue-100 text-blue-800`
-              : `bg-gray-100 text-gray-800`
-              }`}
+            className={`flex items-center gap-2 px-3 py-1 rounded-full ${
+              offline?.isOfflineEnabled
+                ? `bg-blue-100 text-blue-800`
+                : `bg-gray-100 text-gray-800`
+            }`}
           >
             <div
-              className={`w-2 h-2 rounded-full ${offline?.isOfflineEnabled ? `bg-blue-500` : `bg-gray-500`
-                }`}
+              className={`w-2 h-2 rounded-full ${
+                offline?.isOfflineEnabled ? `bg-blue-500` : `bg-gray-500`
+              }`}
             />
             {offline?.isOfflineEnabled ? `Offline Mode Enabled` : `Online Only`}
           </div>
@@ -218,18 +222,20 @@ export function TodoDemo({
                 >
                   <button
                     onClick={() => handleToggleTodo(todo.id)}
-                    className={`w-5 h-5 rounded border-2 flex items-center justify-center ${todo.completed
-                      ? `bg-green-500 border-green-500 text-white`
-                      : `border-gray-300 hover:border-green-400`
-                      }`}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                      todo.completed
+                        ? `bg-green-500 border-green-500 text-white`
+                        : `border-gray-300 hover:border-green-400`
+                    }`}
                   >
                     {todo.completed && <span className="text-xs">✓</span>}
                   </button>
                   <span
-                    className={`flex-1 ${todo.completed
-                      ? `line-through text-gray-500`
-                      : `text-gray-900`
-                      }`}
+                    className={`flex-1 ${
+                      todo.completed
+                        ? `line-through text-gray-500`
+                        : `text-gray-900`
+                    }`}
                   >
                     {todo.text}
                   </span>
@@ -253,7 +259,6 @@ export function TodoDemo({
           <h3 className="font-medium text-gray-900 mb-2">Try this:</h3>
           <ol className="text-sm text-gray-600 space-y-1">
             <li>1. Add some todos while online</li>
-            <li>2. Open DevTools → Network → Set to "Offline"</li>
             <li>3. Add more todos (they'll be stored locally)</li>
             <li>4. Go back online to see them sync</li>
             <li>

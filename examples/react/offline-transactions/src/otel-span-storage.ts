@@ -10,8 +10,8 @@ interface StoredSpan {
 }
 
 export class OTelSpanStorage {
-  private dbName = 'otel-spans'
-  private storeName = 'failed-spans'
+  private dbName = `otel-spans`
+  private storeName = `failed-spans`
   private db: IDBDatabase | null = null
   private maxRetries = 5
 
@@ -28,9 +28,9 @@ export class OTelSpanStorage {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result
         if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { keyPath: 'id' })
-          store.createIndex('timestamp', 'timestamp', { unique: false })
-          store.createIndex('retryCount', 'retryCount', { unique: false })
+          const store = db.createObjectStore(this.storeName, { keyPath: `id` })
+          store.createIndex(`timestamp`, `timestamp`, { unique: false })
+          store.createIndex(`retryCount`, `retryCount`, { unique: false })
         }
       }
     })
@@ -47,7 +47,7 @@ export class OTelSpanStorage {
     }
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readwrite')
+      const transaction = this.db!.transaction([this.storeName], `readwrite`)
       const store = transaction.objectStore(this.storeName)
       const request = store.add(storedSpan)
 
@@ -56,11 +56,11 @@ export class OTelSpanStorage {
     })
   }
 
-  async getAll(): Promise<StoredSpan[]> {
+  async getAll(): Promise<Array<StoredSpan>> {
     if (!this.db) await this.init()
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readonly')
+      const transaction = this.db!.transaction([this.storeName], `readonly`)
       const store = transaction.objectStore(this.storeName)
       const request = store.getAll()
 
@@ -73,7 +73,7 @@ export class OTelSpanStorage {
     if (!this.db) await this.init()
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readwrite')
+      const transaction = this.db!.transaction([this.storeName], `readwrite`)
       const store = transaction.objectStore(this.storeName)
       const request = store.delete(id)
 
@@ -86,16 +86,12 @@ export class OTelSpanStorage {
     if (!this.db) await this.init()
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readwrite')
+      const transaction = this.db!.transaction([this.storeName], `readwrite`)
       const store = transaction.objectStore(this.storeName)
       const getRequest = store.get(id)
 
       getRequest.onsuccess = () => {
         const storedSpan = getRequest.result as StoredSpan
-        if (!storedSpan) {
-          resolve()
-          return
-        }
 
         storedSpan.retryCount++
 
@@ -119,7 +115,7 @@ export class OTelSpanStorage {
     if (!this.db) await this.init()
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readwrite')
+      const transaction = this.db!.transaction([this.storeName], `readwrite`)
       const store = transaction.objectStore(this.storeName)
       const request = store.clear()
 
@@ -132,7 +128,7 @@ export class OTelSpanStorage {
     if (!this.db) await this.init()
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.storeName], 'readonly')
+      const transaction = this.db!.transaction([this.storeName], `readonly`)
       const store = transaction.objectStore(this.storeName)
       const request = store.count()
 

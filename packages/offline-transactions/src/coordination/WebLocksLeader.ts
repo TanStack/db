@@ -26,7 +26,7 @@ export class WebLocksLeader extends BaseLeaderElection {
           mode: `exclusive`,
           ifAvailable: true,
         },
-        async (lock) => {
+        (lock) => {
           return lock !== null
         }
       )
