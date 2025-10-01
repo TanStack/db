@@ -253,12 +253,16 @@ function processJoin(
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          const lazyCollectionSubscription = subscriptions[lazyCollection.id]
+          const lazyAliasCandidate =
+            activeCollection === `main` ? joinedTableAlias : mainTableAlias
+          const lazyCollectionSubscription =
+            subscriptions[lazyAliasCandidate] ??
+            subscriptions[`__collection:${lazyCollection.id}`]
 
           if (!lazyCollectionSubscription) {
-            throw new Error(
-              `Internal error: subscription for collection is missing in join pipeline. Make sure the live query collection sets the subscription before running the pipeline.`
-            )
+            // The alias was not subscribed (e.g. belongs to a nested subquery),
+            // so we skip the lazy loading optimization for this join.
+            return
           }
 
           if (lazyCollectionSubscription.hasLoadedInitialState()) {
@@ -401,9 +405,9 @@ function processJoinSource(
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.collection.id]
+      const input = allInputs[from.alias] ?? allInputs[from.collection.id]
       if (!input) {
-        throw new CollectionInputNotFoundError(from.collection.id)
+        throw new CollectionInputNotFoundError(from.alias, from.collection.id)
       }
       return { alias: from.alias, input, collectionId: from.collection.id }
     }

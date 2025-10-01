@@ -13,6 +13,7 @@ import type { BaseIndex } from "../../indexes/base-index.js"
 import type { Collection } from "../../collection/index.js"
 
 export type OrderByOptimizationInfo = {
+  alias: string
   offset: number
   limit: number
   comparator: (
@@ -157,7 +158,13 @@ export function processOrderBy(
 
       if (index && index.supports(`gt`)) {
         // We found an index that we can use to lazily load ordered data
+        const orderByAlias =
+          orderByExpression.path.length > 1
+            ? String(orderByExpression.path[0])
+            : rawQuery.from.alias
+
         const orderByOptimizationInfo = {
+          alias: orderByAlias,
           offset: offset ?? 0,
           limit,
           comparator,

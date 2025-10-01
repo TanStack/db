@@ -337,9 +337,9 @@ function processFrom(
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.collection.id]
+      const input = allInputs[from.alias] ?? allInputs[from.collection.id]
       if (!input) {
-        throw new CollectionInputNotFoundError(from.collection.id)
+        throw new CollectionInputNotFoundError(from.alias, from.collection.id)
       }
       return { alias: from.alias, input, collectionId: from.collection.id }
     }

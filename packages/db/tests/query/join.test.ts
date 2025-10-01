@@ -3,9 +3,9 @@ import {
   concat,
   createLiveQueryCollection,
   eq,
+  gt,
   isUndefined,
   lt,
-  gt,
   not,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
@@ -1554,7 +1554,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       )
     })
   })
-  
+
   test(`should handle multiple joins with where clauses to the same source collection`, () => {
     type Collection1 = {
       id: number
@@ -1604,7 +1604,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 .where(({ join1 }) => not(gt(join1.other, 20))),
             },
             ({ main, join1 }) => eq(main.value, join1.value),
-            "left"
+            `left`
           )
           .join(
             {
@@ -1613,13 +1613,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 .where(({ join2 }) => not(lt(join2.other, 20))),
             },
             ({ main, join2 }) => eq(main.value, join2.value),
-            "left"
+            `left`
           ),
     })
 
     const multipleResults = multipleJoinQuery.toArray
-
-    console.log(multipleResults)
 
     // This should work - we're filtering for records where join1 has 'a' AND join2 has 'b'
     // But it might fail due to the sequential WHERE clause issue

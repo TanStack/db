@@ -350,8 +350,11 @@ export class LimitOffsetRequireOrderByError extends QueryCompilationError {
 }
 
 export class CollectionInputNotFoundError extends QueryCompilationError {
-  constructor(collectionId: string) {
-    super(`Input for collection "${collectionId}" not found in inputs map`)
+  constructor(alias: string, collectionId?: string) {
+    const details = collectionId
+      ? `alias "${alias}" (collection "${collectionId}")`
+      : `collection "${alias}"`
+    super(`Input for ${details} not found in inputs map`)
   }
 }
 
@@ -561,5 +564,13 @@ export class QueryOptimizerError extends TanStackDBError {
 export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
   constructor() {
     super(`Cannot combine empty expression list`)
+  }
+}
+
+export class WhereClauseConversionError extends QueryOptimizerError {
+  constructor(collectionId: string, alias: string) {
+    super(
+      `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`
+    )
   }
 }

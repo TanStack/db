@@ -32,7 +32,8 @@ export class CollectionConfigBuilder<
   private readonly id: string
   readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
-  private readonly collectionAliasesById: Map<string, Set<string>>
+  private readonly aliasToCollectionId: Record<string, string>
+  private readonly collectionByAlias: Record<string, Collection<any, any, any>>
 
   // WeakMap to store the keys of the results
   // so that we can retrieve them in the getKey function
@@ -52,7 +53,7 @@ export class CollectionConfigBuilder<
     | Map<string, BasicExpression<boolean>>
     | undefined
 
-  // Map of collection ID to subscription
+  // Map of collection alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
   // Map of collection IDs to functions that load keys for that lazy collection
   lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
@@ -69,7 +70,18 @@ export class CollectionConfigBuilder<
 
     this.query = buildQueryFromConfig(config)
     this.collections = extractCollectionsFromQuery(this.query)
-    this.collectionAliasesById = extractCollectionAliases(this.query)
+    const collectionAliasesById = extractCollectionAliases(this.query)
+
+    this.aliasToCollectionId = {}
+    this.collectionByAlias = {}
+    for (const [collectionId, aliases] of collectionAliasesById.entries()) {
+      const collection = this.collections[collectionId]
+      if (!collection) continue
+      for (const alias of aliases) {
+        this.aliasToCollectionId[alias] = collectionId
+        this.collectionByAlias[alias] = collection
+      }
+    }
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -98,9 +110,12 @@ export class CollectionConfigBuilder<
     }
   }
 
-  getCollectionAliases(collectionId: string): Array<string> {
-    const aliases = this.collectionAliasesById.get(collectionId)
-    return aliases ? Array.from(aliases) : []
+  getCollectionIdForAlias(alias: string): string {
+    const collectionId = this.aliasToCollectionId[alias]
+    if (!collectionId) {
+      throw new Error(`Unknown collection alias "${alias}"`)
+    }
+    return collectionId
   }
 
   // The callback function is called after the graph has run.
@@ -203,8 +218,8 @@ export class CollectionConfigBuilder<
   private compileBasePipeline() {
     this.graphCache = new D2()
     this.inputsCache = Object.fromEntries(
-      Object.entries(this.collections).map(([key]) => [
-        key,
+      Object.keys(this.collectionByAlias).map((alias) => [
+        alias,
         this.graphCache!.newInput<any>(),
       ])
     )
@@ -340,9 +355,11 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
   ) {
-    const loaders = Object.entries(this.collections).map(
-      ([collectionId, collection]) => {
+    const loaders = Object.entries(this.collectionByAlias).map(
+      ([alias, collection]) => {
+        const collectionId = this.aliasToCollectionId[alias]!
         const collectionSubscriber = new CollectionSubscriber(
+          alias,
           collectionId,
           collection,
           config,
@@ -351,7 +368,9 @@ export class CollectionConfigBuilder<
         )
 
         const subscription = collectionSubscriber.subscribe()
-        this.subscriptions[collectionId] = subscription
+        this.subscriptions[alias] = subscription
+        const collectionKey = `__collection:${collectionId}`
+        this.subscriptions[collectionKey] = subscription
 
         const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
           collectionSubscriber,
@@ -470,7 +489,7 @@ function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
     }
   }
 
-  function traverse(q: QueryIR) {
+  function traverse(q?: QueryIR) {
     if (!q) return
 
     recordAlias(q.from)
