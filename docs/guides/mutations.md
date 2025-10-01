@@ -138,8 +138,10 @@ todoCollection.update(
 )
 
 // Use metadata in handler
-onUpdate: async ({ transaction, metadata }) => {
-  if (metadata?.intent === 'complete') {
+onUpdate: async ({ transaction }) => {
+  const mutation = transaction.mutations[0]
+
+  if (mutation.metadata?.intent === 'complete') {
     await Promise.all(
       transaction.mutations.map((mutation) =>
         api.todos.complete(mutation.original.id)
@@ -337,8 +339,8 @@ All operation handlers receive an object with the following properties:
 ```typescript
 type OperationHandler = (params: {
   transaction: Transaction
-  metadata?: Record<string, any>
-}) => Promise<void> | void
+  collection: Collection
+}) => Promise<any> | any
 ```
 
 The `transaction` object contains:
@@ -349,6 +351,7 @@ The `transaction` object contains:
   - `modified`: The modified item (for inserts and updates)
   - `changes`: The changes object (for updates)
   - `key`: The item key
+  - `metadata`: Optional metadata attached to the mutation
 
 ### Defining Operation Handlers
 
