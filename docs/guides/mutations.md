@@ -139,13 +139,18 @@ todoCollection.update(
 
 // Use metadata in handler
 onUpdate: async ({ transaction, metadata }) => {
-  // Collection handlers only ever receive one mutation at a time
-  const mutation = transaction.mutations[0]
-
   if (metadata?.intent === 'complete') {
-    await api.todos.complete(mutation.original.id)
+    await Promise.all(
+      transaction.mutations.map((mutation) =>
+        api.todos.complete(mutation.original.id)
+      )
+    )
   } else {
-    await api.todos.update(mutation.original.id, mutation.changes)
+    await Promise.all(
+      transaction.mutations.map((mutation) =>
+        api.todos.update(mutation.original.id, mutation.changes)
+      )
+    )
   }
 }
 ```
@@ -168,7 +173,7 @@ const likePost = createOptimisticAction<string>({
     // Send the intent to the server
     await api.posts.like(postId)
     // Server determines actual state changes
-    await postCollection.refetch()
+    await postCollection.utils.refetch()
   },
 })
 ```
@@ -355,51 +360,60 @@ const todoCollection = createCollection({
   // ... other options
 
   onInsert: async ({ transaction }) => {
-    const mutation = transaction.mutations[0]
-    await api.todos.create(mutation.modified)
-    // Wait for sync back before returning
-    await mutation.collection.refetch()
+    await Promise.all(
+      transaction.mutations.map((mutation) =>
+        api.todos.create(mutation.modified)
+      )
+    )
   },
 
   onUpdate: async ({ transaction }) => {
-    const mutation = transaction.mutations[0]
-    await api.todos.update(mutation.original.id, mutation.changes)
-    // Wait for sync back before returning
-    await mutation.collection.refetch()
+    await Promise.all(
+      transaction.mutations.map((mutation) =>
+        api.todos.update(mutation.original.id, mutation.changes)
+      )
+    )
   },
 
   onDelete: async ({ transaction }) => {
-    const mutation = transaction.mutations[0]
-    await api.todos.delete(mutation.original.id)
-    // Wait for sync back before returning
-    await mutation.collection.refetch()
+    await Promise.all(
+      transaction.mutations.map((mutation) =>
+        api.todos.delete(mutation.original.id)
+      )
+    )
   },
 })
 ```
 
-> [!IMPORTANT]
-> Operation handlers must ensure server writes have synced back before returning. The optimistic state is dropped when the handler returns, so failing to wait for sync will cause a flash of missing data.
+> [!NOTE]
+> Collection operation handlers automatically trigger a refetch after the handler completes, so you don't need to manually call `refetch()` in your handlers.
 
-### Using Collection-Specific Utils
+### Collection-Specific Handler Patterns
 
-Different collection types provide utilities to help wait for sync:
+Different collection types have specific patterns for their handlers:
 
-**QueryCollection**:
+**QueryCollection** - automatically refetches after handler completes:
 ```typescript
 onUpdate: async ({ transaction }) => {
-  const mutation = transaction.mutations[0]
-  await api.todos.update(mutation.original.id, mutation.changes)
-  await mutation.collection.refetch() // TanStack Query refetch
+  await Promise.all(
+    transaction.mutations.map((mutation) =>
+      api.todos.update(mutation.original.id, mutation.changes)
+    )
+  )
+  // Automatic refetch happens after handler completes
 }
 ```
 
-**ElectricCollection**:
+**ElectricCollection** - return txid(s) to track sync:
 ```typescript
 onUpdate: async ({ transaction }) => {
-  const mutation = transaction.mutations[0]
-  const response = await api.todos.update(mutation.original.id, mutation.changes)
-  // Wait for Electric to sync the transaction
-  await mutation.collection.utils.awaitTxId(response.txid)
+  const txids = await Promise.all(
+    transaction.mutations.map(async (mutation) => {
+      const response = await api.todos.update(mutation.original.id, mutation.changes)
+      return response.txid
+    })
+  )
+  return { txid: txids }
 }
 ```
 
@@ -419,7 +433,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
 
   // Wait for sync back before returning
   const mutation = transaction.mutations[0]
-  await mutation.collection.refetch()
+  await mutation.collection.utils.refetch()
 }
 
 // Use in collections
@@ -1054,7 +1068,7 @@ const todoCollection = createCollection({
     linkIds(tempId, realId)
 
     // Wait for sync back
-    await todoCollection.refetch()
+    await todoCollection.utils.refetch()
   },
 })
 
