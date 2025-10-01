@@ -153,7 +153,6 @@ export class CollectionSubscription {
     limit,
     minValue,
   }: RequestLimitedSnapshotOptions) {
-    console.log("in requestLimitedSnapshot")
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
