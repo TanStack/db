@@ -1428,22 +1428,12 @@ describe(`Collection.subscribeChanges`, () => {
       includeInitialState: true,
     })
 
-    console.log({ calls: callback.mock.calls.length })
-    const changes = callback.mock.calls[0]![0] as ChangesPayload<TestItem>
-
-    console.log(changes)
-
     callback.mockReset()
 
     // Delete item 0
     collection.delete(0)
 
     await new Promise((resolve) => setTimeout(resolve, 10))
-
-    console.log({ calls: callback.mock.calls.length })
-    for (const call of callback.mock.calls) {
-      console.log(call[0]![0])
-    }
 
     expect(callback.mock.calls.length).toBe(1)
     expect(callback.mock.calls[0]![0]).toEqual([
@@ -1490,7 +1480,6 @@ describe(`Collection.subscribeChanges`, () => {
       },
       onDelete: async ({ transaction }) => {
         const { original } = transaction.mutations[0]
-        console.log({ original })
 
         // Simulate waiting for some async operation
         await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1509,22 +1498,12 @@ describe(`Collection.subscribeChanges`, () => {
       includeInitialState: true,
     })
 
-    console.log({ calls: callback.mock.calls.length })
-    const changes = callback.mock.calls[0]![0] as ChangesPayload<TestItem>
-
-    console.log(changes)
-
     callback.mockReset()
 
     // Delete item 0
     collection.delete(0)
 
     await new Promise((resolve) => setTimeout(resolve, 10))
-
-    console.log({ calls: callback.mock.calls.length })
-    for (const call of callback.mock.calls) {
-      console.log(call[0]![0])
-    }
 
     expect(callback.mock.calls.length).toBe(1)
     expect(callback.mock.calls[0]![0]).toEqual([
