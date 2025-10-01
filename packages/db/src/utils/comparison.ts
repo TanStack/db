@@ -110,3 +110,13 @@ export const defaultComparator = makeComparator({
   nulls: `first`,
   stringSort: `locale`,
 })
+
+/**
+ * Normalize a value for comparison
+ */
+export function normalizeValue(value: any): any {
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+  return value
+}

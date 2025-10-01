@@ -1,6 +1,6 @@
 {
   "name": "todos",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -22,12 +22,12 @@
   },
   "private": true,
   "dependencies": {
-    "@angular/common": "^20.3.1",
-    "@angular/compiler": "^20.3.1",
-    "@angular/core": "^20.3.1",
-    "@angular/forms": "^20.3.1",
-    "@angular/platform-browser": "^20.3.1",
-    "@angular/router": "^20.3.1",
+    "@angular/common": "^20.3.2",
+    "@angular/compiler": "^20.3.2",
+    "@angular/core": "^20.3.2",
+    "@angular/forms": "^20.3.2",
+    "@angular/platform-browser": "^20.3.2",
+    "@angular/router": "^20.3.2",
     "@tanstack/angular-db": "workspace:*",
     "@tanstack/db": "workspace:*",
     "rxjs": "~7.8.2",
@@ -35,12 +35,12 @@
     "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular/build": "^20.3.2",
-    "@angular/cli": "^20.3.2",
-    "@angular/compiler-cli": "^20.3.1",
+    "@angular/build": "^20.3.3",
+    "@angular/cli": "^20.3.3",
+    "@angular/compiler-cli": "^20.3.2",
     "@types/jasmine": "~5.1.9",
     "autoprefixer": "^10.4.21",
-    "jasmine-core": "~5.10.0",
+    "jasmine-core": "~5.11.0",
     "karma": "~6.4.4",
     "karma-chrome-launcher": "~3.2.0",
     "karma-coverage": "~2.2.1",

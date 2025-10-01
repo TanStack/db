@@ -1,5 +1,42 @@
 # @tanstack/db
 
+## 0.4.3
+
+### Patch Changes
+
+- Remove circular imports to fix compatibility with Metro bundler ([#605](https://github.com/TanStack/db/pull/605))
+
+## 0.4.2
+
+### Patch Changes
+
+- Add support for Date objects to min/max aggregates and range queries when using an index. ([#428](https://github.com/TanStack/db/pull/428))
+
+- Prevent pushing down of where clauses that only touch the namespace of a source, rather than a prop on that namespace. This ensures that the semantics of the query are maintained for things such as `isUndefined(namespace)` after a join. ([#600](https://github.com/TanStack/db/pull/600))
+
+- Fix joins using conditions with computed values (such as `concat()`) ([#595](https://github.com/TanStack/db/pull/595))
+
+- Fix repeated renders when markReady called when the collection was already ready. This would occur after each long poll on an Electric collection. ([#604](https://github.com/TanStack/db/pull/604))
+
+- Updated dependencies [[`51c6bc5`](https://github.com/TanStack/db/commit/51c6bc58244ed6a3ac853e7e6af7775b33d6b65a)]:
+  - @tanstack/db-ivm@0.1.9
+
+## 0.4.1
+
+### Patch Changes
+
+- Implement idle cleanup for collection garbage collection ([#590](https://github.com/TanStack/db/pull/590))
+
+  Collection cleanup operations now use `requestIdleCallback()` to prevent blocking the UI thread during garbage collection. This improvement ensures better performance by scheduling cleanup during browser idle time rather than immediately when collections have no active subscribers.
+
+  **Key improvements:**
+  - Non-blocking cleanup operations that don't interfere with user interactions
+  - Automatic fallback to `setTimeout` for older browsers without `requestIdleCallback` support
+  - Proper callback management to prevent race conditions during cleanup rescheduling
+  - Maintains full backward compatibility with existing collection lifecycle behavior
+
+  This addresses performance concerns where collection cleanup could cause UI thread blocking during active application usage.
+
 ## 0.4.0
 
 ### Minor Changes

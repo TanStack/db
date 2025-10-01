@@ -1,15 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useLiveQuery, eq } from "@tanstack/react-db"
+import { eq, useLiveQuery } from "@tanstack/react-db"
 import { useState } from "react"
+import type { Todo } from "@/db/schema"
 import { authClient } from "@/lib/auth-client"
 import {
-  todoCollection,
   projectCollection,
+  todoCollection,
   usersCollection,
 } from "@/lib/collections"
-import { type Todo } from "@/db/schema"
 
-export const Route = createFileRoute("/_authenticated/project/$projectId")({
+export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
   component: ProjectPage,
   ssr: false,
   loader: async () => {
@@ -22,16 +22,14 @@ export const Route = createFileRoute("/_authenticated/project/$projectId")({
 function ProjectPage() {
   const { projectId } = Route.useParams()
   const { data: session } = authClient.useSession()
-  const [newTodoText, setNewTodoText] = useState("")
+  const [newTodoText, setNewTodoText] = useState(``)
 
   const { data: todos } = useLiveQuery(
     (q) =>
       q
-        .from({ todoCollection })
-        .where(({ todoCollection }) =>
-          eq(todoCollection.project_id, parseInt(projectId, 10))
-        )
-        .orderBy(({ todoCollection }) => todoCollection.created_at),
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.project_id, parseInt(projectId, 10)))
+        .orderBy(({ todo }) => todo.created_at),
     [projectId]
   )
 
@@ -49,16 +47,13 @@ function ProjectPage() {
         })),
     [projectId]
   )
-  const usersInProject = usersInProjects?.[0]
-  console.log({ usersInProject, users })
+  const usersInProject = usersInProjects[0]
 
   const { data: projects } = useLiveQuery(
     (q) =>
       q
-        .from({ projectCollection })
-        .where(({ projectCollection }) =>
-          eq(projectCollection.id, parseInt(projectId, 10))
-        ),
+        .from({ p: projectCollection })
+        .where(({ p }) => eq(p.id, parseInt(projectId, 10))),
     [projectId]
   )
   const project = projects[0]
@@ -74,7 +69,7 @@ function ProjectPage() {
         user_ids: [],
         created_at: new Date(),
       })
-      setNewTodoText("")
+      setNewTodoText(``)
     }
   }
 
@@ -88,17 +83,13 @@ function ProjectPage() {
     todoCollection.delete(id)
   }
 
-  if (!project) {
-    return <div className="p-6">Project not found</div>
-  }
-
   return (
     <div className="p-6">
       <div className="max-w-2xl mx-auto">
         <h1
           className="text-2xl font-bold text-gray-800 mb-2 cursor-pointer hover:bg-gray-50 p-0 rounded"
           onClick={() => {
-            const newName = prompt("Edit project name:", project.name)
+            const newName = prompt(`Edit project name:`, project.name)
             if (newName && newName !== project.name) {
               projectCollection.update(project.id, (draft) => {
                 draft.name = newName
@@ -113,8 +104,8 @@ function ProjectPage() {
           className="text-gray-600 mb-3 cursor-pointer hover:bg-gray-50 p-0 rounded min-h-[1.5rem]"
           onClick={() => {
             const newDescription = prompt(
-              "Edit project description:",
-              project.description || ""
+              `Edit project description:`,
+              project.description || ``
             )
             if (newDescription !== null) {
               projectCollection.update(project.id, (draft) => {
@@ -123,7 +114,7 @@ function ProjectPage() {
             }
           }}
         >
-          {project.description || "Click to add description..."}
+          {project.description || `Click to add description...`}
         </p>
 
         <div className="flex gap-2 mb-4">
@@ -131,7 +122,7 @@ function ProjectPage() {
             type="text"
             value={newTodoText}
             onChange={(e) => setNewTodoText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addTodo()}
+            onKeyDown={(e) => e.key === `Enter` && addTodo()}
             placeholder="Add a new todo..."
             className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
@@ -144,7 +135,7 @@ function ProjectPage() {
         </div>
 
         <ul className="space-y-2">
-          {todos?.map((todo) => (
+          {todos.map((todo) => (
             <li
               key={todo.id}
               className="flex items-center gap-2 p-3 bg-white border border-gray-200 rounded-md shadow-sm"
@@ -158,8 +149,8 @@ function ProjectPage() {
               <span
                 className={`flex-1 ${
                   todo.completed
-                    ? "line-through text-gray-500"
-                    : "text-gray-800"
+                    ? `line-through text-gray-500`
+                    : `text-gray-800`
                 }`}
               >
                 {todo.text}
@@ -174,7 +165,7 @@ function ProjectPage() {
           ))}
         </ul>
 
-        {(!todos || todos.length === 0) && (
+        {todos.length === 0 && (
           <div className="text-center py-8">
             <p className="text-gray-500">No todos yet. Add one above!</p>
           </div>
@@ -189,10 +180,10 @@ function ProjectPage() {
           <div className="space-y-2">
             {(session?.user.id === project.owner_id
               ? users
-              : users?.filter((user) => usersInProject?.users.includes(user.id))
-            )?.map((user) => {
-              const isInProject = usersInProject?.users.includes(user.id)
-              const isOwner = user.id === usersInProject?.owner
+              : users.filter((user) => usersInProject.users.includes(user.id))
+            ).map((user) => {
+              const isInProject = usersInProject.users.includes(user.id)
+              const isOwner = user.id === usersInProject.owner
               const canEditMembership = session?.user.id === project.owner_id
               return (
                 <div
@@ -204,7 +195,6 @@ function ProjectPage() {
                       type="checkbox"
                       checked={isInProject}
                       onChange={() => {
-                        console.log(`onChange`, { isInProject, isOwner })
                         if (isInProject && !isOwner) {
                           projectCollection.update(project.id, (draft) => {
                             draft.shared_user_ids =

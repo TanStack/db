@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
+import {
+  concat,
+  createLiveQueryCollection,
+  eq,
+  isUndefined,
+} from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 
@@ -948,6 +953,30 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         const alice = results.find((r) => r.user_name === `Alice`)
         expect(alice?.department_name).toBe(`Engineering`)
       })
+
+      test(`should handle joins with computed expressions`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .join(
+                { dept: departmentsCollection },
+                ({ user, dept }) =>
+                  eq(
+                    concat(`dept`, user.department_id),
+                    concat(`dept`, dept.id)
+                  ),
+                `inner`
+              )
+              .select(({ user, dept }) => ({
+                user_name: user.name,
+                department_name: dept.name,
+              })),
+        })
+
+        expect(joinQuery.size).toBe(3)
+      })
     })
 
     test(`should handle chained joins with incremental updates`, () => {
@@ -1404,6 +1433,47 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       }).toThrow(
         `Invalid join condition: both expressions refer to the same table "user"`
       )
+    })
+
+    test(`should not push down isUndefined(namespace) to subquery`, () => {
+      const usersCollection = createUsersCollection()
+      const specialUsersCollection = createCollection(
+        mockSyncCollectionOptions({
+          id: `special-users`,
+          getKey: (user) => user.id,
+          initialData: [{ id: 1, special: true }],
+        })
+      )
+
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .leftJoin(
+              { special: specialUsersCollection },
+              ({ user, special }) => eq(user.id, special.id)
+            )
+            .where(({ special }) => isUndefined(special)),
+      })
+
+      // Should return users that don't have a matching special user
+      // This should be users with IDs 2, 3, 4 (since only user 1 has a special record)
+      const results = joinQuery.toArray
+      expect(results).toHaveLength(3)
+
+      // All results should have special as undefined
+      for (const row of results) {
+        expect(row.special).toBeUndefined()
+      }
+
+      // Should not include user 1 (Alice) since she has a special record
+      const aliceResult = results.find((r) => r.user.id === 1)
+      expect(aliceResult).toBeUndefined()
+
+      // Should include users 2, 3, 4 (Bob, Charlie, Dave)
+      const userIds = results.map((r) => r.user.id).sort()
+      expect(userIds).toEqual([2, 3, 4])
     })
   })
 }

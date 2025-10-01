@@ -1,6 +1,8 @@
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { flushSync, untrack } from "svelte"
-import { createLiveQueryCollection } from "@tanstack/db"
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from "svelte/reactivity"
+import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   ChangeMessage,
   Collection,

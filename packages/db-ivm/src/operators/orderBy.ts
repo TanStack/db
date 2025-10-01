@@ -3,8 +3,7 @@ import { topKWithFractionalIndex } from "./topKWithFractionalIndex.js"
 import { map } from "./map.js"
 import { innerJoin } from "./join.js"
 import { consolidate } from "./consolidate.js"
-import type { KeyValue } from "../types.js"
-import type { IStreamBuilder } from "../types"
+import type { IStreamBuilder, KeyValue } from "../types.js"
 
 export interface OrderByOptions<Ve> {
   comparator?: (a: Ve, b: Ve) => number
