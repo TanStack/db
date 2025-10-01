@@ -54,9 +54,38 @@ const sampleUsers: Array<User> = [
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
+const mockRequestSnapshot = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
+  requestSnapshot: async (...args: any) => {
+    const result = await mockRequestSnapshot(...args)
+    const subscribers = mockSubscribe.mock.calls.map((args) => args[0])
+    const data = [...result.data]
+
+    const messages: Array<Message<any>> = data.map((row: any) => ({
+      value: row.value,
+      key: row.key,
+      headers: row.headers,
+    }))
+
+    if (messages.length > 0) {
+      // add an up-to-date message
+      messages.push({
+        headers: { control: `up-to-date` },
+      })
+    }
+
+    subscribers.forEach((subscriber) => subscriber(messages))
+    return result
+  },
 }
+
+// Mock the requestSnapshot method
+// to return an empty array of data
+// since most tests don't use it
+mockRequestSnapshot.mockResolvedValue({
+  data: [],
+})
 
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
@@ -437,4 +466,131 @@ describe.each([
     // Clean up
     subscription.unsubscribe()
   })
+  if (autoIndex === `eager`) {
+    it(`should load more data via requestSnapshot when creating live query with higher limit`, async () => {
+      mockRequestSnapshot.mockResolvedValue({
+        data: [],
+      })
+
+      // Initial sync with limited data
+      simulateInitialSync()
+      expect(electricCollection.status).toBe(`ready`)
+      expect(electricCollection.size).toBe(4)
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(0)
+
+      // Create first live query with limit of 2
+      const limitedLiveQuery = createLiveQueryCollection({
+        id: `limited-users-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              active: user.active,
+              age: user.age,
+            }))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(2),
+      })
+
+      expect(limitedLiveQuery.status).toBe(`ready`)
+      expect(limitedLiveQuery.size).toBe(2) // Only first 2 active users
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+
+      const callArgs = (index: number) =>
+        mockRequestSnapshot.mock.calls[index]?.[0]
+      expect(callArgs(0)).toMatchObject({
+        params: { "1": `true` },
+        where: `active = $1`,
+        orderBy: `age NULLS FIRST`,
+        limit: 2,
+      })
+
+      // Next call will return a snapshot containing 2 rows
+      // Calls after that will return the default empty snapshot
+      mockRequestSnapshot.mockResolvedValueOnce({
+        data: [
+          {
+            headers: { operation: `insert` },
+            key: 5,
+            value: {
+              id: 5,
+              name: `Eve`,
+              age: 30,
+              email: `eve@example.com`,
+              active: true,
+            },
+          },
+          {
+            headers: { operation: `insert` },
+            key: 6,
+            value: {
+              id: 6,
+              name: `Frank`,
+              age: 35,
+              email: `frank@example.com`,
+              active: true,
+            },
+          },
+        ],
+      })
+
+      // Create second live query with higher limit of 6
+      const expandedLiveQuery = createLiveQueryCollection({
+        id: `expanded-users-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .select(({ user }) => ({
+              id: user.id,
+              name: user.name,
+              active: user.active,
+            }))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(6),
+      })
+
+      // Wait for the live query to process
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      // Verify that requestSnapshot was called with the correct parameters
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
+
+      // Check that first it requested a limit of 6 users
+      expect(callArgs(1)).toMatchObject({
+        params: { "1": `true` },
+        where: `active = $1`,
+        orderBy: `age NULLS FIRST`,
+        limit: 6,
+      })
+
+      // After this initial snapshot for the new live query it receives all 3 users from the local collection
+      // so it still needs 3 more users to reach the limit of 6 so it requests 3 more to the sync layer
+      expect(callArgs(2)).toMatchObject({
+        params: { "1": `true`, "2": `25` },
+        where: `active = $1 AND age > $2`,
+        orderBy: `age NULLS FIRST`,
+        limit: 3,
+      })
+
+      // The previous snapshot returned 2 more users so it still needs 1 more user to reach the limit of 6
+      expect(callArgs(3)).toMatchObject({
+        params: { "1": `true`, "2": `35` },
+        where: `active = $1 AND age > $2`,
+        orderBy: `age NULLS FIRST`,
+        limit: 1,
+      })
+
+      // The sync layer won't provide any more users so the DB is exhausted and it stops (i.e. doesn't request more)
+
+      // The expanded live query should now have more data
+      expect(expandedLiveQuery.status).toBe(`ready`)
+      expect(expandedLiveQuery.size).toBe(5) // Alice, Bob, Dave from initial + Eve and Frank from additional data
+    })
+  }
 })
