@@ -16,7 +16,7 @@ This page contains a curated list of community-created packages, tools, and reso
   - Install: `npm install tanstack-dexie-db-collection`
 
 ### PGLite Integration (Unofficial)
-- **[tanstack-db-pglite](https://github.com/letstri/tanstack-db-pglite)** - Community-maintained [pglite](https://github.com/lyonlai/pglite) adapter for TanStack DB
+- **[tanstack-db-pglite](https://github.com/letstri/tanstack-db-pglite)** - Community-maintained [PGLite](https://pglite.dev/) adapter for TanStack DB
   - Use PostgreSQL-compatible databases in the browser via WebAssembly
   - Install: `npm install tanstack-db-pglite`
 
