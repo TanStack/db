@@ -431,7 +431,9 @@ describe(`QueryCollection`, () => {
     })
 
     // Verify queryFn was called with the correct context, including the meta object
-    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({ meta: { ...meta, tsDb: {} } })
+    )
   })
 
   describe(`Select method testing`, () => {
@@ -696,6 +698,20 @@ describe(`QueryCollection`, () => {
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
       const optionsDefault = queryCollectionOptions(configDefault)
+
+      // Call sync to force the query to be created
+      optionsDefault.sync.sync({
+        begin: () => {},
+        write: () => {},
+        commit: () => {},
+        collection: {
+          subscriberCount: 1,
+          on: () => {
+            return () => {}
+          },
+        },
+      } as any)
+
       await optionsDefault.onInsert!(insertMockParams)
 
       // Verify handler was called and refetch was triggered
