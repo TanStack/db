@@ -1,10 +1,10 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and } from "../query/builder/functions.js"
+import { and, gt, lt } from "../query/index.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
-import type { BasicExpression, OrderBy } from "../query/ir.js"
+import { Value, type BasicExpression, type OrderBy } from "../query/ir.js"
 import type { BaseIndex } from "../indexes/base-index.js"
 import type { ChangeMessage } from "../types.js"
 import type { CollectionImpl } from "./index.js"
@@ -153,6 +153,7 @@ export class CollectionSubscription {
     limit,
     minValue,
   }: RequestLimitedSnapshotOptions) {
+    console.log("in requestLimitedSnapshot")
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -203,10 +204,19 @@ export class CollectionSubscription {
 
     this.callback(changes)
 
+    let whereWithValueFilter = where
+    if (typeof minValue !== `undefined`) {
+      // Only request data that we haven't seen yet (i.e. is bigger than the minValue)
+      const { expression, compareOptions } = orderBy[0]!
+      const operator = compareOptions.direction === `asc` ? gt : lt
+      const valueFilter = operator(expression, new Value(minValue))
+      whereWithValueFilter = where ? and(where, valueFilter) : valueFilter
+    }
+
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
     this.collection.syncMore({
-      where,
+      where: whereWithValueFilter,
       limit,
       orderBy,
     })
