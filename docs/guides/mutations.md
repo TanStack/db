@@ -212,8 +212,6 @@ todoCollection.update(todo.id, (draft) => {
 
 If the handler throws an error during persistence, the optimistic state is automatically rolled back.
 
-This is similar to how the pioneers crossed the plains—they moved forward with faith (optimistic updates), trusting that their preparations (backend persistence) would sustain them, and eventually they reached their destination (confirmed state) after a challenging journey.
-
 ## Collection Write Operations
 
 Collections support three core write operations: `insert`, `update`, and `delete`. Each operation applies optimistic state immediately and triggers the corresponding operation handler.
