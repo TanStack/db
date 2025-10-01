@@ -16,6 +16,7 @@ import {
 import { compileSQL } from "./sql-compiler"
 import type {
   BaseCollectionConfig,
+  Collection,
   CollectionConfig,
   DeleteMutationFnParams,
   Fn,
@@ -497,7 +498,10 @@ function createElectricSync<T extends Row<unknown>>(
       })
 
       return {
-        onLoadMore: (opts) => onLoadMore(stream, params, opts),
+        onLoadMore: (opts) => {
+          const snapshotParams = compileSQL<T>(opts)
+          return stream.requestSnapshot(snapshotParams)
+        },
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
@@ -511,21 +515,3 @@ function createElectricSync<T extends Row<unknown>>(
   }
 }
 
-async function onLoadMore<T extends Row<unknown>>(
-  stream: ShapeStream<T>,
-  syncParams: Parameters<SyncConfig<T>[`sync`]>[0],
-  options: OnLoadMoreOptions
-) {
-  const { begin, write, commit } = syncParams
-  const snapshotParams = compileSQL<T>(options)
-  const snapshot = await stream.requestSnapshot(snapshotParams)
-
-  begin()
-  snapshot.data.forEach((row) => {
-    write({
-      type: `insert`,
-      value: row.value,
-    })
-  })
-  commit()
-}
