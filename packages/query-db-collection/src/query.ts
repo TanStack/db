@@ -1,4 +1,4 @@
-import { QueryObserver } from "@tanstack/query-core"
+import { QueryObserver, hashKey } from "@tanstack/query-core"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -18,6 +18,7 @@ import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  OnLoadMoreOptions,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -41,6 +42,8 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
+type TQueryKeyBuilder<TQueryKey> = (opts: OnLoadMoreOptions) => TQueryKey
+
 /**
  * Configuration options for creating a Query Collection
  * @template T - The explicit type of items stored in the collection
@@ -62,7 +65,7 @@ export interface QueryCollectionConfig<
   TQueryData = Awaited<ReturnType<TQueryFn>>,
 > extends BaseCollectionConfig<T, TKey, TSchema> {
   /** The query key used by TanStack Query to identify this query */
-  queryKey: TQueryKey
+  queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>
@@ -421,174 +424,273 @@ export function queryCollectionOptions(
   /** The timestamp for when the query most recently returned the status as "error" */
   let lastErrorUpdatedAt = 0
 
+  // hashedQueryKey → queryKey
+  const hashToQueryKey = new Map<string, QueryKey>()
+
+  // queryKey → Set<RowKey>
+  const queryToRows = new Map<string, Set<string | number>>()
+
+  // RowKey → Set<queryKey>
+  const rowToQueries = new Map<string | number, Set<string>>()
+
+  // queryKey → QueryObserver - map of query observers that we did not yet susbcribe to
+  const observers = new Map<
+    string,
+    QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
+  >()
+
+  // queryKey → QueryObserver's unsubscribe function
+  const unsubscribes = new Map<string, () => void>()
+
+  // Helper function to add a row to the internal state
+  const addRow = (rowKey: string | number, hashedQueryKey: string) => {
+    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
+    rowToQueriesSet.add(hashedQueryKey)
+    rowToQueries.set(rowKey, rowToQueriesSet)
+
+    const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
+    queryToRowsSet.add(rowKey)
+    queryToRows.set(hashedQueryKey, queryToRowsSet)
+  }
+
+  // Helper function to remove a row from the internal state
+  const removeRow = (rowKey: string | number, hashedQuerKey: string) => {
+    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
+    rowToQueriesSet.delete(hashedQuerKey)
+    rowToQueries.set(rowKey, rowToQueriesSet)
+
+    const queryToRowsSet = queryToRows.get(hashedQuerKey) || new Set()
+    queryToRowsSet.delete(rowKey)
+    queryToRows.set(hashedQuerKey, queryToRowsSet)
+  }
+
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
-    const observerOptions: QueryObserverOptions<
-      Array<any>,
-      any,
-      Array<any>,
-      Array<any>,
-      any
-    > = {
-      queryKey: queryKey,
-      queryFn: queryFn,
-      meta: meta,
-      enabled: enabled,
-      refetchInterval: refetchInterval,
-      retry: retry,
-      retryDelay: retryDelay,
-      staleTime: staleTime,
-      structuralSharing: true,
-      notifyOnChangeProps: `all`,
+    const createQueryFromOpts = (opts: OnLoadMoreOptions) => {
+      // Push the predicates down to the queryKey and queryFn
+      const key = typeof queryKey === `function` ? queryKey(opts) : queryKey
+      const hashedQueryKey = hashKey(key)
+      const extendedMeta = { ...meta, tsDb: opts }
+
+      if (observers.has(hashedQueryKey)) {
+        // We already have a query for this queryKey, return early
+        return
+      }
+
+      const observerOptions: QueryObserverOptions<
+        Array<any>,
+        any,
+        Array<any>,
+        Array<any>,
+        any
+      > = {
+        queryKey: key,
+        queryFn: queryFn,
+        meta: extendedMeta,
+        enabled: enabled,
+        refetchInterval: refetchInterval,
+        retry: retry,
+        retryDelay: retryDelay,
+        staleTime: staleTime,
+        structuralSharing: true,
+        notifyOnChangeProps: `all`,
+      }
+
+      const localObserver = new QueryObserver<
+        Array<any>,
+        any,
+        Array<any>,
+        Array<any>,
+        any
+      >(queryClient, observerOptions)
+
+      hashToQueryKey.set(hashedQueryKey, key)
+      observers.set(hashedQueryKey, localObserver)
+
+      // If startSync=true or there are subscribers to the collection, subscribe to the query straight away
+      if (config.startSync || collection.subscriberCount > 0) {
+        subscribeToQuery(localObserver, hashedQueryKey)
+      }
     }
 
-    const localObserver = new QueryObserver<
-      Array<any>,
-      any,
-      Array<any>,
-      Array<any>,
-      any
-    >(queryClient, observerOptions)
+    type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
-    let isSubscribed = false
-    let actualUnsubscribeFn: (() => void) | null = null
+    const makeQueryResultHandler = (queryKey: QueryKey) => {
+      const hashedQueryKey = hashKey(queryKey)
+      const handleQueryResult: UpdateHandler = (result) => {
+        if (result.isSuccess) {
+          // Clear error state
+          lastError = undefined
+          errorCount = 0
 
-    type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
-    const handleQueryResult: UpdateHandler = (result) => {
-      if (result.isSuccess) {
-        // Clear error state
-        lastError = undefined
-        errorCount = 0
+          const rawData = result.data
+          const newItemsArray = select ? select(rawData) : rawData
 
-        const rawData = result.data
-        const newItemsArray = select ? select(rawData) : rawData
-
-        if (
-          !Array.isArray(newItemsArray) ||
-          newItemsArray.some((item) => typeof item !== `object`)
-        ) {
-          const errorMessage = select
-            ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-            : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-
-          console.error(errorMessage)
-          return
-        }
-
-        const currentSyncedItems: Map<string | number, any> = new Map(
-          collection._state.syncedData.entries()
-        )
-        const newItemsMap = new Map<string | number, any>()
-        newItemsArray.forEach((item) => {
-          const key = getKey(item)
-          newItemsMap.set(key, item)
-        })
-
-        begin()
-
-        // Helper function for shallow equality check of objects
-        const shallowEqual = (
-          obj1: Record<string, any>,
-          obj2: Record<string, any>
-        ): boolean => {
-          // Get all keys from both objects
-          const keys1 = Object.keys(obj1)
-          const keys2 = Object.keys(obj2)
-
-          // If number of keys is different, objects are not equal
-          if (keys1.length !== keys2.length) return false
-
-          // Check if all keys in obj1 have the same values in obj2
-          return keys1.every((key) => {
-            // Skip comparing functions and complex objects deeply
-            if (typeof obj1[key] === `function`) return true
-            return obj1[key] === obj2[key]
-          })
-        }
-
-        currentSyncedItems.forEach((oldItem, key) => {
-          const newItem = newItemsMap.get(key)
-          if (!newItem) {
-            write({ type: `delete`, value: oldItem })
-          } else if (
-            !shallowEqual(
-              oldItem as Record<string, any>,
-              newItem as Record<string, any>
-            )
+          if (
+            !Array.isArray(newItemsArray) ||
+            newItemsArray.some((item) => typeof item !== `object`)
           ) {
-            // Only update if there are actual differences in the properties
-            write({ type: `update`, value: newItem })
+            const errorMessage = select
+              ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+              : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+
+            console.error(errorMessage)
+            return
           }
-        })
 
-        newItemsMap.forEach((newItem, key) => {
-          if (!currentSyncedItems.has(key)) {
-            write({ type: `insert`, value: newItem })
+          const currentSyncedItems: Map<string | number, any> = new Map(
+            collection._state.syncedData.entries()
+          )
+          const newItemsMap = new Map<string | number, any>()
+          newItemsArray.forEach((item) => {
+            const key = getKey(item)
+            newItemsMap.set(key, item)
+          })
+
+          begin()
+
+          // Helper function for shallow equality check of objects
+          const shallowEqual = (
+            obj1: Record<string, any>,
+            obj2: Record<string, any>
+          ): boolean => {
+            // Get all keys from both objects
+            const keys1 = Object.keys(obj1)
+            const keys2 = Object.keys(obj2)
+
+            // If number of keys is different, objects are not equal
+            if (keys1.length !== keys2.length) return false
+
+            // Check if all keys in obj1 have the same values in obj2
+            return keys1.every((key) => {
+              // Skip comparing functions and complex objects deeply
+              if (typeof obj1[key] === `function`) return true
+              return obj1[key] === obj2[key]
+            })
           }
-        })
 
-        commit()
+          currentSyncedItems.forEach((oldItem, key) => {
+            const newItem = newItemsMap.get(key)
+            if (!newItem) {
+              write({ type: `delete`, value: oldItem })
+              removeRow(key, hashedQueryKey)
+            } else if (
+              !shallowEqual(
+                oldItem as Record<string, any>,
+                newItem as Record<string, any>
+              )
+            ) {
+              // Only update if there are actual differences in the properties
+              write({ type: `update`, value: newItem })
+            }
+          })
 
-        // Mark collection as ready after first successful query result
-        markReady()
-      } else if (result.isError) {
-        if (result.errorUpdatedAt !== lastErrorUpdatedAt) {
-          lastError = result.error
-          errorCount++
-          lastErrorUpdatedAt = result.errorUpdatedAt
+          newItemsMap.forEach((newItem, key) => {
+            addRow(key, hashedQueryKey)
+            if (!currentSyncedItems.has(key)) {
+              write({ type: `insert`, value: newItem })
+            }
+          })
+
+          commit()
+
+          // Mark collection as ready after first successful query result
+          markReady()
+        } else if (result.isError) {
+          if (result.errorUpdatedAt !== lastErrorUpdatedAt) {
+            lastError = result.error
+            errorCount++
+            lastErrorUpdatedAt = result.errorUpdatedAt
+          }
+
+          console.error(
+            `[QueryCollection] Error observing query ${String(queryKey)}:`,
+            result.error
+          )
+
+          // Mark collection as ready even on error to avoid blocking apps
+          markReady()
         }
+      }
+      return handleQueryResult
+    }
 
-        console.error(
-          `[QueryCollection] Error observing query ${String(queryKey)}:`,
-          result.error
-        )
+    const isSubscribed = (hashedQueryKey: string) => {
+      return unsubscribes.has(hashedQueryKey)
+    }
 
-        // Mark collection as ready even on error to avoid blocking apps
-        markReady()
+    const subscribeToQuery = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string
+    ) => {
+      if (!isSubscribed(hashedQueryKey)) {
+        const queryKey = hashToQueryKey.get(hashedQueryKey)!
+        const handleQueryResult = makeQueryResultHandler(queryKey)
+        const unsubscribeFn = observer.subscribe(handleQueryResult)
+        unsubscribes.set(hashedQueryKey, unsubscribeFn)
       }
     }
 
-    const subscribeToQuery = () => {
-      if (!isSubscribed) {
-        actualUnsubscribeFn = localObserver.subscribe(handleQueryResult)
-        isSubscribed = true
-      }
+    const subscribeToQueries = () => {
+      observers.forEach(subscribeToQuery)
     }
 
-    const unsubscribeFromQuery = () => {
-      if (isSubscribed && actualUnsubscribeFn) {
-        actualUnsubscribeFn()
-        actualUnsubscribeFn = null
-        isSubscribed = false
-      }
+    const unsubscribeFromQueries = () => {
+      unsubscribes.forEach((unsubscribeFn) => {
+        unsubscribeFn()
+      })
+      unsubscribes.clear()
     }
-
-    // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
-    // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
-    subscribeToQuery()
 
     // Set up event listener for subscriber changes
     const unsubscribeFromCollectionEvents = collection.on(
       `subscribers:change`,
       ({ subscriberCount }) => {
         if (subscriberCount > 0) {
-          subscribeToQuery()
+          subscribeToQueries()
         } else if (subscriberCount === 0) {
-          unsubscribeFromQuery()
+          unsubscribeFromQueries()
         }
       }
     )
 
-    // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial
-    // state)
-    handleQueryResult(localObserver.getCurrentResult())
+    // Create the initial query without any predicates
+    createQueryFromOpts({})
 
-    return async () => {
+    // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
+    // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
+    subscribeToQueries()
+
+    // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial state)
+    observers.forEach((observer, hashedQueryKey) => {
+      const queryKey = hashToQueryKey.get(hashedQueryKey)!
+      const handleQueryResult = makeQueryResultHandler(queryKey)
+      handleQueryResult(observer.getCurrentResult())
+    })
+
+    const cleanup = async () => {
       unsubscribeFromCollectionEvents()
-      unsubscribeFromQuery()
-      await queryClient.cancelQueries({ queryKey })
-      queryClient.removeQueries({ queryKey })
+      unsubscribeFromQueries()
+
+      const queryKeys = [...hashToQueryKey.values()]
+
+      hashToQueryKey.clear()
+      queryToRows.clear()
+      rowToQueries.clear()
+      observers.clear()
+
+      await Promise.all(
+        queryKeys.map(async (queryKey) => {
+          await queryClient.cancelQueries({ queryKey })
+          queryClient.removeQueries({ queryKey })
+        })
+      )
+    }
+
+    return {
+      onLoadMore: createQueryFromOpts,
+      cleanup,
     }
   }
 
@@ -596,15 +698,20 @@ export function queryCollectionOptions(
    * Refetch the query data
    * @returns Promise that resolves when the refetch is complete
    */
-  const refetch: RefetchFn = (opts) => {
-    return queryClient.refetchQueries(
-      {
-        queryKey: queryKey,
-      },
-      {
-        throwOnError: opts?.throwOnError,
-      }
-    )
+  const refetch: RefetchFn = async (opts) => {
+    const queryKeys = [...hashToQueryKey.values()]
+    const refetchPromises = queryKeys.map((queryKey) => {
+      return queryClient.refetchQueries(
+        {
+          queryKey: queryKey,
+        },
+        {
+          throwOnError: opts?.throwOnError,
+        }
+      )
+    })
+
+    await Promise.all(refetchPromises)
   }
 
   // Create write context for manual write operations
