@@ -607,8 +607,10 @@ Manual transactions accept the following options:
 
 ```typescript
 createTransaction({
-  autoCommit: boolean,      // Whether to automatically commit after mutate()
-  mutationFn?: MutationFn,  // Function to persist mutations
+  id?: string,              // Optional unique identifier for the transaction
+  autoCommit?: boolean,     // Whether to automatically commit after mutate()
+  mutationFn: MutationFn,   // Function to persist mutations
+  metadata?: Record<string, unknown>, // Optional custom metadata
 })
 ```
 
