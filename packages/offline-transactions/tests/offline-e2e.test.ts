@@ -393,4 +393,51 @@ describe(`offline executor end-to-end`, () => {
 
     runtimeEnv.executor.dispose()
   })
+
+  it(`executes transactions online-only when not leader`, async () => {
+    const env = createTestOfflineEnvironment()
+
+    // Set this tab to not be leader
+    env.leader.setLeader(false)
+
+    // Give the executor a moment to react to leadership change
+    await flushMicrotasks()
+
+    // Should not be offline enabled when not leader
+    expect(env.executor.isOfflineEnabled).toBe(false)
+
+    const offlineTx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+
+    const now = new Date()
+    offlineTx.mutate(() => {
+      env.collection.insert({
+        id: `non-leader-item`,
+        value: `online-only`,
+        completed: false,
+        updatedAt: now,
+      })
+    })
+
+    // Should execute immediately online without persisting to outbox
+    await offlineTx.commit()
+
+    // Should have called the mutation function
+    expect(env.mutationCalls.length).toBe(1)
+    const call = env.mutationCalls[0]!
+    expect(call.transaction.mutations).toHaveLength(1)
+    expect(call.transaction.mutations[0].key).toBe(`non-leader-item`)
+
+    // Should have applied to both local and server state
+    expect(env.collection.get(`non-leader-item`)?.value).toBe(`online-only`)
+    expect(env.serverState.get(`non-leader-item`)?.value).toBe(`online-only`)
+
+    // Should NOT have persisted to outbox
+    const outboxEntries = await env.executor.peekOutbox()
+    expect(outboxEntries).toEqual([])
+
+    env.executor.dispose()
+  })
 })
