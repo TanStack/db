@@ -14,8 +14,8 @@ Local changes are applied immediately as optimistic state, then persisted to you
 const todoCollection = createCollection({
   id: "todos",
   onUpdate: async ({ transaction }) => {
-    const { original, modified } = transaction.mutations[0]
-    await api.todos.update(original.id, modified)
+    const mutation = transaction.mutations[0]
+    await api.todos.update(mutation.original.id, mutation.modified)
   },
 })
 
@@ -139,10 +139,13 @@ todoCollection.update(
 
 // Use metadata in handler
 onUpdate: async ({ transaction, metadata }) => {
+  // Collection handlers only ever receive one mutation at a time
+  const mutation = transaction.mutations[0]
+
   if (metadata?.intent === 'complete') {
-    await api.todos.complete(transaction.mutations[0].original.id)
+    await api.todos.complete(mutation.original.id)
   } else {
-    await api.todos.update(transaction.mutations[0].original.id, transaction.mutations[0].changes)
+    await api.todos.update(mutation.original.id, mutation.changes)
   }
 }
 ```
@@ -354,24 +357,24 @@ const todoCollection = createCollection({
   // ... other options
 
   onInsert: async ({ transaction }) => {
-    const { modified: newTodo } = transaction.mutations[0]
-    await api.todos.create(newTodo)
+    const mutation = transaction.mutations[0]
+    await api.todos.create(mutation.modified)
     // Wait for sync back before returning
-    await transaction.mutations[0].collection.refetch()
+    await mutation.collection.refetch()
   },
 
   onUpdate: async ({ transaction }) => {
-    const { original, changes } = transaction.mutations[0]
-    await api.todos.update(original.id, changes)
+    const mutation = transaction.mutations[0]
+    await api.todos.update(mutation.original.id, mutation.changes)
     // Wait for sync back before returning
-    await transaction.mutations[0].collection.refetch()
+    await mutation.collection.refetch()
   },
 
   onDelete: async ({ transaction }) => {
-    const { original } = transaction.mutations[0]
-    await api.todos.delete(original.id)
+    const mutation = transaction.mutations[0]
+    await api.todos.delete(mutation.original.id)
     // Wait for sync back before returning
-    await transaction.mutations[0].collection.refetch()
+    await mutation.collection.refetch()
   },
 })
 ```
@@ -386,19 +389,19 @@ Different collection types provide utilities to help wait for sync:
 **QueryCollection**:
 ```typescript
 onUpdate: async ({ transaction }) => {
-  const { collection, original, changes } = transaction.mutations[0]
-  await api.todos.update(original.id, changes)
-  await collection.refetch() // TanStack Query refetch
+  const mutation = transaction.mutations[0]
+  await api.todos.update(mutation.original.id, mutation.changes)
+  await mutation.collection.refetch() // TanStack Query refetch
 }
 ```
 
 **ElectricCollection**:
 ```typescript
 onUpdate: async ({ transaction }) => {
-  const { collection, original, changes } = transaction.mutations[0]
-  const response = await api.todos.update(original.id, changes)
+  const mutation = transaction.mutations[0]
+  const response = await api.todos.update(mutation.original.id, mutation.changes)
   // Wait for Electric to sync the transaction
-  await collection.utils.awaitTxId(response.txid)
+  await mutation.collection.utils.awaitTxId(response.txid)
 }
 ```
 
@@ -417,8 +420,8 @@ const mutationFn: MutationFn = async ({ transaction }) => {
   }
 
   // Wait for sync back before returning
-  const collection = transaction.mutations[0].collection
-  await collection.refetch()
+  const mutation = transaction.mutations[0]
+  await mutation.collection.refetch()
 }
 
 // Use in collections
@@ -1039,12 +1042,13 @@ const todoCollection = createCollection({
   id: "todos",
   // ... other options
   onInsert: async ({ transaction }) => {
-    const tempId = transaction.mutations[0].modified.id
+    const mutation = transaction.mutations[0]
+    const tempId = mutation.modified.id
 
     // Create todo on server and get real ID back
     const response = await api.todos.create({
-      text: transaction.mutations[0].modified.text,
-      completed: transaction.mutations[0].modified.completed,
+      text: mutation.modified.text,
+      completed: mutation.modified.completed,
     })
     const realId = response.id
 
