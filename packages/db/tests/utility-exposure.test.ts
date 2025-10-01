@@ -17,9 +17,7 @@ describe(`Utility exposure pattern`, () => {
     // Create a mock sync config
     const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
-        return {
-          unsubscribe: () => {},
-        }
+        return () => {}
       },
     }
 
@@ -47,9 +45,7 @@ describe(`Utility exposure pattern`, () => {
     // Create a mock sync config
     const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
-        return {
-          unsubscribe: () => {},
-        }
+        return () => {}
       },
     }
 

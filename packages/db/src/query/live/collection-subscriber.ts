@@ -1,5 +1,8 @@
 import { MultiSet } from "@tanstack/db-ivm"
-import { convertToBasicExpression } from "../compiler/expressions.js"
+import {
+  convertOrderByToBasicExpression,
+  convertToBasicExpression,
+} from "../compiler/expressions.js"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
@@ -16,26 +19,29 @@ export class CollectionSubscriber<
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
+  private collectionAlias: string
+
   constructor(
     private collectionId: string,
     private collection: Collection,
     private config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     private syncState: FullSyncState,
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
-  ) {}
-
-  subscribe(): CollectionSubscription {
-    const collectionAlias = findCollectionAlias(
+  ) {
+    this.collectionAlias = findCollectionAlias(
       this.collectionId,
       this.collectionConfigBuilder.query
-    )
-    const whereClause = this.getWhereClauseFromAlias(collectionAlias)
+    )!
+  }
+
+  subscribe(): CollectionSubscription {
+    const whereClause = this.getWhereClauseFromAlias(this.collectionAlias)
 
     if (whereClause) {
       // Convert WHERE clause to BasicExpression format for collection subscription
       const whereExpression = convertToBasicExpression(
         whereClause,
-        collectionAlias!
+        this.collectionAlias
       )
 
       if (whereExpression) {
@@ -128,7 +134,7 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined
   ) {
-    const { offset, limit, comparator, dataNeeded, index } =
+    const { orderBy, offset, limit, comparator, dataNeeded, index } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -164,10 +170,17 @@ export class CollectionSubscriber<
 
     subscription.setOrderByIndex(index)
 
+    // Normalize the orderBy clauses such that the references are relative to the collection
+    const normalizedOrderBy = convertOrderByToBasicExpression(
+      orderBy,
+      this.collectionAlias
+    )
+
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
     subscription.requestLimitedSnapshot({
       limit: offset + limit,
+      orderBy: normalizedOrderBy,
     })
 
     return subscription
@@ -225,7 +238,7 @@ export class CollectionSubscriber<
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
   private loadNextItems(n: number, subscription: CollectionSubscription) {
-    const { valueExtractorForRawRow } =
+    const { orderBy, valueExtractorForRawRow } =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
       ]!
@@ -233,8 +246,16 @@ export class CollectionSubscriber<
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
+
+    // Normalize the orderBy clauses such that the references are relative to the collection
+    const normalizedOrderBy = convertOrderByToBasicExpression(
+      orderBy,
+      this.collectionAlias
+    )
+
     // Take the `n` items after the biggest sent value
     subscription.requestLimitedSnapshot({
+      orderBy: normalizedOrderBy,
       limit: n,
       minValue: biggestSentValue,
     })
