@@ -629,10 +629,11 @@ tx.mutate(() => {
   collection.update(key, updater)
 })
 
-// Manually commit the transaction
+// Commit the transaction
 await tx.commit()
 
-// Rollback all changes
+// Manually rollback changes (e.g., user cancels a form)
+// Note: Rollback happens automatically if mutationFn throws an error
 tx.rollback()
 ```
 
