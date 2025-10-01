@@ -388,8 +388,8 @@ const todoCollection = createCollection({
 })
 ```
 
-> [!NOTE]
-> Collection operation handlers automatically trigger a refetch after the handler completes, so you don't need to manually call `refetch()` in your handlers.
+> [!IMPORTANT]
+> Operation handlers must not resolve until the server changes have synced back to the collection. Different collection types provide different patterns to ensure this happens correctly.
 
 ### Collection-Specific Handler Patterns
 
