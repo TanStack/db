@@ -1,5 +1,8 @@
 import { MultiSet } from "@tanstack/db-ivm"
-import { convertOrderByToBasicExpression, convertToBasicExpression } from "../compiler/expressions.js"
+import {
+  convertOrderByToBasicExpression,
+  convertToBasicExpression,
+} from "../compiler/expressions.js"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
@@ -168,7 +171,10 @@ export class CollectionSubscriber<
     subscription.setOrderByIndex(index)
 
     // Normalize the orderBy clauses such that the references are relative to the collection
-    const normalizedOrderBy = convertOrderByToBasicExpression(orderBy, this.collectionAlias)
+    const normalizedOrderBy = convertOrderByToBasicExpression(
+      orderBy,
+      this.collectionAlias
+    )
 
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
@@ -240,7 +246,7 @@ export class CollectionSubscriber<
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
-    
+
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = convertOrderByToBasicExpression(
       orderBy,

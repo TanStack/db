@@ -233,7 +233,7 @@ describe(`Transactions`, () => {
   })
   it(`commit() should throw errors when mutation function fails`, async () => {
     const tx = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw new Error(`API failed`)
       },
       autoCommit: false,
@@ -269,7 +269,7 @@ describe(`Transactions`, () => {
   it(`commit() and isPersisted.promise should reject with the same error instance`, async () => {
     const originalError = new Error(`Original API error`)
     const tx = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw originalError
       },
       autoCommit: false,
@@ -315,7 +315,7 @@ describe(`Transactions`, () => {
 
   it(`should handle non-Error throwables (strings)`, async () => {
     const tx = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw `string error`
       },
       autoCommit: false,
@@ -355,7 +355,7 @@ describe(`Transactions`, () => {
 
   it(`should handle non-Error throwables (numbers, objects)`, async () => {
     const tx = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw 42
       },
       autoCommit: false,
@@ -371,7 +371,7 @@ describe(`Transactions`, () => {
     }
 
     const tx2 = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw { code: `ERR_FAILED`, details: `Something went wrong` }
       },
       autoCommit: false,
@@ -405,7 +405,7 @@ describe(`Transactions`, () => {
 
   it(`should throw TransactionNotPendingCommitError when commit() is called on failed transaction`, async () => {
     const tx = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw new Error(`Failed`)
       },
       autoCommit: false,
@@ -440,7 +440,7 @@ describe(`Transactions`, () => {
   it(`should handle cascading rollbacks with proper error propagation`, async () => {
     const originalError = new Error(`Primary transaction failed`)
     const tx1 = createTransaction({
-      mutationFn: async () => {
+      mutationFn: () => {
         throw originalError
       },
       autoCommit: false,

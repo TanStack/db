@@ -102,7 +102,9 @@ export function convertOrderByToBasicExpression(
     )
 
     if (!basicExp) {
-      throw new Error(`Failed to convert orderBy expression to a basic expression: ${clause.expression}`)
+      throw new Error(
+        `Failed to convert orderBy expression to a basic expression: ${clause.expression}`
+      )
     }
 
     return {
