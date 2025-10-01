@@ -30,7 +30,6 @@ export function compileSQL<T>(
 
   // Serialize the values in the params array into PG formatted strings
   // and transform the array into a Record<string, string>
-  console.log("params", params)
   const paramsRecord = params.reduce(
     (acc, param, index) => {
       acc[`${index + 1}`] = serialize(param)
@@ -59,7 +58,7 @@ function compileBasicExpression(
     case `val`:
       params.push(exp.value)
       return `$${params.length}`
-    case `ref`: 
+    case `ref`:
       // TODO: doesn't yet support JSON(B) values which could be accessed with nested props
       if (exp.path.length !== 1) {
         throw new Error(
