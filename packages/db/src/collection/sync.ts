@@ -11,8 +11,8 @@ import { deepEquals } from "../utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ChangeMessage,
-  CollectionConfig,
   CleanupFn,
+  CollectionConfig,
   OnLoadMoreOptions,
   SyncConfigRes,
 } from "../types"
