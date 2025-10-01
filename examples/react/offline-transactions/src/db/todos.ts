@@ -13,14 +13,14 @@ import { queryClient } from "~/utils/queryClient"
 /**
  * A utility function to fetch data from a URL with built-in retry logic for non-200 responses.
  *
- * This function will automatically retry the GET request a specified number of times if the initial
+ * This function will automatically retry HTTP requests a specified number of times if the initial
  * fetch fails or returns a non-200 OK status. It uses an exponential backoff strategy to increase
  * the delay between retries, reducing the load on the server.
  *
  * @param url The URL to fetch.
- * @param options A standard `RequestInit` object for the fetch request. Note: Only 'GET' method is supported.
+ * @param options A standard `RequestInit` object for the fetch request. Supports all HTTP methods.
  * @param retryConfig An object with retry configuration.
- * @param retryConfig.retries The number of times to retry the request (default: 3).
+ * @param retryConfig.retries The number of times to retry the request (default: 6).
  * @param retryConfig.delay The initial delay in milliseconds before the first retry (default: 1000).
  * @param retryConfig.backoff The backoff multiplier for subsequent retries (default: 2).
  * @returns A promise that resolves to the `Response` object if the fetch is successful.
@@ -31,17 +31,12 @@ export async function fetchWithRetry(
   options: RequestInit = {},
   retryConfig: { retries?: number; delay?: number; backoff?: number } = {}
 ): Promise<Response> {
-  const { retries = 3, delay = 1000, backoff = 2 } = retryConfig
-
-  // Ensure the request method is 'GET'
-  if (options.method && options.method.toUpperCase() !== `GET`) {
-    throw new Error(`This function only supports GET requests.`)
-  }
+  const { retries = 6, delay = 1000, backoff = 2 } = retryConfig
 
   // Loop for the specified number of retries
   for (let i = 0; i <= retries; i++) {
     try {
-      const response = await fetch(url, { ...options, method: `GET` })
+      const response = await fetch(url, options)
 
       // If the response is OK, return it immediately
       if (response.ok) {
@@ -105,7 +100,6 @@ export const todoCollection = createCollection(
         createdAt: new Date(todo.createdAt),
         updatedAt: new Date(todo.updatedAt),
       }))
-      console.log(`data returning from queryFn`, res)
       return res
     },
     getKey: (item) => item.id,
@@ -124,12 +118,13 @@ export const todoAPI = {
   }) {
     const mutations = transaction.mutations
 
+    console.log(`sync todos`, mutations[0].changes, mutations[0].original.text)
     for (const mutation of mutations) {
       try {
         switch (mutation.type) {
           case `insert`: {
             const todoData = mutation.modified as Todo
-            const response = await fetch(`/api/todos`, {
+            const response = await fetchWithRetry(`/api/todos`, {
               method: `POST`,
               headers: {
                 "Content-Type": `application/json`,
@@ -149,7 +144,7 @@ export const todoAPI = {
 
           case `update`: {
             const todoData = mutation.modified as Partial<Todo>
-            const response = await fetch(
+            const response = await fetchWithRetry(
               `/api/todos/${(mutation.modified as Todo).id}`,
               {
                 method: `PUT`,
@@ -171,7 +166,7 @@ export const todoAPI = {
           }
 
           case `delete`: {
-            const response = await fetch(
+            const response = await fetchWithRetry(
               `/api/todos/${(mutation.original as Todo).id}`,
               {
                 method: `DELETE`,
@@ -192,7 +187,10 @@ export const todoAPI = {
         throw error
       }
     }
+    const start = performance.now()
+    console.time(`refresh collection ${start}`)
     await todoCollection.utils.refetch()
+    console.timeEnd(`refresh collection ${start}`)
   },
 }
 
@@ -219,12 +217,6 @@ export function createTodoActions(offline: any) {
       const todo = todoCollection.get(id)
       if (!todo) return
       todoCollection.update(id, (draft) => {
-        console.log(
-          `inside update`,
-          draft.text,
-          draft.completed,
-          todo.completed
-        )
         draft.completed = !draft.completed
         draft.updatedAt = new Date()
       })
@@ -259,7 +251,7 @@ export function createIndexedDBOfflineExecutor() {
       syncTodos: todoAPI.syncTodos,
     },
     onLeadershipChange: (isLeader) => {
-      console.log(`IndexedDB executor leadership changed:`, isLeader)
+      console.log({ isLeader })
       if (!isLeader) {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
@@ -276,7 +268,6 @@ export function createLocalStorageOfflineExecutor() {
       syncTodos: todoAPI.syncTodos,
     },
     onLeadershipChange: (isLeader) => {
-      console.log(`localStorage executor leadership changed:`, isLeader)
       if (!isLeader) {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
