@@ -1,5 +1,6 @@
 import { MultiSet } from "@tanstack/db-ivm"
 import { convertToBasicExpression } from "../compiler/expressions.js"
+import { Func } from "../ir.js"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
@@ -25,34 +26,14 @@ export class CollectionSubscriber<
   ) {}
 
   subscribe(): CollectionSubscription {
-    const collectionAlias = findCollectionAlias(
-      this.collectionId,
-      this.collectionConfigBuilder.query
-    )
-    const whereClause = this.getWhereClauseFromAlias(collectionAlias)
+    const whereExpression = this.buildCollectionFilter()
 
-    if (whereClause) {
-      // Convert WHERE clause to BasicExpression format for collection subscription
-      const whereExpression = convertToBasicExpression(
-        whereClause,
-        collectionAlias!
-      )
-
-      if (whereExpression) {
-        // Use index optimization for this collection
-        return this.subscribeToChanges(whereExpression)
-      } else {
-        // This should not happen - if we have a whereClause but can't create whereExpression,
-        // it indicates a bug in our optimization logic
-        throw new Error(
-          `Failed to convert WHERE clause to collection filter for collection '${this.collectionId}'. ` +
-            `This indicates a bug in the query optimization logic.`
-        )
-      }
-    } else {
-      // No WHERE clause for this collection, use regular subscription
-      return this.subscribeToChanges()
+    if (whereExpression) {
+      return this.subscribeToChanges(whereExpression)
     }
+
+    // No applicable filter for this collection, use regular subscription
+    return this.subscribeToChanges()
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
@@ -240,15 +221,38 @@ export class CollectionSubscriber<
     })
   }
 
-  private getWhereClauseFromAlias(
-    collectionAlias: string | undefined
-  ): BasicExpression<boolean> | undefined {
+  private buildCollectionFilter(): BasicExpression<boolean> | undefined {
     const collectionWhereClausesCache =
       this.collectionConfigBuilder.collectionWhereClausesCache
-    if (collectionAlias && collectionWhereClausesCache) {
-      return collectionWhereClausesCache.get(collectionAlias)
+    if (!collectionWhereClausesCache) {
+      return undefined
     }
-    return undefined
+
+    const aliases = this.collectionConfigBuilder.getCollectionAliases(
+      this.collectionId
+    )
+    if (aliases.length === 0) {
+      return undefined
+    }
+
+    const convertedClauses: Array<BasicExpression<boolean>> = []
+    for (const alias of aliases) {
+      const clause = collectionWhereClausesCache.get(alias)
+      if (!clause) {
+        // At least one alias requires the full collection, so we cannot safely filter
+        return undefined
+      }
+
+      const converted = convertToBasicExpression(clause, alias)
+      if (!converted) {
+        // Conversion failed which means we cannot use this filter at the subscription level
+        return undefined
+      }
+
+      convertedClauses.push(converted)
+    }
+
+    return combineWithOr(convertedClauses)
   }
 
   private *trackSentValues(
@@ -265,36 +269,6 @@ export class CollectionSubscriber<
       yield change
     }
   }
-}
-
-/**
- * Finds the alias for a collection ID in the query
- */
-function findCollectionAlias(
-  collectionId: string,
-  query: any
-): string | undefined {
-  // Check FROM clause
-  if (
-    query.from?.type === `collectionRef` &&
-    query.from.collection?.id === collectionId
-  ) {
-    return query.from.alias
-  }
-
-  // Check JOIN clauses
-  if (query.join) {
-    for (const joinClause of query.join) {
-      if (
-        joinClause.from?.type === `collectionRef` &&
-        joinClause.from.collection?.id === collectionId
-      ) {
-        return joinClause.from.alias
-      }
-    }
-  }
-
-  return undefined
 }
 
 /**
@@ -324,6 +298,20 @@ function sendChangesToInput(
   }
 
   return multiSetArray.length
+}
+
+function combineWithOr(
+  expressions: Array<BasicExpression<boolean>>
+): BasicExpression<boolean> | undefined {
+  if (expressions.length === 0) {
+    return undefined
+  }
+
+  if (expressions.length === 1) {
+    return expressions[0]!
+  }
+
+  return new Func(`or`, expressions)
 }
 
 /** Splits updates into a delete of the old value and an insert of the new value */

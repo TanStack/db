@@ -4,6 +4,9 @@ import {
   createLiveQueryCollection,
   eq,
   isUndefined,
+  lt,
+  gt,
+  not,
 } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
@@ -1475,6 +1478,169 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       const userIds = results.map((r) => r.user.id).sort()
       expect(userIds).toEqual([2, 3, 4])
     })
+
+    test(`should handle where clause on a self-join query`, () => {
+      // This test reproduces the bug where a WHERE clause combined with a LEFT JOIN
+      // on the same collection causes the joined parent to be undefined
+      type Event = {
+        id: string
+        parent_id: string | undefined
+        name: string
+      }
+
+      const sampleEvents: Array<Event> = [
+        {
+          id: `ba224e71-a464-418d-a0a9-5959b490775d`,
+          parent_id: undefined,
+          name: `Parent Event`,
+        },
+        {
+          id: `3770a4a6-3260-4566-9f79-f50864ebdd46`,
+          parent_id: `ba224e71-a464-418d-a0a9-5959b490775d`,
+          name: `Child Event`,
+        },
+        {
+          id: `another-child-id`,
+          parent_id: `ba224e71-a464-418d-a0a9-5959b490775d`,
+          name: `Another Child`,
+        },
+      ]
+
+      const eventCollection = createCollection(
+        mockSyncCollectionOptions<Event>({
+          id: `test-events-self-join-bug`,
+          getKey: (event) => event.id,
+          initialData: sampleEvents,
+          autoIndex,
+        })
+      )
+
+      const queryWithWhere = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ event: eventCollection })
+            .where(({ event }) =>
+              eq(event.id, `3770a4a6-3260-4566-9f79-f50864ebdd46`)
+            )
+            .join(
+              { parent: eventCollection },
+              ({ event, parent }) => eq(parent.id, event.parent_id),
+              `left`
+            )
+            .select(({ event, parent }) => ({
+              id: event.id,
+              parent_id: event.parent_id,
+              parent: {
+                id: parent?.id,
+              },
+            })),
+      })
+
+      const resultsWithWhere = queryWithWhere.toArray
+      expect(resultsWithWhere).toHaveLength(1)
+
+      const childEventWithWhere = resultsWithWhere[0]!
+      expect(childEventWithWhere).toBeDefined()
+
+      expect(childEventWithWhere.id).toBe(
+        `3770a4a6-3260-4566-9f79-f50864ebdd46`
+      )
+      expect(childEventWithWhere.parent_id).toBe(
+        `ba224e71-a464-418d-a0a9-5959b490775d`
+      )
+      expect(childEventWithWhere.parent.id).toBe(
+        `ba224e71-a464-418d-a0a9-5959b490775d`
+      )
+    })
+  })
+  
+  test(`should handle multiple joins with where clauses to the same source collection`, () => {
+    type Collection1 = {
+      id: number
+      value: number
+    }
+
+    type Collection2 = {
+      id: number
+      value: number
+      other: number
+    }
+
+    const collection1Data: Array<Collection1> = [{ id: 1, value: 1 }]
+
+    const collection2Data: Array<Collection2> = [
+      { id: 1, value: 1, other: 10 },
+      { id: 2, value: 1, other: 30 },
+    ]
+
+    const collection1 = createCollection(
+      mockSyncCollectionOptions<Collection1>({
+        id: `test-collection1-multiple-joins`,
+        getKey: (item) => item.id,
+        initialData: collection1Data,
+        autoIndex,
+      })
+    )
+
+    const collection2 = createCollection(
+      mockSyncCollectionOptions<Collection2>({
+        id: `test-collection2-multiple-joins`,
+        getKey: (item) => item.id,
+        initialData: collection2Data,
+        autoIndex,
+      })
+    )
+
+    const multipleJoinQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ main: collection1 })
+          .join(
+            {
+              join1: q
+                .from({ join1: collection2 })
+                .where(({ join1 }) => not(gt(join1.other, 20))),
+            },
+            ({ main, join1 }) => eq(main.value, join1.value),
+            "left"
+          )
+          .join(
+            {
+              join2: q
+                .from({ join2: collection2 })
+                .where(({ join2 }) => not(lt(join2.other, 20))),
+            },
+            ({ main, join2 }) => eq(main.value, join2.value),
+            "left"
+          ),
+    })
+
+    const multipleResults = multipleJoinQuery.toArray
+
+    console.log(multipleResults)
+
+    // This should work - we're filtering for records where join1 has 'a' AND join2 has 'b'
+    // But it might fail due to the sequential WHERE clause issue
+    expect(multipleResults).toHaveLength(1)
+
+    const result = multipleResults[0]!
+    expect(result).toBeDefined()
+
+    // Should have the main item
+    expect(result.main.id).toBe(1)
+
+    // Should have both joined items with their respective filters
+    expect(result.join1).toBeDefined()
+    expect(result.join1!.id).toBe(1)
+    expect(result.join1!.value).toBe(1)
+    expect(result.join1!.other).toBe(10)
+
+    expect(result.join2).toBeDefined()
+    expect(result.join2!.id).toBe(2)
+    expect(result.join2!.value).toBe(1)
+    expect(result.join2!.other).toBe(30)
   })
 }
 

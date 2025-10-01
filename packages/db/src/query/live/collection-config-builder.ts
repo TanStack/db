@@ -32,6 +32,7 @@ export class CollectionConfigBuilder<
   private readonly id: string
   readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
+  private readonly collectionAliasesById: Map<string, Set<string>>
 
   // WeakMap to store the keys of the results
   // so that we can retrieve them in the getKey function
@@ -68,6 +69,7 @@ export class CollectionConfigBuilder<
 
     this.query = buildQueryFromConfig(config)
     this.collections = extractCollectionsFromQuery(this.query)
+    this.collectionAliasesById = extractCollectionAliases(this.query)
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -94,6 +96,11 @@ export class CollectionConfigBuilder<
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
     }
+  }
+
+  getCollectionAliases(collectionId: string): Array<string> {
+    const aliases = this.collectionAliasesById.get(collectionId)
+    return aliases ? Array.from(aliases) : []
   }
 
   // The callback function is called after the graph has run.
@@ -442,6 +449,42 @@ function extractCollectionsFromQuery(
   extractFromQuery(query)
 
   return collections
+}
+
+function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
+  const aliasesById = new Map<string, Set<string>>()
+
+  function recordAlias(source: any) {
+    if (!source) return
+
+    if (source.type === `collectionRef`) {
+      const { id } = source.collection
+      const existing = aliasesById.get(id)
+      if (existing) {
+        existing.add(source.alias)
+      } else {
+        aliasesById.set(id, new Set([source.alias]))
+      }
+    } else if (source.type === `queryRef`) {
+      traverse(source.query)
+    }
+  }
+
+  function traverse(q: QueryIR) {
+    if (!q) return
+
+    recordAlias(q.from)
+
+    if (q.join) {
+      for (const joinClause of q.join) {
+        recordAlias(joinClause.from)
+      }
+    }
+  }
+
+  traverse(query)
+
+  return aliasesById
 }
 
 function accumulateChanges<T>(
