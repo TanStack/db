@@ -957,7 +957,7 @@ When you insert an item with a temporary ID, the optimistic object is eventually
 
 ```tsx
 // Generate temporary ID (e.g., negative number)
-const tempId = -Math.floor(Math.random() * 1000000) + 1
+const tempId = -(Math.floor(Math.random() * 1000000) + 1)
 
 // Insert with temporary ID
 todoCollection.insert({
