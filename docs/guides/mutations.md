@@ -298,7 +298,7 @@ todoCollection.update(
 **Returns**: A `Transaction` object that you can use to track the mutation's lifecycle.
 
 > [!IMPORTANT]
-> The `updater` function uses Immer under the hood to capture changes as immutable updates. You must not reassign the draft parameter itself—only mutate its properties.
+> The `updater` function uses an Immer-like pattern to capture changes as immutable updates. You must not reassign the draft parameter itself—only mutate its properties.
 
 ### Delete
 
