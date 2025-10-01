@@ -697,7 +697,10 @@ console.log(tx.state) // 'pending', 'persisting', 'completed', or 'failed'
 
 ## Mutation Merging
 
-When multiple mutations operate on the same item within a transaction, TanStack DB intelligently merges them to reduce over-the-wire churn and keep the optimistic local view aligned with user intent.
+When multiple mutations operate on the same item within a transaction, TanStack DB intelligently merges them to:
+- **Reduce network traffic**: Fewer mutations sent to the server
+- **Preserve user intent**: Final state matches what user expects
+- **Maintain UI consistency**: Local state always reflects user actions
 
 The merging behavior follows a truth table based on the mutation types:
 
@@ -707,113 +710,9 @@ The merging behavior follows a truth table based on the mutation types:
 | **insert + delete** | _removed_ | Mutations cancel each other out                   |
 | **update + delete** | `delete`  | Delete dominates                                  |
 | **update + update** | `update`  | Union changes, keep first original                |
-| **same type**       | _latest_  | Replace with most recent mutation                 |
 
-### Insert + Update
-
-When you insert an item and then update it in the same transaction:
-
-```ts
-const tx = createTransaction({ autoCommit: false, mutationFn })
-
-// Insert a new todo
-tx.mutate(() =>
-  todoCollection.insert({
-    id: "1",
-    text: "Buy groceries",
-    completed: false,
-  })
-)
-
-// Update the same todo
-tx.mutate(() =>
-  todoCollection.update("1", (draft) => {
-    draft.text = "Buy organic groceries"
-    draft.priority = "high"
-  })
-)
-
-// Result: Single insert mutation with merged data
-// { id: '1', text: 'Buy organic groceries', completed: false, priority: 'high' }
-```
-
-The mutations are merged into a single `insert` with the combined changes.
-
-### Insert + Delete
-
-When you insert an item and then delete it in the same transaction:
-
-```ts
-const tx = createTransaction({ autoCommit: false, mutationFn })
-
-// Insert then delete cancels out
-tx.mutate(() =>
-  todoCollection.insert({ id: "1", text: "Temp todo" })
-)
-tx.mutate(() =>
-  todoCollection.delete("1")
-)
-
-// Result: No mutations (they cancel each other out)
-```
-
-The mutations cancel out completely—no backend operations are needed.
-
-### Update + Update
-
-When you update an item multiple times:
-
-```ts
-const tx = createTransaction({ autoCommit: false, mutationFn })
-
-tx.mutate(() =>
-  todoCollection.update("1", (draft) => {
-    draft.text = "First update"
-  })
-)
-
-tx.mutate(() =>
-  todoCollection.update("1", (draft) => {
-    draft.completed = true
-  })
-)
-
-// Result: Single update with combined changes
-// { text: "First update", completed: true }
-```
-
-The mutations are merged into a single `update` with all changes combined, preserving the first original value.
-
-### Update + Delete
-
-When you update an item and then delete it:
-
-```ts
-const tx = createTransaction({ autoCommit: false, mutationFn })
-
-tx.mutate(() =>
-  todoCollection.update("1", (draft) => {
-    draft.completed = true
-  })
-)
-
-tx.mutate(() =>
-  todoCollection.delete("1")
-)
-
-// Result: Single delete mutation
-// The update is discarded, only the delete remains
-```
-
-The delete dominates—the update is discarded since the item will be deleted anyway.
-
-### Benefits of Mutation Merging
-
-This intelligent merging ensures:
-
-- **Network efficiency**: Fewer mutations sent to the server
-- **User intent preservation**: Final state matches what user expects
-- **Optimistic UI consistency**: Local state always reflects user actions
+> [!NOTE]
+> Attempting to insert or delete the same item multiple times within a transaction will throw an error.
 
 ## Controlling Optimistic Behavior
 
