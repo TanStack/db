@@ -1,4 +1,5 @@
 // Storage adapters
+import { createOptimisticAction, createTransaction } from "@tanstack/db"
 import { IndexedDBAdapter } from "./storage/IndexedDBAdapter"
 import { LocalStorageAdapter } from "./storage/LocalStorageAdapter"
 
@@ -17,6 +18,8 @@ import { DefaultOnlineDetector } from "./connectivity/OnlineDetector"
 // API
 import { OfflineTransaction as OfflineTransactionAPI } from "./api/OfflineTransaction"
 import { createOfflineAction } from "./api/OfflineAction"
+
+// TanStack DB primitives
 
 // Replay
 import type {
@@ -161,13 +164,29 @@ export class OfflineExecutor {
 
   createOfflineTransaction(
     options: CreateOfflineTransactionOptions
-  ): OfflineTransactionAPI {
+  ): Transaction | OfflineTransactionAPI {
     const mutationFn = this.config.mutationFns[options.mutationFnName]
 
     if (!mutationFn) {
       throw new Error(`Unknown mutation function: ${options.mutationFnName}`)
     }
 
+    // Check leadership immediately and use the appropriate primitive
+    if (!this.isOfflineEnabled) {
+      // Non-leader: use createTransaction directly with the resolved mutation function
+      // We need to wrap it to add the idempotency key
+      return createTransaction({
+        autoCommit: options.autoCommit ?? true,
+        mutationFn: (params) =>
+          mutationFn({
+            ...params,
+            idempotencyKey: options.idempotencyKey || crypto.randomUUID(),
+          }),
+        metadata: options.metadata,
+      })
+    }
+
+    // Leader: use OfflineTransaction wrapper for offline persistence
     return new OfflineTransactionAPI(
       options,
       mutationFn,
@@ -176,15 +195,29 @@ export class OfflineExecutor {
     )
   }
 
-  createOfflineAction<T>(
-    options: CreateOfflineActionOptions<T>
-  ): (vars: T) => Transaction {
+  createOfflineAction<T>(options: CreateOfflineActionOptions<T>) {
     const mutationFn = this.config.mutationFns[options.mutationFnName]
 
     if (!mutationFn) {
       throw new Error(`Unknown mutation function: ${options.mutationFnName}`)
     }
 
+    // Check leadership immediately and use the appropriate primitive
+    if (!this.isOfflineEnabled) {
+      // Non-leader: use createOptimisticAction directly with the resolved mutation function
+      // We need to wrap it to add the idempotency key
+      return createOptimisticAction({
+        mutationFn: (vars, params) =>
+          mutationFn({
+            ...vars,
+            ...params,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        onMutate: options.onMutate,
+      })
+    }
+
+    // Leader: use the offline action wrapper
     return createOfflineAction(
       options,
       mutationFn,

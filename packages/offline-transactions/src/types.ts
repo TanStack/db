@@ -100,6 +100,7 @@ export interface OnlineDetector {
 }
 
 export interface CreateOfflineTransactionOptions {
+  id?: string
   mutationFnName: string
   autoCommit?: boolean
   idempotencyKey?: string

@@ -30,15 +30,6 @@ export function TodoDemo({
       .orderBy(({ todo }) => todo.createdAt, `desc`)
   )
 
-  console.log(
-    `todoList`,
-    todoList.forEach((todo) => {
-      console.log({ text: todo.text, completed: todo.completed })
-    })
-  )
-  console.log(todoCollection.toArray)
-  console.log(todoCollection.transactions)
-
   // Monitor online status
   useEffect(() => {
     const handleOnline = () => {

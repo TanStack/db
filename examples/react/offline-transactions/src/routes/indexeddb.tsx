@@ -12,6 +12,7 @@ function IndexedDBDemo() {
 
   useEffect(() => {
     const offlineExecutor = createIndexedDBOfflineExecutor()
+    console.log({ offlineExecutor })
     setOffline(offlineExecutor)
 
     return () => {

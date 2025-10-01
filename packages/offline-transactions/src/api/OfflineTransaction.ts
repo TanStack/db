@@ -55,9 +55,12 @@ export class OfflineTransaction {
           version: 1,
         }
 
+        const completionPromise = this.executor.waitForTransactionCompletion(
+          this.offlineId
+        )
+
         try {
           await this.persistTransaction(offlineTransaction)
-
           // Now block and wait for the executor to complete the real mutation
           await completionPromise
         } catch (error) {
@@ -81,6 +84,7 @@ export class OfflineTransaction {
       // For now, returning the transaction and letting caller handle commit
       this.commit().catch((error) => {
         console.error(`Auto-commit failed:`, error)
+        throw error
       })
     }
 
