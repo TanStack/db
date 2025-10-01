@@ -433,10 +433,6 @@ const mutationFn: MutationFn = async ({ transaction }) => {
   if (!response.ok) {
     throw new Error(`HTTP Error: ${response.status}`)
   }
-
-  // Wait for sync back before returning
-  const mutation = transaction.mutations[0]
-  await mutation.collection.utils.refetch()
 }
 
 // Use in collections
