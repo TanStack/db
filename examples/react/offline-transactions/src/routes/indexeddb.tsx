@@ -25,7 +25,7 @@ function IndexedDBDemo() {
     // }).then(setOffline)
 
     createIndexedDBOfflineExecutor({
-      endpoint: 'http://localhost:4318/v1/traces',
+      endpoint: `http://localhost:4318/v1/traces`,
     }).then((executor) => {
       offlineExecutor = executor
       console.log({ offlineExecutor })

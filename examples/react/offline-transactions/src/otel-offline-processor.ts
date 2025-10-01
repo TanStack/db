@@ -1,5 +1,5 @@
-import type { SpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base'
-import { OTelSpanStorage } from './otel-span-storage'
+import { OTelSpanStorage } from "./otel-span-storage"
+import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base"
 
 /**
  * Custom span processor that persists failed spans to IndexedDB
@@ -36,12 +36,12 @@ export class OfflineRetrySpanProcessor {
 
       if (result.code !== 0) {
         // Export failed, store for retry
-        console.warn('Failed to export span, storing for retry:', span.name)
+        console.warn(`Failed to export span, storing for retry:`, span.name)
         await this.storage.store(span)
       }
     } catch (error) {
       // Network error or exporter failure, store for retry
-      console.warn('Error exporting span, storing for retry:', error)
+      console.warn(`Error exporting span, storing for retry:`, error)
       await this.storage.store(span)
     }
   }
@@ -83,7 +83,10 @@ export class OfflineRetrySpanProcessor {
 
     for (const stored of storedSpans) {
       try {
-        const result = await this.exporter.export([stored.span as ReadableSpan], () => {})
+        const result = await this.exporter.export(
+          [stored.span as ReadableSpan],
+          () => {}
+        )
 
         if (result.code === 0) {
           // Success! Remove from storage
@@ -95,12 +98,14 @@ export class OfflineRetrySpanProcessor {
         }
       } catch (error) {
         // Still can't send, increment retry count
-        console.warn('Retry failed for span:', error)
+        console.warn(`Retry failed for span:`, error)
         await this.storage.incrementRetryCount(stored.id)
       }
     }
 
-    console.log(`Successfully retried ${successCount}/${storedSpans.length} spans`)
+    console.log(
+      `Successfully retried ${successCount}/${storedSpans.length} spans`
+    )
     return successCount
   }
 

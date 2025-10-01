@@ -1,4 +1,4 @@
-import { OfflineRetrySpanProcessor } from './otel-offline-processor'
+import { OfflineRetrySpanProcessor } from "./otel-offline-processor"
 
 export interface InitWebTracingOptions {
   endpoint: string
@@ -71,7 +71,7 @@ export async function initWebTracing(
   // If online detector provided, retry on connectivity change
   if (onlineDetector) {
     onlineDetector.subscribe(async () => {
-      console.log('Connectivity changed, retrying stored spans')
+      console.log(`Connectivity changed, retrying stored spans`)
       if (offlineProcessor) {
         const count = await offlineProcessor.retryStoredSpans()
         if (count > 0) {

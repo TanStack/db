@@ -1,7 +1,7 @@
+import { createTraceState } from "@opentelemetry/api"
 import { DefaultRetryPolicy } from "../retry/RetryPolicy"
 import { NonRetriableError } from "../types"
 import { withNestedSpan } from "../telemetry/tracer"
-import { createTraceState } from "@opentelemetry/api"
 import type { SpanContext } from "@opentelemetry/api"
 import type { KeyScheduler } from "./KeyScheduler"
 import type { OutboxManager } from "../outbox/OutboxManager"
@@ -11,7 +11,7 @@ import type {
   SerializedSpanContext,
 } from "../types"
 
-const HANDLED_EXECUTION_ERROR = Symbol("HandledExecutionError")
+const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
 function toSpanContext(
   serialized?: SerializedSpanContext
@@ -99,7 +99,7 @@ export class TransactionExecutor {
   ): Promise<void> {
     try {
       await withNestedSpan(
-        "transaction.execute",
+        `transaction.execute`,
         {
           "transaction.id": transaction.id,
           "transaction.mutationFnName": transaction.mutationFnName,
@@ -110,7 +110,7 @@ export class TransactionExecutor {
           this.scheduler.markStarted(transaction)
 
           if (transaction.retryCount > 0) {
-            span.setAttribute("retry.attempt", transaction.retryCount)
+            span.setAttribute(`retry.attempt`, transaction.retryCount)
           }
 
           try {
@@ -119,16 +119,15 @@ export class TransactionExecutor {
             this.scheduler.markCompleted(transaction)
             await this.outbox.remove(transaction.id)
 
-            span.setAttribute("result", "success")
+            span.setAttribute(`result`, `success`)
             this.offlineExecutor.resolveTransaction(transaction.id, result)
           } catch (error) {
             const err =
               error instanceof Error ? error : new Error(String(error))
 
-            span.setAttribute("result", "error")
+            span.setAttribute(`result`, `error`)
 
             await this.handleError(transaction, err)
-
             ;(err as any)[HANDLED_EXECUTION_ERROR] = true
             throw err
           }
@@ -181,7 +180,7 @@ export class TransactionExecutor {
     error: Error
   ): Promise<void> {
     return withNestedSpan(
-      "transaction.handleError",
+      `transaction.handleError`,
       {
         "transaction.id": transaction.id,
         "error.name": error.name,
@@ -193,7 +192,7 @@ export class TransactionExecutor {
           transaction.retryCount
         )
 
-        span.setAttribute("shouldRetry", shouldRetry)
+        span.setAttribute(`shouldRetry`, shouldRetry)
 
         if (!shouldRetry) {
           this.scheduler.markCompleted(transaction)
@@ -203,7 +202,7 @@ export class TransactionExecutor {
             error
           )
 
-          span.setAttribute("result", "permanent_failure")
+          span.setAttribute(`result`, `permanent_failure`)
           // Signal permanent failure to the waiting transaction
           this.offlineExecutor.rejectTransaction(transaction.id, error)
           return
@@ -221,18 +220,18 @@ export class TransactionExecutor {
           },
         }
 
-        span.setAttribute("retryDelay", delay)
-        span.setAttribute("nextRetryCount", updatedTransaction.retryCount)
+        span.setAttribute(`retryDelay`, delay)
+        span.setAttribute(`nextRetryCount`, updatedTransaction.retryCount)
 
         this.scheduler.markFailed(transaction)
         this.scheduler.updateTransaction(updatedTransaction)
 
         try {
           await this.outbox.update(transaction.id, updatedTransaction)
-          span.setAttribute("result", "scheduled_retry")
+          span.setAttribute(`result`, `scheduled_retry`)
         } catch (persistError) {
           span.recordException(persistError as Error)
-          span.setAttribute("result", "persist_failed")
+          span.setAttribute(`result`, `persist_failed`)
           throw persistError
         }
 

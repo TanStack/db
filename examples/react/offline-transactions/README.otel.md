@@ -27,7 +27,7 @@ Uncomment the tracing configuration in `src/routes/indexeddb.tsx` or `src/routes
 
 ```typescript
 const offlineExecutor = createIndexedDBOfflineExecutor({
-  endpoint: 'http://localhost:4318/v1/traces',
+  endpoint: "http://localhost:4318/v1/traces",
 })
 ```
 
@@ -63,11 +63,11 @@ You can pass headers for Honeycomb configuration:
 
 ```typescript
 const offlineExecutor = createIndexedDBOfflineExecutor({
-  endpoint: 'http://localhost:4318/v1/traces',
+  endpoint: "http://localhost:4318/v1/traces",
   headers: {
     // Optional: specify dataset
-    'x-honeycomb-dataset': 'my-dataset',
-  }
+    "x-honeycomb-dataset": "my-dataset",
+  },
 })
 ```
 
@@ -76,6 +76,7 @@ const offlineExecutor = createIndexedDBOfflineExecutor({
 ### CORS Errors
 
 If you see CORS errors, verify:
+
 - The collector is running: `docker-compose ps`
 - Port 4318 is accessible: `curl http://localhost:4318`
 - The `allowed_origins` in `otel-collector-config.yaml` matches your app's origin
@@ -83,11 +84,13 @@ If you see CORS errors, verify:
 ### No Traces Appearing
 
 Check collector logs:
+
 ```bash
 docker-compose logs otel-collector
 ```
 
 Verify your Honeycomb API key is correct:
+
 ```bash
 docker-compose exec otel-collector env | grep HONEYCOMB
 ```
