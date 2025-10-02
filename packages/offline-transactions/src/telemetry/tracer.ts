@@ -1,12 +1,7 @@
-import {
-  trace,
-  type Span,
-  SpanStatusCode,
-  context,
-  type SpanContext,
-} from "@opentelemetry/api"
+import { SpanStatusCode, context, trace } from "@opentelemetry/api"
+import type { Span, SpanContext } from "@opentelemetry/api"
 
-const TRACER = trace.getTracer("@tanstack/offline-transactions", "0.0.1")
+const TRACER = trace.getTracer(`@tanstack/offline-transactions`, `0.0.1`)
 
 export interface SpanAttrs {
   [key: string]: string | number | boolean | undefined
