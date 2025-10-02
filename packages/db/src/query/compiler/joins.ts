@@ -8,11 +8,12 @@ import {
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
-  InvalidJoinConditionLeftTableError,
-  InvalidJoinConditionRightTableError,
-  InvalidJoinConditionSameTableError,
-  InvalidJoinConditionTableMismatchError,
+  InvalidJoinConditionLeftSourceError,
+  InvalidJoinConditionRightSourceError,
+  InvalidJoinConditionSameSourceError,
+  InvalidJoinConditionSourceMismatchError,
   JoinCollectionNotFoundError,
+  SubscriptionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from "../../errors.js"
@@ -179,7 +180,7 @@ function processJoin(
   // Prepare the main pipeline for joining
   let mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the main table expression
+      // Extract the join key from the main source expression
       const mainKey = compiledMainExpr(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
@@ -196,7 +197,7 @@ function processJoin(
       // Wrap the row in a namespaced structure
       const namespacedRow: NamespacedRow = { [joinedSource]: row }
 
-      // Extract the join key from the joined table expression
+      // Extract the join key from the joined source expression
       const joinedKey = compiledJoinedExpr(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
@@ -269,8 +270,8 @@ function processJoin(
       > = activePipeline.pipe(
         tap((data) => {
           // For outer joins (LEFT/RIGHT), the driving side determines which alias's
-          // subscription we consult for lazy loading. The main table drives LEFT joins,
-          // joined table drives RIGHT joins.
+          // subscription we consult for lazy loading. The main source drives LEFT joins,
+          // joined source drives RIGHT joins.
           const lazyAliasCandidate =
             activeSource === `main` ? joinedSource : mainSource
 
@@ -284,8 +285,11 @@ function processJoin(
           const lazySourceSubscription = subscriptions[resolvedAlias]
 
           if (!lazySourceSubscription) {
-            throw new Error(
-              `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${lazyAliasCandidate}', collection '${lazySource.id}') is missing in join pipeline. Available aliases: ${Object.keys(subscriptions).join(`, `)}. This indicates a bug in alias tracking.`
+            throw new SubscriptionNotFoundError(
+              resolvedAlias,
+              lazyAliasCandidate,
+              lazySource.id,
+              Object.keys(subscriptions)
             )
           }
 
@@ -324,62 +328,61 @@ function processJoin(
 }
 
 /**
- * Analyzes join expressions to determine which refers to which table
- * and returns them in the correct order (available table expression first, joined table expression second)
+ * Analyzes join expressions to determine which refers to which source
+ * and returns them in the correct order (available source expression first, joined source expression second)
  */
 function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
-  allAvailableTableAliases: Array<string>,
+  allAvailableSourceAliases: Array<string>,
   joinedSource: string
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
-  // Filter out the joined table alias from the available table aliases
-  const availableSources = allAvailableTableAliases.filter(
+  // Filter out the joined source alias from the available source aliases
+  const availableSources = allAvailableSourceAliases.filter(
     (alias) => alias !== joinedSource
   )
 
-  const leftTableAlias = getTableAliasFromExpression(left)
-  const rightTableAlias = getTableAliasFromExpression(right)
+  const leftSourceAlias = getSourceAliasFromExpression(left)
+  const rightSourceAlias = getSourceAliasFromExpression(right)
 
-  // If left expression refers to an available table and right refers to joined table, keep as is
+  // If left expression refers to an available source and right refers to joined source, keep as is
   if (
-    leftTableAlias &&
-    availableSources.includes(leftTableAlias) &&
-    rightTableAlias === joinedSource
+    leftSourceAlias &&
+    availableSources.includes(leftSourceAlias) &&
+    rightSourceAlias === joinedSource
   ) {
     return { mainExpr: left, joinedExpr: right }
   }
 
-  // If left expression refers to joined table and right refers to an available table, swap them
+  // If left expression refers to joined source and right refers to an available source, swap them
   if (
-    leftTableAlias === joinedSource &&
-    rightTableAlias &&
-    availableSources.includes(rightTableAlias)
+    leftSourceAlias === joinedSource &&
+    rightSourceAlias &&
+    availableSources.includes(rightSourceAlias)
   ) {
     return { mainExpr: right, joinedExpr: left }
   }
 
-  // If one expression doesn't refer to any table, this is an invalid join
-  if (!leftTableAlias || !rightTableAlias) {
-    // For backward compatibility, use the first available table alias in error message
-    throw new InvalidJoinConditionTableMismatchError()
+  // If one expression doesn't refer to any source, this is an invalid join
+  if (!leftSourceAlias || !rightSourceAlias) {
+    throw new InvalidJoinConditionSourceMismatchError()
   }
 
   // If both expressions refer to the same alias, this is an invalid join
-  if (leftTableAlias === rightTableAlias) {
-    throw new InvalidJoinConditionSameTableError(leftTableAlias)
+  if (leftSourceAlias === rightSourceAlias) {
+    throw new InvalidJoinConditionSameSourceError(leftSourceAlias)
   }
 
-  // Left side must refer to an available table
+  // Left side must refer to an available source
   // This cannot happen with the query builder as there is no way to build a ref
-  // to an unavailable table, but just in case, but could happen with the IR
-  if (!availableSources.includes(leftTableAlias)) {
-    throw new InvalidJoinConditionLeftTableError(leftTableAlias)
+  // to an unavailable source, but just in case, but could happen with the IR
+  if (!availableSources.includes(leftSourceAlias)) {
+    throw new InvalidJoinConditionLeftSourceError(leftSourceAlias)
   }
 
-  // Right side must refer to the joined table
-  if (rightTableAlias !== joinedSource) {
-    throw new InvalidJoinConditionRightTableError(joinedSource)
+  // Right side must refer to the joined source
+  if (rightSourceAlias !== joinedSource) {
+    throw new InvalidJoinConditionRightSourceError(joinedSource)
   }
 
   // This should not be reachable given the logic above, but just in case
@@ -387,27 +390,27 @@ function analyzeJoinExpressions(
 }
 
 /**
- * Extracts the table alias from a join expression
+ * Extracts the source alias from a join expression
  */
-function getTableAliasFromExpression(expr: BasicExpression): string | null {
+function getSourceAliasFromExpression(expr: BasicExpression): string | null {
   switch (expr.type) {
     case `ref`:
-      // PropRef path has the table alias as the first element
+      // PropRef path has the source alias as the first element
       return expr.path[0] || null
     case `func`: {
-      // For function expressions, we need to check if all arguments refer to the same table
-      const tableAliases = new Set<string>()
+      // For function expressions, we need to check if all arguments refer to the same source
+      const sourceAliases = new Set<string>()
       for (const arg of expr.args) {
-        const alias = getTableAliasFromExpression(arg)
+        const alias = getSourceAliasFromExpression(arg)
         if (alias) {
-          tableAliases.add(alias)
+          sourceAliases.add(alias)
         }
       }
-      // If all arguments refer to the same table, return that table alias
-      return tableAliases.size === 1 ? Array.from(tableAliases)[0]! : null
+      // If all arguments refer to the same source, return that source alias
+      return sourceAliases.size === 1 ? Array.from(sourceAliases)[0]! : null
     }
     default:
-      // Values (type='val') don't reference any table
+      // Values (type='val') don't reference any source
       return null
   }
 }
@@ -567,7 +570,7 @@ function processJoinResults(joinType: string) {
 /**
  * Returns the active and lazy collections for a join clause.
  * The active collection is the one that we need to fully iterate over
- * and it can be the main table (i.e. left collection) or the joined table (i.e. right collection).
+ * and it can be the main source (i.e. left collection) or the joined source (i.e. right collection).
  * The lazy collection is the one that we should join-in lazily based on matches in the active collection.
  * @param joinClause - The join clause to analyze
  * @param leftCollection - The left collection

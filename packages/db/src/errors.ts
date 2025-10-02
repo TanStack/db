@@ -409,32 +409,32 @@ export class UnsupportedJoinTypeError extends JoinError {
   }
 }
 
-export class InvalidJoinConditionSameTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionSameSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: both expressions refer to the same table "${tableAlias}"`
+      `Invalid join condition: both expressions refer to the same source "${sourceAlias}"`
     )
   }
 }
 
-export class InvalidJoinConditionTableMismatchError extends JoinError {
+export class InvalidJoinConditionSourceMismatchError extends JoinError {
   constructor() {
-    super(`Invalid join condition: expressions must reference table aliases`)
+    super(`Invalid join condition: expressions must reference source aliases`)
   }
 }
 
-export class InvalidJoinConditionLeftTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionLeftSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: left expression refers to an unavailable table "${tableAlias}"`
+      `Invalid join condition: left expression refers to an unavailable source "${sourceAlias}"`
     )
   }
 }
 
-export class InvalidJoinConditionRightTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionRightSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: right expression does not refer to the joined table "${tableAlias}"`
+      `Invalid join condition: right expression does not refer to the joined source "${sourceAlias}"`
     )
   }
 }
@@ -578,6 +578,27 @@ export class WhereClauseConversionError extends QueryOptimizerError {
   constructor(collectionId: string, alias: string) {
     super(
       `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`
+    )
+  }
+}
+
+export class SubscriptionNotFoundError extends QueryCompilationError {
+  constructor(
+    resolvedAlias: string,
+    originalAlias: string,
+    collectionId: string,
+    availableAliases: Array<string>
+  ) {
+    super(
+      `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${originalAlias}', collection '${collectionId}') is missing in join pipeline. Available aliases: ${availableAliases.join(`, `)}. This indicates a bug in alias tracking.`
+    )
+  }
+}
+
+export class AggregateNotSupportedError extends QueryCompilationError {
+  constructor() {
+    super(
+      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`
     )
   }
 }

@@ -1327,7 +1327,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       })
     })
 
-    test(`should throw error when both expressions refer to the same table`, () => {
+    test(`should throw error when both expressions refer to the same source`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
           id: `test-users-same-table`,
@@ -1349,11 +1349,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same table "user"`
+        `Invalid join condition: both expressions refer to the same source "user"`
       )
     })
 
-    test(`should throw error when expressions don't reference table aliases`, () => {
+    test(`should throw error when expressions don't reference source aliases`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
           id: `test-users-no-refs`,
@@ -1375,11 +1375,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             ),
         })
       }).toThrow(
-        `Invalid join condition: expressions must reference table aliases`
+        `Invalid join condition: expressions must reference source aliases`
       )
     })
 
-    test(`should throw error when right side doesn't match joined table`, () => {
+    test(`should throw error when right side doesn't match joined source`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
           id: `test-users-no-refs`,
@@ -1410,11 +1410,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               ),
         })
       }).toThrow(
-        `Invalid join condition: right expression does not refer to the joined table "dept2"`
+        `Invalid join condition: right expression does not refer to the joined source "dept2"`
       )
     })
 
-    test(`should throw error when function expression has mixed table references`, () => {
+    test(`should throw error when function expression has mixed source references`, () => {
       const usersCollection = createCollection(
         mockSyncCollectionOptions<User>({
           id: `test-users-mixed-refs`,
@@ -1436,7 +1436,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same table "user"`
+        `Invalid join condition: both expressions refer to the same source "user"`
       )
     })
 
@@ -1595,7 +1595,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               ({ employee, manager }) => eq(employee.manager_id, manager.id),
               `left`
             )
-            .where(({ manager }) => or(isNull(manager.id), gt(manager.age, 35)))
+            .where(({ manager }) =>
+              or(isNull(manager?.id), gt(manager?.age, 35))
+            )
             .select(({ employee, manager }) => ({
               employeeId: employee.id,
               employeeName: employee.name,

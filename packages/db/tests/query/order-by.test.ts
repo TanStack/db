@@ -1491,12 +1491,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                   ({ employees, departments }) =>
                     eq(employees.department_id, departments.id)
                 )
-                .orderBy(({ departments }) => departments.name, `asc`)
+                .orderBy(({ departments }) => departments?.name, `asc`)
                 .limit(5)
                 .select(({ employees, departments }) => ({
                   employeeId: employees.id,
                   employeeName: employees.name,
-                  departmentName: departments.name,
+                  departmentName: departments?.name,
                 }))
             )
 
