@@ -461,10 +461,6 @@ describe(`LocalOnly Collection`, () => {
         })
       )
 
-      testCollection.subscribeChanges((changes) => {
-        console.log({ testCollectionChanges: changes })
-      })
-
       const query = createCollection(
         liveQueryCollectionOptions({
           startSync: true,
@@ -474,10 +470,6 @@ describe(`LocalOnly Collection`, () => {
             })),
         })
       )
-
-      query.subscribeChanges((changes) => {
-        console.log({ queryChanges: changes })
-      })
 
       testCollection.delete(0)
 
