@@ -1,4 +1,8 @@
-import { OTelSpanStorage } from "./otel-span-storage"
+import {
+  OTelSpanStorage,
+  deserializeSpan,
+  serializeSpan,
+} from "./otel-span-storage"
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base"
 
 /**
@@ -32,17 +36,25 @@ export class OfflineRetrySpanProcessor {
 
     try {
       // Try to export the span immediately
-      const result = await this.exporter.export([span], () => {})
+      const result = await new Promise((resolve) => {
+        this.exporter.export([span], (result) => {
+          resolve(result)
+        })
+      })
 
-      if (result.code !== 0) {
+      if (!result || result.code !== 0) {
         // Export failed, store for retry
-        console.warn(`Failed to export span, storing for retry:`, span.name)
-        await this.storage.store(span)
+        console.warn(
+          `Failed to export span, storing for retry:`,
+          span.name,
+          result
+        )
+        await this.storage.store(serializeSpan(span))
       }
     } catch (error) {
       // Network error or exporter failure, store for retry
       console.warn(`Error exporting span, storing for retry:`, error)
-      await this.storage.store(span)
+      await this.storage.store(serializeSpan(span))
     }
   }
 
@@ -83,12 +95,14 @@ export class OfflineRetrySpanProcessor {
 
     for (const stored of storedSpans) {
       try {
-        const result = await this.exporter.export(
-          [stored.span as ReadableSpan],
-          () => {}
-        )
+        const deserializedSpan = deserializeSpan(stored.span)
+        const result = await new Promise((resolve) => {
+          this.exporter.export([deserializedSpan], (result) => {
+            resolve(result)
+          })
+        })
 
-        if (result.code === 0) {
+        if (result && result.code === 0) {
           // Success! Remove from storage
           await this.storage.remove(stored.id)
           successCount++

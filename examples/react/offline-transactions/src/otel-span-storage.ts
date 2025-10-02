@@ -1,10 +1,30 @@
 /**
  * IndexedDB storage for persisting OpenTelemetry spans when offline
  */
+import type { ReadableSpan } from "@opentelemetry/sdk-trace-base"
+
+export interface SerializedSpan {
+  name: string
+  spanContext: {
+    traceId: string
+    spanId: string
+    traceFlags: number
+  }
+  parentSpanId?: string
+  startTime: [number, number]
+  endTime: [number, number]
+  status: { code: number; message?: string }
+  attributes: Record<string, any>
+  events: Array<any>
+  links: Array<any>
+  kind: number
+  resource: Record<string, any>
+  instrumentationLibrary: { name: string; version?: string }
+}
 
 interface StoredSpan {
   id: string
-  span: any // Serialized span data
+  span: SerializedSpan
   timestamp: number
   retryCount: number
 }
@@ -36,7 +56,7 @@ export class OTelSpanStorage {
     })
   }
 
-  async store(spanData: any): Promise<void> {
+  async store(spanData: SerializedSpan): Promise<void> {
     if (!this.db) await this.init()
 
     const storedSpan: StoredSpan = {
@@ -135,5 +155,53 @@ export class OTelSpanStorage {
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
     })
+  }
+}
+
+/**
+ * Serialize a ReadableSpan to a plain object that can be stored in IndexedDB
+ */
+export function serializeSpan(span: ReadableSpan): SerializedSpan {
+  return {
+    name: span.name,
+    spanContext: {
+      traceId: span.spanContext().traceId,
+      spanId: span.spanContext().spanId,
+      traceFlags: span.spanContext().traceFlags,
+    },
+    parentSpanId: span.parentSpanId,
+    startTime: span.startTime,
+    endTime: span.endTime,
+    status: span.status,
+    attributes: span.attributes,
+    events: span.events,
+    links: span.links,
+    kind: span.kind,
+    resource: span.resource.attributes,
+    instrumentationLibrary: span.instrumentationLibrary,
+  }
+}
+
+/**
+ * Deserialize a stored span back into a format the exporter can use
+ */
+export function deserializeSpan(serialized: SerializedSpan): any {
+  return {
+    name: serialized.name,
+    spanContext: () => serialized.spanContext,
+    parentSpanId: serialized.parentSpanId,
+    startTime: serialized.startTime,
+    endTime: serialized.endTime,
+    status: serialized.status,
+    attributes: serialized.attributes,
+    events: serialized.events,
+    links: serialized.links,
+    kind: serialized.kind,
+    resource: {
+      attributes: serialized.resource,
+    },
+    instrumentationLibrary: serialized.instrumentationLibrary,
+    duration: serialized.endTime,
+    ended: true,
   }
 }
