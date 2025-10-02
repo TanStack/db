@@ -104,6 +104,9 @@ export class CollectionSyncManager<
                 existingValue !== undefined &&
                 deepEquals(existingValue, messageWithoutKey.value)
               ) {
+                // The "insert" is an echo of a value we already have locally.
+                // Treat it as an update so we preserve optimistic intent without
+                // throwing a duplicate-key error during reconciliation.
                 messageType = `update`
               } else {
                 throw new DuplicateKeySyncError(key, this.id)

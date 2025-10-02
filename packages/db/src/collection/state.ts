@@ -217,6 +217,10 @@ export class CollectionStateManager<
     triggeredByUserAction: boolean = false
   ): void {
     // Skip redundant recalculations when we're in the middle of committing sync transactions
+    // While the sync pipeline is replaying a large batch we still want to honour
+    // fresh optimistic mutations from the UI. Only skip recompute for the
+    // internal sync-driven redraws; user-triggered work (triggeredByUserAction)
+    // must run so live queries stay responsive during long commits.
     if (this.isCommittingSyncTransactions && !triggeredByUserAction) {
       return
     }
