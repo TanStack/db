@@ -1,9 +1,10 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
-import { transactionScopedScheduler } from "../../schedular.js"
+import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
@@ -187,10 +188,14 @@ export class CollectionConfigBuilder<
   scheduleGraphRun(
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState,
-    callback?: () => boolean
+    callback?: () => boolean,
+    options?: { contextId?: SchedulerContextId; jobId?: unknown }
   ) {
-    const activeTransaction = getActiveTransaction()
-    const contextId = activeTransaction?.id
+    const contextId = options?.contextId ?? getActiveTransaction()?.id
+    const jobId = options?.jobId ?? this
+    // We intentionally scope deduplication to the builder instance. Each instance
+    // owns caches and compiled pipelines, so sharing an entry across instances that
+    // merely reuse the same string id would bind the wrong `this` in the run closure.
 
     const createEntry = () => {
       const state: PendingGraphRun<TResult> = {
@@ -210,13 +215,27 @@ export class CollectionConfigBuilder<
             state.loadCallbacks.size > 0
               ? () => {
                   let allDone = true
+                  let firstError: unknown
+
                   for (const loader of state.loadCallbacks) {
-                    const result = loader()
-                    if (result === false) {
+                    try {
+                      const result = loader()
+                      if (result === false) {
+                        allDone = false
+                      }
+                    } catch (error) {
                       allDone = false
+                      if (firstError === undefined) {
+                        firstError = error
+                      }
                     }
                   }
 
+                  if (firstError !== undefined) {
+                    throw firstError
+                  }
+
+                  // Returning false signals that callers should schedule another pass.
                   return allDone
                 }
               : undefined
@@ -237,7 +256,7 @@ export class CollectionConfigBuilder<
 
     transactionScopedScheduler.schedule({
       contextId,
-      jobId: this,
+      jobId,
       createEntry,
       updateEntry,
     })

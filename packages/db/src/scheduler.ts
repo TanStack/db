@@ -15,12 +15,14 @@ interface ScheduleOptions<TState> {
 /**
  * Basic scoped scheduler that coalesces work by context and job.
  *
- * - A context (e.g. a transaction id) scopes work execution:
- *   queued jobs for the same context run together when that context is flushed.
- * - A job id (e.g. a specific CollectionConfigBuilder) dedupes work within a context.
+ * - A **context** (for example a transaction id) represents the batching boundary.
+ *   Work scheduled with the same context id is queued until that context is flushed.
+ * - A **job id** deduplicates work inside a context. The first scheduled job determines
+ *   the execution slot; subsequent schedules update the same entry but preserve order.
+ * - When no context id is provided the work executes immediately (no batching).
  *
- * Callers provide an entry factory so state objects can be mutated across schedules,
- * and optionally an updater to merge new data into an existing entry.
+ * Each job entry owns a mutable state object so callers can merge new data between
+ * schedule calls before the eventual `run()` executes.
  */
 export class Scheduler {
   private contexts = new Map<
@@ -81,6 +83,10 @@ export class Scheduler {
 
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
+  }
+
+  hasPendingJobs(contextId: SchedulerContextId): boolean {
+    return this.contexts.has(contextId)
   }
 
   clearJob(contextId: SchedulerContextId, jobId: unknown): void {
