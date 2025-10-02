@@ -7,6 +7,7 @@ import {
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from "../errors"
+import { deepEquals } from "../utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { ChangeMessage, CollectionConfig } from "../types"
 import type { CollectionImpl } from "./index.js"
@@ -84,6 +85,8 @@ export class CollectionSyncManager<
           }
           const key = this.config.getKey(messageWithoutKey.value)
 
+          let messageType = messageWithoutKey.type
+
           // Check if an item with this key already exists when inserting
           if (messageWithoutKey.type === `insert`) {
             const insertingIntoExistingSynced = state.syncedData.has(key)
@@ -96,17 +99,26 @@ export class CollectionSyncManager<
               !hasPendingDeleteForKey &&
               !isTruncateTransaction
             ) {
-              throw new DuplicateKeySyncError(key, this.id)
+              const existingValue = state.syncedData.get(key)
+              if (
+                existingValue !== undefined &&
+                deepEquals(existingValue, messageWithoutKey.value)
+              ) {
+                messageType = `update`
+              } else {
+                throw new DuplicateKeySyncError(key, this.id)
+              }
             }
           }
 
           const message: ChangeMessage<TOutput> = {
             ...messageWithoutKey,
+            type: messageType,
             key,
           }
           pendingTransaction.operations.push(message)
 
-          if (messageWithoutKey.type === `delete`) {
+          if (messageType === `delete`) {
             pendingTransaction.deletedKeys.add(key)
           }
         },

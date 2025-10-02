@@ -68,14 +68,17 @@ export class CollectionChangesManager<
     // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
     let eventsToEmit = changes
 
-    // If we have batched events and this is a forced emit, combine them
-    if (this.batchedEvents.length > 0 && forceEmit) {
-      eventsToEmit = [...this.batchedEvents, ...changes]
+    if (forceEmit) {
+      if (this.batchedEvents.length > 0) {
+        eventsToEmit = [...this.batchedEvents, ...changes]
+      }
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
 
-    if (eventsToEmit.length === 0) return
+    if (eventsToEmit.length === 0) {
+      return
+    }
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {

@@ -217,7 +217,7 @@ export class CollectionStateManager<
     triggeredByUserAction: boolean = false
   ): void {
     // Skip redundant recalculations when we're in the middle of committing sync transactions
-    if (this.isCommittingSyncTransactions) {
+    if (this.isCommittingSyncTransactions && !triggeredByUserAction) {
       return
     }
 
