@@ -69,6 +69,9 @@ export class CollectionChangesManager<
     let eventsToEmit = changes
 
     if (forceEmit) {
+      // Force emit is used to end a batch (e.g. after a sync commit). Combine any
+      // buffered optimistic events with the final changes so subscribers see the
+      // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
         eventsToEmit = [...this.batchedEvents, ...changes]
       }
