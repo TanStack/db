@@ -253,10 +253,12 @@ export class BTreeIndex<
   take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
+    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
+    let pair: [any, any] | undefined
     let key = normalizeValue(from)
 
-    while ((key = nextKey(key)) && result.length < n) {
+    while ((pair = nextPair(key)) !== undefined && result.length < n) {
+      key = pair[0]
       const keys = this.valueMap.get(key)
       if (keys) {
         const it = keys.values()
