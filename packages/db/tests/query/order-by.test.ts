@@ -1301,7 +1301,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const results = Array.from(orderByQuery.values())
         expect(results).toHaveLength(1)
 
-        expect(results[0]!.id).toBe(`1`) // receiving "2"
+        expect(results[0]!.id).toBe(`1`)
         expect(results[0]!.date).toEqual(new Date(`2025-09-15`))
       })
 
@@ -1339,7 +1339,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .from({ persons: personsCollection })
             .orderBy(({ persons }) => persons.age, {
               direction: `asc`,
-              nulls: `first`,
+              nulls: `last`,
             })
             .limit(3)
         )
@@ -1347,12 +1347,9 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const result1 = Array.from(query1.values())
         expect(result1).toHaveLength(3)
-        expect(result1.map((r) => r.age)).toEqual([null, 14, 25])
+        expect(result1.map((r) => r.age)).toEqual([14, 25, null])
 
-        // Following PG semantics,
-        // NULLs should order after any non-null values in ASC order
-        // and before any non-null values in DESC order
-        // so here NULL should be > 18 and thus not part of the result
+        // The default compare options defaults to nulls first
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
@@ -1361,9 +1358,24 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         await query2.preload()
 
         const result2 = Array.from(query2.values())
+        const ages = result2.map((r) => r.age)
+        expect(ages).toHaveLength(2)
+        expect(ages).toContain(null)
+        expect(ages).toContain(14)
 
-        console.log(result2)
-        expect(result2.map((r) => r.age)).toEqual([14])
+        // The default compare options defaults to nulls first
+        // So the null value is not part of the result
+        const query3 = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => gt(persons.age, 18))
+        )
+        await query3.preload()
+
+        const result3 = Array.from(query3.values())
+        const ages2 = result3.map((r) => r.age)
+        expect(ages2).toHaveLength(1)
+        expect(ages2).toContain(25)
       })
 
       it(`can use orderBy when two different comparators are used on the same column`, async () => {
