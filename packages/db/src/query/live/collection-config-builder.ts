@@ -32,8 +32,9 @@ export class CollectionConfigBuilder<
   private readonly id: string
   readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
-  private readonly aliasToCollectionId: Record<string, string>
   private readonly collectionByAlias: Record<string, Collection<any, any, any>>
+  // Populated during compilation to include optimizer-generated aliases
+  private compiledAliasToCollectionId: Record<string, string> = {}
 
   // WeakMap to store the keys of the results
   // so that we can retrieve them in the getKey function
@@ -72,13 +73,11 @@ export class CollectionConfigBuilder<
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
-    this.aliasToCollectionId = {}
     this.collectionByAlias = {}
     for (const [collectionId, aliases] of collectionAliasesById.entries()) {
       const collection = this.collections[collectionId]
       if (!collection) continue
       for (const alias of aliases) {
-        this.aliasToCollectionId[alias] = collectionId
         this.collectionByAlias[alias] = collection
       }
     }
@@ -111,11 +110,15 @@ export class CollectionConfigBuilder<
   }
 
   getCollectionIdForAlias(alias: string): string {
-    const collectionId = this.aliasToCollectionId[alias]
-    if (!collectionId) {
-      throw new Error(`Unknown collection alias "${alias}"`)
+    const compiled = this.compiledAliasToCollectionId[alias]
+    if (compiled) {
+      return compiled
     }
-    return collectionId
+    const collection = this.collectionByAlias[alias]
+    if (collection) {
+      return collection.id
+    }
+    throw new Error(`Unknown collection alias "${alias}"`)
   }
 
   // The callback function is called after the graph has run.
@@ -224,11 +227,8 @@ export class CollectionConfigBuilder<
       ])
     )
 
-    // Compile the query and get both pipeline and collection WHERE clauses
-    const {
-      pipeline: pipelineCache,
-      collectionWhereClauses: collectionWhereClausesCache,
-    } = compileQuery(
+    // Compile the query and capture alias metadata produced during optimisation
+    let compilation = compileQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
@@ -238,8 +238,37 @@ export class CollectionConfigBuilder<
       this.optimizableOrderByCollections
     )
 
-    this.pipelineCache = pipelineCache
-    this.collectionWhereClausesCache = collectionWhereClausesCache
+    this.pipelineCache = compilation.pipeline
+    this.collectionWhereClausesCache = compilation.collectionWhereClauses
+    this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+    // Optimized queries can introduce aliases beyond those declared on the
+    // builder. If that happens, provision inputs for the missing aliases and
+    // recompile so the pipeline is fully wired before execution.
+    const missingAliases = Object.keys(this.compiledAliasToCollectionId).filter(
+      (alias) => !Object.hasOwn(this.inputsCache!, alias)
+    )
+
+    if (missingAliases.length > 0) {
+      for (const alias of missingAliases) {
+        this.inputsCache[alias] = this.graphCache.newInput<any>()
+      }
+
+      compilation = compileQuery(
+        this.query,
+        this.inputsCache as Record<string, KeyedStream>,
+        this.collections,
+        this.subscriptions,
+        this.lazyCollectionsCallbacks,
+        this.lazyCollections,
+        this.optimizableOrderByCollections,
+        new WeakMap(),
+        new WeakMap()
+      )
+
+      this.pipelineCache = compilation.pipeline
+      this.collectionWhereClausesCache = compilation.collectionWhereClauses
+      this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+    }
   }
 
   private maybeCompileBasePipeline() {
@@ -355,31 +384,41 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
   ) {
-    const loaders = Object.entries(this.collectionByAlias).map(
-      ([alias, collection]) => {
-        const collectionId = this.aliasToCollectionId[alias]!
-        const collectionSubscriber = new CollectionSubscriber(
-          alias,
-          collectionId,
-          collection,
-          config,
-          syncState,
-          this
-        )
+    const compiledAliases = Object.entries(this.compiledAliasToCollectionId)
+    if (compiledAliases.length === 0) {
+      throw new Error(
+        `Compiler returned no alias metadata for query '${this.id}'. This should not happen; please report.`
+      )
+    }
 
-        const subscription = collectionSubscriber.subscribe()
-        this.subscriptions[alias] = subscription
-        const collectionKey = `__collection:${collectionId}`
-        this.subscriptions[collectionKey] = subscription
+    // Subscribe to each alias the compiler reported.
+    const aliasEntries = compiledAliases
 
-        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
-          collectionSubscriber,
-          subscription
-        )
+    const loaders = aliasEntries.map(([alias, collectionId]) => {
+      const collection =
+        this.collectionByAlias[alias] ?? this.collections[collectionId]!
 
-        return loadMore
-      }
-    )
+      const collectionSubscriber = new CollectionSubscriber(
+        alias,
+        collectionId,
+        collection,
+        config,
+        syncState,
+        this
+      )
+
+      const subscription = collectionSubscriber.subscribe()
+      this.subscriptions[alias] = subscription
+      const collectionKey = `__collection:${collectionId}`
+      this.subscriptions[collectionKey] = subscription
+
+      const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+        collectionSubscriber,
+        subscription
+      )
+
+      return loadMore
+    })
 
     const loadMoreDataCallback = () => {
       loaders.map((loader) => loader())

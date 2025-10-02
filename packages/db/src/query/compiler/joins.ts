@@ -63,7 +63,8 @@ export function processJoins(
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR,
-  onCompileSubquery: CompileQueryFn
+  onCompileSubquery: CompileQueryFn,
+  aliasToCollectionId: Record<string, string>
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -83,7 +84,8 @@ export function processJoins(
       lazyCollections,
       optimizableOrderByCollections,
       rawQuery,
-      onCompileSubquery
+      onCompileSubquery,
+      aliasToCollectionId
     )
   }
 
@@ -108,8 +110,11 @@ function processJoin(
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR,
-  onCompileSubquery: CompileQueryFn
+  onCompileSubquery: CompileQueryFn,
+  aliasToCollectionId: Record<string, string>
 ): NamespacedAndKeyedStream {
+  const isCollectionRef = joinClause.from.type === `collectionRef`
+
   // Get the joined table alias and input stream
   const {
     alias: joinedTableAlias,
@@ -125,11 +130,17 @@ function processJoin(
     optimizableOrderByCollections,
     cache,
     queryMapping,
-    onCompileSubquery
+    onCompileSubquery,
+    aliasToCollectionId
   )
 
   // Add the joined table to the tables map
   tables[joinedTableAlias] = joinedInput
+  if (isCollectionRef) {
+    // Only direct collection references form new alias bindings. Subquery
+    // aliases reuse the mapping returned from the recursive compilation above.
+    aliasToCollectionId[joinedTableAlias] = joinedCollectionId
+  }
 
   const mainCollection = collections[mainTableId]
   const joinedCollection = collections[joinedCollectionId]
@@ -260,9 +271,9 @@ function processJoin(
             subscriptions[`__collection:${lazyCollection.id}`]
 
           if (!lazyCollectionSubscription) {
-            // The alias was not subscribed (e.g. belongs to a nested subquery),
-            // so we skip the lazy loading optimization for this join.
-            return
+            throw new Error(
+              `Internal error: subscription for collection is missing in join pipeline. Make sure the live query collection sets the subscription before running the pipeline.`
+            )
           }
 
           if (lazyCollectionSubscription.hasLoadedInitialState()) {
@@ -401,7 +412,8 @@ function processJoinSource(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping,
-  onCompileSubquery: CompileQueryFn
+  onCompileSubquery: CompileQueryFn,
+  aliasToCollectionId: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -409,6 +421,7 @@ function processJoinSource(
       if (!input) {
         throw new CollectionInputNotFoundError(from.alias, from.collection.id)
       }
+      aliasToCollectionId[from.alias] = from.collection.id
       return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
@@ -427,6 +440,10 @@ function processJoinSource(
         cache,
         queryMapping
       )
+
+      // Pull the nested alias map up so the caller can subscribe to those aliases
+      // and keep the current alias pointing at the subquery's collection.
+      Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
 
       // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline

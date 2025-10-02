@@ -4,6 +4,7 @@ import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionImpl } from "../../../src/collection/index.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
+import type { CollectionSubscription } from "../../../src/collection/subscription.js"
 
 // Test schema types
 interface Issue {
@@ -272,27 +273,45 @@ describe(`Query2 Subqueries`, () => {
 
       const usersSubscription = usersCollection.subscribeChanges(() => {})
       const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+      const subscriptions: Record<string, CollectionSubscription> = {
+        [usersCollection.id]: usersSubscription,
+        [issuesCollection.id]: issuesSubscription,
+      }
 
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
       const usersInput = createUserInput(graph)
       const lazyCollections = new Set<string>()
-      const { pipeline } = compileQuery(
+      const compilation = compileQuery(
         builtQuery,
         {
           issues: issuesInput,
           users: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
-        {
-          [usersCollection.id]: usersSubscription,
-          [issuesCollection.id]: issuesSubscription,
-        },
+        subscriptions,
         { issues: dummyCallbacks, users: dummyCallbacks },
         lazyCollections,
         {}
       )
+      const { pipeline } = compilation
+
+      for (const [alias, collectionId] of Object.entries(
+        compilation.aliasToCollectionId
+      )) {
+        if (!subscriptions[alias]) {
+          subscriptions[alias] =
+            collectionId === usersCollection.id
+              ? usersSubscription
+              : issuesSubscription
+        }
+
+        const collectionKey = `__collection:${collectionId}`
+        if (!subscriptions[collectionKey]) {
+          subscriptions[collectionKey] = subscriptions[alias]
+        }
+      }
 
       // Since we're doing a left join, the collection on the right should be handled lazily
       expect(lazyCollections).contains(usersCollection.id)

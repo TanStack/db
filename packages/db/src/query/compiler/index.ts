@@ -40,6 +40,8 @@ export interface CompilationResult {
   pipeline: ResultStream
   /** Map of collection aliases to their WHERE clauses for index optimization */
   collectionWhereClauses: Map<string, BasicExpression<boolean>>
+  /** Map of alias to underlying collection id used during compilation */
+  aliasToCollectionId: Record<string, string>
 }
 
 /**
@@ -78,6 +80,10 @@ export function compileQuery(
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
 
+  // Track alias to collection id relationships discovered during compilation so
+  // the live layer can subscribe to every alias the optimiser introduces.
+  const aliasToCollectionId: Record<string, string> = {}
+
   // Create a map of table aliases to inputs
   const tables: Record<string, KeyedStream> = {}
 
@@ -95,7 +101,8 @@ export function compileQuery(
     lazyCollections,
     optimizableOrderByCollections,
     cache,
-    queryMapping
+    queryMapping,
+    aliasToCollectionId
   )
   tables[mainTableAlias] = mainInput
 
@@ -128,7 +135,8 @@ export function compileQuery(
       lazyCollections,
       optimizableOrderByCollections,
       rawQuery,
-      compileQuery
+      compileQuery,
+      aliasToCollectionId
     )
   }
 
@@ -287,6 +295,7 @@ export function compileQuery(
       collectionId: mainCollectionId,
       pipeline: result,
       collectionWhereClauses,
+      aliasToCollectionId,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -315,6 +324,7 @@ export function compileQuery(
     collectionId: mainCollectionId,
     pipeline: result,
     collectionWhereClauses,
+    aliasToCollectionId,
   }
   cache.set(rawQuery, compilationResult)
 
@@ -333,7 +343,8 @@ function processFrom(
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
-  queryMapping: QueryMapping
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -341,6 +352,7 @@ function processFrom(
       if (!input) {
         throw new CollectionInputNotFoundError(from.alias, from.collection.id)
       }
+      aliasToCollectionId[from.alias] = from.collection.id
       return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
@@ -359,6 +371,8 @@ function processFrom(
         cache,
         queryMapping
       )
+
+      Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
 
       // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline
