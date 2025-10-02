@@ -5,6 +5,7 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from "./errors"
+import { transactionScopedScheduler } from "./schedular.js"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -179,10 +180,12 @@ export function getActiveTransaction(): Transaction | undefined {
 }
 
 function registerTransaction(tx: Transaction<any>) {
+  transactionScopedScheduler.clear(tx.id)
   transactionStack.push(tx)
 }
 
 function unregisterTransaction(tx: Transaction<any>) {
+  transactionScopedScheduler.flush(tx.id)
   transactionStack = transactionStack.filter((t) => t.id !== tx.id)
 }
 

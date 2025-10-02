@@ -11,6 +11,8 @@ import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 
+const loadMoreCallbackSymbol = Symbol(`tanstack.db.loadMore`)
+
 export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
@@ -85,10 +87,10 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // We need to call `maybeRunGraph` even if there's no data to load
+    // We need to schedule a graph run even if there's no data to load
     // because we need to mark the collection as ready if it's not already
-    // and that's only done in `maybeRunGraph`
-    this.collectionConfigBuilder.maybeRunGraph(
+    // and that's only done during the graph execution
+    this.collectionConfigBuilder.scheduleGraphRun(
       this.config,
       this.syncState,
       dataLoader
@@ -201,10 +203,18 @@ export class CollectionSubscriber<
     }
 
     const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
-    this.sendChangesToPipeline(
-      trackedChanges,
-      this.loadMoreIfNeeded.bind(this, subscription)
-    )
+    type SubscriptionWithLoader = CollectionSubscription & {
+      [loadMoreCallbackSymbol]?: () => boolean
+    }
+
+    const subscriptionWithLoader = subscription as SubscriptionWithLoader
+
+    const boundLoader =
+      subscriptionWithLoader[loadMoreCallbackSymbol] ??
+      (subscriptionWithLoader[loadMoreCallbackSymbol] =
+        this.loadMoreIfNeeded.bind(this, subscription))
+
+    this.sendChangesToPipeline(trackedChanges, boundLoader)
   }
 
   // Loads the next `n` items from the collection

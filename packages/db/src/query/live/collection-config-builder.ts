@@ -1,6 +1,8 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
+import { transactionScopedScheduler } from "../../schedular.js"
+import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -21,6 +23,12 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
+
+type PendingGraphRun<TResult extends object> = {
+  config: Parameters<SyncConfig<TResult>[`sync`]>[0]
+  syncState: FullSyncState
+  loadCallbacks: Set<() => boolean>
+}
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -176,6 +184,65 @@ export class CollectionConfigBuilder<
     }
   }
 
+  scheduleGraphRun(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    callback?: () => boolean
+  ) {
+    const activeTransaction = getActiveTransaction()
+    const contextId = activeTransaction?.id
+
+    const createEntry = () => {
+      const state: PendingGraphRun<TResult> = {
+        config,
+        syncState,
+        loadCallbacks: new Set(),
+      }
+
+      if (callback) {
+        state.loadCallbacks.add(callback)
+      }
+
+      return {
+        state,
+        run: () => {
+          const combinedLoader =
+            state.loadCallbacks.size > 0
+              ? () => {
+                  let allDone = true
+                  for (const loader of state.loadCallbacks) {
+                    const result = loader()
+                    if (result === false) {
+                      allDone = false
+                    }
+                  }
+
+                  return allDone
+                }
+              : undefined
+
+          this.maybeRunGraph(state.config, state.syncState, combinedLoader)
+        },
+      }
+    }
+
+    const updateEntry = (entry: { state: PendingGraphRun<TResult> }) => {
+      entry.state.config = config
+      entry.state.syncState = syncState
+
+      if (callback) {
+        entry.state.loadCallbacks.add(callback)
+      }
+    }
+
+    transactionScopedScheduler.schedule({
+      contextId,
+      jobId: this,
+      createEntry,
+      updateEntry,
+    })
+  }
+
   private getSyncConfig(): SyncConfig<TResult> {
     return {
       rowUpdateMode: `full`,
@@ -202,7 +269,7 @@ export class CollectionConfigBuilder<
     )
 
     // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+    this.scheduleGraphRun(config, fullSyncState, loadMoreDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
