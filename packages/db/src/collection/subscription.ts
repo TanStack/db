@@ -5,7 +5,7 @@ import {
   createFilteredCallback,
 } from "./change-events.js"
 import type { BasicExpression } from "../query/ir.js"
-import type { BaseIndex } from "../indexes/base-index.js"
+import type { IndexInterface } from "../indexes/base-index.js"
 import type { ChangeMessage } from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
@@ -38,7 +38,7 @@ export class CollectionSubscription {
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
 
-  private orderByIndex: BaseIndex<string | number> | undefined
+  private orderByIndex: IndexInterface<string | number> | undefined
 
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
@@ -65,7 +65,7 @@ export class CollectionSubscription {
       : this.callback
   }
 
-  setOrderByIndex(index: BaseIndex<any>) {
+  setOrderByIndex(index: IndexInterface<any>) {
     this.orderByIndex = index
   }
 

@@ -245,15 +245,26 @@ export class BTreeIndex<
   }
 
   /**
-   * Returns the next n items after the provided item or the first n items if no from item is provided.
-   * @param n - The number of items to return
-   * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
-   * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
+   * Performs a reversed range query
    */
-  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    return this.rangeQuery({
+      from: to ?? this.orderedEntries.maxKey(),
+      to: from ?? this.orderedEntries.minKey(),
+      fromInclusive: toInclusive,
+      toInclusive: fromInclusive,
+    })
+  }
+
+  private takeInternal(
+    n: number,
+    nextPair: (k?: any) => [any, any] | undefined,
+    from?: any,
+    filterFn?: (key: TKey) => boolean
+  ): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
     let pair: [any, any] | undefined
     let key = normalizeValue(from)
 
@@ -273,6 +284,32 @@ export class BTreeIndex<
     }
 
     return result
+  }
+
+  /**
+   * Returns the next n items after the provided item or the first n items if no from item is provided.
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
+   * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
+   */
+  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
+    return this.takeInternal(n, nextPair, from, filterFn)
+  }
+
+  /**
+   * Returns the next n items **before** the provided item (in descending order) or the last n items if no from item is provided.
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Starts from the largest item (inclusive) if not provided.
+   * @returns The next n items **before** the provided key. Returns the last n items if no from item is provided.
+   */
+  takeReversed(
+    n: number,
+    from?: any,
+    filterFn?: (key: TKey) => boolean
+  ): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
+    return this.takeInternal(n, nextPair, from, filterFn)
   }
 
   /**
@@ -301,6 +338,13 @@ export class BTreeIndex<
     return this.orderedEntries
       .keysArray()
       .map((key) => [key, this.valueMap.get(key) ?? new Set()])
+  }
+
+  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
+    return this.takeReversed(this.orderedEntries.size).map((key) => [
+      key,
+      this.valueMap.get(key) ?? new Set(),
+    ])
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
