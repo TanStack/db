@@ -4,15 +4,18 @@ import {
   convertToBasicExpression,
 } from "../compiler/expressions.js"
 import { WhereClauseConversionError } from "../../errors.js"
-import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
-import type { ChangeMessage, SyncConfig } from "../../types.js"
+import type { ChangeMessage } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression } from "../ir.js"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
+
+const loadMoreCallbackSymbol = Symbol.for(
+  `@tanstack/db.collection-config-builder`
+)
 
 export class CollectionSubscriber<
   TContext extends Context,
@@ -25,8 +28,6 @@ export class CollectionSubscriber<
     private alias: string,
     private collectionId: string,
     private collection: Collection,
-    private config: Parameters<SyncConfig<TResult>[`sync`]>[0],
-    private syncState: FullSyncState,
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
   ) {}
 
@@ -68,7 +69,11 @@ export class CollectionSubscriber<
     const unsubscribe = () => {
       subscription.unsubscribe()
     }
-    this.syncState.unsubscribeCallbacks.add(unsubscribe)
+    // currentSyncState is always defined when subscribe() is called
+    // (called during sync session setup)
+    this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
+      unsubscribe
+    )
     return subscription
   }
 
@@ -76,7 +81,10 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean
   ) {
-    const input = this.syncState.inputs[this.alias]!
+    // currentSyncState and input are always defined when this method is called
+    // (only called from active subscriptions during a sync session)
+    const input =
+      this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
       changes,
@@ -88,14 +96,12 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // Always call maybeRunGraph to process changes eagerly.
-    // The graph will run unless the live query is in an error state.
-    // Status management is handled separately via status:change event listeners.
-    this.collectionConfigBuilder.maybeRunGraph(
-      this.config,
-      this.syncState,
-      dataLoader
-    )
+    // We need to schedule a graph run even if there's no data to load
+    // because we need to mark the collection as ready if it's not already
+    // and that's only done in `scheduleGraphRun`
+    this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
+      alias: this.alias,
+    })
   }
 
   private subscribeToMatchingChanges(
@@ -212,9 +218,22 @@ export class CollectionSubscriber<
     }
 
     const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
+
+    // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
+    // This ensures we pass the same function instance to the scheduler each time,
+    // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
+    type SubscriptionWithLoader = CollectionSubscription & {
+      [loadMoreCallbackSymbol]?: () => boolean
+    }
+
+    const subscriptionWithLoader = subscription as SubscriptionWithLoader
+
+    subscriptionWithLoader[loadMoreCallbackSymbol] ??=
+      this.loadMoreIfNeeded.bind(this, subscription)
+
     this.sendChangesToPipeline(
       trackedChanges,
-      this.loadMoreIfNeeded.bind(this, subscription)
+      subscriptionWithLoader[loadMoreCallbackSymbol]
     )
   }
 
