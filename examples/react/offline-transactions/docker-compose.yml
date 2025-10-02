@@ -9,7 +9,7 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
-      - "4318:4318"    # OTLP HTTP endpoint with CORS support
+      - "4318:4318" # OTLP HTTP endpoint with CORS support
     restart: unless-stopped
 
   # Optional: Local Jaeger for development
