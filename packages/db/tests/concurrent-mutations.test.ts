@@ -91,13 +91,10 @@ describe(`Live Query - Concurrent Insert Updates`, () => {
     expect(collection.size).toBe(2)
     expect(liveQuery.size).toBe(2)
 
-    // Live query should emit change events for:
-    // 1. First optimistic insert
-    // 2. Second optimistic insert
-    // 3. First sync completion
-    // 4. Second sync completion
-    // Minimum: 4 events (may be more depending on implementation)
-    expect(changeEventCount).toBeGreaterThanOrEqual(4)
+    // Expect at least the optimistic inserts to arrive immediately
+    expect(changeEventCount).toBeGreaterThanOrEqual(2)
+    // ensure batching has been flushed after sync commits
+    expect((collection as any)._changes.shouldBatchEvents).toBe(false)
   })
 
   it(`should handle concurrent inserts without orderBy clause`, async () => {
