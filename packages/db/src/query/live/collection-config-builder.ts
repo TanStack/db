@@ -56,10 +56,10 @@ export class CollectionConfigBuilder<
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
-  // Map of collection IDs to functions that load keys for that lazy collection
-  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
-  // Set of collection IDs that are lazy collections
-  readonly lazyCollections = new Set<string>()
+  // Map of source aliases to functions that load keys for that lazy source
+  lazySourcesCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  // Set of source aliases that are lazy (don't load initial state)
+  readonly lazySources = new Set<string>()
   // Set of collection IDs that include an optimizable ORDER BY clause
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
@@ -119,6 +119,10 @@ export class CollectionConfigBuilder<
       return collection.id
     }
     throw new Error(`Unknown source alias "${alias}"`)
+  }
+
+  isLazyAlias(alias: string): boolean {
+    return this.lazySources.has(alias)
   }
 
   // The callback function is called after the graph has run.
@@ -211,10 +215,10 @@ export class CollectionConfigBuilder<
       this.pipelineCache = undefined
       this.sourceWhereClausesCache = undefined
 
-      // Reset lazy collection state
-      this.lazyCollections.clear()
+      // Reset lazy source alias state
+      this.lazySources.clear()
       this.optimizableOrderByCollections = {}
-      this.lazyCollectionsCallbacks = {}
+      this.lazySourcesCallbacks = {}
 
       // Clear subscription references to prevent memory leaks
       // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
@@ -240,8 +244,8 @@ export class CollectionConfigBuilder<
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
       this.subscriptions,
-      this.lazyCollectionsCallbacks,
-      this.lazyCollections,
+      this.lazySourcesCallbacks,
+      this.lazySources,
       this.optimizableOrderByCollections
     )
 
@@ -268,8 +272,8 @@ export class CollectionConfigBuilder<
         this.inputsCache as Record<string, KeyedStream>,
         this.collections,
         this.subscriptions,
-        this.lazyCollectionsCallbacks,
-        this.lazyCollections,
+        this.lazySourcesCallbacks,
+        this.lazySources,
         this.optimizableOrderByCollections,
         new WeakMap(),
         new WeakMap()
@@ -419,10 +423,6 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[alias] = subscription
-      // Also store under collection key for backward compatibility with join logic
-      // that may reference collection-level subscriptions
-      const collectionKey = `__collection:${collectionId}`
-      this.subscriptions[collectionKey] = subscription
 
       const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
         collectionSubscriber,

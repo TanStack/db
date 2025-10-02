@@ -52,9 +52,10 @@ export class CollectionSubscriber<
         orderByInfo
       )
     } else {
-      // If the collection is lazy then we should not include the initial state
-      const includeInitialState =
-        !this.collectionConfigBuilder.lazyCollections.has(this.collectionId)
+      // If the source alias is lazy then we should not include the initial state
+      const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
+        this.alias
+      )
 
       subscription = this.subscribeToMatchingChanges(
         whereExpression,

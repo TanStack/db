@@ -282,7 +282,7 @@ describe(`Query2 Subqueries`, () => {
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
       const usersInput = createUserInput(graph)
-      const lazyCollections = new Set<string>()
+      const lazySources = new Set<string>()
       const compilation = compileQuery(
         builtQuery,
         {
@@ -292,7 +292,7 @@ describe(`Query2 Subqueries`, () => {
         { issues: issuesCollection, users: usersCollection },
         subscriptions,
         { issues: dummyCallbacks, users: dummyCallbacks },
-        lazyCollections,
+        lazySources,
         {}
       )
       const { pipeline } = compilation
@@ -306,15 +306,12 @@ describe(`Query2 Subqueries`, () => {
               ? usersSubscription
               : issuesSubscription
         }
-
-        const collectionKey = `__collection:${collectionId}`
-        if (!subscriptions[collectionKey]) {
-          subscriptions[collectionKey] = subscriptions[alias]
-        }
       }
 
-      // Since we're doing a left join, the collection on the right should be handled lazily
-      expect(lazyCollections).contains(usersCollection.id)
+      // Since we're doing a left join, the alias on the right (from the subquery) should be handled lazily
+      // The subquery uses 'user' alias, but the join uses 'activeUser' - we expect the lazy alias
+      // to be the one that's marked (which is 'activeUser' since it's the joinedTableAlias)
+      expect(lazySources).contains(`activeUser`)
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(

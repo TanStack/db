@@ -58,7 +58,7 @@ export function compileQuery(
   collections: Record<string, Collection<any, any, any, any, any>>,
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>,
+  lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
@@ -83,13 +83,16 @@ export function compileQuery(
   // the live layer can subscribe to every alias the optimizer introduces.
   const aliasToCollectionId: Record<string, string> = {}
 
-  // Create a map of table aliases to inputs
-  // Note: alias keys take precedence over collection keys for input resolution
-  const tables: Record<string, KeyedStream> = {}
+  // Create a map of source aliases to input streams.
+  // Note: During input resolution, alias keys take precedence over collection ID keys.
+  // This enables per-alias subscriptions: when looking up an input stream, we first check
+  // for `inputs[alias]` before falling back to `inputs[collectionId]`. This allows different
+  // aliases of the same collection (e.g., self-joins) to have independent filtered streams.
+  const sources: Record<string, KeyedStream> = {}
 
-  // Process the FROM clause to get the main table
+  // Process the FROM clause to get the main source
   const {
-    alias: mainTableAlias,
+    alias: mainSource,
     input: mainInput,
     collectionId: mainCollectionId,
   } = processFrom(
@@ -98,19 +101,19 @@ export function compileQuery(
     collections,
     subscriptions,
     callbacks,
-    lazyCollections,
+    lazySources,
     optimizableOrderByCollections,
     cache,
     queryMapping,
     aliasToCollectionId
   )
-  tables[mainTableAlias] = mainInput
+  sources[mainSource] = mainInput
 
-  // Prepare the initial pipeline with the main table wrapped in its alias
+  // Prepare the initial pipeline with the main source wrapped in its alias
   let pipeline: NamespacedAndKeyedStream = mainInput.pipe(
     map(([key, row]) => {
       // Initialize the record with a nested structure
-      const ret = [key, { [mainTableAlias]: row }] as [
+      const ret = [key, { [mainSource]: row }] as [
         string,
         Record<string, typeof row>,
       ]
@@ -123,16 +126,16 @@ export function compileQuery(
     pipeline = processJoins(
       pipeline,
       query.join,
-      tables,
+      sources,
       mainCollectionId,
-      mainTableAlias,
+      mainSource,
       allInputs,
       cache,
       queryMapping,
       collections,
       subscriptions,
       callbacks,
-      lazyCollections,
+      lazySources,
       optimizableOrderByCollections,
       rawQuery,
       compileQuery,
@@ -193,7 +196,7 @@ export function compileQuery(
       map(([key, namespacedRow]) => {
         const selectResults =
           !query.join && !query.groupBy
-            ? namespacedRow[mainTableAlias]
+            ? namespacedRow[mainSource]
             : namespacedRow
 
         return [
@@ -340,7 +343,7 @@ function processFrom(
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>,
+  lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping,
@@ -370,7 +373,7 @@ function processFrom(
         collections,
         subscriptions,
         callbacks,
-        lazyCollections,
+        lazySources,
         optimizableOrderByCollections,
         cache,
         queryMapping
