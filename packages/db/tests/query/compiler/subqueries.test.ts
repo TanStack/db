@@ -172,7 +172,7 @@ describe(`Query2 Subqueries`, () => {
       const issuesInput = createIssueInput(graph)
       const { pipeline } = compileQuery(
         builtQuery,
-        { issues: issuesInput },
+        { issue: issuesInput },
         { issues: issuesCollection },
         {},
         {},
@@ -286,12 +286,12 @@ describe(`Query2 Subqueries`, () => {
       const compilation = compileQuery(
         builtQuery,
         {
-          issues: issuesInput,
-          users: usersInput,
+          issue: issuesInput,
+          user: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
         subscriptions,
-        { issues: dummyCallbacks, users: dummyCallbacks },
+        { issue: dummyCallbacks, user: dummyCallbacks },
         lazySources,
         {}
       )
@@ -395,12 +395,12 @@ describe(`Query2 Subqueries`, () => {
       const compilation = compileQuery(
         builtQuery,
         {
-          issues: issuesInput,
-          users: usersInput,
+          issue: issuesInput,
+          user: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
         subscriptions,
-        { issues: dummyCallbacks, users: dummyCallbacks },
+        { issue: dummyCallbacks, user: dummyCallbacks },
         lazyCollections,
         {}
       )
@@ -441,7 +441,7 @@ describe(`Query2 Subqueries`, () => {
       const issuesInput = createIssueInput(graph)
       const { pipeline } = compileQuery(
         builtQuery,
-        { issues: issuesInput },
+        { issue: issuesInput },
         { issues: issuesCollection },
         {},
         {},

@@ -45,12 +45,17 @@ export interface CompilationResult {
 }
 
 /**
- * Compiles a query2 IR into a D2 pipeline
+ * Compiles a query IR into a D2 pipeline
  * @param rawQuery The query IR to compile
- * @param inputs Mapping of collection names to input streams
+ * @param inputs Mapping of source aliases to input streams (e.g., `{ employee: input1, manager: input2 }`)
+ * @param collections Mapping of collection IDs to Collection instances
+ * @param subscriptions Mapping of source aliases to CollectionSubscription instances
+ * @param callbacks Mapping of source aliases to lazy loading callbacks
+ * @param lazySources Set of source aliases that should load data lazily
+ * @param optimizableOrderByCollections Map of collection IDs to order-by optimization info
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional mapping from optimized queries to original queries
- * @returns A CompilationResult with the pipeline and collection WHERE clauses
+ * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
  */
 export function compileQuery(
   rawQuery: QueryIR,
@@ -84,10 +89,9 @@ export function compileQuery(
   const aliasToCollectionId: Record<string, string> = {}
 
   // Create a map of source aliases to input streams.
-  // Note: During input resolution, alias keys take precedence over collection ID keys.
-  // This enables per-alias subscriptions: when looking up an input stream, we first check
-  // for `inputs[alias]` before falling back to `inputs[collectionId]`. This allows different
-  // aliases of the same collection (e.g., self-joins) to have independent filtered streams.
+  // Inputs MUST be keyed by alias (e.g., `{ employee: input1, manager: input2 }`),
+  // not by collection ID. This enables per-alias subscriptions where different aliases
+  // of the same collection (e.g., self-joins) maintain independent filtered streams.
   const sources: Record<string, KeyedStream> = {}
 
   // Process the FROM clause to get the main source
@@ -351,7 +355,7 @@ function processFrom(
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.alias] ?? allInputs[from.collection.id]
+      const input = allInputs[from.alias]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,

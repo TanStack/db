@@ -50,10 +50,10 @@ describe(`Subquery Caching`, () => {
       },
     }
 
-    // Set up D2 inputs
+    // Set up D2 inputs - keyed by alias, not collection ID
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     // Test: Compile the main query twice - first without shared cache, then with shared cache
 
@@ -159,7 +159,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     // Create a shared cache
     const sharedCache = new WeakMap()
@@ -216,7 +216,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     const sharedCache = new WeakMap()
 
@@ -287,7 +287,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     const sharedCache = new WeakMap()
 
