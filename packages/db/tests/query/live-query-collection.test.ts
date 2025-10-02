@@ -682,7 +682,11 @@ describe(`createLiveQueryCollection`, () => {
 
             syncBegin()
             transaction.mutations.forEach((mutation) => {
-              syncWrite({ type: mutation.type, value: mutation.modified })
+              syncWrite({
+                type: mutation.type,
+                value: mutation.modified,
+                key: mutation.key,
+              })
             })
             syncCommit()
           },
@@ -739,7 +743,11 @@ describe(`createLiveQueryCollection`, () => {
 
             syncBegin()
             transaction.mutations.forEach((mutation) => {
-              syncWrite({ type: mutation.type, value: mutation.modified })
+              syncWrite({
+                type: mutation.type,
+                value: mutation.modified,
+                key: mutation.key,
+              })
             })
             syncCommit()
           },
@@ -819,6 +827,7 @@ describe(`createLiveQueryCollection`, () => {
             transaction.mutations.forEach((mutation) => {
               syncWrite?.({
                 type: mutation.type,
+                key: mutation.key,
                 value: mutation.modified as {
                   id: string
                   createdAt: number
@@ -838,17 +847,15 @@ describe(`createLiveQueryCollection`, () => {
               .from({ todo: todos })
               .orderBy(({ todo }) => todo.createdAt, `desc`),
           startSync: true,
-          getKey: (row) =>
-            `todo` in row ? row.todo.id : (row as { id: string }).id,
         })
 
         await live.preload()
 
         const ensureConsistency = (id: string) => {
           const baseTodo = todos.get(id)
-          const liveRow = live.get(id)
-          const liveTodo =
-            liveRow && `todo` in liveRow ? (liveRow as any).todo : liveRow
+          const liveTodo = Array.from(live.values())
+            .map((row: any) => (`todo` in row ? row.todo : row))
+            .find((todo: any) => todo?.id === id)
           expect(liveTodo?.completed).toBe(baseTodo?.completed)
         }
 
@@ -912,8 +919,6 @@ describe(`createLiveQueryCollection`, () => {
               .from({ todo: todos })
               .orderBy(({ todo }) => todo.createdAt, `desc`),
           startSync: true,
-          getKey: (row) =>
-            `todo` in row ? row.todo.id : (row as { id: string }).id,
         })
 
         await live.preload()
@@ -925,9 +930,9 @@ describe(`createLiveQueryCollection`, () => {
           draft.completed = true
         })
 
-        const liveRow = live.get(`1`)
-        const liveTodo =
-          liveRow && `todo` in liveRow ? (liveRow as any).todo : liveRow
+        const liveTodo = Array.from(live.values())
+          .map((row: any) => (`todo` in row ? row.todo : row))
+          .find((todo: any) => todo?.id === `1`)
 
         expect(liveTodo?.completed).toBe(true)
       })
