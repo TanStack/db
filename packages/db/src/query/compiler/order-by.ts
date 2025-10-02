@@ -132,6 +132,7 @@ export function processOrderBy(
           fieldName,
           followRefResult.path,
           followRefCollection,
+          clause.compareOptions,
           compare
         )
       }
@@ -152,7 +153,8 @@ export function processOrderBy(
 
       const index: BaseIndex<string | number> | undefined = findIndexForField(
         followRefCollection.indexes,
-        followRefResult.path
+        followRefResult.path,
+        clause.compareOptions
       )
 
       if (index && index.supports(`gt`)) {

@@ -15,6 +15,8 @@
  * - Optimizes IN array expressions
  */
 
+import { DEFAULT_COMPARE_OPTIONS } from "../utils.js"
+import type { CompareOptions } from "../query/builder/types.js"
 import type { BaseIndex, IndexOperation } from "../indexes/base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 
@@ -31,10 +33,14 @@ export interface OptimizationResult<TKey> {
  */
 export function findIndexForField<TKey extends string | number>(
   indexes: Map<number, BaseIndex<TKey>>,
-  fieldPath: Array<string>
+  fieldPath: Array<string>,
+  compareOptions: CompareOptions = DEFAULT_COMPARE_OPTIONS
 ): BaseIndex<TKey> | undefined {
   for (const index of indexes.values()) {
-    if (index.matchesField(fieldPath)) {
+    if (
+      index.matchesField(fieldPath) &&
+      index.matchesCompareOptions(compareOptions)
+    ) {
       return index
     }
   }

@@ -1,6 +1,7 @@
 import { BTree } from "../utils/btree.js"
 import { defaultComparator, normalizeValue } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
+import type { CompareOptions } from "../query/builder/types.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
 
@@ -9,6 +10,7 @@ import type { IndexOperation } from "./base-index.js"
  */
 export interface BTreeIndexOptions {
   compareFn?: (a: any, b: any) => number
+  compareOptions?: CompareOptions
 }
 
 /**
@@ -53,6 +55,9 @@ export class BTreeIndex<
   ) {
     super(id, expression, name, options)
     this.compareFn = options?.compareFn ?? defaultComparator
+    if (options?.compareOptions) {
+      this.compareOptions = options!.compareOptions
+    }
     this.orderedEntries = new BTree(this.compareFn)
   }
 

@@ -2,6 +2,8 @@
  * Generic utility functions
  */
 
+import type { CompareOptions } from "./query/builder/types"
+
 interface TypedArray {
   length: number
   [index: number]: number
@@ -208,4 +210,10 @@ function getStringTag(a: any): any {
 export function isTemporal(a: any): boolean {
   const tag = getStringTag(a)
   return typeof tag === `string` && temporalTypes.includes(tag)
+}
+
+export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {
+  direction: `asc`,
+  nulls: `first`,
+  stringSort: `locale`,
 }
