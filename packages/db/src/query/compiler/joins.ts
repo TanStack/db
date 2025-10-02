@@ -64,7 +64,8 @@ export function processJoins(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
-  aliasToCollectionId: Record<string, string>
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -85,7 +86,8 @@ export function processJoins(
       optimizableOrderByCollections,
       rawQuery,
       onCompileSubquery,
-      aliasToCollectionId
+      aliasToCollectionId,
+      aliasRemapping
     )
   }
 
@@ -111,7 +113,8 @@ function processJoin(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
-  aliasToCollectionId: Record<string, string>
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
@@ -131,7 +134,8 @@ function processJoin(
     cache,
     queryMapping,
     onCompileSubquery,
-    aliasToCollectionId
+    aliasToCollectionId,
+    aliasRemapping
   )
 
   // Add the joined source to the sources map
@@ -270,23 +274,18 @@ function processJoin(
           const lazyAliasCandidate =
             activeSource === `main` ? joinedSource : mainSource
 
-          // The alias candidate might be a subquery alias without a direct subscription.
-          // In that case, find an alias from aliasToCollectionId that maps to the lazy collection.
-          let lazySourceSubscription = subscriptions[lazyAliasCandidate]
-          if (!lazySourceSubscription) {
-            // Search for any alias that maps to the lazy collection ID
-            const matchingAlias = Object.entries(aliasToCollectionId).find(
-              ([_alias, collId]) => collId === lazySource.id
-            )?.[0]
-
-            if (matchingAlias) {
-              lazySourceSubscription = subscriptions[matchingAlias]
-            }
-          }
+          // Find the subscription for lazy loading.
+          // For subqueries, the outer join alias (e.g., 'activeUser') may differ from the
+          // inner alias (e.g., 'user'). Use aliasRemapping to resolve outer → inner alias.
+          // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
+          // → aliasRemapping['activeUser'] = 'user'
+          const resolvedAlias =
+            aliasRemapping[lazyAliasCandidate] || lazyAliasCandidate
+          const lazySourceSubscription = subscriptions[resolvedAlias]
 
           if (!lazySourceSubscription) {
             throw new Error(
-              `Internal error: subscription for alias '${lazyAliasCandidate}' (collection '${lazySource.id}') is missing in join pipeline. Available aliases: ${Object.keys(subscriptions).join(`, `)}. This indicates a bug in alias tracking.`
+              `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${lazyAliasCandidate}', collection '${lazySource.id}') is missing in join pipeline. Available aliases: ${Object.keys(subscriptions).join(`, `)}. This indicates a bug in alias tracking.`
             )
           }
 
@@ -427,7 +426,8 @@ function processJoinSource(
   cache: QueryCache,
   queryMapping: QueryMapping,
   onCompileSubquery: CompileQueryFn,
-  aliasToCollectionId: Record<string, string>
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -459,9 +459,20 @@ function processJoinSource(
         queryMapping
       )
 
-      // Pull the nested alias map up so the caller can subscribe to those aliases
-      // and keep the current alias pointing at the subquery's collection.
+      // Pull up the inner alias mappings
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
+      Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // For subqueries, the outer alias (from.alias) may differ from inner aliases.
+      // Find the inner alias that corresponds to the subquery's main collection and create a remapping.
+      const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
+        (alias) =>
+          subQueryResult.aliasToCollectionId[alias] ===
+          subQueryResult.collectionId
+      )
+      if (innerAlias && innerAlias !== from.alias) {
+        aliasRemapping[from.alias] = innerAlias
+      }
 
       // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline

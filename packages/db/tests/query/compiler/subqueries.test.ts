@@ -273,9 +273,11 @@ describe(`Query2 Subqueries`, () => {
 
       const usersSubscription = usersCollection.subscribeChanges(() => {})
       const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+
+      // Create subscriptions keyed by alias (matching production behavior)
       const subscriptions: Record<string, CollectionSubscription> = {
-        [usersCollection.id]: usersSubscription,
-        [issuesCollection.id]: issuesSubscription,
+        issue: issuesSubscription,
+        user: usersSubscription,
       }
 
       // Compile and execute the query
@@ -296,17 +298,6 @@ describe(`Query2 Subqueries`, () => {
         {}
       )
       const { pipeline } = compilation
-
-      for (const [alias, collectionId] of Object.entries(
-        compilation.aliasToCollectionId
-      )) {
-        if (!subscriptions[alias]) {
-          subscriptions[alias] =
-            collectionId === usersCollection.id
-              ? usersSubscription
-              : issuesSubscription
-        }
-      }
 
       // Since we're doing a left join, the alias on the right (from the subquery) should be handled lazily
       // The subquery uses 'user' alias, but the join uses 'activeUser' - we expect the lazy alias
@@ -377,9 +368,11 @@ describe(`Query2 Subqueries`, () => {
 
       const usersSubscription = usersCollection.subscribeChanges(() => {})
       const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+
+      // Create subscriptions keyed by alias (matching production behavior)
       const subscriptions: Record<string, CollectionSubscription> = {
-        [usersCollection.id]: usersSubscription,
-        [issuesCollection.id]: issuesSubscription,
+        issue: issuesSubscription,
+        user: usersSubscription,
       }
 
       const dummyCallbacks = {

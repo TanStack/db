@@ -42,6 +42,8 @@ export interface CompilationResult {
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
   /** Map of alias to underlying collection id used during compilation */
   aliasToCollectionId: Record<string, string>
+  /** Map of outer alias to inner alias for subquery aliasing (e.g., 'activeUser' → 'user') */
+  aliasRemapping: Record<string, string>
 }
 
 /**
@@ -88,6 +90,11 @@ export function compileQuery(
   // the live layer can subscribe to every alias the optimizer introduces.
   const aliasToCollectionId: Record<string, string> = {}
 
+  // Track alias remapping for subqueries (outer alias → inner alias)
+  // e.g., when .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
+  // we store: aliasRemapping['activeUser'] = 'user'
+  const aliasRemapping: Record<string, string> = {}
+
   // Create a map of source aliases to input streams.
   // Inputs MUST be keyed by alias (e.g., `{ employee: input1, manager: input2 }`),
   // not by collection ID. This enables per-alias subscriptions where different aliases
@@ -109,7 +116,8 @@ export function compileQuery(
     optimizableOrderByCollections,
     cache,
     queryMapping,
-    aliasToCollectionId
+    aliasToCollectionId,
+    aliasRemapping
   )
   sources[mainSource] = mainInput
 
@@ -143,7 +151,8 @@ export function compileQuery(
       optimizableOrderByCollections,
       rawQuery,
       compileQuery,
-      aliasToCollectionId
+      aliasToCollectionId,
+      aliasRemapping
     )
   }
 
@@ -303,6 +312,7 @@ export function compileQuery(
       pipeline: result,
       sourceWhereClauses,
       aliasToCollectionId,
+      aliasRemapping,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -332,6 +342,7 @@ export function compileQuery(
     pipeline: result,
     sourceWhereClauses,
     aliasToCollectionId,
+    aliasRemapping,
   }
   cache.set(rawQuery, compilationResult)
 
@@ -351,7 +362,8 @@ function processFrom(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
   queryMapping: QueryMapping,
-  aliasToCollectionId: Record<string, string>
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -383,7 +395,20 @@ function processFrom(
         queryMapping
       )
 
+      // Pull up the inner alias mappings
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
+      Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // For subqueries, the outer alias (from.alias) may differ from inner aliases.
+      // Find the inner alias that corresponds to the subquery's main collection and create a remapping.
+      const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
+        (alias) =>
+          subQueryResult.aliasToCollectionId[alias] ===
+          subQueryResult.collectionId
+      )
+      if (innerAlias && innerAlias !== from.alias) {
+        aliasRemapping[from.alias] = innerAlias
+      }
 
       // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline
