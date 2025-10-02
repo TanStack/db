@@ -350,11 +350,18 @@ export class LimitOffsetRequireOrderByError extends QueryCompilationError {
 }
 
 export class CollectionInputNotFoundError extends QueryCompilationError {
-  constructor(alias: string, collectionId?: string) {
+  constructor(
+    alias: string,
+    collectionId?: string,
+    availableKeys?: Array<string>
+  ) {
     const details = collectionId
       ? `alias "${alias}" (collection "${collectionId}")`
       : `collection "${alias}"`
-    super(`Input for ${details} not found in inputs map`)
+    const availableKeysMsg = availableKeys?.length
+      ? `. Available keys: ${availableKeys.join(`, `)}`
+      : ``
+    super(`Input for ${details} not found in inputs map${availableKeysMsg}`)
   }
 }
 

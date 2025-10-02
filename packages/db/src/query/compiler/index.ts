@@ -38,8 +38,8 @@ export interface CompilationResult {
   collectionId: string
   /** The compiled query pipeline */
   pipeline: ResultStream
-  /** Map of collection aliases to their WHERE clauses for index optimization */
-  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+  /** Map of source aliases to their WHERE clauses for index optimization */
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>
   /** Map of alias to underlying collection id used during compilation */
   aliasToCollectionId: Record<string, string>
 }
@@ -70,8 +70,7 @@ export function compileQuery(
   }
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, collectionWhereClauses } =
-    optimizeQuery(rawQuery)
+  const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -81,10 +80,11 @@ export function compileQuery(
   const allInputs = { ...inputs }
 
   // Track alias to collection id relationships discovered during compilation so
-  // the live layer can subscribe to every alias the optimiser introduces.
+  // the live layer can subscribe to every alias the optimizer introduces.
   const aliasToCollectionId: Record<string, string> = {}
 
   // Create a map of table aliases to inputs
+  // Note: alias keys take precedence over collection keys for input resolution
   const tables: Record<string, KeyedStream> = {}
 
   // Process the FROM clause to get the main table
@@ -294,7 +294,7 @@ export function compileQuery(
     const compilationResult = {
       collectionId: mainCollectionId,
       pipeline: result,
-      collectionWhereClauses,
+      sourceWhereClauses,
       aliasToCollectionId,
     }
     cache.set(rawQuery, compilationResult)
@@ -323,7 +323,7 @@ export function compileQuery(
   const compilationResult = {
     collectionId: mainCollectionId,
     pipeline: result,
-    collectionWhereClauses,
+    sourceWhereClauses,
     aliasToCollectionId,
   }
   cache.set(rawQuery, compilationResult)
@@ -350,7 +350,11 @@ function processFrom(
     case `collectionRef`: {
       const input = allInputs[from.alias] ?? allInputs[from.collection.id]
       if (!input) {
-        throw new CollectionInputNotFoundError(from.alias, from.collection.id)
+        throw new CollectionInputNotFoundError(
+          from.alias,
+          from.collection.id,
+          Object.keys(allInputs)
+        )
       }
       aliasToCollectionId[from.alias] = from.collection.id
       return { alias: from.alias, input, collectionId: from.collection.id }

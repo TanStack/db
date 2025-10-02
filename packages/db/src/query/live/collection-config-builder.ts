@@ -50,11 +50,11 @@ export class CollectionConfigBuilder<
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
-  public collectionWhereClausesCache:
+  public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
 
-  // Map of collection alias to subscription
+  // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
   // Map of collection IDs to functions that load keys for that lazy collection
   lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
@@ -118,7 +118,7 @@ export class CollectionConfigBuilder<
     if (collection) {
       return collection.id
     }
-    throw new Error(`Unknown collection alias "${alias}"`)
+    throw new Error(`Unknown source alias "${alias}"`)
   }
 
   // The callback function is called after the graph has run.
@@ -209,12 +209,19 @@ export class CollectionConfigBuilder<
       this.graphCache = undefined
       this.inputsCache = undefined
       this.pipelineCache = undefined
-      this.collectionWhereClausesCache = undefined
+      this.sourceWhereClausesCache = undefined
 
       // Reset lazy collection state
       this.lazyCollections.clear()
       this.optimizableOrderByCollections = {}
       this.lazyCollectionsCallbacks = {}
+
+      // Clear subscription references to prevent memory leaks
+      // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
+      Object.keys(this.subscriptions).forEach(
+        (key) => delete this.subscriptions[key]
+      )
+      this.compiledAliasToCollectionId = {}
     }
   }
 
@@ -239,7 +246,7 @@ export class CollectionConfigBuilder<
     )
 
     this.pipelineCache = compilation.pipeline
-    this.collectionWhereClausesCache = compilation.collectionWhereClauses
+    this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
     // Optimized queries can introduce aliases beyond those declared on the
     // builder. If that happens, provision inputs for the missing aliases and
@@ -266,7 +273,7 @@ export class CollectionConfigBuilder<
       )
 
       this.pipelineCache = compilation.pipeline
-      this.collectionWhereClausesCache = compilation.collectionWhereClauses
+      this.sourceWhereClausesCache = compilation.sourceWhereClauses
       this.compiledAliasToCollectionId = compilation.aliasToCollectionId
     }
   }

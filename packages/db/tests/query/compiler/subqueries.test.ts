@@ -352,6 +352,77 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Complex composable queries`, () => {
+    it(`exports alias metadata from nested subqueries`, () => {
+      // Create a nested subquery structure to test alias metadata propagation
+      const innerQuery = new Query()
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.status, `active`))
+
+      const middleQuery = new Query()
+        .from({ activeUser: innerQuery })
+        .select(({ activeUser }) => ({
+          id: activeUser.id,
+          name: activeUser.name,
+        }))
+
+      const outerQuery = new Query()
+        .from({ issue: issuesCollection })
+        .join({ userInfo: middleQuery }, ({ issue, userInfo }) =>
+          eq(issue.userId, userInfo.id)
+        )
+        .select(({ issue, userInfo }) => ({
+          issueId: issue.id,
+          issueTitle: issue.title,
+          userName: userInfo?.name,
+        }))
+
+      const builtQuery = getQueryIR(outerQuery)
+
+      const usersSubscription = usersCollection.subscribeChanges(() => {})
+      const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+      const subscriptions: Record<string, CollectionSubscription> = {
+        [usersCollection.id]: usersSubscription,
+        [issuesCollection.id]: issuesSubscription,
+      }
+
+      const dummyCallbacks = {
+        loadKeys: (_: any) => {},
+        loadInitialState: () => {},
+      }
+
+      // Compile the query
+      const graph = new D2()
+      const issuesInput = createIssueInput(graph)
+      const usersInput = createUserInput(graph)
+      const lazyCollections = new Set<string>()
+      const compilation = compileQuery(
+        builtQuery,
+        {
+          issues: issuesInput,
+          users: usersInput,
+        },
+        { issues: issuesCollection, users: usersCollection },
+        subscriptions,
+        { issues: dummyCallbacks, users: dummyCallbacks },
+        lazyCollections,
+        {}
+      )
+
+      // Verify that alias metadata includes aliases from the query
+      const aliasToCollectionId = compilation.aliasToCollectionId
+
+      // Should include the main table alias (note: alias is 'issue', not 'issues')
+      expect(aliasToCollectionId.issue).toBe(issuesCollection.id)
+
+      // Should include the user alias from the subquery
+      expect(aliasToCollectionId.user).toBe(usersCollection.id)
+
+      // Verify that the compiler correctly maps aliases to collection IDs
+      expect(Object.keys(aliasToCollectionId)).toHaveLength(2)
+      expect(aliasToCollectionId.issue).toBe(issuesCollection.id)
+      expect(aliasToCollectionId.user).toBe(usersCollection.id)
+    })
+
     it(`executes simple aggregate subquery`, () => {
       // Create a base query that filters issues for project 1
       const baseQuery = new Query()

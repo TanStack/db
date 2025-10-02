@@ -264,6 +264,9 @@ function processJoin(
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
+          // For outer joins (LEFT/RIGHT), the driving side determines which alias's
+          // subscription we consult for lazy loading. The main table drives LEFT joins,
+          // joined table drives RIGHT joins.
           const lazyAliasCandidate =
             activeCollection === `main` ? joinedTableAlias : mainTableAlias
           const lazyCollectionSubscription =
@@ -419,7 +422,11 @@ function processJoinSource(
     case `collectionRef`: {
       const input = allInputs[from.alias] ?? allInputs[from.collection.id]
       if (!input) {
-        throw new CollectionInputNotFoundError(from.alias, from.collection.id)
+        throw new CollectionInputNotFoundError(
+          from.alias,
+          from.collection.id,
+          Object.keys(allInputs)
+        )
       }
       aliasToCollectionId[from.alias] = from.collection.id
       return { alias: from.alias, input, collectionId: from.collection.id }

@@ -226,12 +226,12 @@ export class CollectionSubscriber<
   }
 
   private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {
-    const collectionWhereClausesCache =
-      this.collectionConfigBuilder.collectionWhereClausesCache
-    if (!collectionWhereClausesCache) {
+    const sourceWhereClausesCache =
+      this.collectionConfigBuilder.sourceWhereClausesCache
+    if (!sourceWhereClausesCache) {
       return undefined
     }
-    return collectionWhereClausesCache.get(this.alias)
+    return sourceWhereClausesCache.get(this.alias)
   }
 
   private getOrderByInfo(): OrderByOptimizationInfo | undefined {
