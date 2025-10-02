@@ -260,6 +260,9 @@ export class CollectionConfigBuilder<
         this.inputsCache[alias] = this.graphCache.newInput<any>()
       }
 
+      // Note: Using fresh WeakMaps here loses cached subquery results, but ensures
+      // clean compilation with the new alias inputs. For complex queries with many
+      // subqueries, this could be optimized to preserve the cache.
       compilation = compileQuery(
         this.query,
         this.inputsCache as Record<string, KeyedStream>,
@@ -416,6 +419,8 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[alias] = subscription
+      // Also store under collection key for backward compatibility with join logic
+      // that may reference collection-level subscriptions
       const collectionKey = `__collection:${collectionId}`
       this.subscriptions[collectionKey] = subscription
 
