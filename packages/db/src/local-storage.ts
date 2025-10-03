@@ -109,7 +109,10 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    *   }
    * })
    */
-  acceptMutations: (transaction: { mutations: Array<PendingMutation<unknown>> }, collection: unknown) => void
+  acceptMutations: (
+    transaction: { mutations: Array<PendingMutation<unknown>> },
+    collection: unknown
+  ) => void
 }
 
 /**
