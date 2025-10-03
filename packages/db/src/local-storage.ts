@@ -12,6 +12,7 @@ import type {
   DeleteMutationFnParams,
   InferSchemaOutput,
   InsertMutationFnParams,
+  PendingMutation,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -90,6 +91,25 @@ export type GetStorageSizeFn = () => number
 export interface LocalStorageCollectionUtils extends UtilsRecord {
   clearStorage: ClearStorageFn
   getStorageSize: GetStorageSizeFn
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
+   * This should be called in your transaction's mutationFn to persist local-storage data.
+   *
+   * @param transaction - The transaction containing mutations to accept
+   * @param collection - The collection instance (pass the collection variable)
+   * @example
+   * const localSettings = createCollection(localStorageCollectionOptions({...}))
+   *
+   * const tx = createTransaction({
+   *   mutationFn: async ({ transaction }) => {
+   *     // Persist local-storage mutations
+   *     localSettings.utils.acceptMutations(transaction, localSettings)
+   *     // Then make API call
+   *     await api.save(...)
+   *   }
+   * })
+   */
+  acceptMutations: (transaction: { mutations: Array<PendingMutation<unknown>> }, collection: unknown) => void
 }
 
 /**
@@ -123,11 +143,17 @@ function generateUuid(): string {
  * This function creates a collection that persists data to localStorage/sessionStorage
  * and synchronizes changes across browser tabs using storage events.
  *
+ * **Using with Manual Transactions:**
+ *
+ * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
+ * don't participate in the standard mutation handler flow for manual transactions.
+ *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the localStorage collection
- * @returns Collection options with utilities including clearStorage and getStorageSize
+ * @returns Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
  *
  * @example
  * // Basic localStorage collection
@@ -159,6 +185,33 @@ function generateUuid(): string {
  *     },
  *   })
  * )
+ *
+ * @example
+ * // Using with manual transactions
+ * const localSettings = createCollection(
+ *   localStorageCollectionOptions({
+ *     storageKey: 'user-settings',
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Persist local-storage mutations
+ *     localSettings.utils.acceptMutations(transaction, localSettings)
+ *
+ *     // Use settings data in API call
+ *     const settingsMutations = transaction.mutations.filter(m => m.collection === localSettings)
+ *     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   localSettings.insert({ id: 'theme', value: 'dark' })
+ *   apiCollection.insert({ id: 2, data: 'profile data' })
+ * })
+ *
+ * await tx.commit()
  */
 
 // Overload for when schema is provided
@@ -397,6 +450,66 @@ export function localStorageCollectionOptions(
   // Default id to a pattern based on storage key if not provided
   const collectionId = id ?? `local-collection:${config.storageKey}`
 
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them to storage
+   */
+  const acceptMutations = (
+    transaction: { mutations: Array<PendingMutation<unknown>> },
+    collection: unknown
+  ) => {
+    // Filter mutations that belong to this collection
+    const collectionMutations = transaction.mutations.filter(
+      (m) => m.collection === collection
+    )
+
+    if (collectionMutations.length === 0) {
+      return
+    }
+
+    // Validate all mutations can be serialized before modifying storage
+    for (const mutation of collectionMutations) {
+      switch (mutation.type) {
+        case `insert`:
+        case `update`:
+          validateJsonSerializable(mutation.modified, mutation.type)
+          break
+        case `delete`:
+          validateJsonSerializable(mutation.original, mutation.type)
+          break
+      }
+    }
+
+    // Load current data from storage
+    const currentData = loadFromStorage<unknown>(config.storageKey, storage)
+
+    // Apply each mutation
+    for (const mutation of collectionMutations) {
+      const key = config.getKey(mutation.modified)
+
+      switch (mutation.type) {
+        case `insert`:
+        case `update`: {
+          const storedItem: StoredItem<unknown> = {
+            versionKey: generateUuid(),
+            data: mutation.modified,
+          }
+          currentData.set(key, storedItem)
+          break
+        }
+        case `delete`: {
+          currentData.delete(key)
+          break
+        }
+      }
+    }
+
+    // Save to storage
+    saveToStorage(currentData)
+
+    // Manually trigger local sync since storage events don't fire for current tab
+    triggerLocalSync()
+  }
+
   return {
     ...restConfig,
     id: collectionId,
@@ -407,6 +520,7 @@ export function localStorageCollectionOptions(
     utils: {
       clearStorage,
       getStorageSize,
+      acceptMutations,
     },
   }
 }

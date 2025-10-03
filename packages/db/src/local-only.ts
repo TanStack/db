@@ -5,6 +5,7 @@ import type {
   InferSchemaOutput,
   InsertMutationFnParams,
   OperationType,
+  PendingMutation,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -33,9 +34,29 @@ export interface LocalOnlyCollectionConfig<
 }
 
 /**
- * Local-only collection utilities type (currently empty but matches the pattern)
+ * Local-only collection utilities type
  */
-export interface LocalOnlyCollectionUtils extends UtilsRecord {}
+export interface LocalOnlyCollectionUtils extends UtilsRecord {
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them.
+   * This should be called in your transaction's mutationFn to persist local-only data.
+   *
+   * @param transaction - The transaction containing mutations to accept
+   * @param collection - The collection instance (pass `this` from within collection context or the collection variable)
+   * @example
+   * const localData = createCollection(localOnlyCollectionOptions({...}))
+   *
+   * const tx = createTransaction({
+   *   mutationFn: async ({ transaction }) => {
+   *     // Persist local-only mutations
+   *     localData.utils.acceptMutations(transaction, localData)
+   *     // Then make API call
+   *     await api.save(...)
+   *   }
+   * })
+   */
+  acceptMutations: (transaction: { mutations: Array<PendingMutation<unknown>> }, collection: unknown) => void
+}
 
 /**
  * Creates Local-only collection options for use with a standard Collection
@@ -44,10 +65,16 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * that immediately "syncs" all optimistic changes to the collection, making them permanent.
  * Perfect for local-only data that doesn't need persistence or external synchronization.
  *
+ * **Using with Manual Transactions:**
+ *
+ * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. This is necessary because local-only collections
+ * don't participate in the standard mutation handler flow for manual transactions.
+ *
  * @template T - The schema type if a schema is provided, otherwise the type of items in the collection
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
- * @returns Collection options with utilities (currently empty but follows the pattern)
+ * @returns Collection options with utilities including acceptMutations
  *
  * @example
  * // Basic local-only collection
@@ -80,6 +107,32 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  *     },
  *   })
  * )
+ *
+ * @example
+ * // Using with manual transactions
+ * const localData = createCollection(
+ *   localOnlyCollectionOptions({
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Persist local-only mutations
+ *     localData.utils.acceptMutations(transaction, localData)
+ *
+ *     // Use local data in API call
+ *     const localMutations = transaction.mutations.filter(m => m.collection === localData)
+ *     await api.save({ metadata: localMutations[0]?.modified })
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   localData.insert({ id: 1, data: 'metadata' })
+ *   apiCollection.insert({ id: 2, data: 'main data' })
+ * })
+ *
+ * await tx.commit()
  */
 
 // Overload for when schema is provided
@@ -187,13 +240,35 @@ export function localOnlyCollectionOptions(
     return handlerResult
   }
 
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them
+   */
+  const acceptMutations = (
+    transaction: { mutations: Array<PendingMutation<unknown>> },
+    collection: unknown
+  ) => {
+    // Filter mutations that belong to this collection
+    const collectionMutations = transaction.mutations.filter(
+      (m) => m.collection === collection
+    )
+
+    if (collectionMutations.length === 0) {
+      return
+    }
+
+    // Persist the mutations through sync
+    syncResult.confirmOperationsSync(collectionMutations)
+  }
+
   return {
     ...restConfig,
     sync: syncResult.sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {} as LocalOnlyCollectionUtils,
+    utils: {
+      acceptMutations,
+    } as LocalOnlyCollectionUtils,
     startSync: true,
     gcTime: 0,
   }
