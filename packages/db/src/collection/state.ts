@@ -644,7 +644,7 @@ export class CollectionStateManager<
 
         // Ensure listeners are active before emitting this critical batch
         if (this.lifecycle.status !== `ready`) {
-          this.lifecycle.setStatus(`ready`)
+          this.lifecycle.markReady()
         }
       }
 
@@ -708,10 +708,23 @@ export class CollectionStateManager<
 
         // Check if this sync operation is redundant with a completed optimistic operation
         const completedOp = completedOptimisticOps.get(key)
-        const isRedundantSync =
-          completedOp &&
-          newVisibleValue !== undefined &&
-          deepEquals(completedOp.value, newVisibleValue)
+        let isRedundantSync = false
+
+        if (completedOp) {
+          if (
+            completedOp.type === `delete` &&
+            previousVisibleValue !== undefined &&
+            newVisibleValue === undefined &&
+            deepEquals(completedOp.value, previousVisibleValue)
+          ) {
+            isRedundantSync = true
+          } else if (
+            newVisibleValue !== undefined &&
+            deepEquals(completedOp.value, newVisibleValue)
+          ) {
+            isRedundantSync = true
+          }
+        }
 
         if (!isRedundantSync) {
           if (

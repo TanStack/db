@@ -1,6 +1,7 @@
 import { BTree } from "../utils/btree.js"
-import { defaultComparator } from "../utils/comparison.js"
+import { defaultComparator, normalizeValue } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
+import type { CompareOptions } from "../query/builder/types.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
 
@@ -9,6 +10,7 @@ import type { IndexOperation } from "./base-index.js"
  */
 export interface BTreeIndexOptions {
   compareFn?: (a: any, b: any) => number
+  compareOptions?: CompareOptions
 }
 
 /**
@@ -53,6 +55,9 @@ export class BTreeIndex<
   ) {
     super(id, expression, name, options)
     this.compareFn = options?.compareFn ?? defaultComparator
+    if (options?.compareOptions) {
+      this.compareOptions = options!.compareOptions
+    }
     this.orderedEntries = new BTree(this.compareFn)
   }
 
@@ -71,15 +76,18 @@ export class BTreeIndex<
       )
     }
 
+    // Normalize the value for Map key usage
+    const normalizedValue = normalizeValue(indexedValue)
+
     // Check if this value already exists
-    if (this.valueMap.has(indexedValue)) {
+    if (this.valueMap.has(normalizedValue)) {
       // Add to existing set
-      this.valueMap.get(indexedValue)!.add(key)
+      this.valueMap.get(normalizedValue)!.add(key)
     } else {
       // Create new set for this value
       const keySet = new Set<TKey>([key])
-      this.valueMap.set(indexedValue, keySet)
-      this.orderedEntries.set(indexedValue, undefined)
+      this.valueMap.set(normalizedValue, keySet)
+      this.orderedEntries.set(normalizedValue, undefined)
     }
 
     this.indexedKeys.add(key)
@@ -101,16 +109,19 @@ export class BTreeIndex<
       return
     }
 
-    if (this.valueMap.has(indexedValue)) {
-      const keySet = this.valueMap.get(indexedValue)!
+    // Normalize the value for Map key usage
+    const normalizedValue = normalizeValue(indexedValue)
+
+    if (this.valueMap.has(normalizedValue)) {
+      const keySet = this.valueMap.get(normalizedValue)!
       keySet.delete(key)
 
       // If set is now empty, remove the entry entirely
       if (keySet.size === 0) {
-        this.valueMap.delete(indexedValue)
+        this.valueMap.delete(normalizedValue)
 
         // Remove from ordered entries
-        this.orderedEntries.delete(indexedValue)
+        this.orderedEntries.delete(normalizedValue)
       }
     }
 
@@ -195,7 +206,8 @@ export class BTreeIndex<
    * Performs an equality lookup
    */
   equalityLookup(value: any): Set<TKey> {
-    return new Set(this.valueMap.get(value) ?? [])
+    const normalizedValue = normalizeValue(value)
+    return new Set(this.valueMap.get(normalizedValue) ?? [])
   }
 
   /**
@@ -206,8 +218,10 @@ export class BTreeIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    const fromKey = from ?? this.orderedEntries.minKey()
-    const toKey = to ?? this.orderedEntries.maxKey()
+    const normalizedFrom = normalizeValue(from)
+    const normalizedTo = normalizeValue(to)
+    const fromKey = normalizedFrom ?? this.orderedEntries.minKey()
+    const toKey = normalizedTo ?? this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
       fromKey,
@@ -239,10 +253,12 @@ export class BTreeIndex<
   take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    const nextKey = (k?: any) => this.orderedEntries.nextHigherKey(k)
-    let key = from
+    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
+    let pair: [any, any] | undefined
+    let key = normalizeValue(from)
 
-    while ((key = nextKey(key)) && result.length < n) {
+    while ((pair = nextPair(key)) !== undefined && result.length < n) {
+      key = pair[0]
       const keys = this.valueMap.get(key)
       if (keys) {
         const it = keys.values()
@@ -266,7 +282,8 @@ export class BTreeIndex<
     const result = new Set<TKey>()
 
     for (const value of values) {
-      const keys = this.valueMap.get(value)
+      const normalizedValue = normalizeValue(value)
+      const keys = this.valueMap.get(normalizedValue)
       if (keys) {
         keys.forEach((key) => result.add(key))
       }

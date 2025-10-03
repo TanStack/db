@@ -127,7 +127,8 @@ export function compileQuery(
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
-      rawQuery
+      rawQuery,
+      compileQuery
     )
   }
 
@@ -512,3 +513,5 @@ export function followRef(
     }
   }
 }
+
+export type CompileQueryFn = typeof compileQuery

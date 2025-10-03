@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.9
+
+### Patch Changes
+
+- Add support for Date objects to min/max aggregates and range queries when using an index. ([#428](https://github.com/TanStack/db/pull/428))
+
 ## 0.1.8
 
 ### Patch Changes

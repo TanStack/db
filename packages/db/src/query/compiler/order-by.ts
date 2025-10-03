@@ -1,11 +1,10 @@
 import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
 import { defaultComparator, makeComparator } from "../../utils/comparison.js"
-import { PropRef } from "../ir.js"
+import { PropRef, followRef } from "../ir.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
 import { replaceAggregatesByRefs } from "./group-by.js"
-import { followRef } from "./index.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
 import type { OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
@@ -133,6 +132,7 @@ export function processOrderBy(
           fieldName,
           followRefResult.path,
           followRefCollection,
+          clause.compareOptions,
           compare
         )
       }
@@ -153,7 +153,8 @@ export function processOrderBy(
 
       const index: BaseIndex<string | number> | undefined = findIndexForField(
         followRefCollection.indexes,
-        followRefResult.path
+        followRefResult.path,
+        clause.compareOptions
       )
 
       if (index && index.supports(`gt`)) {

@@ -1,8 +1,7 @@
 import { map } from "./map.js"
 import { innerJoin } from "./join.js"
 import { consolidate } from "./consolidate.js"
-import type { KeyValue } from "../types.js"
-import type { IStreamBuilder, PipedOperator } from "../types"
+import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
 
 /**
  * Filters the elements of a keyed stream, by keys of another stream.

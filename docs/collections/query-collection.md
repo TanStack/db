@@ -55,6 +55,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Query Options
 
+- `select`: Function that lets extract array items when they’re wrapped with metadata
 - `enabled`: Whether the query should automatically run (default: `true`)
 - `refetchInterval`: Refetch interval in milliseconds
 - `retry`: Retry configuration for failed queries

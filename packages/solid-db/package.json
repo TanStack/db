@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/solid-db",
   "description": "Solid integration for @tanstack/db",
-  "version": "0.1.23",
+  "version": "0.1.25",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,7 @@
     "solid",
     "typescript"
   ],
-  "packageManager": "pnpm@10.17.0",
+  "packageManager": "pnpm@10.17.1",
   "dependencies": {
     "@solid-primitives/map": "^0.7.2",
     "@tanstack/db": "workspace:*"

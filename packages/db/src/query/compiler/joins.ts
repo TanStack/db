@@ -17,10 +17,10 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { PropRef } from "../ir.js"
+import { PropRef, followRef } from "../ir.js"
 import { inArray } from "../builder/functions.js"
 import { compileExpression } from "./evaluators.js"
-import { compileQuery, followRef } from "./index.js"
+import type { CompileQueryFn } from "./index.js"
 import type { OrderByOptimizationInfo } from "./order-by.js"
 import type {
   BasicExpression,
@@ -62,7 +62,8 @@ export function processJoins(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  rawQuery: QueryIR
+  rawQuery: QueryIR,
+  onCompileSubquery: CompileQueryFn
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -81,7 +82,8 @@ export function processJoins(
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
-      rawQuery
+      rawQuery,
+      onCompileSubquery
     )
   }
 
@@ -105,7 +107,8 @@ function processJoin(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  rawQuery: QueryIR
+  rawQuery: QueryIR,
+  onCompileSubquery: CompileQueryFn
 ): NamespacedAndKeyedStream {
   // Get the joined table alias and input stream
   const {
@@ -121,7 +124,8 @@ function processJoin(
     lazyCollections,
     optimizableOrderByCollections,
     cache,
-    queryMapping
+    queryMapping,
+    onCompileSubquery
   )
 
   // Add the joined table to the tables map
@@ -204,7 +208,12 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
-    if (!limitedSubquery) {
+    // If join expressions contain computed values (like concat functions)
+    // we don't optimize the join because we don't have an index over the computed values
+    const hasComputedJoinExpr =
+      mainExpr.type === `func` || joinedExpr.type === `func`
+
+    if (!limitedSubquery && !hasComputedJoinExpr) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
@@ -387,7 +396,8 @@ function processJoinSource(
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
-  queryMapping: QueryMapping
+  queryMapping: QueryMapping,
+  onCompileSubquery: CompileQueryFn
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -402,7 +412,7 @@ function processJoinSource(
       const originalQuery = queryMapping.get(from.query) || from.query
 
       // Recursively compile the sub-query with cache
-      const subQueryResult = compileQuery(
+      const subQueryResult = onCompileSubquery(
         originalQuery,
         allInputs,
         collections,

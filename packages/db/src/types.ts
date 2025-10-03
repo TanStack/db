@@ -334,8 +334,14 @@ export interface BaseCollectionConfig<
    */
   gcTime?: number
   /**
-   * Whether to start syncing immediately when the collection is created.
-   * Defaults to false for lazy loading. Set to true to immediately sync.
+   * Whether to eagerly start syncing on collection creation.
+   * When true, syncing begins immediately. When false, syncing starts when the first subscriber attaches.
+   *
+   * Note: Even with startSync=true, collections will pause syncing when there are no active
+   * subscribers (typically when components querying the collection unmount), resuming when new
+   * subscribers attach. This preserves normal staleTime/gcTime behavior.
+   *
+   * @default false
    */
   startSync?: boolean
   /**

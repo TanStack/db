@@ -1,5 +1,7 @@
 import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
 import { comparisonFunctions } from "../query/builder/functions.js"
+import { DEFAULT_COMPARE_OPTIONS, deepEquals } from "../utils.js"
+import type { CompareOptions } from "../query/builder/types.js"
 import type { BasicExpression } from "../query/ir.js"
 
 /**
@@ -36,6 +38,7 @@ export abstract class BaseIndex<
   protected lookupCount = 0
   protected totalLookupTime = 0
   protected lastUpdated = new Date()
+  protected compareOptions: CompareOptions
 
   constructor(
     id: number,
@@ -45,6 +48,7 @@ export abstract class BaseIndex<
   ) {
     this.id = id
     this.expression = expression
+    this.compareOptions = DEFAULT_COMPARE_OPTIONS
     this.name = name
     this.initialize(options)
   }
@@ -74,6 +78,10 @@ export abstract class BaseIndex<
       this.expression.path.length === fieldPath.length &&
       this.expression.path.every((part, i) => part === fieldPath[i])
     )
+  }
+
+  matchesCompareOptions(compareOptions: CompareOptions): boolean {
+    return deepEquals(this.compareOptions, compareOptions)
   }
 
   getStats(): IndexStats {

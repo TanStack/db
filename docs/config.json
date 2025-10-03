@@ -78,6 +78,10 @@
           "to": "guides/live-queries"
         },
         {
+          "label": "Mutations",
+          "to": "guides/mutations"
+        },
+        {
           "label": "Error Handling",
           "to": "guides/error-handling"
         },

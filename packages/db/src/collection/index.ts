@@ -458,7 +458,10 @@ export class CollectionImpl<
    * // Create a ordered index with custom options
    * const ageIndex = collection.createIndex((row) => row.age, {
    *   indexType: BTreeIndex,
-   *   options: { compareFn: customComparator },
+   *   options: {
+   *     compareFn: customComparator,
+   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
+   *   },
    *   name: 'age_btree'
    * })
    *

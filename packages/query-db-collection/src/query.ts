@@ -52,15 +52,14 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
  */
 export interface QueryCollectionConfig<
   T extends object = object,
-  TQueryFn extends (
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
     context: QueryFunctionContext<any>
-  ) => Promise<Array<any>> = (
-    context: QueryFunctionContext<any>
-  ) => Promise<Array<any>>,
+  ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
 > extends BaseCollectionConfig<T, TKey, TSchema> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey
@@ -68,9 +67,10 @@ export interface QueryCollectionConfig<
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>
   ) => Promise<Array<any>>
-    ? TQueryFn
-    : (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
-
+    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+    : TQueryFn
+  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
+  select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
 
@@ -248,7 +248,77 @@ export interface QueryCollectionUtils<
  *     }
  *   })
  * )
+ *
+ * @example
+ * // The select option extracts the items array from a response with metadata
+ * const todosCollection = createCollection(
+ *   queryCollectionOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: async () => fetch('/api/todos').then(r => r.json()),
+ *     select: (data) => data.items, // Extract the array of items
+ *     queryClient,
+ *     schema: todoSchema,
+ *     getKey: (item) => item.id,
+ *   })
+ * )
  */
+// Overload for when schema is provided and select present
+export function queryCollectionOptions<
+  T extends StandardSchemaV1,
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any>,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfig<
+    InferSchemaOutput<T>,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    T
+  > & {
+    schema: T
+    select: (data: TQueryData) => Array<InferSchemaInput<T>>
+  }
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  schema: T
+  utils: QueryCollectionUtils<
+    InferSchemaOutput<T>,
+    TKey,
+    InferSchemaInput<T>,
+    TError
+  >
+}
+
+// Overload for when no schema is provided and select present
+export function queryCollectionOptions<
+  T extends object,
+  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+    context: QueryFunctionContext<any>
+  ) => Promise<any>,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = Awaited<ReturnType<TQueryFn>>,
+>(
+  config: QueryCollectionConfig<
+    T,
+    TQueryFn,
+    TError,
+    TQueryKey,
+    TKey,
+    never,
+    TQueryData
+  > & {
+    schema?: never // prohibit schema
+    select: (data: TQueryData) => Array<T>
+  }
+): CollectionConfig<T, TKey> & {
+  schema?: never // no schema in the result
+  utils: QueryCollectionUtils<T, TKey, T, TError>
+}
 
 // Overload for when schema is provided
 export function queryCollectionOptions<
@@ -308,6 +378,7 @@ export function queryCollectionOptions(
   const {
     queryKey,
     queryFn,
+    select,
     queryClient,
     enabled,
     refetchInterval,
@@ -338,6 +409,7 @@ export function queryCollectionOptions(
     throw new QueryClientRequiredError()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!getKey) {
     throw new GetKeyRequiredError()
   }
@@ -379,23 +451,28 @@ export function queryCollectionOptions(
       any
     >(queryClient, observerOptions)
 
+    let isSubscribed = false
+    let actualUnsubscribeFn: (() => void) | null = null
+
     type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
-    const handleUpdate: UpdateHandler = (result) => {
+    const handleQueryResult: UpdateHandler = (result) => {
       if (result.isSuccess) {
         // Clear error state
         lastError = undefined
         errorCount = 0
 
-        const newItemsArray = result.data
+        const rawData = result.data
+        const newItemsArray = select ? select(rawData) : rawData
 
         if (
           !Array.isArray(newItemsArray) ||
           newItemsArray.some((item) => typeof item !== `object`)
         ) {
-          console.error(
-            `[QueryCollection] queryFn did not return an array of objects. Skipping update.`,
-            newItemsArray
-          )
+          const errorMessage = select
+            ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+            : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
+
+          console.error(errorMessage)
           return
         }
 
@@ -472,14 +549,44 @@ export function queryCollectionOptions(
       }
     }
 
-    const actualUnsubscribeFn = localObserver.subscribe(handleUpdate)
+    const subscribeToQuery = () => {
+      if (!isSubscribed) {
+        actualUnsubscribeFn = localObserver.subscribe(handleQueryResult)
+        isSubscribed = true
+      }
+    }
+
+    const unsubscribeFromQuery = () => {
+      if (isSubscribed && actualUnsubscribeFn) {
+        actualUnsubscribeFn()
+        actualUnsubscribeFn = null
+        isSubscribed = false
+      }
+    }
+
+    // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
+    // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
+    subscribeToQuery()
+
+    // Set up event listener for subscriber changes
+    const unsubscribeFromCollectionEvents = collection.on(
+      `subscribers:change`,
+      ({ subscriberCount }) => {
+        if (subscriberCount > 0) {
+          subscribeToQuery()
+        } else if (subscriberCount === 0) {
+          unsubscribeFromQuery()
+        }
+      }
+    )
 
     // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial
     // state)
-    handleUpdate(localObserver.getCurrentResult())
+    handleQueryResult(localObserver.getCurrentResult())
 
     return async () => {
-      actualUnsubscribeFn()
+      unsubscribeFromCollectionEvents()
+      unsubscribeFromQuery()
       await queryClient.cancelQueries({ queryKey })
       queryClient.removeQueries({ queryKey })
     }

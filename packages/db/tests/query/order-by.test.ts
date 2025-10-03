@@ -6,6 +6,7 @@ import {
   eq,
   gt,
   isUndefined,
+  lt,
   max,
   not,
 } from "../../src/query/builder/functions.js"
@@ -1185,6 +1186,327 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const results = Array.from(collection.values())
         expect(results).toHaveLength(0)
+      })
+
+      it(`can use orderBy on different columns of the same collection`, async () => {
+        type DateItem = {
+          id: string
+          date: Date
+          value: number
+        }
+
+        const dateCollection = createCollection(
+          mockSyncCollectionOptions<DateItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                date: new Date(`2025-09-15`),
+                value: 5,
+              },
+              {
+                id: `2`,
+                date: new Date(`2025-09-10`),
+                value: 42,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const firstQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.date, `asc`)
+            .limit(1)
+        )
+        await firstQuery.preload()
+
+        // This then tries to use an index on the date field but in the opposite direction
+        const orderByQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.value, `asc`)
+            .limit(1)
+        )
+        await orderByQuery.preload()
+
+        const orderedDatesResult = Array.from(firstQuery.values())
+        expect(orderedDatesResult).toHaveLength(1)
+
+        expect(orderedDatesResult[0]!.id).toBe(`2`)
+        expect(orderedDatesResult[0]!.date).toEqual(new Date(`2025-09-10`))
+        expect(orderedDatesResult[0]!.value).toBe(42)
+
+        const orderedNumbersResult = Array.from(orderByQuery.values())
+        expect(orderedNumbersResult).toHaveLength(1)
+
+        expect(orderedNumbersResult[0]!.id).toBe(`1`)
+        expect(orderedNumbersResult[0]!.value).toBe(5)
+        expect(orderedNumbersResult[0]!.date).toEqual(new Date(`2025-09-15`))
+      })
+
+      it(`can use orderBy in both ascending and descending order on the same column`, async () => {
+        type DateItem = {
+          id: string
+          date: Date
+        }
+
+        const dateCollection = createCollection(
+          mockSyncCollectionOptions<DateItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                date: new Date(`2025-09-15`),
+              },
+              {
+                id: `2`,
+                date: new Date(`2025-09-10`),
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const firstQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.date, `asc`)
+            .limit(1)
+            .select(({ numbers }) => ({
+              id: numbers.id,
+              date: numbers.date,
+            }))
+        )
+        await firstQuery.preload()
+
+        // This then tries to use an index on the date field but in the opposite direction
+        const orderByQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.date, `desc`)
+            .limit(1)
+            .select(({ numbers }) => ({
+              id: numbers.id,
+              date: numbers.date,
+            }))
+        )
+        await orderByQuery.preload()
+
+        const results = Array.from(orderByQuery.values())
+        expect(results).toHaveLength(1)
+
+        expect(results[0]!.id).toBe(`1`)
+        expect(results[0]!.date).toEqual(new Date(`2025-09-15`))
+      })
+
+      it(`optimizes where clause correctly after orderBy on same column`, async () => {
+        type PersonItem = {
+          id: string
+          age: number | null
+        }
+
+        const personsCollection = createCollection(
+          mockSyncCollectionOptions<PersonItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                age: 14,
+              },
+              {
+                id: `2`,
+                age: 25,
+              },
+              {
+                id: `3`,
+                age: null,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const query1 = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .orderBy(({ persons }) => persons.age, {
+              direction: `asc`,
+              nulls: `last`,
+            })
+            .limit(3)
+        )
+        await query1.preload()
+
+        const result1 = Array.from(query1.values())
+        expect(result1).toHaveLength(3)
+        expect(result1.map((r) => r.age)).toEqual([14, 25, null])
+
+        // The default compare options defaults to nulls first
+        const query2 = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => lt(persons.age, 18))
+        )
+        await query2.preload()
+
+        const result2 = Array.from(query2.values())
+        const ages = result2.map((r) => r.age)
+        expect(ages).toHaveLength(2)
+        expect(ages).toContain(null)
+        expect(ages).toContain(14)
+
+        // The default compare options defaults to nulls first
+        // So the null value is not part of the result
+        const query3 = createLiveQueryCollection((q) =>
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => gt(persons.age, 18))
+        )
+        await query3.preload()
+
+        const result3 = Array.from(query3.values())
+        const ages2 = result3.map((r) => r.age)
+        expect(ages2).toHaveLength(1)
+        expect(ages2).toContain(25)
+      })
+
+      it(`can use orderBy when two different comparators are used on the same column`, async () => {
+        type DateItem = {
+          id: string
+          value: string
+        }
+
+        const dateCollection = createCollection(
+          mockSyncCollectionOptions<DateItem>({
+            id: `test-dates`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                value: `a`,
+              },
+              {
+                id: `2`,
+                value: `b`,
+              },
+              {
+                id: `3`,
+                value: `C`,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the date field
+        const query1 = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.value, {
+              direction: `asc`,
+              stringSort: `lexical`,
+            })
+            .limit(2)
+        )
+        await query1.preload()
+
+        const results1 = Array.from(query1.values()).map((r) => r.value)
+        expect(results1).toEqual([`C`, `a`])
+
+        // This then tries to use an index on the date field but in the opposite direction
+        const query2 = createLiveQueryCollection((q) =>
+          q
+            .from({ numbers: dateCollection })
+            .orderBy(({ numbers }) => numbers.value, {
+              direction: `asc`,
+              stringSort: `locale`,
+              locale: `en-US`,
+            })
+            .limit(2)
+        )
+        await query2.preload()
+
+        const results2 = Array.from(query2.values()).map((r) => r.value)
+        expect(results2).toEqual([`a`, `b`])
+      })
+
+      it(`can use orderBy when nulls first vs nulls last are used on the same column`, async () => {
+        type NullableItem = {
+          id: string
+          value: number | null
+        }
+
+        const nullableCollection = createCollection(
+          mockSyncCollectionOptions<NullableItem>({
+            id: `test-nullable`,
+            getKey: (item) => item.id,
+            initialData: [
+              {
+                id: `1`,
+                value: 10,
+              },
+              {
+                id: `2`,
+                value: null,
+              },
+              {
+                id: `3`,
+                value: 5,
+              },
+              {
+                id: `4`,
+                value: null,
+              },
+            ],
+            autoIndex,
+          })
+        )
+
+        // When autoIndex is `eager` this creates an index on the value field with nulls first
+        const query1 = createLiveQueryCollection((q) =>
+          q
+            .from({ items: nullableCollection })
+            .orderBy(({ items }) => items.value, {
+              direction: `asc`,
+              nulls: `first`,
+            })
+            .limit(3)
+            .select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+            }))
+        )
+        await query1.preload()
+
+        const results1 = Array.from(query1.values())
+        expect(results1.map((r) => r.value)).toEqual([null, null, 5])
+
+        // This then tries to use an index on the value field but with nulls last
+        const query2 = createLiveQueryCollection((q) =>
+          q
+            .from({ items: nullableCollection })
+            .orderBy(({ items }) => items.value, {
+              direction: `asc`,
+              nulls: `last`,
+            })
+            .limit(3)
+            .select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+            }))
+        )
+        await query2.preload()
+
+        const results2 = Array.from(query2.values())
+        expect(results2.map((r) => r.value)).toEqual([5, 10, null])
       })
     })
 
