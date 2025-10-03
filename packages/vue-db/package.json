@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@electric-sql/client": "1.0.10",
-    "@vitejs/plugin-vue": "^5.2.4",
+    "@vitejs/plugin-vue": "^6.0.1",
     "@vitest/coverage-istanbul": "^3.2.4",
     "vue": "^3.5.22"
   },
