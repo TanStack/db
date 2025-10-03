@@ -9,7 +9,7 @@ import type { CompiledSingleRowExpression } from "./evaluators.js"
 import type { OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
-import type { BaseIndex } from "../../indexes/base-index.js"
+import type { IndexInterface } from "../../indexes/base-index.js"
 import type { Collection } from "../../collection/index.js"
 
 export type OrderByOptimizationInfo = {
@@ -20,7 +20,7 @@ export type OrderByOptimizationInfo = {
     b: Record<string, unknown> | null | undefined
   ) => number
   valueExtractorForRawRow: (row: Record<string, unknown>) => any
-  index: BaseIndex<string | number>
+  index: IndexInterface<string | number>
   dataNeeded?: () => number
 }
 
@@ -151,11 +151,12 @@ export function processOrderBy(
         return compare(extractedA, extractedB)
       }
 
-      const index: BaseIndex<string | number> | undefined = findIndexForField(
-        followRefCollection.indexes,
-        followRefResult.path,
-        clause.compareOptions
-      )
+      const index: IndexInterface<string | number> | undefined =
+        findIndexForField(
+          followRefCollection.indexes,
+          followRefResult.path,
+          clause.compareOptions
+        )
 
       if (index && index.supports(`gt`)) {
         // We found an index that we can use to lazily load ordered data

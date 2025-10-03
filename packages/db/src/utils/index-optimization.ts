@@ -16,8 +16,13 @@
  */
 
 import { DEFAULT_COMPARE_OPTIONS } from "../utils.js"
+import { ReverseIndex } from "../indexes/reverse-index.js"
 import type { CompareOptions } from "../query/builder/types.js"
-import type { BaseIndex, IndexOperation } from "../indexes/base-index.js"
+import type {
+  BaseIndex,
+  IndexInterface,
+  IndexOperation,
+} from "../indexes/base-index.js"
 import type { BasicExpression } from "../query/ir.js"
 
 /**
@@ -32,15 +37,18 @@ export interface OptimizationResult<TKey> {
  * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
-  indexes: Map<number, BaseIndex<TKey>>,
+  indexes: Map<number, IndexInterface<TKey>>,
   fieldPath: Array<string>,
   compareOptions: CompareOptions = DEFAULT_COMPARE_OPTIONS
-): BaseIndex<TKey> | undefined {
+): IndexInterface<TKey> | undefined {
   for (const index of indexes.values()) {
     if (
       index.matchesField(fieldPath) &&
       index.matchesCompareOptions(compareOptions)
     ) {
+      if (!index.matchesDirection(compareOptions.direction)) {
+        return new ReverseIndex(index)
+      }
       return index
     }
   }

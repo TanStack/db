@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection/index.js"
 import {
@@ -11,6 +11,7 @@ import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from "../utils.js"
+import { createDeferred } from "../../src/deferred"
 import type { ChangeMessage } from "../../src/types.js"
 
 // Sample user type for tests
@@ -642,5 +643,299 @@ describe(`createLiveQueryCollection`, () => {
     const updatedResult = liveQuery.get(`live:1`)
     expect(updatedResult).toBeDefined()
     expect(updatedResult!.name).toBe(`Updated Task`)
+  })
+
+  describe(`optimistic reconciliation`, () => {
+    describe(`with delayed inserts`, () => {
+      beforeEach(() => {
+        vi.useFakeTimers()
+      })
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it(`keeps emitting changes while sync catches up`, async () => {
+        let changeEventCount = 0
+
+        let syncBegin!: () => void
+        let syncWrite!: (change: ChangeMessage<any>) => void
+        let syncCommit!: () => void
+
+        const base = createCollection<{ id: string; created_at: number }>({
+          id: `delayed-inserts`,
+          getKey: (item) => item.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+
+              begin()
+              commit()
+              markReady()
+            },
+          },
+          onInsert: async ({ transaction }) => {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+
+            syncBegin()
+            transaction.mutations.forEach((mutation) => {
+              syncWrite({
+                type: mutation.type,
+                value: mutation.modified,
+                key: mutation.key,
+              })
+            })
+            syncCommit()
+          },
+        })
+
+        const live = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ todo: base })
+              .orderBy(({ todo }) => todo.created_at, `asc`),
+          startSync: true,
+        })
+
+        await live.preload()
+
+        live.subscribeChanges(() => {
+          changeEventCount++
+        })
+
+        const tx1 = base.insert({ id: `1`, created_at: Date.now() })
+        const tx2 = base.insert({ id: `2`, created_at: Date.now() + 1 })
+
+        await vi.advanceTimersByTimeAsync(2000)
+        await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+
+        expect(base.size).toBe(2)
+        expect(live.size).toBe(2)
+        expect(changeEventCount).toBeGreaterThanOrEqual(2)
+        expect((base as any)._changes.shouldBatchEvents).toBe(false)
+      })
+
+      it(`stays in sync with many queued inserts`, async () => {
+        let syncBegin!: () => void
+        let syncWrite!: (change: ChangeMessage<any>) => void
+        let syncCommit!: () => void
+
+        const base = createCollection<{ id: string; created_at: number }>({
+          id: `delayed-inserts-many`,
+          getKey: (item) => item.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+
+              begin()
+              commit()
+              markReady()
+            },
+          },
+          onInsert: async ({ transaction }) => {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+
+            syncBegin()
+            transaction.mutations.forEach((mutation) => {
+              syncWrite({
+                type: mutation.type,
+                value: mutation.modified,
+                key: mutation.key,
+              })
+            })
+            syncCommit()
+          },
+        })
+
+        const live = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ todo: base })
+              .orderBy(({ todo }) => todo.created_at, `asc`),
+          startSync: true,
+        })
+
+        await live.preload()
+
+        const transactions = Array.from({ length: 5 }, (_, index) =>
+          base.insert({
+            id: `${index + 1}`,
+            created_at: Date.now() + index,
+          })
+        )
+
+        await vi.advanceTimersByTimeAsync(5000)
+        await Promise.all(transactions.map((tx) => tx.isPersisted.promise))
+
+        expect(base.size).toBe(5)
+        expect(live.size).toBe(5)
+        expect((base as any)._changes.shouldBatchEvents).toBe(false)
+      })
+    })
+
+    describe(`with queued optimistic updates`, () => {
+      it(`keeps live query results aligned while persist is delayed`, async () => {
+        const pendingPersists: Array<ReturnType<typeof createDeferred<void>>> =
+          []
+
+        let syncBegin: (() => void) | undefined
+        let syncWrite: ((change: ChangeMessage<any>) => void) | undefined
+        let syncCommit: (() => void) | undefined
+
+        const todos = createCollection<{
+          id: string
+          createdAt: number
+          completed: boolean
+        }>({
+          id: `queued-optimistic-updates`,
+          getKey: (todo) => todo.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = (change) => write({ ...change })
+              syncCommit = commit
+
+              begin()
+              ;[
+                { id: `1`, createdAt: 1, completed: false },
+                { id: `2`, createdAt: 2, completed: false },
+                { id: `3`, createdAt: 3, completed: false },
+                { id: `4`, createdAt: 4, completed: false },
+                { id: `5`, createdAt: 5, completed: false },
+              ].forEach((todo) =>
+                write({
+                  type: `insert`,
+                  value: todo,
+                })
+              )
+              commit()
+              markReady()
+            },
+          },
+          onUpdate: async ({ transaction }) => {
+            const deferred = createDeferred<void>()
+            pendingPersists.push(deferred)
+            await deferred.promise
+
+            syncBegin?.()
+            transaction.mutations.forEach((mutation) => {
+              syncWrite?.({
+                type: mutation.type,
+                key: mutation.key,
+                value: mutation.modified as {
+                  id: string
+                  createdAt: number
+                  completed: boolean
+                },
+              })
+            })
+            syncCommit?.()
+          },
+        })
+
+        await todos.preload()
+
+        const live = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ todo: todos })
+              .orderBy(({ todo }) => todo.createdAt, `desc`),
+          startSync: true,
+        })
+
+        await live.preload()
+
+        const ensureConsistency = (id: string) => {
+          const baseTodo = todos.get(id)
+          const liveTodo = Array.from(live.values())
+            .map((row: any) => (`todo` in row ? row.todo : row))
+            .find((todo: any) => todo?.id === id)
+          expect(liveTodo?.completed).toBe(baseTodo?.completed)
+        }
+
+        const firstBatch = [`1`, `2`, `3`, `4`, `5`, `1`, `3`, `5`]
+        const secondBatch = [`2`, `4`, `1`, `2`, `3`, `4`, `5`]
+
+        for (const id of firstBatch) {
+          todos.update(id, (draft) => {
+            draft.completed = !draft.completed
+          })
+
+          await Promise.resolve()
+          ensureConsistency(id)
+        }
+
+        const toResolveNow = pendingPersists.splice(0, 4)
+        for (const deferred of toResolveNow) {
+          deferred.resolve()
+          await Promise.resolve()
+        }
+
+        for (const id of secondBatch) {
+          todos.update(id, (draft) => {
+            draft.completed = !draft.completed
+          })
+
+          await Promise.resolve()
+          ensureConsistency(id)
+        }
+
+        pendingPersists.forEach((deferred) => deferred.resolve())
+      })
+
+      it(`still emits optimistic changes during long sync commit`, async () => {
+        const todos = createCollection<{
+          id: string
+          createdAt: number
+          completed: boolean
+        }>({
+          id: `commit-blocked`,
+          getKey: (todo) => todo.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `1`, createdAt: 1, completed: false },
+              })
+              commit()
+              markReady()
+            },
+          },
+          onUpdate: async () => {},
+        })
+
+        await todos.preload()
+
+        const live = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ todo: todos })
+              .orderBy(({ todo }) => todo.createdAt, `desc`),
+          startSync: true,
+        })
+
+        await live.preload()
+
+        const state = (todos as any)._state
+        state.isCommittingSyncTransactions = true
+
+        todos.update(`1`, (draft) => {
+          draft.completed = true
+        })
+
+        const liveTodo = Array.from(live.values())
+          .map((row: any) => (`todo` in row ? row.todo : row))
+          .find((todo: any) => todo?.id === `1`)
+
+        expect(liveTodo?.completed).toBe(true)
+      })
+    })
   })
 })
