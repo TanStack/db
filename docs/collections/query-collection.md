@@ -57,6 +57,14 @@ The `queryCollectionOptions` function accepts the following options:
 
 - `select`: Function that lets extract array items when they’re wrapped with metadata
 - `enabled`: Whether the query should automatically run (default: `true`)
+- `refetchType`: The type of refetch to perform (default: `all`)
+  - `all`: Refetch this collection regardless of observer state
+  - `active`: Refetch only when there is an active observer
+  - `inactive`: Refetch only when there is no active observer
+  - Notes:
+    - Refetch only targets queries that already exist in the TanStack Query cache for the exact `queryKey`
+    - If `enabled: false`, `utils.refetch()` is a no-op for all `refetchType` values
+    - An "active observer" exists while the collection is syncing (e.g. when `startSync: true` or once started manually)
 - `refetchInterval`: Refetch interval in milliseconds
 - `retry`: Retry configuration for failed queries
 - `retryDelay`: Delay between retries
@@ -135,7 +143,9 @@ This is useful when:
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch()`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Manually trigger a refetch of the query
+  - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
+  - Targets only the exact `queryKey` and respects `refetchType` (`'all' | 'active' | 'inactive'`).
 
 ## Direct Writes
 
@@ -348,4 +358,4 @@ All direct write methods are available on `collection.utils`:
 - `writeDelete(keys)`: Delete one or more items directly
 - `writeUpsert(data)`: Insert or update one or more items directly
 - `writeBatch(callback)`: Perform multiple operations atomically
-- `refetch()`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Manually trigger a refetch of the query
