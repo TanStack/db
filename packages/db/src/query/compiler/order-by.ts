@@ -54,18 +54,12 @@ export function processOrderBy(
 
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { __select_results?: any }) => {
-    // For ORDER BY expressions, we need to provide access to both:
-    // 1. The original namespaced row data (for direct table column references)
-    // 2. The __select_results (for SELECT alias references)
-
-    // Create a merged context for expression evaluation
-    const orderByContext = { ...row }
-
-    // If there are select results, merge them at the top level for alias access
-    if (row.__select_results) {
-      // Add select results as top-level properties for alias access
-      Object.assign(orderByContext, row.__select_results)
-    }
+    // The namespaced row contains:
+    // 1. Table aliases as top-level properties (e.g., row["tableName"])
+    // 2. SELECT results in __select_results (e.g., row.__select_results["aggregateAlias"])
+    // The replaceAggregatesByRefs function has already transformed any aggregate expressions
+    // that match SELECT aggregates to use the __select_results namespace.
+    const orderByContext = row
 
     if (orderByClause.length > 1) {
       // For multiple orderBy columns, create a composite key

@@ -2172,3 +2172,80 @@ describe(`Query2 OrderBy Compiler`, () => {
   createOrderByTests(`off`)
   createOrderByTests(`eager`)
 })
+
+describe(`OrderBy with collection alias conflicts`, () => {
+  type EmailSchema = {
+    email: string
+    createdAt: Date
+  }
+
+  const date1 = new Date(`2024-01-01`)
+  const date2 = new Date(`2024-01-02`)
+  const date3 = new Date(`2024-01-03`)
+
+  const emailCollection = createCollection<EmailSchema>({
+    ...mockSyncCollectionOptions({
+      id: `emails`,
+      getKey: (item) => item.email,
+      initialData: [
+        { email: `first@test.com`, createdAt: date1 },
+        { email: `second@test.com`, createdAt: date2 },
+        { email: `third@test.com`, createdAt: date3 },
+      ],
+    }),
+  })
+
+  it(`should work when alias does not conflict with field name`, () => {
+    // This should work fine - alias "t" doesn't conflict with any field
+    const liveCollection = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q.from({ t: emailCollection }).orderBy(({ t }) => t.createdAt, `desc`),
+    })
+
+    const result = liveCollection.toArray
+
+    expect(result).toHaveLength(3)
+    expect(result[0]?.email).toBe(`third@test.com`)
+    expect(result[1]?.email).toBe(`second@test.com`)
+    expect(result[2]?.email).toBe(`first@test.com`)
+  })
+
+  it(`should work when alias DOES conflict with field name`, () => {
+    // This breaks - alias "email" conflicts with field "email"
+    const liveCollection = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ email: emailCollection })
+          .orderBy(({ email }) => email.createdAt, `desc`),
+    })
+
+    const result = liveCollection.toArray
+
+    expect(result).toHaveLength(3)
+    // The sorting should work - most recent first
+    expect(result[0]?.email).toBe(`third@test.com`)
+    expect(result[1]?.email).toBe(`second@test.com`)
+    expect(result[2]?.email).toBe(`first@test.com`)
+  })
+
+  it(`should also work for createdAt alias conflict`, () => {
+    // This should also work - alias "createdAt" conflicts with field "createdAt"
+    const liveCollection = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ createdAt: emailCollection })
+          .orderBy(({ createdAt }) => createdAt.email, `asc`),
+    })
+
+    const result = liveCollection.toArray as Array<EmailSchema>
+
+    expect(result).toHaveLength(3)
+    // The sorting should work - alphabetically by email
+    expect(result[0]?.email).toBe(`first@test.com`)
+    expect(result[1]?.email).toBe(`second@test.com`)
+    expect(result[2]?.email).toBe(`third@test.com`)
+  })
+})
