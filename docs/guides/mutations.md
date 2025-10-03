@@ -178,6 +178,9 @@ const likePost = createOptimisticAction<string>({
     await postCollection.utils.refetch()
   },
 })
+
+// Use it.
+likePost(postId)
 ```
 
 Use custom actions when:
