@@ -198,6 +198,10 @@ export class CollectionSubscriber<
     }
 
     const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
+
+    // Cache the bound loader on the subscription using a symbol property.
+    // This ensures we pass the same function instance to the scheduler each time,
+    // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
     type SubscriptionWithLoader = CollectionSubscription & {
       [loadMoreCallbackSymbol]?: () => boolean
     }

@@ -1,13 +1,11 @@
 /**
- * Identifier used to scope scheduled work. For live queries this maps directly to a
- * transaction id so that all mutations performed inside a transaction are flushed together.
+ * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
 export type SchedulerContextId = string | symbol
 
 /**
- * Internal representation of a job queued by the scheduler. The mutable `state`
- * allows callers to accumulate information (callbacks, configuration, etc.) before
- * the job eventually runs, while `run` executes the actual work.
+ * Internal representation of a job queued by the scheduler.
+ * Mutable `state` accumulates information before `run` executes the work.
  */
 interface SchedulerEntry<TState> {
   state: TState
@@ -15,10 +13,8 @@ interface SchedulerEntry<TState> {
 }
 
 /**
- * Options accepted by {@link Scheduler.schedule}. Jobs are identified by a `jobId`
- * unique within a context and may declare dependencies on other jobs. The entry
- * factory is invoked the first time a job is scheduled, and `updateEntry` lets the
- * caller merge additional state into existing entries.
+ * Options for {@link Scheduler.schedule}. Jobs are identified by `jobId` within a context
+ * and may declare dependencies. `createEntry` is called once; `updateEntry` merges state.
  */
 interface ScheduleOptions<TState> {
   contextId?: SchedulerContextId
@@ -29,10 +25,8 @@ interface ScheduleOptions<TState> {
 }
 
 /**
- * State stored per context (transaction). The queue preserves scheduling order,
- * `entries` holds the jobs themselves, `dependencies` maps each job to the set of
- * prerequisite jobs, and `completed` records which jobs have already run during the
- * current flush.
+ * State per context. Queue preserves order, entries hold jobs, dependencies track
+ * prerequisites, and completed records which jobs have run during the current flush.
  */
 interface SchedulerContextState {
   queue: Array<unknown>
@@ -42,23 +36,19 @@ interface SchedulerContextState {
 }
 
 /**
- * Basic scoped scheduler that coalesces work by context and job.
+ * Scoped scheduler that coalesces work by context and job.
  *
- * - A **context** (for example a transaction id) represents the batching boundary.
- *   Work scheduled with the same context id is queued until that context is flushed.
- * - A **job id** deduplicates work inside a context. The first scheduled job determines
- *   the execution slot; subsequent schedules update the same entry but preserve order.
- * - When no context id is provided the work executes immediately (no batching).
+ * - **context** (e.g. transaction id) defines the batching boundary; work is queued until flushed.
+ * - **job id** deduplicates work within a context; subsequent schedules update the entry.
+ * - Without a context id, work executes immediately.
  *
- * Each job entry owns a mutable state object so callers can merge new data between
- * schedule calls before the eventual `run()` executes.
+ * Each entry has mutable state so callers can merge data before `run()` executes.
  */
 export class Scheduler {
   private contexts = new Map<SchedulerContextId, SchedulerContextState>()
 
   /**
-   * Retrieve the state bucket for a context or create a fresh one if this is the
-   * first job scheduled for that context.
+   * Get or create the state bucket for a context.
    */
   private getOrCreateContext(
     contextId: SchedulerContextId
@@ -77,9 +67,8 @@ export class Scheduler {
   }
 
   /**
-   * Schedule work. When no context id is provided the job executes immediately.
-   * Otherwise we add/merge the job into the current transaction bucket so it can be
-   * flushed once all dependencies are satisfied.
+   * Schedule work. Without a context id, executes immediately.
+   * Otherwise queues the job to be flushed once dependencies are satisfied.
    */
   schedule<TState>({
     contextId,
@@ -122,9 +111,8 @@ export class Scheduler {
   }
 
   /**
-   * Flush all queued work for the provided context. Jobs that still have unmet
-   * dependencies are rotated to the back of the queue and retried on the next pass.
-   * If we complete a pass without running any job we throw to signal a dependency cycle.
+   * Flush all queued work for a context. Jobs with unmet dependencies are retried.
+   * Throws if a pass completes without running any job (dependency cycle).
    */
   flush(contextId: SchedulerContextId): void {
     const context = this.contexts.get(contextId)
@@ -175,8 +163,7 @@ export class Scheduler {
   }
 
   /**
-   * Flush every context that still has pending work. Useful during tear-down to
-   * guarantee there are no lingering jobs.
+   * Flush all contexts with pending work. Useful during tear-down.
    */
   flushAll(): void {
     for (const contextId of Array.from(this.contexts.keys())) {
@@ -184,19 +171,19 @@ export class Scheduler {
     }
   }
 
-  /** Clear any scheduled jobs for the given context. */
+  /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
   }
 
-  /** Determine whether a context still has jobs waiting to be executed. */
+  /** Check if a context has pending jobs. */
   hasPendingJobs(contextId: SchedulerContextId): boolean {
     const context = this.contexts.get(contextId)
     if (!context) return false
     return context.entries.size > 0
   }
 
-  /** Remove a single job from a context, cleaning up associated dependency data. */
+  /** Remove a single job from a context and clean up its dependencies. */
   clearJob(contextId: SchedulerContextId, jobId: unknown): void {
     const context = this.contexts.get(contextId)
     if (!context) return

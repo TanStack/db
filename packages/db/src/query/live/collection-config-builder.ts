@@ -209,6 +209,24 @@ export class CollectionConfigBuilder<
     }
   }
 
+  /**
+   * Schedules a graph run with the transaction-scoped scheduler.
+   * Ensures each builder runs at most once per transaction, with automatic dependency tracking
+   * to run parent queries before child queries. Outside a transaction, runs immediately.
+   *
+   * Multiple calls during a transaction are coalesced into a single execution.
+   * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
+   * Load callbacks are combined when entries merge.
+   *
+   * @param config - Collection sync configuration with begin/commit/markReady callbacks
+   * @param syncState - The full sync state containing the D2 graph, inputs, and pipeline
+   * @param callback - Optional callback to load more data if needed (returns true when done)
+   * @param options - Optional scheduling configuration
+   * @param options.contextId - Transaction ID to group work; defaults to active transaction
+   * @param options.jobId - Unique identifier for this job; defaults to this builder instance
+   * @param options.alias - Source alias that triggered this schedule; adds alias-specific dependencies
+   * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
+   */
   scheduleGraphRun(
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState,
