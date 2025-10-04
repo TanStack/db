@@ -31,18 +31,28 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 
 /**
- * Result of query compilation including both the pipeline and collection-specific WHERE clauses
+ * Result of query compilation including both the pipeline and source-specific WHERE clauses
  */
 export interface CompilationResult {
   /** The ID of the main collection */
   collectionId: string
-  /** The compiled query pipeline */
+
+  /** The compiled query pipeline (D2 stream) */
   pipeline: ResultStream
+
   /** Map of source aliases to their WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
-  /** Map of alias to underlying collection id used during compilation */
+
+  /**
+   * Maps each source alias to its collection ID. Enables per-alias subscriptions for self-joins.
+   * Example: `{ employee: 'employees-col-id', manager: 'employees-col-id' }`
+   */
   aliasToCollectionId: Record<string, string>
-  /** Map of outer alias to inner alias for subquery aliasing (e.g., 'activeUser' → 'user') */
+
+  /**
+   * Maps outer alias to inner alias for subqueries (e.g., `{ activeUser: 'user' }`).
+   * Used to resolve subscriptions during lazy loading when aliases differ.
+   */
   aliasRemapping: Record<string, string>
 }
 
@@ -350,7 +360,8 @@ export function compileQuery(
 }
 
 /**
- * Processes the FROM clause to extract the main table alias and input stream
+ * Processes the FROM clause, handling direct collection references and subqueries.
+ * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
 function processFrom(
   from: CollectionRef | QueryRef,
@@ -395,12 +406,14 @@ function processFrom(
         queryMapping
       )
 
-      // Pull up the inner alias mappings
+      // Pull up inner alias mappings from subquery compilation
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
 
-      // For subqueries, the outer alias (from.alias) may differ from inner aliases.
-      // Find the inner alias that corresponds to the subquery's main collection and create a remapping.
+      // Create remapping when outer alias differs from inner alias.
+      // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: ... })
+      // Creates: aliasRemapping['activeUser'] = 'user'
+      // Needed for subscription resolution during lazy loading.
       const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
         (alias) =>
           subQueryResult.aliasToCollectionId[alias] ===

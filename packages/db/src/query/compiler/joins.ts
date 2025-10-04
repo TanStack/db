@@ -40,14 +40,18 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 
+/** Function type for loading specific keys into a lazy collection */
 export type LoadKeysFn = (key: Set<string | number>) => void
+
+/** Callbacks for managing lazy-loaded collections in optimized joins */
 export type LazyCollectionCallbacks = {
   loadKeys: LoadKeysFn
   loadInitialState: () => void
 }
 
 /**
- * Processes all join clauses in a query
+ * Processes all join clauses, applying lazy loading optimizations and maintaining
+ * alias tracking for per-alias subscriptions (enables self-joins).
  */
 export function processJoins(
   pipeline: NamespacedAndKeyedStream,
@@ -96,7 +100,8 @@ export function processJoins(
 }
 
 /**
- * Processes a single join clause
+ * Processes a single join clause with lazy loading optimization.
+ * For LEFT/RIGHT/INNER joins, marks one side as "lazy" (loads on-demand based on join keys).
  */
 function processJoin(
   pipeline: NamespacedAndKeyedStream,
@@ -265,6 +270,8 @@ function processJoin(
         )
       }
 
+      // Set up lazy loading: intercept active side's stream and dynamically load
+      // matching rows from lazy side based on join keys.
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
@@ -298,6 +305,7 @@ function processJoin(
             return
           }
 
+          // Request filtered snapshot from lazy collection for matching join keys
           const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
           const lazyJoinRef = new PropRef(followRefResult.path)
           const loaded = lazySourceSubscription.requestSnapshot({
@@ -462,7 +470,7 @@ function processJoinSource(
         queryMapping
       )
 
-      // Pull up the inner alias mappings
+      // Pull up alias mappings from subquery
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
 

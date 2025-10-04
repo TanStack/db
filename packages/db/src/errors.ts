@@ -349,6 +349,10 @@ export class LimitOffsetRequireOrderByError extends QueryCompilationError {
   }
 }
 
+/**
+ * Error thrown when a collection input stream is not found during query compilation.
+ * In self-joins, each alias (e.g., 'employee', 'manager') requires its own input stream.
+ */
 export class CollectionInputNotFoundError extends QueryCompilationError {
   constructor(
     alias: string,
@@ -574,6 +578,9 @@ export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
   }
 }
 
+/**
+ * Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
+ */
 export class WhereClauseConversionError extends QueryOptimizerError {
   constructor(collectionId: string, alias: string) {
     super(
@@ -582,6 +589,10 @@ export class WhereClauseConversionError extends QueryOptimizerError {
   }
 }
 
+/**
+ * Error when a subscription cannot be found during lazy join processing.
+ * For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
+ */
 export class SubscriptionNotFoundError extends QueryCompilationError {
   constructor(
     resolvedAlias: string,
@@ -595,6 +606,9 @@ export class SubscriptionNotFoundError extends QueryCompilationError {
   }
 }
 
+/**
+ * Error thrown when aggregate expressions are used outside of a GROUP BY context.
+ */
 export class AggregateNotSupportedError extends QueryCompilationError {
   constructor() {
     super(

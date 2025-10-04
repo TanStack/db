@@ -229,6 +229,12 @@ export class CollectionConfigBuilder<
     }
   }
 
+  /**
+   * Compiles the query pipeline in two phases:
+   * 1. Initial compilation with declared aliases
+   * 2. Recompile if optimizer introduces new aliases (provisions missing inputs)
+   * Ensures all aliases have input streams for per-alias subscriptions.
+   */
   private compileBasePipeline() {
     this.graphCache = new D2()
     this.inputsCache = Object.fromEntries(
@@ -238,6 +244,7 @@ export class CollectionConfigBuilder<
       ])
     )
 
+    // Phase 1: Initial compilation
     // Compile the query and capture alias metadata produced during optimisation
     let compilation = compileQuery(
       this.query,
@@ -252,6 +259,8 @@ export class CollectionConfigBuilder<
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+
+    // Phase 2: Handle optimizer-generated aliases (provision inputs and recompile)
     // Optimized queries can introduce aliases beyond those declared on the
     // builder. If that happens, provision inputs for the missing aliases and
     // recompile so the pipeline is fully wired before execution.
@@ -394,6 +403,11 @@ export class CollectionConfigBuilder<
     )
   }
 
+  /**
+   * Creates per-alias subscriptions enabling self-join support.
+   * Each alias gets its own subscription with independent filters, even for the same collection.
+   * Example: `{ employee: col, manager: col }` creates two separate subscriptions.
+   */
   private subscribeToAllCollections(
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
@@ -405,10 +419,7 @@ export class CollectionConfigBuilder<
       )
     }
 
-    // Subscribe to each alias the compiler reported.
-    const aliasEntries = compiledAliases
-
-    const loaders = aliasEntries.map(([alias, collectionId]) => {
+    const loaders = compiledAliases.map(([alias, collectionId]) => {
       const collection =
         this.collectionByAlias[alias] ?? this.collections[collectionId]!
 
@@ -422,7 +433,7 @@ export class CollectionConfigBuilder<
       )
 
       const subscription = collectionSubscriber.subscribe()
-      this.subscriptions[alias] = subscription
+      this.subscriptions[alias] = subscription // Keyed by alias for lazy loading lookup
 
       const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
         collectionSubscriber,
