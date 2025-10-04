@@ -5,6 +5,7 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from "./errors"
+import { transactionScopedScheduler } from "./scheduler.js"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -179,11 +180,21 @@ export function getActiveTransaction(): Transaction | undefined {
 }
 
 function registerTransaction(tx: Transaction<any>) {
+  // Clear any stale work that may have been left behind if a previous mutate
+  // scope aborted before we could flush.
+  transactionScopedScheduler.clear(tx.id)
   transactionStack.push(tx)
 }
 
 function unregisterTransaction(tx: Transaction<any>) {
-  transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  // Always flush pending work for this transaction before removing it from
+  // the ambient stack – this runs even if the mutate callback throws.
+  // If flush throws (e.g., due to a job error), we still clean up the stack.
+  try {
+    transactionScopedScheduler.flush(tx.id)
+  } finally {
+    transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  }
 }
 
 function removeFromPendingList(tx: Transaction<any>) {

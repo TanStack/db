@@ -11,6 +11,8 @@ import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 
+const loadMoreCallbackSymbol = Symbol(`tanstack.db.loadMore`)
+
 export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
@@ -80,18 +82,13 @@ export class CollectionSubscriber<
       this.collection.config.getKey
     )
 
-    // Do not provide the callback that loads more data
-    // if there's no more data to load
-    // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // We need to call `maybeRunGraph` even if there's no data to load
-    // because we need to mark the collection as ready if it's not already
-    // and that's only done in `maybeRunGraph`
-    this.collectionConfigBuilder.maybeRunGraph(
+    this.collectionConfigBuilder.scheduleGraphRun(
       this.config,
       this.syncState,
-      dataLoader
+      dataLoader,
+      { alias: this.alias }
     )
   }
 
@@ -201,10 +198,22 @@ export class CollectionSubscriber<
     }
 
     const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
-    this.sendChangesToPipeline(
-      trackedChanges,
-      this.loadMoreIfNeeded.bind(this, subscription)
-    )
+
+    // Cache the bound loader on the subscription using a symbol property.
+    // This ensures we pass the same function instance to the scheduler each time,
+    // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
+    type SubscriptionWithLoader = CollectionSubscription & {
+      [loadMoreCallbackSymbol]?: () => boolean
+    }
+
+    const subscriptionWithLoader = subscription as SubscriptionWithLoader
+
+    const boundLoader =
+      subscriptionWithLoader[loadMoreCallbackSymbol] ??
+      (subscriptionWithLoader[loadMoreCallbackSymbol] =
+        this.loadMoreIfNeeded.bind(this, subscription))
+
+    this.sendChangesToPipeline(trackedChanges, boundLoader)
   }
 
   // Loads the next `n` items from the collection

@@ -1,7 +1,14 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
+import { transactionScopedScheduler } from "../../scheduler.js"
+import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import {
+  attachBuilderToConfig,
+  getCollectionBuilder,
+} from "./collection-registry.js"
+import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
@@ -11,6 +18,7 @@ import type {
   KeyedStream,
   ResultStream,
   SyncConfig,
+  UtilsRecord,
 } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression, QueryIR } from "../ir.js"
@@ -21,6 +29,16 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
+
+export type RunCountUtils = UtilsRecord & {
+  getRunCount: () => number
+}
+
+type PendingGraphRun<TResult extends object> = {
+  config: Parameters<SyncConfig<TResult>[`sync`]>[0]
+  syncState: FullSyncState
+  loadCallbacks: Set<() => boolean>
+}
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -46,6 +64,7 @@ export class CollectionConfigBuilder<
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
   private isGraphRunning = false
+  private runCount = 0
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -53,6 +72,15 @@ export class CollectionConfigBuilder<
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+
+  private readonly aliasDependencies: Record<
+    string,
+    Array<CollectionConfigBuilder<any, any>>
+  > = Object.create(null)
+
+  private readonly builderDependencies = new Set<
+    CollectionConfigBuilder<any, any>
+  >()
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -92,8 +120,8 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfig<TResult> {
-    return {
+  getConfig(): CollectionConfig<TResult> & { utils: RunCountUtils } {
+    const config = {
       id: this.id,
       getKey:
         this.config.getKey ||
@@ -106,7 +134,12 @@ export class CollectionConfigBuilder<
       onUpdate: this.config.onUpdate,
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
-    }
+      utils: {
+        getRunCount: this.getRunCount.bind(this),
+      },
+    } as CollectionConfig<TResult> & { utils: RunCountUtils }
+    attachBuilderToConfig(config, this)
+    return config
   }
 
   getCollectionIdForAlias(alias: string): string {
@@ -176,11 +209,147 @@ export class CollectionConfigBuilder<
     }
   }
 
+  /**
+   * Schedules a graph run with the transaction-scoped scheduler.
+   * Ensures each builder runs at most once per transaction, with automatic dependency tracking
+   * to run parent queries before child queries. Outside a transaction, runs immediately.
+   *
+   * Multiple calls during a transaction are coalesced into a single execution.
+   * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
+   * Load callbacks are combined when entries merge.
+   *
+   * @param config - Collection sync configuration with begin/commit/markReady callbacks
+   * @param syncState - The full sync state containing the D2 graph, inputs, and pipeline
+   * @param callback - Optional callback to load more data if needed (returns true when done)
+   * @param options - Optional scheduling configuration
+   * @param options.contextId - Transaction ID to group work; defaults to active transaction
+   * @param options.jobId - Unique identifier for this job; defaults to this builder instance
+   * @param options.alias - Source alias that triggered this schedule; adds alias-specific dependencies
+   * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
+   */
+  scheduleGraphRun(
+    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    syncState: FullSyncState,
+    callback?: () => boolean,
+    options?: {
+      contextId?: SchedulerContextId
+      jobId?: unknown
+      alias?: string
+      dependencies?: Array<CollectionConfigBuilder<any, any>>
+    }
+  ) {
+    const contextId = options?.contextId ?? getActiveTransaction()?.id
+    // Use the builder instance as the job ID for deduplication. This is memory-safe
+    // because the scheduler's context Map is deleted after flushing (no long-term retention).
+    const jobId = options?.jobId ?? this
+    const dependencyBuilders = (() => {
+      if (options?.dependencies) {
+        return options.dependencies
+      }
+
+      const deps = new Set(this.builderDependencies)
+      if (options?.alias) {
+        const aliasDeps = this.aliasDependencies[options.alias]
+        if (aliasDeps) {
+          for (const dep of aliasDeps) {
+            deps.add(dep)
+          }
+        }
+      }
+
+      deps.delete(this)
+
+      return Array.from(deps)
+    })()
+    // We intentionally scope deduplication to the builder instance. Each instance
+    // owns caches and compiled pipelines, so sharing an entry across instances that
+    // merely reuse the same string id would bind the wrong `this` in the run closure.
+
+    const createEntry = () => {
+      const state: PendingGraphRun<TResult> = {
+        config,
+        syncState,
+        loadCallbacks: new Set(),
+      }
+
+      if (callback) {
+        state.loadCallbacks.add(callback)
+      }
+
+      return {
+        state,
+        run: () => {
+          this.incrementRunCount()
+          const combinedLoader =
+            state.loadCallbacks.size > 0
+              ? () => {
+                  let allDone = true
+                  let firstError: unknown
+
+                  for (const loader of state.loadCallbacks) {
+                    try {
+                      const result = loader()
+                      if (result === false) {
+                        allDone = false
+                      }
+                    } catch (error) {
+                      allDone = false
+                      if (firstError === undefined) {
+                        firstError = error
+                      }
+                    }
+                  }
+
+                  if (firstError !== undefined) {
+                    throw firstError
+                  }
+
+                  // Returning false signals that callers should schedule another pass.
+                  return allDone
+                }
+              : undefined
+
+          try {
+            this.maybeRunGraph(state.config, state.syncState, combinedLoader)
+          } finally {
+            // Clear callbacks after run to avoid carrying stale closures across transactions
+            state.loadCallbacks.clear()
+          }
+        },
+      }
+    }
+
+    const updateEntry = (entry: { state: PendingGraphRun<TResult> }) => {
+      entry.state.config = config
+      entry.state.syncState = syncState
+
+      if (callback) {
+        entry.state.loadCallbacks.add(callback)
+      }
+    }
+
+    transactionScopedScheduler.schedule({
+      contextId,
+      jobId,
+      dependencies: dependencyBuilders,
+      createEntry,
+      updateEntry,
+    })
+  }
+
   private getSyncConfig(): SyncConfig<TResult> {
     return {
       rowUpdateMode: `full`,
       sync: this.syncFn.bind(this),
     }
+  }
+
+  incrementRunCount() {
+    this.runCount++
+  }
+
+  getRunCount() {
+    return this.runCount
   }
 
   private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
@@ -202,7 +371,7 @@ export class CollectionConfigBuilder<
     )
 
     // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+    this.scheduleGraphRun(config, fullSyncState, loadMoreDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
@@ -411,6 +580,14 @@ export class CollectionConfigBuilder<
     const loaders = aliasEntries.map(([alias, collectionId]) => {
       const collection =
         this.collectionByAlias[alias] ?? this.collections[collectionId]!
+
+      const dependencyBuilder = getCollectionBuilder(collection)
+      if (dependencyBuilder && dependencyBuilder !== this) {
+        this.aliasDependencies[alias] = [dependencyBuilder]
+        this.builderDependencies.add(dependencyBuilder)
+      } else {
+        this.aliasDependencies[alias] = []
+      }
 
       const collectionSubscriber = new CollectionSubscriber(
         alias,
