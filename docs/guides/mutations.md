@@ -15,7 +15,7 @@ const todoCollection = createCollection({
   id: "todos",
   onUpdate: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
-    await api.todos.update(mutation.original.id, mutation.changed)
+    await api.todos.update(mutation.original.id, mutation.changes)
   },
 })
 
