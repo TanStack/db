@@ -59,26 +59,24 @@ export class Scheduler {
   }
 
   flush(contextId: SchedulerContextId): void {
-    const context = this.contexts.get(contextId)
-    if (!context) return
+    let context = this.contexts.get(contextId)
+    while (context) {
+      this.contexts.delete(contextId)
 
-    this.contexts.delete(contextId)
+      for (const entry of context.values()) {
+        entry.run()
+      }
 
-    for (const entry of context.values()) {
-      entry.run()
+      context = this.contexts.get(contextId)
     }
   }
 
   flushAll(): void {
-    const contexts = Array.from(this.contexts.keys())
-    contexts.forEach((contextId) => {
-      const context = this.contexts.get(contextId)
-      if (!context) return
-      this.contexts.delete(contextId)
-      for (const entry of context.values()) {
-        entry.run()
-      }
-    })
+    let next = this.contexts.keys().next()
+    while (!next.done) {
+      this.flush(next.value)
+      next = this.contexts.keys().next()
+    }
   }
 
   clear(contextId: SchedulerContextId): void {

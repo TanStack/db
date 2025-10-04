@@ -218,6 +218,219 @@ describe(`live query scheduler`, () => {
     tx.rollback()
   })
 
+  it(`runs join live queries once after their parent queries settle`, async () => {
+    const collectionA = createCollection<{ id: number; value: string }>({
+      id: `diamond-A`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const collectionB = createCollection<{ id: number; value: string }>({
+      id: `diamond-B`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const liveQueryA = createLiveQueryCollection({
+      id: `diamond-lqA`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ a: collectionA })
+          .select(({ a }) => ({ id: a.id, value: a.value })),
+    })
+
+    const liveQueryB = createLiveQueryCollection({
+      id: `diamond-lqB`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ b: collectionB })
+          .select(({ b }) => ({ id: b.id, value: b.value })),
+    })
+
+    const liveQueryJoin = createLiveQueryCollection({
+      id: `diamond-join`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ left: liveQueryA })
+          .join(
+            { right: liveQueryB },
+            ({ left, right }) => eq(left.id, right.id),
+            `full` // Full join to ensure we would get multiple changes if this doesn't dedupe
+          )
+          .select(({ left, right }) => ({
+            left: left?.value,
+            right: right?.value,
+          })),
+    })
+
+    await Promise.all([
+      liveQueryA.preload(),
+      liveQueryB.preload(),
+      liveQueryJoin.preload(),
+    ])
+
+    const joinBatches = recordBatches(liveQueryJoin)
+
+    const tx = createTransaction({
+      mutationFn: async () => {},
+      autoCommit: false,
+    })
+
+    tx.mutate(() => {
+      collectionA.insert({ id: 1, value: `A1` })
+      collectionB.insert({ id: 1, value: `B1` })
+    })
+
+    expect(joinBatches.batches).toHaveLength(1)
+    expect(joinBatches.batches[0]![0]).toMatchObject({ type: `insert` })
+    expect(joinBatches.batches[0]![0]!.value).toMatchObject({
+      left: `A1`,
+      right: `B1`,
+    })
+
+    tx.mutate(() => {
+      collectionA.update(1, (draft) => {
+        draft.value = `A1b`
+      })
+      collectionB.update(1, (draft) => {
+        draft.value = `B1b`
+      })
+    })
+
+    expect(joinBatches.batches).toHaveLength(2)
+    expect(joinBatches.batches[1]![0]).toMatchObject({
+      type: `update`,
+      previousValue: {
+        left: `A1`,
+        right: `B1`,
+      },
+    })
+    expect(joinBatches.batches[1]![0]!.value).toMatchObject({
+      left: `A1b`,
+      right: `B1b`,
+    })
+
+    joinBatches.unsubscribe()
+    tx.rollback()
+  })
+
+  it(`runs hybrid joins once when they observe both a live query and a collection`, async () => {
+    const collectionA = createCollection<{ id: number; value: string }>({
+      id: `hybrid-A`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const collectionB = createCollection<{ id: number; value: string }>({
+      id: `hybrid-B`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const liveQueryA = createLiveQueryCollection({
+      id: `hybrid-lqA`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ a: collectionA })
+          .select(({ a }) => ({ id: a.id, value: a.value })),
+    })
+
+    const hybridJoin = createLiveQueryCollection({
+      id: `hybrid-join`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ left: liveQueryA })
+          .join(
+            { right: collectionB },
+            ({ left, right }) => eq(left.id, right.id),
+            `full`
+          )
+          .select(({ left, right }) => ({
+            left: left?.value,
+            right: right?.value,
+          })),
+    })
+
+    await Promise.all([liveQueryA.preload(), hybridJoin.preload()])
+
+    const batches = recordBatches(hybridJoin)
+
+    const tx = createTransaction({
+      mutationFn: async () => {},
+      autoCommit: false,
+    })
+
+    tx.mutate(() => {
+      collectionA.insert({ id: 7, value: `A7` })
+      collectionB.insert({ id: 7, value: `B7` })
+    })
+
+    expect(batches.batches).toHaveLength(1)
+    expect(batches.batches[0]![0]).toMatchObject({ type: `insert` })
+    expect(batches.batches[0]![0]!.value).toMatchObject({
+      left: `A7`,
+      right: `B7`,
+    })
+
+    tx.mutate(() => {
+      collectionA.update(7, (draft) => {
+        draft.value = `A7b`
+      })
+      collectionB.update(7, (draft) => {
+        draft.value = `B7b`
+      })
+    })
+
+    expect(batches.batches).toHaveLength(2)
+    expect(batches.batches[1]![0]).toMatchObject({
+      type: `update`,
+      previousValue: {
+        left: `A7`,
+        right: `B7`,
+      },
+    })
+    expect(batches.batches[1]![0]!.value).toMatchObject({
+      left: `A7b`,
+      right: `B7b`,
+    })
+
+    batches.unsubscribe()
+    tx.rollback()
+  })
+
   it(`coalesces load-more callbacks scheduled within the same context`, () => {
     const baseCollection = createCollection<User>({
       id: `loader-users`,
