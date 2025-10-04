@@ -349,9 +349,23 @@ export class LimitOffsetRequireOrderByError extends QueryCompilationError {
   }
 }
 
+/**
+ * Error thrown when a collection input stream is not found during query compilation.
+ * In self-joins, each alias (e.g., 'employee', 'manager') requires its own input stream.
+ */
 export class CollectionInputNotFoundError extends QueryCompilationError {
-  constructor(collectionId: string) {
-    super(`Input for collection "${collectionId}" not found in inputs map`)
+  constructor(
+    alias: string,
+    collectionId?: string,
+    availableKeys?: Array<string>
+  ) {
+    const details = collectionId
+      ? `alias "${alias}" (collection "${collectionId}")`
+      : `collection "${alias}"`
+    const availableKeysMsg = availableKeys?.length
+      ? `. Available keys: ${availableKeys.join(`, `)}`
+      : ``
+    super(`Input for ${details} not found in inputs map${availableKeysMsg}`)
   }
 }
 
@@ -399,32 +413,32 @@ export class UnsupportedJoinTypeError extends JoinError {
   }
 }
 
-export class InvalidJoinConditionSameTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionSameSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: both expressions refer to the same table "${tableAlias}"`
+      `Invalid join condition: both expressions refer to the same source "${sourceAlias}"`
     )
   }
 }
 
-export class InvalidJoinConditionTableMismatchError extends JoinError {
+export class InvalidJoinConditionSourceMismatchError extends JoinError {
   constructor() {
-    super(`Invalid join condition: expressions must reference table aliases`)
+    super(`Invalid join condition: expressions must reference source aliases`)
   }
 }
 
-export class InvalidJoinConditionLeftTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionLeftSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: left expression refers to an unavailable table "${tableAlias}"`
+      `Invalid join condition: left expression refers to an unavailable source "${sourceAlias}"`
     )
   }
 }
 
-export class InvalidJoinConditionRightTableError extends JoinError {
-  constructor(tableAlias: string) {
+export class InvalidJoinConditionRightSourceError extends JoinError {
+  constructor(sourceAlias: string) {
     super(
-      `Invalid join condition: right expression does not refer to the joined table "${tableAlias}"`
+      `Invalid join condition: right expression does not refer to the joined source "${sourceAlias}"`
     )
   }
 }
@@ -561,5 +575,57 @@ export class QueryOptimizerError extends TanStackDBError {
 export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
   constructor() {
     super(`Cannot combine empty expression list`)
+  }
+}
+
+/**
+ * Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
+ */
+export class WhereClauseConversionError extends QueryOptimizerError {
+  constructor(collectionId: string, alias: string) {
+    super(
+      `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`
+    )
+  }
+}
+
+/**
+ * Error when a subscription cannot be found during lazy join processing.
+ * For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
+ */
+export class SubscriptionNotFoundError extends QueryCompilationError {
+  constructor(
+    resolvedAlias: string,
+    originalAlias: string,
+    collectionId: string,
+    availableAliases: Array<string>
+  ) {
+    super(
+      `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${originalAlias}', collection '${collectionId}') is missing in join pipeline. Available aliases: ${availableAliases.join(`, `)}. This indicates a bug in alias tracking.`
+    )
+  }
+}
+
+/**
+ * Error thrown when aggregate expressions are used outside of a GROUP BY context.
+ */
+export class AggregateNotSupportedError extends QueryCompilationError {
+  constructor() {
+    super(
+      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`
+    )
+  }
+}
+
+/**
+ * Internal error when the compiler returns aliases that don't have corresponding input streams.
+ * This should never happen since all aliases come from user declarations.
+ */
+export class MissingAliasInputsError extends QueryCompilationError {
+  constructor(missingAliases: Array<string>) {
+    super(
+      `Internal error: compiler returned aliases without inputs: ${missingAliases.join(`, `)}. ` +
+        `This indicates a bug in query compilation. Please report this issue.`
+    )
   }
 }

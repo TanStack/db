@@ -107,7 +107,7 @@ export type SchemaFromSource<T extends Source> = Prettify<{
  * GetAliases - Extracts all table aliases available in a query context
  *
  * Simple utility type that returns the keys of the schema, representing
- * all table/collection aliases that can be referenced in the current query.
+ * all table/source aliases that can be referenced in the current query.
  */
 export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
 
