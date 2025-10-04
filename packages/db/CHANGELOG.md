@@ -1,5 +1,23 @@
 # @tanstack/db
 
+## 0.4.4
+
+### Patch Changes
+
+- Fix live queries getting stuck during long-running sync commits by always ([#631](https://github.com/TanStack/db/pull/631))
+  clearing the batching flag on forced emits, tolerating duplicate insert echoes,
+  and allowing optimistic recomputes to run while commits are still applying. Adds
+  regression coverage for concurrent optimistic inserts, queued updates, and the
+  offline-transactions example to ensure everything stays in sync.
+
+- Fixed bug where orderBy would fail when a collection alias had the same name as one of its schema fields. For example, .from({ email: emailCollection }).orderBy(({ email }) => email.createdAt) now works correctly even when the collection has an email field in its schema. ([#637](https://github.com/TanStack/db/pull/637))
+
+- Optimization: reverse the index when the direction does not match. ([#627](https://github.com/TanStack/db/pull/627))
+
+- Fixed a bug that could result in a duplicate delete event for a row ([#621](https://github.com/TanStack/db/pull/621))
+
+- Fix bug where optimized queries would use the wrong index because the index is on the right column but was built using different comparison options (e.g. different direction, string sort, or null ordering). ([#623](https://github.com/TanStack/db/pull/623))
+
 ## 0.4.3
 
 ### Patch Changes
