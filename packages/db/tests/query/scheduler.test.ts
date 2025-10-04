@@ -272,7 +272,7 @@ describe(`live query scheduler`, () => {
           .join(
             { right: liveQueryB },
             ({ left, right }) => eq(left.id, right.id),
-            `full` // Full join to ensure we would get multiple changes if this doesn't dedupe
+            `full`
           )
           .select(({ left, right }) => ({
             left: left?.value,
@@ -285,8 +285,7 @@ describe(`live query scheduler`, () => {
       liveQueryB.preload(),
       liveQueryJoin.preload(),
     ])
-
-    const joinBatches = recordBatches(liveQueryJoin)
+    const baseRunCount = liveQueryJoin.utils.getRunCount()
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -298,12 +297,8 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 1, value: `B1` })
     })
 
-    expect(joinBatches.batches).toHaveLength(1)
-    expect(joinBatches.batches[0]![0]).toMatchObject({ type: `insert` })
-    expect(joinBatches.batches[0]![0]!.value).toMatchObject({
-      left: `A1`,
-      right: `B1`,
-    })
+    expect(liveQueryJoin.toArray).toEqual([{ left: `A1`, right: `B1` }])
+    expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
       collectionA.update(1, (draft) => {
@@ -314,20 +309,8 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(joinBatches.batches).toHaveLength(2)
-    expect(joinBatches.batches[1]![0]).toMatchObject({
-      type: `update`,
-      previousValue: {
-        left: `A1`,
-        right: `B1`,
-      },
-    })
-    expect(joinBatches.batches[1]![0]!.value).toMatchObject({
-      left: `A1b`,
-      right: `B1b`,
-    })
-
-    joinBatches.unsubscribe()
+    expect(liveQueryJoin.toArray).toEqual([{ left: `A1b`, right: `B1b` }])
+    expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
 
@@ -385,8 +368,7 @@ describe(`live query scheduler`, () => {
     })
 
     await Promise.all([liveQueryA.preload(), hybridJoin.preload()])
-
-    const batches = recordBatches(hybridJoin)
+    const baseRunCount = hybridJoin.utils.getRunCount()
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -398,12 +380,8 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 7, value: `B7` })
     })
 
-    expect(batches.batches).toHaveLength(1)
-    expect(batches.batches[0]![0]).toMatchObject({ type: `insert` })
-    expect(batches.batches[0]![0]!.value).toMatchObject({
-      left: `A7`,
-      right: `B7`,
-    })
+    expect(hybridJoin.toArray).toEqual([{ left: `A7`, right: `B7` }])
+    expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
       collectionA.update(7, (draft) => {
@@ -414,20 +392,8 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(batches.batches).toHaveLength(2)
-    expect(batches.batches[1]![0]).toMatchObject({
-      type: `update`,
-      previousValue: {
-        left: `A7`,
-        right: `B7`,
-      },
-    })
-    expect(batches.batches[1]![0]!.value).toMatchObject({
-      left: `A7b`,
-      right: `B7b`,
-    })
-
-    batches.unsubscribe()
+    expect(hybridJoin.toArray).toEqual([{ left: `A7b`, right: `B7b` }])
+    expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
 
@@ -485,8 +451,7 @@ describe(`live query scheduler`, () => {
     })
 
     await Promise.all([liveQueryA.preload(), join.preload()])
-
-    const batches = recordBatches(join)
+    const baseRunCount = join.utils.getRunCount()
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -498,16 +463,8 @@ describe(`live query scheduler`, () => {
       collectionA.insert({ id: 42, value: `left-later` })
     })
 
-    expect(batches.batches).toHaveLength(1)
-    expect(batches.batches[0]![0]).toMatchObject({
-      type: `insert`,
-      value: {
-        left: `left-later`,
-        right: `right-first`,
-      },
-    })
-
-    batches.unsubscribe()
+    expect(join.toArray).toEqual([{ left: `left-later`, right: `right-first` }])
+    expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
     tx.rollback()
   })
 

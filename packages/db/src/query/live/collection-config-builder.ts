@@ -4,6 +4,10 @@ import { buildQuery, getQueryIR } from "../builder/index.js"
 import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import {
+  attachBuilderToConfig,
+  getCollectionBuilder,
+} from "./collection-registry.js"
 import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -14,6 +18,7 @@ import type {
   KeyedStream,
   ResultStream,
   SyncConfig,
+  UtilsRecord,
 } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression, QueryIR } from "../ir.js"
@@ -24,6 +29,10 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
+
+export type RunCountUtils = UtilsRecord & {
+  getRunCount: () => number
+}
 
 type PendingGraphRun<TResult extends object> = {
   config: Parameters<SyncConfig<TResult>[`sync`]>[0]
@@ -55,6 +64,7 @@ export class CollectionConfigBuilder<
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
   private isGraphRunning = false
+  private runCount = 0
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -62,6 +72,15 @@ export class CollectionConfigBuilder<
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+
+  private readonly aliasDependencies: Record<
+    string,
+    Array<CollectionConfigBuilder<any, any>>
+  > = Object.create(null)
+
+  private readonly builderDependencies = new Set<
+    CollectionConfigBuilder<any, any>
+  >()
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -101,8 +120,8 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfig<TResult> {
-    return {
+  getConfig(): CollectionConfig<TResult> & { utils: RunCountUtils } {
+    const config = {
       id: this.id,
       getKey:
         this.config.getKey ||
@@ -115,7 +134,12 @@ export class CollectionConfigBuilder<
       onUpdate: this.config.onUpdate,
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
-    }
+      utils: {
+        getRunCount: this.getRunCount.bind(this),
+      },
+    } as CollectionConfig<TResult> & { utils: RunCountUtils }
+    attachBuilderToConfig(config, this)
+    return config
   }
 
   getCollectionIdForAlias(alias: string): string {
@@ -189,10 +213,34 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState,
     callback?: () => boolean,
-    options?: { contextId?: SchedulerContextId; jobId?: unknown }
+    options?: {
+      contextId?: SchedulerContextId
+      jobId?: unknown
+      alias?: string
+      dependencies?: Array<CollectionConfigBuilder<any, any>>
+    }
   ) {
     const contextId = options?.contextId ?? getActiveTransaction()?.id
     const jobId = options?.jobId ?? this
+    const dependencyBuilders = (() => {
+      if (options?.dependencies) {
+        return options.dependencies
+      }
+
+      const deps = new Set(this.builderDependencies)
+      if (options?.alias) {
+        const aliasDeps = this.aliasDependencies[options.alias]
+        if (aliasDeps) {
+          for (const dep of aliasDeps) {
+            deps.add(dep)
+          }
+        }
+      }
+
+      deps.delete(this)
+
+      return Array.from(deps)
+    })()
     // We intentionally scope deduplication to the builder instance. Each instance
     // owns caches and compiled pipelines, so sharing an entry across instances that
     // merely reuse the same string id would bind the wrong `this` in the run closure.
@@ -211,6 +259,7 @@ export class CollectionConfigBuilder<
       return {
         state,
         run: () => {
+          this.incrementRunCount()
           const combinedLoader =
             state.loadCallbacks.size > 0
               ? () => {
@@ -257,6 +306,7 @@ export class CollectionConfigBuilder<
     transactionScopedScheduler.schedule({
       contextId,
       jobId,
+      dependencies: dependencyBuilders,
       createEntry,
       updateEntry,
     })
@@ -267,6 +317,14 @@ export class CollectionConfigBuilder<
       rowUpdateMode: `full`,
       sync: this.syncFn.bind(this),
     }
+  }
+
+  incrementRunCount() {
+    this.runCount++
+  }
+
+  getRunCount() {
+    return this.runCount
   }
 
   private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
@@ -497,6 +555,14 @@ export class CollectionConfigBuilder<
     const loaders = aliasEntries.map(([alias, collectionId]) => {
       const collection =
         this.collectionByAlias[alias] ?? this.collections[collectionId]!
+
+      const dependencyBuilder = getCollectionBuilder(collection)
+      if (dependencyBuilder && dependencyBuilder !== this) {
+        this.aliasDependencies[alias] = [dependencyBuilder]
+        this.builderDependencies.add(dependencyBuilder)
+      } else {
+        this.aliasDependencies[alias] = []
+      }
 
       const collectionSubscriber = new CollectionSubscriber(
         alias,
