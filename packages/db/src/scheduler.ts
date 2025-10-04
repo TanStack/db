@@ -142,6 +142,8 @@ export class Scheduler {
         if (ready) {
           entries.delete(jobId)
           dependencies.delete(jobId)
+          // Run the job. If it throws, we don't mark it complete, allowing the
+          // error to propagate while maintaining scheduler state consistency.
           entry.run()
           completed.add(jobId)
           ranThisPass = true

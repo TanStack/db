@@ -189,8 +189,12 @@ function registerTransaction(tx: Transaction<any>) {
 function unregisterTransaction(tx: Transaction<any>) {
   // Always flush pending work for this transaction before removing it from
   // the ambient stack – this runs even if the mutate callback throws.
-  transactionScopedScheduler.flush(tx.id)
-  transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  // If flush throws (e.g., due to a job error), we still clean up the stack.
+  try {
+    transactionScopedScheduler.flush(tx.id)
+  } finally {
+    transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  }
 }
 
 function removeFromPendingList(tx: Transaction<any>) {

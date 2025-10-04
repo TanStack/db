@@ -239,6 +239,8 @@ export class CollectionConfigBuilder<
     }
   ) {
     const contextId = options?.contextId ?? getActiveTransaction()?.id
+    // Use the builder instance as the job ID for deduplication. This is memory-safe
+    // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
     const dependencyBuilders = (() => {
       if (options?.dependencies) {
@@ -307,7 +309,12 @@ export class CollectionConfigBuilder<
                 }
               : undefined
 
-          this.maybeRunGraph(state.config, state.syncState, combinedLoader)
+          try {
+            this.maybeRunGraph(state.config, state.syncState, combinedLoader)
+          } finally {
+            // Clear callbacks after run to avoid carrying stale closures across transactions
+            state.loadCallbacks.clear()
+          }
         },
       }
     }
