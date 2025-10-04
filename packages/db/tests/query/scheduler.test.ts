@@ -431,6 +431,86 @@ describe(`live query scheduler`, () => {
     tx.rollback()
   })
 
+  it(`currently single batch when the join sees right-side data before the left`, async () => {
+    const collectionA = createCollection<{ id: number; value: string }>({
+      id: `ordering-A`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const collectionB = createCollection<{ id: number; value: string }>({
+      id: `ordering-B`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const liveQueryA = createLiveQueryCollection({
+      id: `ordering-lqA`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ a: collectionA })
+          .select(({ a }) => ({ id: a.id, value: a.value })),
+    })
+
+    const join = createLiveQueryCollection({
+      id: `ordering-join`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ left: liveQueryA })
+          .join(
+            { right: collectionB },
+            ({ left, right }) => eq(left.id, right.id),
+            `full`
+          )
+          .select(({ left, right }) => ({
+            left: left?.value,
+            right: right?.value,
+          })),
+    })
+
+    await Promise.all([liveQueryA.preload(), join.preload()])
+
+    const batches = recordBatches(join)
+
+    const tx = createTransaction({
+      mutationFn: async () => {},
+      autoCommit: false,
+    })
+
+    tx.mutate(() => {
+      collectionB.insert({ id: 42, value: `right-first` })
+      collectionA.insert({ id: 42, value: `left-later` })
+    })
+
+    expect(batches.batches).toHaveLength(1)
+    expect(batches.batches[0]![0]).toMatchObject({
+      type: `insert`,
+      value: {
+        left: `left-later`,
+        right: `right-first`,
+      },
+    })
+
+    batches.unsubscribe()
+    tx.rollback()
+  })
+
   it(`coalesces load-more callbacks scheduled within the same context`, () => {
     const baseCollection = createCollection<User>({
       id: `loader-users`,
