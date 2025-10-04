@@ -1,6 +1,7 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
+import { MissingAliasInputsError } from "../../errors.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -33,7 +34,7 @@ export class CollectionConfigBuilder<
   readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
   private readonly collectionByAlias: Record<string, Collection<any, any, any>>
-  // Populated during compilation to include optimizer-generated aliases
+  // Populated during compilation with all aliases (including subquery inner aliases)
   private compiledAliasToCollectionId: Record<string, string> = {}
 
   // WeakMap to store the keys of the results
@@ -230,10 +231,7 @@ export class CollectionConfigBuilder<
   }
 
   /**
-   * Compiles the query pipeline in two phases:
-   * 1. Initial compilation with declared aliases
-   * 2. Recompile if optimizer introduces new aliases (provisions missing inputs)
-   * Ensures all aliases have input streams for per-alias subscriptions.
+   * Compiles the query pipeline with all declared aliases.
    */
   private compileBasePipeline() {
     this.graphCache = new D2()
@@ -244,9 +242,7 @@ export class CollectionConfigBuilder<
       ])
     )
 
-    // Phase 1: Initial compilation
-    // Compile the query and capture alias metadata produced during optimisation
-    let compilation = compileQuery(
+    const compilation = compileQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
@@ -260,37 +256,14 @@ export class CollectionConfigBuilder<
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
 
-    // Phase 2: Handle optimizer-generated aliases (provision inputs and recompile)
-    // Optimized queries can introduce aliases beyond those declared on the
-    // builder. If that happens, provision inputs for the missing aliases and
-    // recompile so the pipeline is fully wired before execution.
+    // Defensive check: verify all compiled aliases have corresponding inputs
+    // This should never happen since all aliases come from user declarations,
+    // but catch it early if the assumption is violated in the future.
     const missingAliases = Object.keys(this.compiledAliasToCollectionId).filter(
       (alias) => !Object.hasOwn(this.inputsCache!, alias)
     )
-
     if (missingAliases.length > 0) {
-      for (const alias of missingAliases) {
-        this.inputsCache[alias] = this.graphCache.newInput<any>()
-      }
-
-      // Note: Using fresh WeakMaps here loses cached subquery results, but ensures
-      // clean compilation with the new alias inputs. For complex queries with many
-      // subqueries, this could be optimized to preserve the cache.
-      compilation = compileQuery(
-        this.query,
-        this.inputsCache as Record<string, KeyedStream>,
-        this.collections,
-        this.subscriptions,
-        this.lazySourcesCallbacks,
-        this.lazySources,
-        this.optimizableOrderByCollections,
-        new WeakMap(),
-        new WeakMap()
-      )
-
-      this.pipelineCache = compilation.pipeline
-      this.sourceWhereClausesCache = compilation.sourceWhereClauses
-      this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+      throw new MissingAliasInputsError(missingAliases)
     }
   }
 

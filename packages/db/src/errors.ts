@@ -616,3 +616,16 @@ export class AggregateNotSupportedError extends QueryCompilationError {
     )
   }
 }
+
+/**
+ * Internal error when the compiler returns aliases that don't have corresponding input streams.
+ * This should never happen since all aliases come from user declarations.
+ */
+export class MissingAliasInputsError extends QueryCompilationError {
+  constructor(missingAliases: Array<string>) {
+    super(
+      `Internal error: compiler returned aliases without inputs: ${missingAliases.join(`, `)}. ` +
+        `This indicates a bug in query compilation. Please report this issue.`
+    )
+  }
+}

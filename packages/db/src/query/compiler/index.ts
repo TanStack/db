@@ -96,8 +96,8 @@ export function compileQuery(
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
 
-  // Track alias to collection id relationships discovered during compilation so
-  // the live layer can subscribe to every alias the optimizer introduces.
+  // Track alias to collection id relationships discovered during compilation.
+  // This includes all user-declared aliases plus inner aliases from subqueries.
   const aliasToCollectionId: Record<string, string> = {}
 
   // Track alias remapping for subqueries (outer alias → inner alias)
