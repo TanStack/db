@@ -326,7 +326,10 @@ export class CollectionConfigBuilder<
   private allCollectionsReadyOrInitialCommit() {
     return Object.values(this.collections).every(
       (collection) =>
-        collection.status === `ready` || collection.status === `initialCommit`
+        collection.status === `ready` ||
+        collection.status === `initialCommit` ||
+        // Allow graph to run if collection has data (optimistic inserts)
+        collection.size > 0
     )
   }
 

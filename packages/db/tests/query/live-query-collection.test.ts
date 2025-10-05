@@ -200,6 +200,62 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.isReady()).toBe(false)
   })
 
+  it(`should include optimistic inserts in live query before source collection sync completes`, async () => {
+    // Create a collection that doesn't sync initially (idle state)
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<User>({
+        id: `collection-with-optimistic-data`,
+        getKey: (user) => user.id,
+      })
+    )
+
+    expect(sourceCollection.status).toBe(`idle`)
+
+    // Insert data optimistically BEFORE creating the live query
+    sourceCollection.insert({ id: 1, name: `Alice`, active: true })
+    sourceCollection.insert({ id: 3, name: `Charlie`, active: false })
+    expect(sourceCollection.size).toBe(2)
+
+    // Create a live query from the collection with optimistic data
+    // This will trigger sync on the source collection (idle → loading)
+    const activeUsers = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true)),
+      startSync: true,
+    })
+
+    // The live query should see the optimistic data even though the source
+    // collection's sync hasn't completed yet (still in 'loading' state)
+    expect(activeUsers.size).toBe(1)
+    expect(Array.from(activeUsers.values())).toMatchObject([
+      { id: 1, name: `Alice`, active: true },
+    ])
+    expect(sourceCollection.status).toBe(`loading`)
+
+    // Now simulate the source collection's sync completing
+    const utils = (sourceCollection as any).config.utils
+    utils.begin()
+    utils.write({
+      type: `insert`,
+      value: { id: 1, name: `Alice`, active: true },
+    })
+    utils.write({
+      type: `insert`,
+      value: { id: 3, name: `Charlie`, active: false },
+    })
+    utils.commit()
+    utils.markReady()
+
+    // After source sync completes, data should still be correct
+    expect(sourceCollection.status).toBe(`ready`)
+    expect(activeUsers.size).toBe(1)
+    expect(Array.from(activeUsers.values())).toMatchObject([
+      { id: 1, name: `Alice`, active: true },
+    ])
+  })
+
   it(`should update after source collection is loaded even when not preloaded before rendering`, async () => {
     // Create a source collection that doesn't start sync immediately
     let beginCallback: (() => void) | undefined
