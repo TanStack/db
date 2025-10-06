@@ -56,7 +56,7 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
    * })
    */
   acceptMutations: (
-    transaction: { mutations: Array<PendingMutation<unknown>> },
+    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
     collection: unknown
   ) => void
 }
@@ -247,7 +247,7 @@ export function localOnlyCollectionOptions(
    * Accepts mutations from a transaction that belong to this collection and persists them
    */
   const acceptMutations = (
-    transaction: { mutations: Array<PendingMutation<unknown>> },
+    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
     collection: unknown
   ) => {
     // Filter mutations that belong to this collection

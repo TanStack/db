@@ -110,7 +110,7 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    * })
    */
   acceptMutations: (
-    transaction: { mutations: Array<PendingMutation<unknown>> },
+    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
     collection: unknown
   ) => void
 }
@@ -457,7 +457,7 @@ export function localStorageCollectionOptions(
    * Accepts mutations from a transaction that belong to this collection and persists them to storage
    */
   const acceptMutations = (
-    transaction: { mutations: Array<PendingMutation<unknown>> },
+    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
     collection: unknown
   ) => {
     // Filter mutations that belong to this collection
@@ -483,7 +483,10 @@ export function localStorageCollectionOptions(
     }
 
     // Load current data from storage
-    const currentData = loadFromStorage<unknown>(config.storageKey, storage)
+    const currentData = loadFromStorage<Record<string, unknown>>(
+      config.storageKey,
+      storage
+    )
 
     // Apply each mutation
     for (const mutation of collectionMutations) {
@@ -492,7 +495,7 @@ export function localStorageCollectionOptions(
       switch (mutation.type) {
         case `insert`:
         case `update`: {
-          const storedItem: StoredItem<unknown> = {
+          const storedItem: StoredItem<Record<string, unknown>> = {
             versionKey: generateUuid(),
             data: mutation.modified,
           }
