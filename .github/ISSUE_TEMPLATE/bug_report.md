@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+- [ ] I've validated the bug against the latest version of DB packages
+
 **Describe the bug**
 A clear and concise description of what the bug is.
 
