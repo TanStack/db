@@ -1,11 +1,12 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, gt, lt } from "../query/index.js"
+import { and, gt, lt } from "../query/builder/functions.js"
+import { Value } from "../query/ir.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
+import type { BasicExpression, OrderBy } from "../query/ir.js"
 import type { IndexInterface } from "../indexes/base-index.js"
-import { Value, type BasicExpression, type OrderBy } from "../query/ir.js"
 import type { ChangeMessage } from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
