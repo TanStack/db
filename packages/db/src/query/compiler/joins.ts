@@ -276,25 +276,18 @@ function processJoin(
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
         tap((data) => {
-          // For outer joins (LEFT/RIGHT), the driving side determines which alias's
-          // subscription we consult for lazy loading. The main source drives LEFT joins,
-          // joined source drives RIGHT joins.
-          const lazyAliasCandidate =
-            activeSource === `main` ? joinedSource : mainSource
-
           // Find the subscription for lazy loading.
           // For subqueries, the outer join alias (e.g., 'activeUser') may differ from the
           // inner alias (e.g., 'user'). Use aliasRemapping to resolve outer → inner alias.
           // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
           // → aliasRemapping['activeUser'] = 'user'
-          const resolvedAlias =
-            aliasRemapping[lazyAliasCandidate] || lazyAliasCandidate
+          const resolvedAlias = aliasRemapping[lazyAlias] || lazyAlias
           const lazySourceSubscription = subscriptions[resolvedAlias]
 
           if (!lazySourceSubscription) {
             throw new SubscriptionNotFoundError(
               resolvedAlias,
-              lazyAliasCandidate,
+              lazyAlias,
               lazySource.id,
               Object.keys(subscriptions)
             )
