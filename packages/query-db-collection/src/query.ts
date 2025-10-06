@@ -462,6 +462,8 @@ export function queryCollectionOptions(
     const queryToRowsSet = queryToRows.get(hashedQuerKey) || new Set()
     queryToRowsSet.delete(rowKey)
     queryToRows.set(hashedQuerKey, queryToRowsSet)
+
+    return rowToQueriesSet.size === 0
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
@@ -573,8 +575,10 @@ export function queryCollectionOptions(
           currentSyncedItems.forEach((oldItem, key) => {
             const newItem = newItemsMap.get(key)
             if (!newItem) {
-              write({ type: `delete`, value: oldItem })
-              removeRow(key, hashedQueryKey)
+              const needToRemove = removeRow(key, hashedQueryKey) // returns true if the row is no longer referenced by any queries
+              if (needToRemove) {
+                write({ type: `delete`, value: oldItem })
+              }
             } else if (
               !shallowEqual(
                 oldItem as Record<string, any>,
