@@ -2,6 +2,7 @@ import {
   ShapeStream,
   isChangeMessage,
   isControlMessage,
+  isVisibleInSnapshot,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
@@ -27,6 +28,7 @@ import type {
   ControlMessage,
   GetExtensions,
   Message,
+  PostgresSnapshot,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
@@ -37,6 +39,23 @@ const debug = DebugModule.debug(`ts/db:electric`)
  * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
+
+/**
+ * Type representing the result of an insert, update, or delete handler
+ */
+type MaybeTxId =
+  | {
+      txid?: Txid | Array<Txid>
+    }
+  | undefined
+  | null
+
+/**
+ * Type representing a snapshot end message
+ */
+type SnapshotEndMessage = ControlMessage & {
+  headers: { control: `snapshot-end` }
+}
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -78,6 +97,20 @@ function isMustRefetchMessage<T extends Row<unknown>>(
   message: Message<T>
 ): message is ControlMessage & { headers: { control: `must-refetch` } } {
   return isControlMessage(message) && message.headers.control === `must-refetch`
+}
+
+function isSnapshotEndMessage<T extends Row<unknown>>(
+  message: Message<T>
+): message is SnapshotEndMessage {
+  return isControlMessage(message) && message.headers.control === `snapshot-end`
+}
+
+function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
+  return {
+    xmin: message.headers.xmin,
+    xmax: message.headers.xmax,
+    xip_list: message.headers.xip_list,
+  }
 }
 
 // Check if a message contains txids in its headers
@@ -139,8 +172,10 @@ export function electricCollectionOptions(
   schema?: any
 } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
+  const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
   const sync = createElectricSync<any>(config.shapeOptions, {
     seenTxids,
+    seenSnapshots,
   })
 
   /**
@@ -158,20 +193,46 @@ export function electricCollectionOptions(
       throw new ExpectedNumberInAwaitTxIdError(typeof txId)
     }
 
+    // First check if the txid is in the seenTxids store
     const hasTxid = seenTxids.state.has(txId)
     if (hasTxid) return true
 
+    // Then check if the txid is in any of the seen snapshots
+    const hasSnapshot = seenSnapshots.state.some((snapshot) =>
+      isVisibleInSnapshot(txId, snapshot)
+    )
+    if (hasSnapshot) return true
+
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        unsubscribe()
+        unsubscribeSeenTxids()
+        unsubscribeSeenSnapshots()
         reject(new TimeoutWaitingForTxIdError(txId))
       }, timeout)
 
-      const unsubscribe = seenTxids.subscribe(() => {
+      const unsubscribeSeenTxids = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
           debug(`awaitTxId found match for txid %o`, txId)
           clearTimeout(timeoutId)
-          unsubscribe()
+          unsubscribeSeenTxids()
+          unsubscribeSeenSnapshots()
+          resolve(true)
+        }
+      })
+
+      const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
+        const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
+          isVisibleInSnapshot(txId, snapshot)
+        )
+        if (visibleSnapshot) {
+          debug(
+            `awaitTxId found match for txid %o in snapshot %o`,
+            txId,
+            visibleSnapshot
+          )
+          clearTimeout(timeoutId)
+          unsubscribeSeenSnapshots()
+          unsubscribeSeenTxids()
           resolve(true)
         }
       })
@@ -183,8 +244,9 @@ export function electricCollectionOptions(
     ? async (params: InsertMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
 
-        const handlerResult = (await config.onInsert!(params)) ?? {}
-        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
+        const handlerResult =
+          ((await config.onInsert!(params)) as MaybeTxId) ?? {}
+        const txid = handlerResult.txid
 
         if (!txid) {
           throw new ElectricInsertHandlerMustReturnTxIdError()
@@ -205,8 +267,9 @@ export function electricCollectionOptions(
     ? async (params: UpdateMutationFnParams<any>) => {
         // Runtime check (that doesn't follow type)
 
-        const handlerResult = (await config.onUpdate!(params)) ?? {}
-        const txid = (handlerResult as { txid?: Txid | Array<Txid> }).txid
+        const handlerResult =
+          ((await config.onUpdate!(params)) as MaybeTxId) ?? {}
+        const txid = handlerResult.txid
 
         if (!txid) {
           throw new ElectricUpdateHandlerMustReturnTxIdError()
@@ -269,9 +332,11 @@ function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     seenTxids: Store<Set<Txid>>
+    seenSnapshots: Store<Array<PostgresSnapshot>>
   }
 ): SyncConfig<T> {
   const { seenTxids } = options
+  const { seenSnapshots } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -342,6 +407,7 @@ function createElectricSync<T extends Row<unknown>>(
       })
       let transactionStarted = false
       const newTxids = new Set<Txid>()
+      const newSnapshots: Array<PostgresSnapshot> = []
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
@@ -373,6 +439,8 @@ function createElectricSync<T extends Row<unknown>>(
                 ...message.headers,
               },
             })
+          } else if (isSnapshotEndMessage(message)) {
+            newSnapshots.push(parseSnapshotMessage(message))
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -412,6 +480,16 @@ function createElectricSync<T extends Row<unknown>>(
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
             return clonedSeen
+          })
+
+          // Always commit snapshots when we receive up-to-date, regardless of transaction state
+          seenSnapshots.setState((currentSnapshots) => {
+            const seen = [...currentSnapshots, ...newSnapshots]
+            newSnapshots.forEach((snapshot) =>
+              debug(`new snapshot synced from pg %o`, snapshot)
+            )
+            newSnapshots.length = 0
+            return seen
           })
         }
       })

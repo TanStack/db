@@ -825,9 +825,6 @@ export class CollectionStateManager<
   public capturePreSyncVisibleState(): void {
     if (this.pendingSyncedTransactions.length === 0) return
 
-    // Clear any previous capture
-    this.preSyncVisibleState.clear()
-
     // Get all keys that will be affected by sync operations
     const syncedKeys = new Set<TKey>()
     for (const transaction of this.pendingSyncedTransactions) {
@@ -843,10 +840,13 @@ export class CollectionStateManager<
 
     // Only capture current visible state for keys that will be affected by sync operations
     // This is much more efficient than capturing the entire collection state
+    // Only capture keys that haven't been captured yet to preserve earlier captures
     for (const key of syncedKeys) {
-      const currentValue = this.get(key)
-      if (currentValue !== undefined) {
-        this.preSyncVisibleState.set(key, currentValue)
+      if (!this.preSyncVisibleState.has(key)) {
+        const currentValue = this.get(key)
+        if (currentValue !== undefined) {
+          this.preSyncVisibleState.set(key, currentValue)
+        }
       }
     }
   }
