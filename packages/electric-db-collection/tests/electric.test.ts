@@ -1031,6 +1031,222 @@ describe(`Electric Integration`, () => {
       await expect(testCollection.utils.awaitTxId(400)).resolves.toBe(true)
     })
 
+    it(`should handle snapshot-end messages and match txids via snapshot metadata`, async () => {
+      const config = {
+        id: `snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send snapshot-end message with PostgresSnapshot metadata
+      // xmin=100, xmax=150, xip_list=[120, 130]
+      // Visible: txid < 100 (committed before snapshot) OR (100 <= txid < 150 AND txid NOT IN [120, 130])
+      // Not visible: txid >= 150 (not yet assigned) OR txid IN [120, 130] (in-progress)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `150`,
+            xip_list: [`120`, `130`],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Txids that are visible in the snapshot should resolve
+      // Txids < xmin are committed and visible
+      await expect(testCollection.utils.awaitTxId(50)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(99)).resolves.toBe(true)
+
+      // Txids in range [xmin, xmax) not in xip_list are visible
+      await expect(testCollection.utils.awaitTxId(100)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(110)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(121)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(125)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(131)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(149)).resolves.toBe(true)
+
+      // Txids in xip_list (in-progress transactions) should NOT resolve
+      await expect(testCollection.utils.awaitTxId(120, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 120`
+      )
+      await expect(testCollection.utils.awaitTxId(130, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 130`
+      )
+
+      // Txids >= xmax should NOT resolve (not yet assigned)
+      await expect(testCollection.utils.awaitTxId(150, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 150`
+      )
+      await expect(testCollection.utils.awaitTxId(200, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 200`
+      )
+    })
+
+    it(`should await for txid that arrives later via snapshot-end`, async () => {
+      const config = {
+        id: `snapshot-await-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start waiting for a txid before snapshot arrives
+      const txidToAwait = 105
+      const promise = testCollection.utils.awaitTxId(txidToAwait, 2000)
+
+      // Send snapshot-end message after a delay
+      setTimeout(() => {
+        subscriber([
+          {
+            headers: {
+              control: `snapshot-end`,
+              xmin: `100`,
+              xmax: `110`,
+              xip_list: [],
+            },
+          },
+          {
+            headers: { control: `up-to-date` },
+          },
+        ])
+      }, 50)
+
+      // The promise should resolve when the snapshot arrives
+      await expect(promise).resolves.toBe(true)
+    })
+
+    it(`should handle multiple snapshots and track all of them`, async () => {
+      const config = {
+        id: `multiple-snapshots-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send first snapshot: visible txids < 110
+      subscriber([
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Send second snapshot: visible txids < 210
+      subscriber([
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `200`,
+            xmax: `210`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Txids visible in first snapshot
+      await expect(testCollection.utils.awaitTxId(105)).resolves.toBe(true)
+
+      // Txids visible in second snapshot
+      await expect(testCollection.utils.awaitTxId(205)).resolves.toBe(true)
+
+      // Txid 150 is visible in second snapshot (< xmin=200 means committed)
+      await expect(testCollection.utils.awaitTxId(150)).resolves.toBe(true)
+
+      // Txids >= second snapshot's xmax should timeout (not yet assigned)
+      await expect(testCollection.utils.awaitTxId(210, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 210`
+      )
+      await expect(testCollection.utils.awaitTxId(300, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 300`
+      )
+    })
+
+    it(`should prefer explicit txids over snapshot matching when both are available`, async () => {
+      const config = {
+        id: `explicit-txid-priority-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send message with explicit txid and snapshot
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: {
+            operation: `insert`,
+            txids: [500],
+          },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Explicit txid should resolve
+      await expect(testCollection.utils.awaitTxId(500)).resolves.toBe(true)
+
+      // Snapshot txid should also resolve
+      await expect(testCollection.utils.awaitTxId(105)).resolves.toBe(true)
+    })
+
     it(`should resync after garbage collection and new subscription`, () => {
       // Use fake timers for this test
       vi.useFakeTimers()
