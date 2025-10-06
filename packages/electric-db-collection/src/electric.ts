@@ -13,10 +13,8 @@ import {
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import type {
-  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
-  Fn,
   InsertMutationFnParams,
   SyncConfig,
   UpdateMutationFnParams,
@@ -85,17 +83,19 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
 export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
-> extends BaseCollectionConfig<
-    T,
-    string | number,
-    TSchema,
-    Record<string, Fn>,
-    { txid: Txid | Array<Txid> }
-  > {
+> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+
+  /**
+   * All standard Collection configuration properties
+   */
+  id?: string
+  schema?: TSchema
+  getKey: CollectionConfig<T, string | number, TSchema>[`getKey`]
+  sync?: CollectionConfig<T, string | number, TSchema>[`sync`]
 
   /**
    * Optional asynchronous handler function called before an insert operation
