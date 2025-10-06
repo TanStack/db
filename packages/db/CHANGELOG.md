@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.5
+
+### Patch Changes
+
+- Fixed race condition which could result in a live query throwing and becoming stuck after multiple mutations complete asynchronously. ([#650](https://github.com/TanStack/db/pull/650))
+
 ## 0.4.4
 
 ### Patch Changes

@@ -1,5 +1,14 @@
 # @tanstack/electric-db-collection
 
+## 0.1.29
+
+### Patch Changes
+
+- The awaitTxId utility now resolves transaction IDs based on snapshot-end message metadata (xmin, xmax, xip_list) in addition to explicit txid arrays, enabling matching on the initial snapshot at the start of a new shape. ([#648](https://github.com/TanStack/db/pull/648))
+
+- Updated dependencies [[`7556fb6`](https://github.com/TanStack/db/commit/7556fb6f888b5bdc830fe6448eb3368efeb61988)]:
+  - @tanstack/db@0.4.5
+
 ## 0.1.28
 
 ### Patch Changes
