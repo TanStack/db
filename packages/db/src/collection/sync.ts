@@ -94,7 +94,7 @@ export class CollectionSyncManager<
             }
             const key = this.config.getKey(messageWithoutKey.value)
 
-          let messageType = messageWithoutKey.type
+            let messageType = messageWithoutKey.type
 
             // Check if an item with this key already exists when inserting
             if (messageWithoutKey.type === `insert`) {
@@ -108,25 +108,25 @@ export class CollectionSyncManager<
                 !hasPendingDeleteForKey &&
                 !isTruncateTransaction
               ) {
-                const existingValue = state.syncedData.get(key)
-              if (
-                existingValue !== undefined &&
-                deepEquals(existingValue, messageWithoutKey.value)
-              ) {
-                // The "insert" is an echo of a value we already have locally.
-                // Treat it as an update so we preserve optimistic intent without
-                // throwing a duplicate-key error during reconciliation.
-                messageType = `update`
-              } else {
-                throw new DuplicateKeySyncError(key, this.id)
+                const existingValue = this.state.syncedData.get(key)
+                if (
+                  existingValue !== undefined &&
+                  deepEquals(existingValue, messageWithoutKey.value)
+                ) {
+                  // The "insert" is an echo of a value we already have locally.
+                  // Treat it as an update so we preserve optimistic intent without
+                  // throwing a duplicate-key error during reconciliation.
+                  messageType = `update`
+                } else {
+                  throw new DuplicateKeySyncError(key, this.id)
                 }
-            }
+              }
             }
 
             const message: ChangeMessage<TOutput> = {
               ...messageWithoutKey,
               type: messageType,
-            key,
+              key,
             }
             pendingTransaction.operations.push(message)
 
