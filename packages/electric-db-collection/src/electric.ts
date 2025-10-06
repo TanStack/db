@@ -43,12 +43,19 @@ export type Txid = number
 /**
  * Type representing the result of an insert, update, or delete handler
  */
-type HandlerResult =
+type MaybeTxId =
   | {
       txid?: Txid | Array<Txid>
     }
   | undefined
   | null
+
+/**
+ * Type representing a snapshot end message
+ */
+type SnapshotEndMessage = ControlMessage & {
+  headers: { control: `snapshot-end` }
+}
 
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
@@ -94,13 +101,11 @@ function isMustRefetchMessage<T extends Row<unknown>>(
 
 function isSnapshotEndMessage<T extends Row<unknown>>(
   message: Message<T>
-): message is ControlMessage & { headers: { control: `snapshot-end` } } {
+): message is SnapshotEndMessage {
   return isControlMessage(message) && message.headers.control === `snapshot-end`
 }
 
-function parseSnapshotMessage(
-  message: ControlMessage & { headers: { control: `snapshot-end` } }
-): PostgresSnapshot {
+function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   return {
     xmin: message.headers.xmin,
     xmax: message.headers.xmax,
@@ -240,7 +245,7 @@ export function electricCollectionOptions(
         // Runtime check (that doesn't follow type)
 
         const handlerResult =
-          ((await config.onInsert!(params)) as HandlerResult) ?? {}
+          ((await config.onInsert!(params)) as MaybeTxId) ?? {}
         const txid = handlerResult.txid
 
         if (!txid) {
@@ -263,7 +268,7 @@ export function electricCollectionOptions(
         // Runtime check (that doesn't follow type)
 
         const handlerResult =
-          ((await config.onUpdate!(params)) as HandlerResult) ?? {}
+          ((await config.onUpdate!(params)) as MaybeTxId) ?? {}
         const txid = handlerResult.txid
 
         if (!txid) {
@@ -479,13 +484,12 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Always commit snapshots when we receive up-to-date, regardless of transaction state
           seenSnapshots.setState((currentSnapshots) => {
-            const clonedSeen = currentSnapshots.slice()
-            newSnapshots.forEach((snapshot) => {
+            const seen = [...currentSnapshots, ...newSnapshots]
+            newSnapshots.forEach((snapshot) =>
               debug(`new snapshot synced from pg %o`, snapshot)
-              clonedSeen.push(snapshot)
-            })
+            )
             newSnapshots.length = 0
-            return clonedSeen
+            return seen
           })
         }
       })
