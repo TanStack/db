@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, test } from "vitest"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { createLiveQueryCollection } from "../../src/query/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 import { upper } from "../../src/query/builder/functions.js"
@@ -7,6 +7,8 @@ import { upper } from "../../src/query/builder/functions.js"
 type User = {
   id: number
   name: string
+  joinedDate: Date
+  something: string
   profile: {
     bio: string
     preferences: {
@@ -46,6 +48,29 @@ describe(`select types`, () => {
     type Expected = {
       id: number
       nameUpper: string
+    }
+
+    const results = col.toArray[0]!
+
+    expectTypeOf(results).toEqualTypeOf<Expected>()
+  })
+
+  test(`works with js built-ins objects`, () => {
+    const users = createUsers()
+    const col = createLiveQueryCollection((q) =>
+      q.from({ u: users }).select(({ u }) => ({
+        id: u.id,
+        joinedDate: u.joinedDate,
+        name: u.name,
+        something: u.something,
+      }))
+    )
+
+    type Expected = {
+      id: number
+      joinedDate: Date
+      name: string
+      something: string
     }
 
     const results = col.toArray[0]!

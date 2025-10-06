@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { concat, createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 import { DistinctRequiresSelectError } from "../../src/errors"
 import { count, eq, gte, not } from "../../src/query/builder/functions.js"
@@ -477,7 +477,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         emptyCollection.utils.commit()
 
         expect(emptyDistinct.size).toBe(1)
-        const department = emptyDistinct.get(1)
+        const department = emptyDistinct.toArray[0]
         expect(department?.department).toBe(`Test`)
       })
 

@@ -58,6 +58,15 @@
               "to": "framework/svelte/adapter"
             }
           ]
+        },
+        {
+          "label": "angular",
+          "children": [
+            {
+              "label": "Angular Adapter",
+              "to": "framework/angular/adapter"
+            }
+          ]
         }
       ]
     },
@@ -67,6 +76,10 @@
         {
           "label": "Live Queries",
           "to": "guides/live-queries"
+        },
+        {
+          "label": "Mutations",
+          "to": "guides/mutations"
         },
         {
           "label": "Error Handling",
@@ -88,6 +101,19 @@
         {
           "label": "Electric Collection",
           "to": "collections/electric-collection"
+        },
+        {
+          "label": "RxDB Collection",
+          "to": "collections/rxdb-collection"
+        }
+      ]
+    },
+    {
+      "label": "Community",
+      "children": [
+        {
+          "label": "Resources & Packages",
+          "to": "community/resources"
         }
       ]
     },
@@ -137,6 +163,14 @@
         {
           "label": "queryCollectionOptions",
           "to": "reference/query-db-collection/functions/querycollectionoptions"
+        },
+        {
+          "label": "RxDB DB Collection",
+          "to": "reference/rxdb-db-collection/index"
+        },
+        {
+          "label": "rxdbCollectionOptions",
+          "to": "reference/rxdb-db-collection/functions/rxdbcollectionoptions"
         }
       ],
       "frameworks": [
@@ -184,6 +218,19 @@
             {
               "label": "UseLiveQueryReturnWithCollection",
               "to": "framework/vue/reference/interfaces/uselivequeryreturnwithcollection"
+            }
+          ]
+        },
+        {
+          "label": "angular",
+          "children": [
+            {
+              "label": "Angular Functions",
+              "to": "framework/angular/reference/index"
+            },
+            {
+              "label": "injectLiveQuery",
+              "to": "framework/angular/reference/functions/injectlivequery"
             }
           ]
         }

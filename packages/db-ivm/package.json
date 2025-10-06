@@ -1,14 +1,14 @@
 {
   "name": "@tanstack/db-ivm",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
-  "version": "0.1.4",
+  "version": "0.1.9",
   "dependencies": {
     "fractional-indexing": "^3.2.0",
     "sorted-btree": "^1.8.1"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.0.9"
+    "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
     ".": {
@@ -29,7 +29,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.18.1",
   "peerDependencies": {
     "typescript": ">=4.7"
   },

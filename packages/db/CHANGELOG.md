@@ -1,5 +1,161 @@
 # @tanstack/db
 
+## 0.4.5
+
+### Patch Changes
+
+- Fixed race condition which could result in a live query throwing and becoming stuck after multiple mutations complete asynchronously. ([#650](https://github.com/TanStack/db/pull/650))
+
+## 0.4.4
+
+### Patch Changes
+
+- Fix live queries getting stuck during long-running sync commits by always ([#631](https://github.com/TanStack/db/pull/631))
+  clearing the batching flag on forced emits, tolerating duplicate insert echoes,
+  and allowing optimistic recomputes to run while commits are still applying. Adds
+  regression coverage for concurrent optimistic inserts, queued updates, and the
+  offline-transactions example to ensure everything stays in sync.
+
+- Fixed bug where orderBy would fail when a collection alias had the same name as one of its schema fields. For example, .from({ email: emailCollection }).orderBy(({ email }) => email.createdAt) now works correctly even when the collection has an email field in its schema. ([#637](https://github.com/TanStack/db/pull/637))
+
+- Optimization: reverse the index when the direction does not match. ([#627](https://github.com/TanStack/db/pull/627))
+
+- Fixed a bug that could result in a duplicate delete event for a row ([#621](https://github.com/TanStack/db/pull/621))
+
+- Fix bug where optimized queries would use the wrong index because the index is on the right column but was built using different comparison options (e.g. different direction, string sort, or null ordering). ([#623](https://github.com/TanStack/db/pull/623))
+
+## 0.4.3
+
+### Patch Changes
+
+- Remove circular imports to fix compatibility with Metro bundler ([#605](https://github.com/TanStack/db/pull/605))
+
+## 0.4.2
+
+### Patch Changes
+
+- Add support for Date objects to min/max aggregates and range queries when using an index. ([#428](https://github.com/TanStack/db/pull/428))
+
+- Prevent pushing down of where clauses that only touch the namespace of a source, rather than a prop on that namespace. This ensures that the semantics of the query are maintained for things such as `isUndefined(namespace)` after a join. ([#600](https://github.com/TanStack/db/pull/600))
+
+- Fix joins using conditions with computed values (such as `concat()`) ([#595](https://github.com/TanStack/db/pull/595))
+
+- Fix repeated renders when markReady called when the collection was already ready. This would occur after each long poll on an Electric collection. ([#604](https://github.com/TanStack/db/pull/604))
+
+- Updated dependencies [[`51c6bc5`](https://github.com/TanStack/db/commit/51c6bc58244ed6a3ac853e7e6af7775b33d6b65a)]:
+  - @tanstack/db-ivm@0.1.9
+
+## 0.4.1
+
+### Patch Changes
+
+- Implement idle cleanup for collection garbage collection ([#590](https://github.com/TanStack/db/pull/590))
+
+  Collection cleanup operations now use `requestIdleCallback()` to prevent blocking the UI thread during garbage collection. This improvement ensures better performance by scheduling cleanup during browser idle time rather than immediately when collections have no active subscribers.
+
+  **Key improvements:**
+  - Non-blocking cleanup operations that don't interfere with user interactions
+  - Automatic fallback to `setTimeout` for older browsers without `requestIdleCallback` support
+  - Proper callback management to prevent race conditions during cleanup rescheduling
+  - Maintains full backward compatibility with existing collection lifecycle behavior
+
+  This addresses performance concerns where collection cleanup could cause UI thread blocking during active application usage.
+
+## 0.4.0
+
+### Minor Changes
+
+- Let collection.subscribeChanges return a subscription object. Move all data loading code related to optimizations into that subscription object. ([#564](https://github.com/TanStack/db/pull/564))
+
+### Patch Changes
+
+- optimise the live query graph execution by removing recursive calls to graph.run ([#564](https://github.com/TanStack/db/pull/564))
+
+- Refactor the main Collection class into smaller classes to make it easier to maintain. ([#560](https://github.com/TanStack/db/pull/560))
+
+- Updated dependencies [[`2f87216`](https://github.com/TanStack/db/commit/2f8721630e06331ca8bb2f962fbb283341103a58), [`89b1c41`](https://github.com/TanStack/db/commit/89b1c414937b021186cf128300d279d1cb4f51fe)]:
+  - @tanstack/db-ivm@0.1.8
+
+## 0.3.2
+
+### Patch Changes
+
+- Added a new events system for subscribing to status changes and other internal events. ([#555](https://github.com/TanStack/db/pull/555))
+
+## 0.3.1
+
+### Patch Changes
+
+- Fix `stateWhenReady()` and `toArrayWhenReady()` methods to consistently wait for collections to be ready by using `preload()` internally. This ensures the collection starts loading if needed rather than just waiting passively. ([#565](https://github.com/TanStack/db/pull/565))
+
+## 0.3.0
+
+### Minor Changes
+
+- Fix transaction error handling to match documented behavior and preserve error identity ([#558](https://github.com/TanStack/db/pull/558))
+
+  ### Breaking Changes
+  - `commit()` now throws errors when the mutation function fails (previously returned a failed transaction)
+
+  ### Bug Fixes
+  1. **Fixed commit() not throwing errors** - The `commit()` method now properly throws errors when the mutation function fails, matching the documented behavior. Both `await tx.commit()` and `await tx.isPersisted.promise` now work correctly in try/catch blocks.
+
+  ### Migration Guide
+
+  If you were catching errors from `commit()` by checking the transaction state:
+
+  ```js
+  // Before - commit() didn't throw
+  await tx.commit()
+  if (tx.state === "failed") {
+    console.error("Failed:", tx.error)
+  }
+
+  // After - commit() now throws
+  try {
+    await tx.commit()
+  } catch (error) {
+    console.error("Failed:", error)
+  }
+  ```
+
+### Patch Changes
+
+- Improve mutation merging from crude replacement to sophisticated merge logic ([#557](https://github.com/TanStack/db/pull/557))
+
+  Previously, mutations were simply replaced when operating on the same item. Now mutations are intelligently merged based on their operation types (insert vs update vs delete), reducing network overhead and better preserving user intent.
+
+## 0.2.5
+
+### Patch Changes
+
+- Refactor of the types of collection config factories for better type inference. ([#530](https://github.com/TanStack/db/pull/530))
+
+- Define BaseCollectionConfig interface and let all collections extend it. ([#531](https://github.com/TanStack/db/pull/531))
+
+- Updated dependencies [[`c58cec9`](https://github.com/TanStack/db/commit/c58cec9eb3f5fc72453793cfd6842387621a63d3)]:
+  - @tanstack/db-ivm@0.1.7
+
+## 0.2.4
+
+### Patch Changes
+
+- optimise key loading into query graph ([#526](https://github.com/TanStack/db/pull/526))
+
+- Fix a bug where selecting a prop that used a built in object such as a Date would result in incorrect types in the result object. ([#524](https://github.com/TanStack/db/pull/524))
+
+- Updated dependencies [[`92febbf`](https://github.com/TanStack/db/commit/92febbf1feaa1d46f8cc4d7a4ea0d44cd5f85256)]:
+  - @tanstack/db-ivm@0.1.6
+
+## 0.2.3
+
+### Patch Changes
+
+- Fixed a bug where a live query could get stuck in "loading" state, or show incomplete data, when an electric "must-refetch" message arrived before the first "up-to-date". ([#532](https://github.com/TanStack/db/pull/532))
+
+- Updated dependencies [[`a9878ad`](https://github.com/TanStack/db/commit/a9878ad58b71c3a2d10c03d75179a793bccf4ffc)]:
+  - @tanstack/db-ivm@0.1.5
+
 ## 0.2.2
 
 ### Patch Changes

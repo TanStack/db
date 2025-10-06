@@ -349,6 +349,19 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return typeof value === `number` ? value : value != null ? Number(value) : 0
   }
 
+  // Create a value extractor function for the expression to aggregate
+  const valueExtractorWithDate = ([, namespacedRow]: [
+    string,
+    NamespacedRow,
+  ]) => {
+    const value = compiledExpr(namespacedRow)
+    return typeof value === `number` || value instanceof Date
+      ? value
+      : value != null
+        ? Number(value)
+        : 0
+  }
+
   // Create a raw value extractor function for the expression to aggregate
   const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     return compiledExpr(namespacedRow)
@@ -363,9 +376,9 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `avg`:
       return avg(valueExtractor)
     case `min`:
-      return min(valueExtractor)
+      return min(valueExtractorWithDate)
     case `max`:
-      return max(valueExtractor)
+      return max(valueExtractorWithDate)
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
@@ -404,16 +417,7 @@ export function replaceAggregatesByRefs(
     }
 
     case `ref`: {
-      const refExpr = havingExpr
-      // Check if this is a direct reference to a SELECT alias
-      if (refExpr.path.length === 1) {
-        const alias = refExpr.path[0]!
-        if (selectClause[alias]) {
-          // This is a reference to a SELECT alias, convert to result.alias
-          return new PropRef([resultAlias, alias])
-        }
-      }
-      // Return as-is for other refs
+      // Non-aggregate refs are passed through unchanged (they reference table columns)
       return havingExpr as BasicExpression
     }
 

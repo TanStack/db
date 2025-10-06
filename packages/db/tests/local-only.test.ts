@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/index"
+import { createCollection, liveQueryCollectionOptions } from "../src/index"
+import { sum } from "../src/query/builder/functions"
 import { localOnlyCollectionOptions } from "../src/local-only"
 import type { LocalOnlyCollectionUtils } from "../src/local-only"
 import type { Collection } from "../src/index"
@@ -8,6 +9,7 @@ interface TestItem extends Record<string, unknown> {
   id: number
   name: string
   completed?: boolean
+  number?: number
 }
 
 describe(`LocalOnly Collection`, () => {
@@ -122,7 +124,7 @@ describe(`LocalOnly Collection`, () => {
     const changeHandler = vi.fn()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(changeHandler)
+    const subscription = collection.subscribeChanges(changeHandler)
 
     // Insert an item
     collection.insert({ id: 1, name: `Test Item` })
@@ -138,7 +140,7 @@ describe(`LocalOnly Collection`, () => {
     ])
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should support toArray method`, () => {
@@ -433,6 +435,47 @@ describe(`LocalOnly Collection`, () => {
       expect(testCollection.size).toBe(2)
       expect(testCollection.get(100)).toEqual({ id: 100, name: `Initial Item` })
       expect(testCollection.get(200)).toEqual({ id: 200, name: `Added Item` })
+    })
+  })
+
+  describe(`Live Query integration`, () => {
+    it(`aggregation should work when there is a onDelete callback`, async () => {
+      // This is a reproduction of this issue: https://github.com/TanStack/db/issues/609
+      // The underlying bug is covered by the "only emit a single event when a sync
+      // mutation is triggered from inside an mutation handler callback after a short
+      // delay" test in collection-subscribe-changes.test.ts
+
+      const testCollection = createCollection<TestItem, number>(
+        localOnlyCollectionOptions({
+          id: `numbers`,
+          getKey: (item) => item.id,
+          initialData: [
+            { id: 0, number: 15 },
+            { id: 1, number: 15 },
+            { id: 2, number: 15 },
+          ] as Array<TestItem>,
+          onDelete: () => {
+            return Promise.resolve()
+          },
+          autoIndex: `off`,
+        })
+      )
+
+      const query = createCollection(
+        liveQueryCollectionOptions({
+          startSync: true,
+          query: (q) =>
+            q.from({ numbers: testCollection }).select(({ numbers }) => ({
+              totalNumber: sum(numbers.number),
+            })),
+        })
+      )
+
+      testCollection.delete(0)
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(query.toArray).toEqual([{ totalNumber: 30 }])
     })
   })
 })

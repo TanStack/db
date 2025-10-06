@@ -11,10 +11,8 @@ import type { ElectricCollectionConfig } from "../src/electric"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  ResolveType,
   UpdateMutationFnParams,
 } from "@tanstack/db"
-import type { Row } from "@electric-sql/client"
 
 describe(`Electric collection type resolution tests`, () => {
   // Define test types
@@ -38,13 +36,11 @@ describe(`Electric collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<ExplicitType, never, Row<unknown>>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
   })
 
-  it(`should use schema type when explicit type is not provided`, () => {
+  it(`should use schema type when a schema is provided`, () => {
     const options = electricCollectionOptions({
       shapeOptions: {
         url: `foo`,
@@ -54,18 +50,24 @@ describe(`Electric collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<unknown, typeof testSchema, Row<unknown>>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[SchemaType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
   })
 
-  it(`should use fallback type when neither explicit nor schema type is provided`, () => {
-    const config: ElectricCollectionConfig<
-      Row<unknown>,
-      never,
-      FallbackType
-    > = {
+  it(`should throw a type error when both a schema and an explicit type (that is not the type of the schema) are provided`, () => {
+    electricCollectionOptions<ExplicitType>({
+      shapeOptions: {
+        url: `foo`,
+        params: { table: `test_table` },
+      },
+      // @ts-expect-error – schema should be `undefined` because we passed an explicit type
+      schema: testSchema,
+      getKey: (item) => item.id,
+    })
+  })
+
+  it(`should use explicit type when no schema is provided`, () => {
+    const config: ElectricCollectionConfig<FallbackType> = {
       shapeOptions: {
         url: `foo`,
         params: { table: `test_table` },
@@ -73,40 +75,25 @@ describe(`Electric collection type resolution tests`, () => {
       getKey: (item) => item.id,
     }
 
-    const options = electricCollectionOptions<
-      Row<unknown>,
-      never,
-      FallbackType
-    >(config)
+    const options = electricCollectionOptions(config)
 
-    type ExpectedType = ResolveType<unknown, never, FallbackType>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[FallbackType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<FallbackType>()
   })
 
-  it(`should correctly resolve type with all three types provided`, () => {
-    const options = electricCollectionOptions<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >({
+  it(`should use getKey type when no schema and no explicit type is provided`, () => {
+    const config = {
       shapeOptions: {
-        url: `test_shape`,
+        url: `foo`,
         params: { table: `test_table` },
       },
-      schema: testSchema,
-      getKey: (item) => item.id,
-    })
+      getKey: (item: FallbackType) => item.id,
+    }
 
-    type ExpectedType = ResolveType<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >
+    const options = electricCollectionOptions(config)
+
     // The getKey function should have the resolved type
-    expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
+    expectTypeOf(options.getKey).parameters.toEqualTypeOf<[FallbackType]>()
   })
 
   it(`should properly type the onInsert, onUpdate, and onDelete handlers`, () => {
@@ -213,7 +200,7 @@ describe(`Electric collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18)) // eslint-disable-line @typescript-eslint/no-unnecessary-condition
+          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
           .select(({ user }) => ({
             id: user.id,
             name: user.name,

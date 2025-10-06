@@ -142,6 +142,8 @@ export interface AnalyzedWhereClause {
   expression: BasicExpression<boolean>
   /** Set of table/source aliases that this WHERE clause touches */
   touchedSources: Set<string>
+  /** Whether this clause contains namespace-only references that prevent pushdown */
+  hasNamespaceOnlyRef: boolean
 }
 
 /**
@@ -486,19 +488,31 @@ function splitAndClausesRecursive(
  * This determines whether a clause can be pushed down to a specific table
  * or must remain in the main query (for multi-source clauses like join conditions).
  *
+ * Special handling for namespace-only references in outer joins:
+ * WHERE clauses that reference only a table namespace (e.g., isUndefined(special), eq(special, value))
+ * rather than specific properties (e.g., isUndefined(special.id), eq(special.id, value)) are treated as
+ * multi-source to prevent incorrect predicate pushdown that would change join semantics.
+ *
  * @param clause - The WHERE expression to analyze
  * @returns Analysis result with the expression and touched source aliases
  *
  * @example
  * ```typescript
- * // eq(users.department_id, 1) -> touches ['users']
- * // eq(users.id, posts.user_id) -> touches ['users', 'posts']
+ * // eq(users.department_id, 1) -> touches ['users'], hasNamespaceOnlyRef: false
+ * // eq(users.id, posts.user_id) -> touches ['users', 'posts'], hasNamespaceOnlyRef: false
+ * // isUndefined(special) -> touches ['special'], hasNamespaceOnlyRef: true (prevents pushdown)
+ * // eq(special, someValue) -> touches ['special'], hasNamespaceOnlyRef: true (prevents pushdown)
+ * // isUndefined(special.id) -> touches ['special'], hasNamespaceOnlyRef: false (allows pushdown)
+ * // eq(special.id, 5) -> touches ['special'], hasNamespaceOnlyRef: false (allows pushdown)
  * ```
  */
 function analyzeWhereClause(
   clause: BasicExpression<boolean>
 ): AnalyzedWhereClause {
+  // Track which table aliases this WHERE clause touches
   const touchedSources = new Set<string>()
+  // Track whether this clause contains namespace-only references that prevent pushdown
+  let hasNamespaceOnlyRef = false
 
   /**
    * Recursively collect all table aliases referenced in an expression
@@ -511,6 +525,13 @@ function analyzeWhereClause(
           const firstElement = expr.path[0]
           if (firstElement) {
             touchedSources.add(firstElement)
+
+            // If the path has only one element (just the namespace),
+            // this is a namespace-only reference that should not be pushed down
+            // This applies to ANY function, not just existence-checking functions
+            if (expr.path.length === 1) {
+              hasNamespaceOnlyRef = true
+            }
           }
         }
         break
@@ -537,6 +558,7 @@ function analyzeWhereClause(
   return {
     expression: clause,
     touchedSources,
+    hasNamespaceOnlyRef,
   }
 }
 
@@ -557,15 +579,15 @@ function groupWhereClauses(
 
   // Categorize each clause based on how many sources it touches
   for (const clause of analyzedClauses) {
-    if (clause.touchedSources.size === 1) {
-      // Single source clause - can be optimized
+    if (clause.touchedSources.size === 1 && !clause.hasNamespaceOnlyRef) {
+      // Single source clause without namespace-only references - can be optimized
       const source = Array.from(clause.touchedSources)[0]!
       if (!singleSource.has(source)) {
         singleSource.set(source, [])
       }
       singleSource.get(source)!.push(clause.expression)
-    } else if (clause.touchedSources.size > 1) {
-      // Multi-source clause - must stay in main query
+    } else if (clause.touchedSources.size > 1 || clause.hasNamespaceOnlyRef) {
+      // Multi-source clause or namespace-only reference - must stay in main query
       multiSource.push(clause.expression)
     }
     // Skip clauses that touch no sources (constants) - they don't need optimization

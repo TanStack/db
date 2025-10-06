@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { authClient } from "@/lib/auth-client"
 import { useState } from "react"
+import { createFileRoute } from "@tanstack/react-router"
+import type { FormEvent } from "react"
+import { authClient } from "@/lib/auth-client"
 
 export const Route = createFileRoute(`/login`)({
   component: Layout,
@@ -8,15 +9,15 @@ export const Route = createFileRoute(`/login`)({
 })
 
 function Layout() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [email, setEmail] = useState(``)
+  const [password, setPassword] = useState(``)
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [currentError, setError] = useState(``)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    setError("")
+    setError(``)
 
     try {
       let { data, error } = await authClient.signUp.email(
@@ -28,12 +29,12 @@ function Layout() {
         {
           onSuccess: () => {
             console.log(`signed up, navigating`)
-            window.location.href = "/"
+            window.location.href = `/`
           },
         }
       )
 
-      if (error?.code === `USER_ALREADY_EXISTS`) {
+      if (error?.code === `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`) {
         console.log(`user exists, logging in`)
         const result = await authClient.signIn.email(
           {
@@ -43,9 +44,10 @@ function Layout() {
           {
             onSuccess: async () => {
               console.log(`signed in, navigating`)
-              const { data: session, error } = await authClient.getSession()
-              console.log({ session, error })
-              window.location.href = "/"
+              const { data: session, error: sessionError } =
+                await authClient.getSession()
+              console.log({ session, sessionError })
+              window.location.href = `/`
             },
           }
         )
@@ -60,8 +62,8 @@ function Layout() {
         console.log(`set error`)
         setError(JSON.stringify(error, null, 4))
       }
-    } catch (_) {
-      setError("An unexpected error occurred")
+    } catch {
+      setError(`An unexpected error occurred`)
     } finally {
       setIsLoading(false)
     }
@@ -118,9 +120,9 @@ function Layout() {
             </div>
           </div>
 
-          {error && (
+          {currentError && (
             <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
+              <div className="text-sm text-red-700">{currentError}</div>
             </div>
           )}
 
@@ -130,7 +132,7 @@ function Layout() {
               disabled={isLoading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? "Signing in..." : "Sign in"}
+              {isLoading ? `Signing in...` : `Sign in`}
             </button>
           </div>
         </form>

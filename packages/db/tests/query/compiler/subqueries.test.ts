@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionImpl } from "../../../src/collection.js"
+import { CollectionImpl } from "../../../src/collection/index.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
 
 // Test schema types
@@ -174,6 +174,7 @@ describe(`Query2 Subqueries`, () => {
         { issues: issuesInput },
         { issues: issuesCollection },
         {},
+        {},
         new Set(),
         {}
       )
@@ -269,6 +270,9 @@ describe(`Query2 Subqueries`, () => {
 
       const builtQuery = getQueryIR(query)
 
+      const usersSubscription = usersCollection.subscribeChanges(() => {})
+      const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
@@ -281,6 +285,10 @@ describe(`Query2 Subqueries`, () => {
           users: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
+        {
+          [usersCollection.id]: usersSubscription,
+          [issuesCollection.id]: issuesSubscription,
+        },
         { issues: dummyCallbacks, users: dummyCallbacks },
         lazyCollections,
         {}
@@ -348,6 +356,7 @@ describe(`Query2 Subqueries`, () => {
         builtQuery,
         { issues: issuesInput },
         { issues: issuesCollection },
+        {},
         {},
         new Set(),
         {}

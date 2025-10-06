@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest"
 import {
+  and,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -166,7 +167,7 @@ describe(`Query collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18)) // eslint-disable-line @typescript-eslint/no-unnecessary-condition
+          .where(({ user }) => and(eq(user.active, true), gt(user.age, 18)))
           .select(({ user }) => ({
             id: user.id,
             name: user.name,
@@ -208,23 +209,21 @@ describe(`Query collection type resolution tests`, () => {
       expectTypeOf(options.getKey).parameters.toEqualTypeOf<[TodoType]>()
     })
 
-    it(`should prioritize explicit type over queryFn`, () => {
+    it(`should throw a type error if explicit type does not match the inferred type from the queryFn`, () => {
       interface UserType {
         id: string
         name: string
       }
 
-      const options = queryCollectionOptions<UserType>({
+      queryCollectionOptions<UserType>({
         queryClient,
         queryKey: [`explicit-priority`],
+        // @ts-expect-error – queryFn doesn't match the explicit type
         queryFn: async (): Promise<Array<TodoType>> => {
           return [] as Array<TodoType>
         },
         getKey: (item) => item.id,
       })
-
-      // Should use explicit UserType, not TodoType from queryFn
-      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[UserType]>()
     })
 
     it(`should prioritize schema over queryFn`, () => {
@@ -240,6 +239,34 @@ describe(`Query collection type resolution tests`, () => {
         queryFn: async (): Promise<Array<z.infer<typeof userSchema>>> => {
           return [] as Array<z.infer<typeof userSchema>>
         },
+        schema: userSchema,
+        getKey: (item) => item.id,
+      })
+
+      // Should use schema type, not TodoType from queryFn
+      type ExpectedType = z.infer<typeof userSchema>
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
+    })
+
+    it(`should throw an error if schema type doesn't match the queryFn type`, () => {
+      interface UserType {
+        id: string
+        name: string
+      }
+
+      const userSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`schema-priority`],
+        queryFn: async () => {
+          return [] as Array<UserType>
+        },
+        // @ts-expect-error – queryFn doesn't match the schema type
         schema: userSchema,
         getKey: (item) => item.id,
       })
@@ -272,6 +299,108 @@ describe(`Query collection type resolution tests`, () => {
 
       const collection = createCollection(options)
       expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+    })
+  })
+
+  describe(`select type inference`, () => {
+    it(`queryFn type inference`, () => {
+      const dataSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`x-queryFn-infer`],
+        queryFn: async (): Promise<Array<z.infer<typeof dataSchema>>> => {
+          return [] as Array<z.infer<typeof dataSchema>>
+        },
+        schema: dataSchema,
+        getKey: (item) => item.id,
+      })
+
+      type ExpectedType = z.infer<typeof dataSchema>
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
+    })
+
+    it(`should error when queryFn returns wrapped data without select`, () => {
+      const userData = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      type UserDataType = z.infer<typeof userData>
+
+      type WrappedResponse = {
+        metadata: string
+        data: Array<UserDataType>
+      }
+
+      queryCollectionOptions({
+        queryClient,
+        queryKey: [`wrapped-no-select`],
+        // @ts-expect-error - queryFn returns wrapped data but no select provided
+        queryFn: (): Promise<WrappedResponse> => {
+          return Promise.resolve({
+            metadata: `example`,
+            data: [],
+          })
+        },
+        // @ts-expect-error - schema type conflicts with queryFn return type
+        schema: userData,
+        // @ts-expect-error - item type is inferred as object due to type mismatch
+        getKey: (item) => item.id,
+      })
+    })
+
+    it(`select properly extracts array from wrapped response`, () => {
+      const userData = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      type UserDataType = z.infer<typeof userData>
+
+      type MetaDataType<T> = {
+        metaDataOne: string
+        metaDataTwo: string
+        data: T
+      }
+
+      const metaDataObject: ResponseType = {
+        metaDataOne: `example meta data`,
+        metaDataTwo: `example meta data`,
+        data: [
+          {
+            id: `1`,
+            name: `carter`,
+            email: `c@email.com`,
+          },
+        ],
+      }
+
+      type ResponseType = MetaDataType<Array<UserDataType>>
+
+      const selectUserData = (data: ResponseType) => {
+        return data.data
+      }
+
+      queryCollectionOptions({
+        queryClient,
+        queryKey: [`x-queryFn-infer`],
+        queryFn: async (): Promise<ResponseType> => {
+          return metaDataObject
+        },
+        select: selectUserData,
+        schema: userData,
+        getKey: (item) => item.id,
+      })
+
+      // Should infer ResponseType as select parameter type
+      expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
     })
   })
 })

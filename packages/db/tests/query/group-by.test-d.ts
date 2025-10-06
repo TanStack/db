@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, test } from "vitest"
 import { createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
+import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 import {
   and,
@@ -23,6 +23,7 @@ type Order = {
   amount: number
   status: string
   date: string
+  date_instance: Date
   product_category: string
   quantity: number
   discount: number
@@ -37,6 +38,7 @@ const sampleOrders: Array<Order> = [
     amount: 100,
     status: `completed`,
     date: `2023-01-01`,
+    date_instance: new Date(`2023-01-01`),
     product_category: `electronics`,
     quantity: 2,
     discount: 0,
@@ -48,6 +50,7 @@ const sampleOrders: Array<Order> = [
     amount: 200,
     status: `completed`,
     date: `2023-01-15`,
+    date_instance: new Date(`2023-01-15`),
     product_category: `electronics`,
     quantity: 1,
     discount: 10,
@@ -81,6 +84,8 @@ describe(`Query GROUP BY Types`, () => {
             avg_amount: avg(orders.amount),
             min_amount: min(orders.amount),
             max_amount: max(orders.amount),
+            min_date: min(orders.date_instance),
+            max_date: max(orders.date_instance),
           })),
     })
 
@@ -93,6 +98,8 @@ describe(`Query GROUP BY Types`, () => {
           avg_amount: number
           min_amount: number
           max_amount: number
+          min_date: Date
+          max_date: Date
         }
       | undefined
     >()

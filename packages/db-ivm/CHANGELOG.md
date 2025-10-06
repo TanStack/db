@@ -1,5 +1,37 @@
 # @tanstack/db-ivm
 
+## 0.1.9
+
+### Patch Changes
+
+- Add support for Date objects to min/max aggregates and range queries when using an index. ([#428](https://github.com/TanStack/db/pull/428))
+
+## 0.1.8
+
+### Patch Changes
+
+- Fix a bug with distinct operator ([#564](https://github.com/TanStack/db/pull/564))
+
+- Change the ivm indexes to use a three level `key->prefix->hash->value` structure, only falling back to structural hashing when there are multiple values for a single prefix. This removes all hashing during the initial run of a query delivering a 2-3x speedup. ([#549](https://github.com/TanStack/db/pull/549))
+
+## 0.1.7
+
+### Patch Changes
+
+- Fix memory leak that results in linear memory growth with incremental changes over time. Thanks to @sorenbs for finding and fixing this. ([#550](https://github.com/TanStack/db/pull/550))
+
+## 0.1.6
+
+### Patch Changes
+
+- optimise key loading into query graph ([#526](https://github.com/TanStack/db/pull/526))
+
+## 0.1.5
+
+### Patch Changes
+
+- Fix bug where different numbers would hash to the same value. This caused distinct not to work properly. ([#525](https://github.com/TanStack/db/pull/525))
+
 ## 0.1.4
 
 ### Patch Changes

@@ -1,8 +1,6 @@
-import { type } from "arktype"
 import mitt from "mitt"
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/collection"
+import { describe, expect, it, vi } from "vitest"
+import { createCollection } from "../src/collection/index.js"
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
@@ -10,7 +8,6 @@ import {
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
-  SchemaValidationError,
 } from "../src/errors"
 import { createTransaction } from "../src/transactions"
 import {
@@ -18,13 +15,7 @@ import {
   mockSyncCollectionOptionsNoInitialState,
   withExpectedRejection,
 } from "./utils"
-import type {
-  ChangeMessage,
-  MutationFn,
-  OperationType,
-  PendingMutation,
-  ResolveTransactionChanges,
-} from "../src/types"
+import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -236,8 +227,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -271,11 +262,11 @@ describe(`Collection`, () => {
 
     // after mutationFn returns, check that the transaction is cleaned up,
     // optimistic update is gone & synced data & combined state are all updated.
-    expect(collection.transactions.size).toEqual(0) // Transaction should be cleaned up
+    expect(collection._state.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
-    expect(collection.optimisticUpserts.size).toEqual(0)
+    expect(collection._state.optimisticUpserts.size).toEqual(0)
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
@@ -489,7 +480,8 @@ describe(`Collection`, () => {
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
+      Array.from(collection._state.transactions.values())[0].mutations[0]
+        .changes
     ).toEqual({
       id: 1,
       value: `bar`,
@@ -497,8 +489,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -798,7 +790,7 @@ describe(`Collection`, () => {
 
     // The item should NOT appear in the collection state immediately
     expect(collection.state.has(2)).toBe(false)
-    expect(collection.optimisticUpserts.has(2)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(false)
     expect(collection.state.size).toBe(1) // Only the initial item
 
     // Now resolve the mutation and wait for completion
@@ -823,7 +815,7 @@ describe(`Collection`, () => {
 
     // The original value should still be there immediately
     expect(collection.state.get(1)?.value).toBe(`initial value`)
-    expect(collection.optimisticUpserts.has(1)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(false)
 
     // Now resolve the update mutation and wait for completion
     pendingMutations[1]?.()
@@ -837,7 +829,7 @@ describe(`Collection`, () => {
 
     // The item should still be there immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticDeletes.has(2)).toBe(false)
+    expect(collection._state.optimisticDeletes.has(2)).toBe(false)
 
     // Now resolve the delete mutation and wait for completion
     pendingMutations[2]?.()
@@ -898,7 +890,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticUpserts.has(2)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(true)
     expect(collection.state.get(2)).toEqual({
       id: 2,
       value: `default optimistic`,
@@ -914,7 +906,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(3)).toBe(true)
-    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
     expect(collection.state.get(3)).toEqual({
       id: 3,
       value: `explicit optimistic`,
@@ -933,7 +925,7 @@ describe(`Collection`, () => {
 
     // The update should be reflected immediately
     expect(collection.state.get(1)?.value).toBe(`optimistic update`)
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
 
     await optimisticUpdateTx.isPersisted.promise
 
@@ -942,310 +934,9 @@ describe(`Collection`, () => {
 
     // The item should be gone immediately
     expect(collection.state.has(3)).toBe(false)
-    expect(collection.optimisticDeletes.has(3)).toBe(true)
+    expect(collection._state.optimisticDeletes.has(3)).toBe(true)
 
     await optimisticDeleteTx.isPersisted.promise
-  })
-})
-
-describe(`Collection with schema validation`, () => {
-  it(`should validate data against arktype schema on insert`, () => {
-    // Create a Zod schema for a user
-    const userSchema = type({
-      name: `string > 0`,
-      age: `number.integer > 0`,
-      "email?": `string.email`,
-    })
-
-    // Create a collection with the schema
-    const collection = createCollection<typeof userSchema.infer>({
-      id: `test`,
-      getKey: (item) => item.name,
-      startSync: true,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: userSchema,
-    })
-    const mutationFn = async () => {}
-
-    // Valid data should work
-    const validUser = {
-      name: `Alice`,
-      age: 30,
-      email: `alice@example.com`,
-    }
-
-    const tx1 = createTransaction({ mutationFn })
-    tx1.mutate(() => collection.insert(validUser))
-
-    // Invalid data should throw SchemaValidationError
-    const invalidUser = {
-      name: ``, // Empty name (fails min length)
-      age: -5, // Negative age (fails positive)
-      email: `not-an-email`, // Invalid email
-    }
-
-    try {
-      const tx2 = createTransaction({ mutationFn })
-      tx2.mutate(() => collection.insert(invalidUser))
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`insert`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        // Check that we have validation errors for each invalid field
-        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
-        )
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-        expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
-        ).toBe(true)
-      }
-    }
-
-    // Partial updates should work with valid data
-    const tx3 = createTransaction({ mutationFn })
-    tx3.mutate(() =>
-      collection.update(`Alice`, (draft) => {
-        draft.age = 31
-      })
-    )
-
-    // Partial updates should fail with invalid data
-    try {
-      const tx4 = createTransaction({ mutationFn })
-      tx4.mutate(() =>
-        collection.update(`Alice`, (draft) => {
-          draft.age = -1
-        })
-      )
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`update`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-      }
-    }
-  })
-
-  it(`should validate data against schema on insert`, () => {
-    // Create a Zod schema for a user
-    const userSchema = z.object({
-      name: z.string().min(1),
-      age: z.number().int().positive(),
-      email: z.string().email().optional(),
-    })
-
-    // Create a collection with the schema
-    const collection = createCollection<z.infer<typeof userSchema>>({
-      id: `test`,
-      getKey: (item) => item.name,
-      startSync: true,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: userSchema,
-    })
-    const mutationFn = async () => {}
-
-    // Valid data should work
-    const validUser = {
-      name: `Alice`,
-      age: 30,
-      email: `alice@example.com`,
-    }
-
-    const tx1 = createTransaction({ mutationFn })
-    tx1.mutate(() => collection.insert(validUser))
-
-    // Invalid data should throw SchemaValidationError
-    const invalidUser = {
-      name: ``, // Empty name (fails min length)
-      age: -5, // Negative age (fails positive)
-      email: `not-an-email`, // Invalid email
-    }
-
-    try {
-      const tx2 = createTransaction({ mutationFn })
-      tx2.mutate(() => collection.insert(invalidUser))
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`insert`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        // Check that we have validation errors for each invalid field
-        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
-        )
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-        expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
-        ).toBe(true)
-      }
-    }
-
-    // Partial updates should work with valid data
-    const tx3 = createTransaction({ mutationFn })
-    tx3.mutate(() =>
-      collection.update(`Alice`, (draft) => {
-        draft.age = 31
-      })
-    )
-
-    // Partial updates should fail with invalid data
-    try {
-      const tx4 = createTransaction({ mutationFn })
-      tx4.mutate(() =>
-        collection.update(`Alice`, (draft) => {
-          draft.age = -1
-        })
-      )
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`update`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-      }
-    }
-  })
-
-  it(`should apply schema defaults on insert`, () => {
-    const todoSchema = z.object({
-      id: z
-        .string()
-        .default(() => `todo-${Math.random().toString(36).substr(2, 9)}`),
-      text: z.string(),
-      completed: z.boolean().default(false),
-      createdAt: z.coerce.date().default(() => new Date()),
-      updatedAt: z.coerce.date().default(() => new Date()),
-    })
-
-    // Define inferred types for clarity and use in assertions
-    type Todo = z.infer<typeof todoSchema>
-    type TodoInput = z.input<typeof todoSchema>
-
-    // NOTE: `createCollection<Todo>` breaks the schema type inference.
-    // We have to use only the schema, and not the type generic, like so:
-    const collection = createCollection({
-      id: `defaults-test`,
-      getKey: (item) => item.id,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: todoSchema,
-    })
-
-    // Type test: should allow inserting input type (with missing fields that have defaults)
-    // Important: Input type is different from the output type (which is inferred using z.infer)
-    // For more details, @see https://github.com/colinhacks/zod/issues/4179#issuecomment-2811669261
-    type InsertParam = Parameters<typeof collection.insert>[0]
-    expectTypeOf<InsertParam>().toEqualTypeOf<TodoInput | Array<TodoInput>>()
-
-    const mutationFn = async () => {}
-
-    // Minimal data
-    const tx1 = createTransaction<Todo>({ mutationFn })
-    tx1.mutate(() => collection.insert({ text: `task-1` }))
-
-    // Type assertions on the mutation structure
-    expect(tx1.mutations).toHaveLength(1)
-    const mutation = tx1.mutations[0]!
-
-    // Test the mutation type structure
-    expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
-    expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
-    expectTypeOf(mutation.changes).toEqualTypeOf<
-      ResolveTransactionChanges<Todo>
-    >()
-    expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
-
-    // Runtime assertions for actual values
-    expect(mutation.type).toBe(`insert`)
-    expect(mutation.changes).toEqual({ text: `task-1` })
-    expect(mutation.modified.text).toBe(`task-1`)
-    expect(mutation.modified.completed).toBe(false)
-    expect(mutation.modified.id).toBeDefined()
-    expect(mutation.modified.createdAt).toBeInstanceOf(Date)
-    expect(mutation.modified.updatedAt).toBeInstanceOf(Date)
-
-    let insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(1)
-    const insertedItem = insertedItems[0]!
-    expect(insertedItem.text).toBe(`task-1`)
-    expect(insertedItem.completed).toBe(false)
-    expect(insertedItem.id).toBeDefined()
-    expect(typeof insertedItem.id).toBe(`string`)
-    expect(insertedItem.createdAt).toBeInstanceOf(Date)
-    expect(insertedItem.updatedAt).toBeInstanceOf(Date)
-
-    // Partial data
-    const tx2 = createTransaction<Todo>({ mutationFn })
-    tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
-
-    insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(2)
-
-    const secondItem = insertedItems.find((item) => item.text === `task-2`)!
-    expect(secondItem).toBeDefined()
-    expect(secondItem.text).toBe(`task-2`)
-    expect(secondItem.completed).toBe(true)
-    expect(secondItem.id).toBeDefined()
-    expect(typeof secondItem.id).toBe(`string`)
-    expect(secondItem.createdAt).toBeInstanceOf(Date)
-    expect(secondItem.updatedAt).toBeInstanceOf(Date)
-
-    // All fields provided
-    const tx3 = createTransaction<Todo>({ mutationFn })
-
-    tx3.mutate(() =>
-      collection.insert({
-        id: `task-id-3`,
-        text: `task-3`,
-        completed: true,
-        createdAt: new Date(`2023-01-01T00:00:00Z`),
-        updatedAt: new Date(`2023-01-01T00:00:00Z`),
-      })
-    )
-    insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(3)
-
-    // using insertedItems[2] was finding wrong item for some reason.
-    const thirdItem = insertedItems.find((item) => item.text === `task-3`)
-    expect(thirdItem).toBeDefined()
-    expect(thirdItem!.text).toBe(`task-3`)
-    expect(thirdItem!.completed).toBe(true)
-    expect(thirdItem!.createdAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
-    expect(thirdItem!.updatedAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
-    expect(thirdItem!.id).toBe(`task-id-3`)
   })
 
   it(`should not block user actions when keys are recently synced`, async () => {
@@ -1407,8 +1098,8 @@ describe(`Collection with schema validation`, () => {
 
     // Verify collection is cleared
     expect(collection.state.size).toBe(0)
-    expect(collection.syncedData.size).toBe(0)
-    expect(collection.syncedMetadata.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
   it(`should keep operations written after truncate in the same transaction`, async () => {
@@ -1473,8 +1164,8 @@ describe(`Collection with schema validation`, () => {
       id: 3,
       value: `should not be cleared`,
     })
-    expect(collection.syncedData.size).toBe(1)
-    expect(collection.syncedMetadata.size).toBe(1)
+    expect(collection._state.syncedData.size).toBe(1)
+    expect(collection._state.syncedMetadata.size).toBe(1)
   })
 
   it(`should handle truncate with empty collection`, async () => {
@@ -1510,8 +1201,8 @@ describe(`Collection with schema validation`, () => {
 
     // Verify collection remains empty
     expect(collection.state.size).toBe(0)
-    expect(collection.syncedData.size).toBe(0)
-    expect(collection.syncedMetadata.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
   it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {

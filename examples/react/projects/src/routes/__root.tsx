@@ -1,6 +1,7 @@
+import * as React from "react"
 import {
-  Outlet,
   HeadContent,
+  Outlet,
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router"
@@ -29,12 +30,12 @@ export const Route = createRootRoute({
       },
     ],
   }),
-
+  shellComponent: RootDocument,
   component: () => (
-    <RootDocument>
+    <>
       <Outlet />
       <TanStackRouterDevtools />
-    </RootDocument>
+    </>
   ),
 })
 

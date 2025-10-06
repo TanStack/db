@@ -1,4 +1,5 @@
-import type { CollectionImpl } from "../../collection.js"
+import type { CollectionImpl } from "../../collection/index.js"
+import type { SingleResult } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -8,7 +9,6 @@ import type {
   Value,
 } from "../ir.js"
 import type { QueryBuilder } from "./index.js"
-import type { ResolveType } from "../../types.js"
 
 /**
  * Context - The central state container for query builder operations
@@ -48,6 +48,8 @@ export interface Context {
   >
   // The result type after select (if select has been called)
   result?: any
+  // Single result only (if findOne has been called)
+  singleResult?: boolean
 }
 
 /**
@@ -77,19 +79,11 @@ export type Source = {
 /**
  * InferCollectionType - Extracts the TypeScript type from a CollectionImpl
  *
- * This helper ensures we get the same type that would be used when creating
- * the collection itself. It uses the internal `ResolveType` logic to maintain
- * consistency between collection creation and query type inference.
- *
- * The complex generic parameters extract:
- * - U: The base document type
- * - TSchema: The schema definition
- * - The resolved type combines these with any transforms
+ * This helper ensures we get the same type that was used when creating the collection itself.
+ * This can be an explicit type passed by the user or the schema output type.
  */
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer U, any, any, infer TSchema, any>
-    ? ResolveType<U, TSchema, U>
-    : never
+  T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema
@@ -500,20 +494,20 @@ export type Ref<T = any> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
-        NonNullable<T[K]> extends Record<string, any>
+        IsPlainObject<NonNullable<T[K]>> extends true
         ? Ref<NonNullable<T[K]>> | undefined
         : RefLeaf<NonNullable<T[K]>> | undefined
       : // Optional only
-        NonUndefined<T[K]> extends Record<string, any>
+        IsPlainObject<NonUndefined<T[K]>> extends true
         ? Ref<NonUndefined<T[K]>> | undefined
         : RefLeaf<NonUndefined<T[K]>> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
-        NonNull<T[K]> extends Record<string, any>
+        IsPlainObject<NonNull<T[K]>> extends true
         ? Ref<NonNull<T[K]>> | null
         : RefLeaf<NonNull<T[K]>> | null
       : // Required
-        T[K] extends Record<string, any>
+        IsPlainObject<T[K]> extends true
         ? Ref<T[K]>
         : RefLeaf<T[K]>
 } & RefLeaf<T>
@@ -580,6 +574,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
+  singleResult: TContext[`singleResult`] extends true ? true : false
 }
 
 /**
@@ -629,6 +624,14 @@ export type ApplyJoinOptionalityToMergedSchema<
     : // New table is required for inner and right joins
       TNewSchema[K]
 }
+
+/**
+ * Utility type to infer the query result size (single row or an array)
+ */
+export type InferResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? GetResult<TContext> | undefined
+    : Array<GetResult<TContext>>
 
 /**
  * GetResult - Determines the final result type of a query
@@ -825,3 +828,48 @@ export type WithResult<TContext extends Context, TResult> = Prettify<
 export type Prettify<T> = {
   [K in keyof T]: T[K]
 } & {}
+
+/**
+ * IsPlainObject - Utility type to check if T is a plain object
+ */
+type IsPlainObject<T> = T extends unknown
+  ? T extends object
+    ? T extends ReadonlyArray<any>
+      ? false
+      : T extends JsBuiltIns
+        ? false
+        : true
+    : false
+  : false
+
+/**
+ * JsBuiltIns - List of JavaScript built-ins
+ */
+type JsBuiltIns =
+  | ArrayBuffer
+  | ArrayBufferLike
+  | AsyncGenerator<any, any, any>
+  | BigInt64Array
+  | BigUint64Array
+  | DataView
+  | Date
+  | Error
+  | Float32Array
+  | Float64Array
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  | Function
+  | Generator<any, any, any>
+  | Int16Array
+  | Int32Array
+  | Int8Array
+  | Map<any, any>
+  | Promise<any>
+  | RegExp
+  | Set<any>
+  | string
+  | Uint16Array
+  | Uint32Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | WeakMap<any, any>
+  | WeakSet<any>

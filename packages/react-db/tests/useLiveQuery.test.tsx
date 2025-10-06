@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  lte,
 } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
@@ -154,6 +155,112 @@ describe(`Query Collections`, () => {
 
     // Fails cause array isn't
     expect(data1).toBe(data2)
+  })
+
+  it(`should be able to return a single row with query builder`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-2`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne()
+      )
+    })
+
+    // Wait for collection to sync
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1)
+    })
+
+    expect(result.current.state.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+  })
+
+  it(`should be able to return a single row with config object`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-2`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveQuery({
+        query: (q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+      })
+    })
+
+    // Wait for collection to sync
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1)
+    })
+
+    expect(result.current.state.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+  })
+
+  it(`should be able to return a single row with collection`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-2`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const liveQueryCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne(),
+    })
+
+    const { result } = renderHook(() => {
+      return useLiveQuery(liveQueryCollection)
+    })
+
+    // Wait for collection to sync
+    await waitFor(() => {
+      expect(result.current.state.size).toBe(1)
+    })
+
+    expect(result.current.state.get(`3`)).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `3`,
+      name: `John Smith`,
+    })
   })
 
   it(`should be able to query a collection with live updates`, async () => {
@@ -333,7 +440,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           }))
       )
     })
@@ -708,7 +815,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           }))
       )
 
@@ -1296,7 +1403,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons.name,
+              name: persons?.name,
             }))
         )
       })
@@ -1442,6 +1549,387 @@ describe(`Query Collections`, () => {
       })
       // Note: Data size may not change immediately due to live query evaluation timing
       // The main test is that isReady remains true when parameters change
+    })
+  })
+
+  describe(`callback variants with conditional returns`, () => {
+    it(`should handle callback returning undefined with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `undefined-callback-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) => {
+          return useLiveQuery(
+            (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
+                .select(({ persons }) => ({
+                  id: persons.id,
+                  name: persons.name,
+                  age: persons.age,
+                }))
+            },
+            [enabled]
+          )
+        },
+        { initialProps: { enabled: false } }
+      )
+
+      // When callback returns undefined, should return the specified state
+      expect(result.current.state).toBeUndefined()
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(false)
+      expect(result.current.isIdle).toBe(false)
+      expect(result.current.isError).toBe(false)
+      expect(result.current.isCleanedUp).toBe(false)
+
+      // Enable the query
+      act(() => {
+        rerender({ enabled: true })
+      })
+
+      // Wait for collection to sync and state to update
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.current.data).toHaveLength(1)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.isIdle).toBe(false)
+
+      const johnSmith = result.current.data![0]
+      expect(johnSmith).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+        age: 35,
+      })
+
+      // Disable the query again
+      act(() => {
+        rerender({ enabled: false })
+      })
+
+      // Should return to undefined state
+      expect(result.current.state).toBeUndefined()
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(false)
+      expect(result.current.isIdle).toBe(false)
+      expect(result.current.isError).toBe(false)
+      expect(result.current.isCleanedUp).toBe(false)
+    })
+
+    it(`should handle callback returning null with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `null-callback-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) => {
+          return useLiveQuery(
+            (q) => {
+              if (!enabled) return null
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
+                .select(({ persons }) => ({
+                  id: persons.id,
+                  name: persons.name,
+                  age: persons.age,
+                }))
+            },
+            [enabled]
+          )
+        },
+        { initialProps: { enabled: false } }
+      )
+
+      // When callback returns null, should return the specified state
+      expect(result.current.state).toBeUndefined()
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(false)
+      expect(result.current.isIdle).toBe(false)
+      expect(result.current.isError).toBe(false)
+      expect(result.current.isCleanedUp).toBe(false)
+
+      // Enable the query
+      act(() => {
+        rerender({ enabled: true })
+      })
+
+      // Wait for collection to sync and state to update
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.current.data).toHaveLength(1)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isReady).toBe(true)
+      expect(result.current.isIdle).toBe(false)
+    })
+
+    it(`should handle callback returning LiveQueryCollectionConfig`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `config-callback-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result, rerender } = renderHook(
+        ({ useConfig }: { useConfig: boolean }) => {
+          return useLiveQuery(
+            (q) => {
+              if (useConfig) {
+                return {
+                  query: q
+                    .from({ persons: collection })
+                    .where(({ persons }) => gt(persons.age, 30))
+                    .select(({ persons }) => ({
+                      id: persons.id,
+                      name: persons.name,
+                      age: persons.age,
+                    })),
+                  startSync: true,
+                  gcTime: 0,
+                }
+              }
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => lte(persons.age, 30))
+                .select(({ persons }) => ({
+                  id: persons.id,
+                  name: persons.name,
+                  age: persons.age,
+                }))
+                .orderBy(({ persons }) => persons.age)
+            },
+            [useConfig]
+          )
+        },
+        { initialProps: { useConfig: false } }
+      )
+
+      // Wait for collection to sync and state to update
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(2) // John Smith (age 35) and Jane Doe (age 25)
+      })
+      expect(result.current.data).toHaveLength(2)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+
+      expect(result.current.data).toMatchObject([
+        {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+        },
+        {
+          id: `1`,
+          name: `John Doe`,
+          age: 30,
+        },
+      ])
+
+      // Switch to using config
+      act(() => {
+        rerender({ useConfig: true })
+      })
+
+      // Should still work with config
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(1)
+      })
+      expect(result.current.data).toHaveLength(1)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+
+      expect(result.current.data).toMatchObject([
+        {
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+        },
+      ])
+    })
+
+    it(`should handle callback returning Collection`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `collection-callback-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      // Create a live query collection beforehand
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+        startSync: true,
+      })
+
+      const { result, rerender } = renderHook(
+        ({ useCollection }: { useCollection: boolean }) => {
+          return useLiveQuery(
+            (q) => {
+              if (useCollection) {
+                return liveQueryCollection
+              }
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => lte(persons.age, 30))
+                .select(({ persons }) => ({
+                  id: persons.id,
+                  name: persons.name,
+                  age: persons.age,
+                }))
+            },
+            [useCollection]
+          )
+        },
+        { initialProps: { useCollection: false } }
+      )
+
+      // Wait for collection to sync and state to update
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(2) // Only John Smith (age 35)
+      })
+      expect(result.current.data).toHaveLength(2)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+
+      expect(result.current.data).toMatchObject([
+        {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+        },
+        {
+          id: `1`,
+          name: `John Doe`,
+          age: 30,
+        },
+      ])
+
+      // Switch to using pre-created collection
+      act(() => {
+        rerender({ useCollection: true })
+      })
+
+      // Should still work with pre-created collection
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.current.data).toHaveLength(1)
+      expect(result.current.collection).toBeDefined()
+      expect(result.current.status).toBeDefined()
+      expect(result.current.collection).toBe(liveQueryCollection)
+
+      expect(result.current.data).toMatchObject([
+        {
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+        },
+      ])
+    })
+
+    it(`should handle conditional returns with dependencies`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `conditional-deps-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result, rerender } = renderHook(
+        ({ minAge, enabled }: { minAge: number; enabled: boolean }) => {
+          return useLiveQuery(
+            (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, minAge))
+                .select(({ persons }) => ({
+                  id: persons.id,
+                  name: persons.name,
+                  age: persons.age,
+                }))
+            },
+            [minAge, enabled]
+          )
+        },
+        { initialProps: { minAge: 30, enabled: false } }
+      )
+
+      // Initially disabled
+      expect(result.current.state).toBeUndefined()
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+
+      // Enable with minAge 30
+      act(() => {
+        rerender({ minAge: 30, enabled: true })
+      })
+
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.current.data).toHaveLength(1)
+      expect(result.current.isIdle).toBe(false)
+
+      // Change minAge to 25 (should include more people)
+      act(() => {
+        rerender({ minAge: 25, enabled: true })
+      })
+
+      await waitFor(() => {
+        expect(result.current.state?.size).toBe(2) // People with age > 25 (ages 30, 35)
+      })
+      expect(result.current.data).toHaveLength(2)
+
+      // Disable again
+      act(() => {
+        rerender({ minAge: 25, enabled: false })
+      })
+
+      expect(result.current.state).toBeUndefined()
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
     })
   })
 })

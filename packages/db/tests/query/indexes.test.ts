@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection"
+import { createCollection } from "../../src/collection/index.js"
 
 import { createLiveQueryCollection } from "../../src/query/live-query-collection"
 import {
@@ -775,14 +775,21 @@ describe(`Query Index Optimization`, () => {
           },
         ])
 
-        // We should have done an index lookup on the 1st collection to find matching items
-        // i.e. items with id "1"
+        // We should have done 2 index lookups:
+        // 1. to find active items
+        // 2. to find items with matching IDs
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
             type: `index`,
             operation: `eq`,
+            field: `status`,
+            value: `active`,
+          },
+          {
+            type: `index`,
+            operation: `in`,
             field: `id`,
-            value: `1`,
+            value: [`1`],
           },
         ])
       } finally {
@@ -983,28 +990,16 @@ describe(`Query Index Optimization`, () => {
         expect(tracker2.stats.queriesExecuted).toEqual([
           {
             type: `index`,
-            operation: `eq`,
+            operation: `in`,
             field: `id2`,
-            value: `1`,
-          },
-          {
-            type: `index`,
-            operation: `eq`,
-            field: `id2`,
-            value: `3`,
-          },
-          {
-            type: `index`,
-            operation: `eq`,
-            field: `id2`,
-            value: `5`,
+            value: [`1`, `3`, `5`],
           },
         ])
 
         expectIndexUsage(combinedStats, {
           shouldUseIndex: true,
           shouldUseFullScan: false,
-          indexCallCount: 4,
+          indexCallCount: 2,
           fullScanCallCount: 0,
         })
       } finally {
@@ -1186,10 +1181,16 @@ describe(`Query Index Optimization`, () => {
         // We should have done an index lookup on the 1st collection to find active items
         expect(tracker1.stats.queriesExecuted).toEqual([
           {
-            type: `index`,
+            field: `status`,
             operation: `eq`,
+            type: `index`,
+            value: `active`,
+          },
+          {
+            type: `index`,
+            operation: `in`,
             field: `id`,
-            value: `1`,
+            value: [`1`],
           },
         ])
       } finally {

@@ -1,6 +1,8 @@
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { flushSync, untrack } from "svelte"
-import { createLiveQueryCollection } from "@tanstack/db"
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from "svelte/reactivity"
+import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   ChangeMessage,
   Collection,
@@ -325,7 +327,7 @@ export function useLiveQuery(
     })
 
     // Subscribe to collection changes with granular updates
-    currentUnsubscribe = currentCollection.subscribeChanges(
+    const subscription = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         untrack(() => {
@@ -346,8 +348,13 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status state on every change
         status = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
+
+    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
 
     // Preload collection data if not already started
     if (currentCollection.status === `idle`) {

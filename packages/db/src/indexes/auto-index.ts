@@ -1,6 +1,8 @@
+import { DEFAULT_COMPARE_OPTIONS } from "../utils"
 import { BTreeIndex } from "./btree-index"
+import type { CompareOptions } from "../query/builder/types"
 import type { BasicExpression } from "../query/ir"
-import type { CollectionImpl } from "../collection"
+import type { CollectionImpl } from "../collection/index.js"
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
@@ -30,6 +32,7 @@ export function ensureIndexForField<
   fieldName: string,
   fieldPath: Array<string>,
   collection: CollectionImpl<T, TKey, any, any, any>,
+  compareOptions: CompareOptions = DEFAULT_COMPARE_OPTIONS,
   compareFn?: (a: any, b: any) => number
 ) {
   if (!shouldAutoIndex(collection)) {
@@ -37,8 +40,10 @@ export function ensureIndexForField<
   }
 
   // Check if we already have an index for this field
-  const existingIndex = Array.from(collection.indexes.values()).find((index) =>
-    index.matchesField(fieldPath)
+  const existingIndex = Array.from(collection.indexes.values()).find(
+    (index) =>
+      index.matchesField(fieldPath) &&
+      index.matchesCompareOptions(compareOptions)
   )
 
   if (existingIndex) {
@@ -50,7 +55,7 @@ export function ensureIndexForField<
     collection.createIndex((row) => (row as any)[fieldName], {
       name: `auto_${fieldName}`,
       indexType: BTreeIndex,
-      options: compareFn ? { compareFn } : {},
+      options: compareFn ? { compareFn, compareOptions } : {},
     })
   } catch (error) {
     console.warn(`Failed to create auto-index for field "${fieldName}":`, error)

@@ -2,6 +2,7 @@ import {
   ShapeStream,
   isChangeMessage,
   isControlMessage,
+  isVisibleInSnapshot,
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
@@ -12,8 +13,10 @@ import {
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
+  Fn,
   InsertMutationFnParams,
   SyncConfig,
   UpdateMutationFnParams,
@@ -24,6 +27,7 @@ import type {
   ControlMessage,
   GetExtensions,
   Message,
+  PostgresSnapshot,
   Row,
   ShapeStreamOptions,
 } from "@electric-sql/client"
@@ -58,6 +62,12 @@ export type MatchingStrategy<T extends Row<unknown> = Row<unknown>> =
   | { matchFn: MatchFunction<T>; timeout?: number }
   | { timeout?: number }
 
+/**
+ * Type representing a snapshot end message
+ */
+type SnapshotEndMessage = ControlMessage & {
+  headers: { control: `snapshot-end` }
+}
 // The `InferSchemaOutput` and `ResolveType` are copied from the `@tanstack/db` package
 // but we modified `InferSchemaOutput` slightly to restrict the schema output to `Row<unknown>`
 // This is needed in order for `GetExtensions` to be able to infer the parser extensions type from the schema
@@ -67,50 +77,25 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-type ResolveType<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends object = Record<string, unknown>,
-> =
-  unknown extends GetExtensions<TExplicit>
-    ? [TSchema] extends [never]
-      ? TFallback
-      : InferSchemaOutput<TSchema>
-    : TExplicit
-
 /**
  * Configuration interface for Electric collection options
- * @template TExplicit - The explicit type of items in the collection (highest priority)
- * @template TSchema - The schema type for validation and type inference (second priority)
- * @template TFallback - The fallback type if no explicit or schema type is provided
- *
- * @remarks
- * Type resolution follows a priority order:
- * 1. If you provide an explicit type via generic parameter, it will be used
- * 2. If no explicit type is provided but a schema is, the schema's output type will be inferred
- * 3. If neither explicit type nor schema is provided, the fallback type will be used
- *
- * You should provide EITHER an explicit type OR a schema, but not both, as they would conflict.
+ * @template T - The type of items in the collection
+ * @template TSchema - The schema type for validation
  */
 export interface ElectricCollectionConfig<
-  TExplicit extends Row<unknown> = Row<unknown>,
+  T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
-> {
+> extends BaseCollectionConfig<
+    T,
+    string | number,
+    TSchema,
+    Record<string, Fn>,
+    { txid: Txid | Array<Txid> }
+  > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
-  shapeOptions: ShapeStreamOptions<
-    GetExtensions<ResolveType<TExplicit, TSchema, TFallback>>
-  >
-
-  /**
-   * All standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`getKey`]
-  sync?: CollectionConfig<ResolveType<TExplicit, TSchema, TFallback>>[`sync`]
+  shapeOptions: ShapeStreamOptions<GetExtensions<T>>
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -160,9 +145,7 @@ export interface ElectricCollectionConfig<
    *   return { txid: results.map(r => r.txid) } // Array of txids
    * }
    */
-  onInsert?: (
-    params: InsertMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
+  onInsert?: (params: InsertMutationFnParams<T>) => Promise<MatchingStrategy<T>>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -202,9 +185,7 @@ export interface ElectricCollectionConfig<
    *   return {} // Void strategy
    * }
    */
-  onUpdate?: (
-    params: UpdateMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
+  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<MatchingStrategy<T>>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -243,9 +224,7 @@ export interface ElectricCollectionConfig<
    *   return {} // Void strategy
    * }
    */
-  onDelete?: (
-    params: DeleteMutationFnParams<ResolveType<TExplicit, TSchema, TFallback>>
-  ) => Promise<MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>>
+  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<MatchingStrategy<T>>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -258,6 +237,20 @@ function isMustRefetchMessage<T extends Row<unknown>>(
   message: Message<T>
 ): message is ControlMessage & { headers: { control: `must-refetch` } } {
   return isControlMessage(message) && message.headers.control === `must-refetch`
+}
+
+function isSnapshotEndMessage<T extends Row<unknown>>(
+  message: Message<T>
+): message is SnapshotEndMessage {
+  return isControlMessage(message) && message.headers.control === `snapshot-end`
+}
+
+function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
+  return {
+    xmin: message.headers.xmin,
+    xmax: message.headers.xmax,
+    xip_list: message.headers.xip_list,
+  }
 }
 
 // Check if a message contains txids in its headers
@@ -292,25 +285,49 @@ export interface ElectricCollectionUtils<T extends Row<unknown> = Row<unknown>>
 /**
  * Creates Electric collection options for use with a standard Collection
  *
- * @template TExplicit - The explicit type of items in the collection (highest priority)
+ * @template T - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the Electric collection
  * @returns Collection options with utilities
  */
-export function electricCollectionOptions<
-  TExplicit extends Row<unknown> = Row<unknown>,
-  TSchema extends StandardSchemaV1 = never,
-  TFallback extends Row<unknown> = Row<unknown>,
->(config: ElectricCollectionConfig<TExplicit, TSchema, TFallback>) {
+
+// Overload for when schema is provided
+export function electricCollectionOptions<T extends StandardSchemaV1>(
+  config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
+    schema: T
+  }
+): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema: T
+}
+
+// Overload for when no schema is provided
+export function electricCollectionOptions<T extends Row<unknown>>(
+  config: ElectricCollectionConfig<T> & {
+    schema?: never // prohibit schema
+  }
+): CollectionConfig<T, string | number> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: never // no schema in the result
+}
+
+export function electricCollectionOptions(
+  config: ElectricCollectionConfig<any, any>
+): CollectionConfig<any, string | number, any> & {
+  id?: string
+  utils: ElectricCollectionUtils
+  schema?: any
+} {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
+  const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
   const pendingMatches = new Store<
     Map<
       string,
       {
-        matchFn: (
-          message: Message<ResolveType<TExplicit, TSchema, TFallback>>
-        ) => boolean
+        matchFn: (message: Message<any>) => boolean
         resolve: (value: boolean) => void
         reject: (error: Error) => void
         timeoutId: ReturnType<typeof setTimeout>
@@ -320,17 +337,13 @@ export function electricCollectionOptions<
   >(new Map())
 
   // Buffer messages since last up-to-date to handle race conditions
-  const currentBatchMessages = new Store<
-    Array<Message<ResolveType<TExplicit, TSchema, TFallback>>>
-  >([])
-  const sync = createElectricSync<ResolveType<TExplicit, TSchema, TFallback>>(
-    config.shapeOptions,
-    {
-      seenTxids,
-      pendingMatches,
-      currentBatchMessages,
-    }
-  )
+  const currentBatchMessages = new Store<Array<Message<any>>>([])
+  const sync = createElectricSync<any>(config.shapeOptions, {
+    seenTxids,
+    seenSnapshots,
+    pendingMatches,
+    currentBatchMessages,
+  })
 
   /**
    * Wait for a specific transaction ID to be synced
@@ -347,20 +360,46 @@ export function electricCollectionOptions<
       throw new ExpectedNumberInAwaitTxIdError(typeof txId)
     }
 
+    // First check if the txid is in the seenTxids store
     const hasTxid = seenTxids.state.has(txId)
     if (hasTxid) return true
 
+    // Then check if the txid is in any of the seen snapshots
+    const hasSnapshot = seenSnapshots.state.some((snapshot) =>
+      isVisibleInSnapshot(txId, snapshot)
+    )
+    if (hasSnapshot) return true
+
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        unsubscribe()
+        unsubscribeSeenTxids()
+        unsubscribeSeenSnapshots()
         reject(new TimeoutWaitingForTxIdError(txId))
       }, timeout)
 
-      const unsubscribe = seenTxids.subscribe(() => {
+      const unsubscribeSeenTxids = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
           debug(`awaitTxId found match for txid %o`, txId)
           clearTimeout(timeoutId)
-          unsubscribe()
+          unsubscribeSeenTxids()
+          unsubscribeSeenSnapshots()
+          resolve(true)
+        }
+      })
+
+      const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
+        const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
+          isVisibleInSnapshot(txId, snapshot)
+        )
+        if (visibleSnapshot) {
+          debug(
+            `awaitTxId found match for txid %o in snapshot %o`,
+            txId,
+            visibleSnapshot
+          )
+          clearTimeout(timeoutId)
+          unsubscribeSeenSnapshots()
+          unsubscribeSeenTxids()
           resolve(true)
         }
       })
@@ -373,10 +412,8 @@ export function electricCollectionOptions<
    * @param timeout Optional timeout in milliseconds (defaults to 3000ms)
    * @returns Promise that resolves when a matching message is found
    */
-  const awaitMatch: AwaitMatchFn<
-    ResolveType<TExplicit, TSchema, TFallback>
-  > = async (
-    matchFn: MatchFunction<ResolveType<TExplicit, TSchema, TFallback>>,
+  const awaitMatch: AwaitMatchFn<any> = async (
+    matchFn: MatchFunction<any>,
     timeout: number = 3000
   ): Promise<boolean> => {
     debug(`awaitMatch called with custom function`)
@@ -401,9 +438,7 @@ export function electricCollectionOptions<
 
       // We need access to the stream messages to check against the match function
       // This will be handled by the sync configuration
-      const checkMatch = (
-        message: Message<ResolveType<TExplicit, TSchema, TFallback>>
-      ) => {
+      const checkMatch = (message: Message<any>) => {
         if (matchFn(message)) {
           debug(`awaitMatch found matching message, waiting for up-to-date`)
           // Mark as matched but don't resolve yet - wait for up-to-date
@@ -477,7 +512,7 @@ export function electricCollectionOptions<
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy<ResolveType<TExplicit, TSchema, TFallback>>
+    result: MatchingStrategy<any>
   ): Promise<void> => {
     // Check for txid strategy (backward compatible)
     if (`txid` in result) {
@@ -503,11 +538,7 @@ export function electricCollectionOptions<
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
   const wrappedOnInsert = config.onInsert
-    ? async (
-        params: InsertMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: InsertMutationFnParams<any>) => {
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
@@ -515,11 +546,7 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (
-        params: UpdateMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: UpdateMutationFnParams<any>) => {
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
@@ -527,11 +554,7 @@ export function electricCollectionOptions<
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (
-        params: DeleteMutationFnParams<
-          ResolveType<TExplicit, TSchema, TFallback>
-        >
-      ) => {
+    ? async (params: DeleteMutationFnParams<any>) => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
@@ -556,7 +579,7 @@ export function electricCollectionOptions<
     utils: {
       awaitTxId,
       awaitMatch,
-    } as ElectricCollectionUtils<ResolveType<TExplicit, TSchema, TFallback>>,
+    } as ElectricCollectionUtils<any>,
   }
 }
 
@@ -567,6 +590,7 @@ function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     seenTxids: Store<Set<Txid>>
+    seenSnapshots: Store<Array<PostgresSnapshot>>
     pendingMatches: Store<
       Map<
         string,
@@ -582,7 +606,8 @@ function createElectricSync<T extends Row<unknown>>(
     currentBatchMessages: Store<Array<Message<T>>>
   }
 ): SyncConfig<T> {
-  const { seenTxids, pendingMatches, currentBatchMessages } = options
+  const { seenTxids, seenSnapshots, pendingMatches, currentBatchMessages } =
+    options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
   // Store for the relation schema information
@@ -603,33 +628,41 @@ function createElectricSync<T extends Row<unknown>>(
     }
   }
 
-  // Abort controller for the stream - wraps the signal if provided
-  const abortController = new AbortController()
-  if (shapeOptions.signal) {
-    shapeOptions.signal.addEventListener(`abort`, () => {
-      abortController.abort()
-    })
-    if (shapeOptions.signal.aborted) {
-      abortController.abort()
-    }
-  }
-
-  // Cleanup pending matches on abort
-  abortController.signal.addEventListener(`abort`, () => {
-    pendingMatches.setState((current) => {
-      current.forEach((match) => {
-        clearTimeout(match.timeoutId)
-        match.reject(new StreamAbortedError())
-      })
-      return new Map() // Clear all pending matches
-    })
-  })
-
   let unsubscribeStream: () => void
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady, truncate, collection } = params
+
+      // Abort controller for the stream - wraps the signal if provided
+      const abortController = new AbortController()
+
+      if (shapeOptions.signal) {
+        shapeOptions.signal.addEventListener(
+          `abort`,
+          () => {
+            abortController.abort()
+          },
+          {
+            once: true,
+          }
+        )
+        if (shapeOptions.signal.aborted) {
+          abortController.abort()
+        }
+      }
+
+      // Cleanup pending matches on abort
+      abortController.signal.addEventListener(`abort`, () => {
+        pendingMatches.setState((current) => {
+          current.forEach((match) => {
+            clearTimeout(match.timeoutId)
+            match.reject(new StreamAbortedError())
+          })
+          return new Map() // Clear all pending matches
+        })
+      })
+
       const stream = new ShapeStream({
         ...shapeOptions,
         signal: abortController.signal,
@@ -657,6 +690,7 @@ function createElectricSync<T extends Row<unknown>>(
       })
       let transactionStarted = false
       const newTxids = new Set<Txid>()
+      const newSnapshots: Array<PostgresSnapshot> = []
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
@@ -728,6 +762,8 @@ function createElectricSync<T extends Row<unknown>>(
                 ...message.headers,
               },
             })
+          } else if (isSnapshotEndMessage(message)) {
+            newSnapshots.push(parseSnapshotMessage(message))
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -770,6 +806,16 @@ function createElectricSync<T extends Row<unknown>>(
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
             return clonedSeen
+          })
+
+          // Always commit snapshots when we receive up-to-date, regardless of transaction state
+          seenSnapshots.setState((currentSnapshots) => {
+            const seen = [...currentSnapshots, ...newSnapshots]
+            newSnapshots.forEach((snapshot) =>
+              debug(`new snapshot synced from pg %o`, snapshot)
+            )
+            newSnapshots.length = 0
+            return seen
           })
 
           // Resolve all matched pending matches on up-to-date
