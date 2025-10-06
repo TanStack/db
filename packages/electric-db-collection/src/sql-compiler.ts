@@ -1,14 +1,12 @@
 import { serialize } from "./pg-serializer"
-import type { ExternalSubsetParamsRecord } from "@electric-sql/client"
+import type { SubsetParams } from "@electric-sql/client"
 import type { IR, OnLoadMoreOptions } from "@tanstack/db"
 
-export type CompiledSqlRecord = Omit<ExternalSubsetParamsRecord, `params`> & {
+export type CompiledSqlRecord = Omit<SubsetParams, `params`> & {
   params?: Array<unknown>
 }
 
-export function compileSQL<T>(
-  options: OnLoadMoreOptions
-): ExternalSubsetParamsRecord {
+export function compileSQL<T>(options: OnLoadMoreOptions): SubsetParams {
   const { where, orderBy, limit } = options
 
   const params: Array<T> = []
