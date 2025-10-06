@@ -201,6 +201,7 @@ export function electricCollectionOptions(
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         unsubscribeSeenTxids()
+        unsubscribeSeenSnapshots()
         reject(new TimeoutWaitingForTxIdError(txId))
       }, timeout)
 
