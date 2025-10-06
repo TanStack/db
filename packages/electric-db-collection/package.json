@@ -3,8 +3,8 @@
   "description": "ElectricSQL collection for TanStack DB",
   "version": "0.1.28",
   "dependencies": {
+    "@electric-sql/client": "^1.0.14",
     "@standard-schema/spec": "^1.0.0",
-    "@electric-sql/client": "^1.0.10",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.7.7",
     "debug": "^4.4.3"
