@@ -17,7 +17,7 @@ describe(`LocalOnly Collection`, () => {
 
   beforeEach(() => {
     // Create collection with LocalOnly configuration
-    collection = createCollection<TestItem, number>(
+    collection = createCollection<TestItem, number, LocalOnlyCollectionUtils>(
       localOnlyCollectionOptions({
         id: `test-local-only`,
         getKey: (item: TestItem) => item.id,
