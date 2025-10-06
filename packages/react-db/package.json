@@ -15,20 +15,20 @@
     "react",
     "typescript"
   ],
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.18.1",
   "dependencies": {
     "@tanstack/db": "workspace:*",
-    "use-sync-external-store": "^1.5.0"
+    "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.0.10",
+    "@electric-sql/client": "1.0.14",
     "@testing-library/react": "^16.3.0",
-    "@types/react": "^19.1.15",
-    "@types/react-dom": "^19.1.9",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "@types/use-sync-external-store": "^1.5.0",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "exports": {
     ".": {
