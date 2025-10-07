@@ -219,6 +219,8 @@ localStorage.debug = 'ts/db:electric'
 
 This will show you when mutations start waiting for txids and when txids arrive from Electric's sync stream.
 
+This is powered by the [debug](https://www.npmjs.com/package/debug) package.
+
 **When txids DON'T match (common bug):**
 ```
 ts/db:electric awaitTxId called with txid 124
