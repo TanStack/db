@@ -492,6 +492,72 @@ const Todo = () => {
 }
 ```
 
+### Type-Safe Actions with Schema Validation
+
+For better type safety and runtime validation, you can use schema validation libraries like Zod, Valibot, or others. Here's an example using Zod:
+
+```tsx
+import { createOptimisticAction } from "@tanstack/react-db"
+import { z } from "zod"
+
+// Define a schema for the action parameters
+const addTodoSchema = z.object({
+  text: z.string().min(1, "Todo text cannot be empty"),
+  priority: z.enum(["low", "medium", "high"]).optional(),
+})
+
+// Use the schema's inferred type for the generic
+const addTodo = createOptimisticAction<z.infer<typeof addTodoSchema>>({
+  onMutate: (params) => {
+    // Validate parameters at runtime
+    const validated = addTodoSchema.parse(params)
+
+    // Apply optimistic state
+    todoCollection.insert({
+      id: crypto.randomUUID(),
+      text: validated.text,
+      priority: validated.priority ?? "medium",
+      completed: false,
+    })
+  },
+  mutationFn: async (params) => {
+    // Parameters are already validated
+    const validated = addTodoSchema.parse(params)
+
+    const response = await fetch("/api/todos", {
+      method: "POST",
+      body: JSON.stringify({
+        text: validated.text,
+        priority: validated.priority ?? "medium",
+        completed: false,
+      }),
+    })
+    const result = await response.json()
+
+    await todoCollection.utils.refetch()
+    return result
+  },
+})
+
+// Use with type-safe parameters
+const Todo = () => {
+  const handleClick = () => {
+    addTodo({
+      text: "🔥 Make app faster",
+      priority: "high",
+    })
+  }
+
+  return <Button onClick={handleClick} />
+}
+```
+
+This pattern works with any validation library (Zod, Valibot, Yup, etc.) and provides:
+- ✅ Runtime validation of parameters
+- ✅ Type safety from inferred types
+- ✅ Clear error messages for invalid inputs
+- ✅ Single source of truth for parameter shape
+
 ### Complex Multi-Collection Actions
 
 Actions can mutate multiple collections:
