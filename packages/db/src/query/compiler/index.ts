@@ -50,8 +50,18 @@ export interface CompilationResult {
   aliasToCollectionId: Record<string, string>
 
   /**
-   * Maps outer alias to inner alias for subqueries (e.g., `{ activeUser: 'user' }`).
-   * Used to resolve subscriptions during lazy loading when aliases differ.
+   * Flattened mapping from outer alias to innermost alias for subqueries.
+   * Always provides one-hop lookups, never recursive chains.
+   *
+   * Example: `{ activeUser: 'user' }` when `.from({ activeUser: subquery })`
+   * where the subquery uses `.from({ user: collection })`.
+   *
+   * For deeply nested subqueries, the mapping goes directly to the innermost alias:
+   * `{ author: 'user' }` (not `{ author: 'activeUser' }`), so `aliasRemapping[alias]`
+   * always resolves in a single lookup.
+   *
+   * Used to resolve subscriptions during lazy loading when join aliases differ from
+   * the inner aliases where collection subscriptions were created.
    */
   aliasRemapping: Record<string, string>
 }
@@ -406,13 +416,23 @@ function processFrom(
         queryMapping
       )
 
-      // Pull up inner alias mappings from subquery compilation
+      // Pull up alias mappings from subquery to parent scope.
+      // This includes both the innermost alias-to-collection mappings AND
+      // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
 
-      // Create remapping when outer alias differs from inner alias.
-      // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: ... })
-      // Creates: aliasRemapping['activeUser'] = 'user'
+      // Create a FLATTENED remapping from outer alias to innermost alias.
+      // For nested subqueries, this ensures one-hop lookups (not recursive chains).
+      //
+      // Example with 3-level nesting:
+      //   Inner:  .from({ user: usersCollection })
+      //   Middle: .from({ activeUser: innerSubquery })     → creates: activeUser → user
+      //   Outer:  .from({ author: middleSubquery })        → creates: author → user (not author → activeUser)
+      //
+      // The key insight: We search through the PULLED-UP aliasToCollectionId (which contains
+      // the innermost 'user' alias), so we always map directly to the deepest level.
+      // This means aliasRemapping[alias] is always a single lookup, never recursive.
       // Needed for subscription resolution during lazy loading.
       const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
         (alias) =>

@@ -277,10 +277,11 @@ function processJoin(
       > = activePipeline.pipe(
         tap((data) => {
           // Find the subscription for lazy loading.
-          // For subqueries, the outer join alias (e.g., 'activeUser') may differ from the
-          // inner alias (e.g., 'user'). Use aliasRemapping to resolve outer → inner alias.
+          // Subscriptions are keyed by the innermost alias (where the collection subscription
+          // was actually created). For subqueries, the join alias may differ from the inner alias.
+          // aliasRemapping provides a flattened one-hop lookup from outer → innermost alias.
           // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
-          // → aliasRemapping['activeUser'] = 'user'
+          // → aliasRemapping['activeUser'] = 'user' (always maps directly to innermost, never recursive)
           const resolvedAlias = aliasRemapping[lazyAlias] || lazyAlias
           const lazySourceSubscription = subscriptions[resolvedAlias]
 
@@ -463,12 +464,23 @@ function processJoinSource(
         queryMapping
       )
 
-      // Pull up alias mappings from subquery
+      // Pull up alias mappings from subquery to parent scope.
+      // This includes both the innermost alias-to-collection mappings AND
+      // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
 
-      // For subqueries, the outer alias (from.alias) may differ from inner aliases.
-      // Find the inner alias that corresponds to the subquery's main collection and create a remapping.
+      // Create a flattened remapping from outer alias to innermost alias.
+      // For nested subqueries, this ensures one-hop lookups (not recursive chains).
+      //
+      // Example with 3-level nesting:
+      //   Inner:  .from({ user: usersCollection })
+      //   Middle: .from({ activeUser: innerSubquery })     → creates: activeUser → user
+      //   Outer:  .join({ author: middleSubquery }, ...)   → creates: author → user (not author → activeUser)
+      //
+      // We search through the PULLED-UP aliasToCollectionId (which contains the
+      // innermost 'user' alias), so we always map directly to the deepest level.
+      // This means aliasRemapping[lazyAlias] is always a single lookup, never recursive.
       const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
         (alias) =>
           subQueryResult.aliasToCollectionId[alias] ===
