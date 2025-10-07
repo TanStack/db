@@ -200,3 +200,94 @@ todosCollection.utils.awaitTxId(12345)
 ```
 
 This is useful when you need to ensure a mutation has been synchronized before proceeding with other operations.
+
+## Debugging
+
+### Common Issue: awaitTxId Stalls or Times Out
+
+A frequent issue developers encounter is that `awaitTxId` (or the transaction's `isPersisted.promise`) stalls indefinitely, eventually timing out with no error messages. The data persists correctly to the database, but the optimistic mutation never resolves.
+
+**Root Cause:** This happens when the transaction ID (txid) returned from your API doesn't match the actual transaction ID of the mutation in Postgres. This mismatch occurs when you query `pg_current_xact_id()` **outside** the same transaction that performs the mutation.
+
+### Enable Debug Logging
+
+To diagnose txid issues, enable debug logging in your browser console:
+
+```javascript
+localStorage.debug = 'ts/db:electric'
+```
+
+This will show you when mutations start waiting for txids and when txids arrive from Electric's sync stream.
+
+This is powered by the [debug](https://www.npmjs.com/package/debug) package.
+
+**When txids DON'T match (common bug):**
+```
+ts/db:electric awaitTxId called with txid 124
+ts/db:electric new txids synced from pg [123]
+// Stalls forever - 124 never arrives!
+```
+
+In this example, the mutation happened in transaction 123, but you queried `pg_current_xact_id()` in a separate transaction (124) that ran after the mutation. The client waits for 124 which will never arrive.
+
+**When txids DO match (correct):**
+```
+ts/db:electric awaitTxId called with txid 123
+ts/db:electric new txids synced from pg [123]
+ts/db:electric awaitTxId found match for txid 123
+// Resolves immediately!
+```
+
+### The Solution: Query txid Inside the Transaction
+
+You **must** call `pg_current_xact_id()` inside the same transaction as your mutation:
+
+**❌ Wrong - txid queried outside transaction:**
+```typescript
+// DON'T DO THIS
+async function createTodo(data) {
+  const txid = await generateTxId(sql) // Wrong: separate transaction
+
+  await sql.begin(async (tx) => {
+    await tx`INSERT INTO todos ${tx(data)}`
+  })
+
+  return { txid } // This txid won't match!
+}
+```
+
+**✅ Correct - txid queried inside transaction:**
+```typescript
+// DO THIS
+async function createTodo(data) {
+  let txid!: Txid
+
+  const result = await sql.begin(async (tx) => {
+    // Call generateTxId INSIDE the transaction
+    txid = await generateTxId(tx)
+
+    const [todo] = await tx`
+      INSERT INTO todos ${tx(data)}
+      RETURNING *
+    `
+    return todo
+  })
+
+  return { todo: result, txid } // txid matches the mutation
+}
+
+async function generateTxId(tx: any): Promise<Txid> {
+  const result = await tx`SELECT pg_current_xact_id()::xid::text as txid`
+  const txid = result[0]?.txid
+
+  if (txid === undefined) {
+    throw new Error(`Failed to get transaction ID`)
+  }
+
+  return parseInt(txid, 10)
+}
+```
+
+See working examples in:
+- `examples/react/todo/src/routes/api/todos.ts`
+- `examples/react/todo/src/api/server.ts`
