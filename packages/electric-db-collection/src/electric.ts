@@ -13,6 +13,7 @@ import {
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -50,15 +51,11 @@ export type MatchFunction<T extends Row<unknown>> = (
 
 /**
  * Matching strategies for Electric synchronization
- * Handlers can return one of three strategies:
- * - Txid strategy: { txid: number | number[] }
- * - Custom match strategy: { matchFn: (message) => boolean, timeout?: number }
- * - Void strategy: { timeout?: number } (when neither txid nor matchFn provided)
+ * Handlers can return:
+ * - Txid strategy: { txid: number | number[] } (recommended)
+ * - Void (no return value) - mutation completes without waiting
  */
-export type MatchingStrategy<T extends Row<unknown> = Row<unknown>> =
-  | { txid: Txid | Array<Txid> }
-  | { matchFn: MatchFunction<T>; timeout?: number }
-  | { timeout?: number }
+export type MatchingStrategy = { txid: Txid | Array<Txid> } | void
 
 /**
  * Type representing a snapshot end message
@@ -83,56 +80,27 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
 export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
-> {
+> extends Omit<
+    BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
 
   /**
-   * All standard Collection configuration properties
-   */
-  id?: string
-  schema?: TSchema
-  getKey: CollectionConfig<T, string | number, TSchema>[`getKey`]
-  sync?: CollectionConfig<T, string | number, TSchema>[`sync`]
-
-  /**
    * Optional asynchronous handler function called before an insert operation
-   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to a matching strategy
+   * @returns Promise resolving to { txid } or void
    * @example
-   * // Basic Electric insert handler with txid matching (backward compatible)
+   * // Basic Electric insert handler with txid (recommended)
    * onInsert: async ({ transaction }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid } // Txid strategy (backward compatible)
-   * }
-   *
-   * @example
-   * // Custom match function strategy
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   await api.todos.create({ data: newItem })
-   *   return {
-   *     matchFn: (message) => {
-   *       return isChangeMessage(message) &&
-   *              message.headers.operation === 'insert' &&
-   *              message.value.name === newItem.name
-   *     },
-   *     timeout: 5000 // Optional timeout in ms, defaults to 3000
-   *   }
-   * }
-   *
-   * @example
-   * // Void strategy - always waits 3 seconds
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   await api.todos.create({ data: newItem })
-   *   return {} // Void strategy
+   *   return { txid: result.txid }
    * }
    *
    * @example
@@ -142,89 +110,101 @@ export interface ElectricCollectionConfig<
    *   const results = await Promise.all(
    *     items.map(item => api.todos.create({ data: item }))
    *   )
-   *   return { txid: results.map(r => r.txid) } // Array of txids
+   *   return { txid: results.map(r => r.txid) }
+   * }
+   *
+   * @example
+   * // No return (void) - mutation completes without waiting
+   * onInsert: async ({ transaction }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.todos.create({ data: newItem })
+   *   // No return - don't wait for sync
+   * }
+   *
+   * @example
+   * // Use awaitMatch utility for custom matching
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.todos.create({ data: newItem })
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'insert' &&
+   *                  message.value.name === newItem.name
+   *   )
    * }
    */
-  onInsert?: (params: InsertMutationFnParams<T>) => Promise<MatchingStrategy<T>>
+  onInsert?: (params: InsertMutationFnParams<T>) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to a matching strategy
+   * @returns Promise resolving to { txid } or void
    * @example
-   * // Basic Electric update handler with txid matching (backward compatible)
+   * // Basic Electric update handler with txid (recommended)
    * onUpdate: async ({ transaction }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
    *     data: changes
    *   })
-   *   return { txid: result.txid } // Txid strategy (backward compatible)
+   *   return { txid: result.txid }
    * }
    *
    * @example
-   * // Custom match function strategy for updates
+   * // No return (void) - mutation completes without waiting
    * onUpdate: async ({ transaction }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   await api.todos.update({ where: { id: original.id }, data: changes })
-   *   return {
-   *     matchFn: (message) => {
-   *       return isChangeMessage(message) &&
-   *              message.headers.operation === 'update' &&
-   *              message.value.id === original.id
-   *     }
-   *   }
    * }
    *
    * @example
-   * // Void strategy - always waits 3 seconds
-   * onUpdate: async ({ transaction }) => {
+   * // Use awaitMatch utility for custom matching
+   * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   await api.todos.update({ where: { id: original.id }, data: changes })
-   *   return {} // Void strategy
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'update' &&
+   *                  message.value.id === original.id
+   *   )
    * }
    */
-  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<MatchingStrategy<T>>
+  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before a delete operation
-   * Can return different matching strategies for synchronization
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to a matching strategy
+   * @returns Promise resolving to { txid } or void
    * @example
-   * // Basic Electric delete handler with txid matching (backward compatible)
+   * // Basic Electric delete handler with txid (recommended)
    * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   return { txid: result.txid } // Txid strategy (backward compatible)
+   *   return { txid: result.txid }
    * }
    *
    * @example
-   * // Custom match function strategy for deletes
+   * // No return (void) - mutation completes without waiting
    * onDelete: async ({ transaction }) => {
    *   const mutation = transaction.mutations[0]
    *   await api.todos.delete({ id: mutation.original.id })
-   *   return {
-   *     matchFn: (message) => {
-   *       return isChangeMessage(message) &&
-   *              message.headers.operation === 'delete' &&
-   *              message.value.id === mutation.original.id
-   *     }
-   *   }
    * }
    *
    * @example
-   * // Void strategy - always waits 3 seconds
-   * onDelete: async ({ transaction }) => {
+   * // Use awaitMatch utility for custom matching
+   * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   await api.todos.delete({ id: mutation.original.id })
-   *   return {} // Void strategy
+   *   await collection.utils.awaitMatch(
+   *     (message) => isChangeMessage(message) &&
+   *                  message.headers.operation === 'delete' &&
+   *                  message.value.id === mutation.original.id
+   *   )
    * }
    */
-  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<MatchingStrategy<T>>
+  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<MatchingStrategy>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -338,11 +318,25 @@ export function electricCollectionOptions(
 
   // Buffer messages since last up-to-date to handle race conditions
   const currentBatchMessages = new Store<Array<Message<any>>>([])
+
+  /**
+   * Helper function to remove multiple matches from the pendingMatches store
+   */
+  const removePendingMatches = (matchIds: Array<string>) => {
+    if (matchIds.length > 0) {
+      pendingMatches.setState((current) => {
+        const newMatches = new Map(current)
+        matchIds.forEach((id) => newMatches.delete(id))
+        return newMatches
+      })
+    }
+  }
   const sync = createElectricSync<any>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
     pendingMatches,
     currentBatchMessages,
+    removePendingMatches,
   })
 
   /**
@@ -457,11 +451,11 @@ export function electricCollectionOptions(
 
       // Check against current batch messages first to handle race conditions
       for (const message of currentBatchMessages.state) {
-        if (checkMatch(message)) {
+        if (matchFn(message)) {
           debug(
             `awaitMatch found immediate match in current batch, waiting for up-to-date`
           )
-          // Mark as matched and register for up-to-date resolution
+          // Register match as already matched
           pendingMatches.setState((current) => {
             const newMatches = new Map(current)
             newMatches.set(matchId, {
@@ -494,46 +488,21 @@ export function electricCollectionOptions(
   }
 
   /**
-   * Wait for a fixed timeout (void strategy)
-   * @param timeout Timeout in milliseconds (defaults to 3000ms for void strategy)
-   * @returns Promise that resolves after the timeout
-   */
-  const awaitVoid = async (timeout: number = 3000): Promise<boolean> => {
-    debug(`awaitVoid called with timeout %dms`, timeout)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        debug(`awaitVoid completed after %dms`, timeout)
-        resolve(true)
-      }, timeout)
-    })
-  }
-
-  /**
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy<any>
+    result: MatchingStrategy
   ): Promise<void> => {
-    // Check for txid strategy (backward compatible)
-    if (`txid` in result) {
+    // Only wait if result contains txid
+    if (result && `txid` in result) {
       // Handle both single txid and array of txids
       if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map((id) => awaitTxId(id)))
+        await Promise.all(result.txid.map(awaitTxId))
       } else {
         await awaitTxId(result.txid)
       }
-      return
     }
-
-    // Check for custom match function strategy
-    if (`matchFn` in result) {
-      await awaitMatch(result.matchFn, result.timeout)
-      return
-    }
-
-    // Void strategy with configurable timeout
-    const timeout = result.timeout ?? 3000
-    await awaitVoid(timeout)
+    // If result is void/undefined, don't wait - mutation completes immediately
   }
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
@@ -604,10 +573,16 @@ function createElectricSync<T extends Row<unknown>>(
       >
     >
     currentBatchMessages: Store<Array<Message<T>>>
+    removePendingMatches: (matchIds: Array<string>) => void
   }
 ): SyncConfig<T> {
-  const { seenTxids, seenSnapshots, pendingMatches, currentBatchMessages } =
-    options
+  const {
+    seenTxids,
+    seenSnapshots,
+    pendingMatches,
+    currentBatchMessages,
+    removePendingMatches,
+  } = options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
   // Store for the relation schema information
@@ -733,13 +708,7 @@ function createElectricSync<T extends Row<unknown>>(
           })
 
           // Remove matches that errored
-          if (matchesToRemove.length > 0) {
-            pendingMatches.setState((current) => {
-              const newMatches = new Map(current)
-              matchesToRemove.forEach((id) => newMatches.delete(id))
-              return newMatches
-            })
-          }
+          removePendingMatches(matchesToRemove)
 
           if (isChangeMessage(message)) {
             // Check if the message contains schema information
@@ -830,13 +799,7 @@ function createElectricSync<T extends Row<unknown>>(
           })
 
           // Remove resolved matches
-          if (matchesToResolve.length > 0) {
-            pendingMatches.setState((current) => {
-              const newMatches = new Map(current)
-              matchesToResolve.forEach((id) => newMatches.delete(id))
-              return newMatches
-            })
-          }
+          removePendingMatches(matchesToResolve)
         }
       })
 

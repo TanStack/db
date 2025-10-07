@@ -54,26 +54,21 @@ The `electricCollectionOptions` function accepts the following options:
 
 ### Persistence Handlers
 
-Handlers are called before mutations and support three different matching strategies:
+Handlers are called before mutations to persist changes to your backend:
 
 - `onInsert`: Handler called before insert operations
-- `onUpdate`: Handler called before update operations  
+- `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
-Each handler can return:
-- `{ txid: number | number[] }` - Txid strategy (recommended)
-- `{ matchFn: (message) => boolean, timeout?: number }` - Custom match function strategy
-- `{}` - Void strategy (3-second timeout)
+Each handler should return `{ txid }` to wait for synchronization. For advanced cases without txids, use the `awaitMatch` utility function.
 
-## Persistence Handlers & Matching Strategies
+## Persistence Handlers & Synchronization
 
-Handlers can be defined to run on mutations. They are useful to send mutations to the backend and confirming them once Electric delivers the corresponding transactions. Until confirmation, TanStack DB blocks sync data for the collection to prevent race conditions. To avoid any delays, it's important to use a matching strategy.
+Handlers persist mutations to the backend and wait for Electric to sync the changes back. This prevents UI glitches where optimistic updates would be removed and then re-added. TanStack DB blocks sync data until the mutation is confirmed, ensuring smooth user experience.
 
-Electric collections support three matching strategies for synchronizing client mutations with server responses:
+### 1. Using Txid (Recommended)
 
-### 1. Txid Strategy (Recommended)
-
-The most reliable strategy uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client waits for that specific txid to appear in the Electric stream.
+The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client waits for that specific txid to appear in the Electric stream.
 
 ```typescript
 const todosCollection = createCollection(
@@ -85,31 +80,31 @@ const todosCollection = createCollection(
       url: '/api/todos',
       params: { table: 'todos' },
     },
-    
+
     onInsert: async ({ transaction }) => {
       const newItem = transaction.mutations[0].modified
       const response = await api.todos.create(newItem)
-      
-      // Txid strategy - most reliable
+
+      // Return txid to wait for sync
       return { txid: response.txid }
     },
-    
+
     onUpdate: async ({ transaction }) => {
       const { original, changes } = transaction.mutations[0]
       const response = await api.todos.update({
         where: { id: original.id },
         data: changes
       })
-      
+
       return { txid: response.txid }
     }
   })
 )
 ```
 
-### 2. Custom Match Function Strategy
+### 2. Using Custom Match Functions
 
-When txids aren't available, you can provide a custom function that examines Electric stream messages to determine when a mutation has been synchronized. This is useful for heuristic-based matching.
+For cases where txids aren't available, use the `awaitMatch` utility function to wait for synchronization with custom matching logic:
 
 ```typescript
 import { isChangeMessage } from '@tanstack/electric-db-collection'
@@ -122,28 +117,28 @@ const todosCollection = createCollection(
       url: '/api/todos',
       params: { table: 'todos' },
     },
-    
-    onInsert: async ({ transaction }) => {
+
+    onInsert: async ({ transaction, collection }) => {
       const newItem = transaction.mutations[0].modified
       await api.todos.create(newItem)
-      
-      // Custom match function strategy
-      return {
-        matchFn: (message) => {
-          return isChangeMessage(message) && 
+
+      // Use awaitMatch utility for custom matching
+      await collection.utils.awaitMatch(
+        (message) => {
+          return isChangeMessage(message) &&
                  message.headers.operation === 'insert' &&
                  message.value.text === newItem.text
         },
-        timeout: 10000 // Optional timeout in ms, defaults to 30000
-      }
+        5000 // timeout in ms (optional, defaults to 3000)
+      )
     }
   })
 )
 ```
 
-### 3. Void Strategy (Timeout)
+### 3. Using Simple Timeout
 
-When neither txids nor reliable matching are possible, you can use the void strategy which simply waits a fixed timeout period (3 seconds by default). This is useful for prototyping or when you're confident about timing.
+For quick prototyping or when you're confident about timing, you can use a simple timeout. This is crude but works:
 
 ```typescript
 const todosCollection = createCollection(
@@ -154,13 +149,13 @@ const todosCollection = createCollection(
       url: '/api/todos',
       params: { table: 'todos' },
     },
-    
+
     onInsert: async ({ transaction }) => {
       const newItem = transaction.mutations[0].modified
       await api.todos.create(newItem)
-      
-      // Void strategy - waits 3 seconds
-      return {}
+
+      // Simple timeout approach
+      await new Promise(resolve => setTimeout(resolve, 2000))
     }
   })
 )

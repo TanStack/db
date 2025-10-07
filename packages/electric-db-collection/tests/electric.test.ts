@@ -644,10 +644,8 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.size).toEqual(1)
     })
 
-    it(`should support void strategy when handler returns empty object`, async () => {
-      vi.useFakeTimers()
-
-      const onInsert = vi.fn().mockResolvedValue({})
+    it(`should support void strategy when handler returns nothing`, async () => {
+      const onInsert = vi.fn().mockResolvedValue(undefined)
 
       const config = {
         id: `test-void-strategy`,
@@ -662,28 +660,24 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Insert with void strategy - should complete after 3 seconds with fake timers
+      // Insert with void strategy - should complete immediately without waiting
       const tx = testCollection.insert({ id: 1, name: `Void Test` })
-
-      // Use runOnlyPendingTimers to execute the timeout
-      await vi.runOnlyPendingTimersAsync()
 
       await expect(tx.isPersisted.promise).resolves.toBeDefined()
       expect(onInsert).toHaveBeenCalled()
-
-      vi.useRealTimers()
     })
 
-    it(`should support custom match function strategy`, async () => {
+    it(`should support custom match function using awaitMatch utility`, async () => {
       let resolveCustomMatch: () => void
       const customMatchPromise = new Promise<void>((resolve) => {
         resolveCustomMatch = resolve
       })
 
-      const onInsert = vi.fn().mockImplementation(({ transaction }) => {
-        const item = transaction.mutations[0].modified
-        return {
-          matchFn: (message: any) => {
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+          await col.utils.awaitMatch((message: any) => {
             if (
               isChangeMessage(message) &&
               message.headers.operation === `insert` &&
@@ -693,10 +687,8 @@ describe(`Electric Integration`, () => {
               return true
             }
             return false
-          },
-          timeout: 5000,
-        }
-      })
+          }, 5000)
+        })
 
       const config = {
         id: `test-custom-match`,
@@ -739,10 +731,14 @@ describe(`Electric Integration`, () => {
     it(`should timeout with custom match function when no match found`, async () => {
       vi.useFakeTimers()
 
-      const onInsert = vi.fn().mockResolvedValue({
-        matchFn: () => false, // Never matches
-        timeout: 1, // Short timeout for test
-      })
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          await col.utils.awaitMatch(
+            () => false, // Never matches
+            1 // Short timeout for test
+          )
+        })
 
       const config = {
         id: `test-timeout`,
@@ -805,16 +801,18 @@ describe(`Electric Integration`, () => {
       expect(typeof testCollection.utils.awaitMatch).toBe(`function`)
     })
 
-    it(`should support multiple matching strategies in different handlers`, () => {
+    it(`should support multiple strategies in different handlers`, () => {
       const onInsert = vi.fn().mockResolvedValue({ txid: 100 }) // Txid strategy
-      const onUpdate = vi
+      const onUpdate = vi.fn().mockResolvedValue(undefined) // Void strategy (no return)
+      const onDelete = vi
         .fn()
-        .mockImplementation(() => Promise.resolve({ timeout: 1500 })) // Void strategy with custom timeout
-      const onDelete = vi.fn().mockResolvedValue({
-        // Custom match strategy
-        matchFn: (message: any) =>
-          isChangeMessage(message) && message.headers.operation === `delete`,
-      })
+        .mockImplementation(async ({ collection: col }) => {
+          // Custom match using awaitMatch utility
+          await col.utils.awaitMatch(
+            (message: any) =>
+              isChangeMessage(message) && message.headers.operation === `delete`
+          )
+        })
 
       const config = {
         id: `test-mixed-strategies`,
@@ -839,10 +837,14 @@ describe(`Electric Integration`, () => {
     it(`should cleanup pending matches on timeout without memory leaks`, async () => {
       vi.useFakeTimers()
 
-      const onInsert = vi.fn().mockResolvedValue({
-        matchFn: () => false, // Never matches
-        timeout: 1, // Short timeout for test
-      })
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          await col.utils.awaitMatch(
+            () => false, // Never matches
+            1 // Short timeout for test
+          )
+        })
 
       const config = {
         id: `test-cleanup`,
@@ -891,10 +893,11 @@ describe(`Electric Integration`, () => {
       let matchFound = false
       let persistenceCompleted = false
 
-      const onInsert = vi.fn().mockImplementation(({ transaction }) => {
-        const item = transaction.mutations[0].modified
-        return Promise.resolve({
-          matchFn: (message: any) => {
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+          await col.utils.awaitMatch((message: any) => {
             if (
               isChangeMessage(message) &&
               message.headers.operation === `insert` &&
@@ -904,10 +907,8 @@ describe(`Electric Integration`, () => {
               return true
             }
             return false
-          },
-          timeout: 5000,
+          }, 5000)
         })
-      })
 
       const config = {
         id: `test-commit-semantics`,
@@ -963,13 +964,14 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.syncedData.has(1)).toBe(true)
     })
 
-    it(`should support configurable timeout for void strategy`, async () => {
+    it(`should support custom timeout using setTimeout`, async () => {
       vi.useFakeTimers()
 
       const customTimeout = 500 // Custom short timeout
 
-      const onInsert = vi.fn().mockResolvedValue({
-        timeout: customTimeout, // Void strategy with custom timeout
+      const onInsert = vi.fn().mockImplementation(async () => {
+        // Simple timeout approach
+        await new Promise((resolve) => setTimeout(resolve, customTimeout))
       })
 
       const config = {
