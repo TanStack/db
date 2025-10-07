@@ -737,9 +737,11 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should timeout with custom match function when no match found`, async () => {
+      vi.useFakeTimers()
+
       const onInsert = vi.fn().mockResolvedValue({
         matchFn: () => false, // Never matches
-        timeout: 100, // Short timeout for test
+        timeout: 1, // Short timeout for test
       })
 
       const config = {
@@ -756,8 +758,16 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
+      // Add catch handler to prevent global unhandled rejection detection
+      tx.isPersisted.promise.catch(() => {})
+
+      // Advance timers to trigger timeout
+      await vi.runOnlyPendingTimersAsync()
+
       // Should timeout and fail
       await expect(tx.isPersisted.promise).rejects.toThrow()
+
+      vi.useRealTimers()
     })
   })
 
@@ -827,9 +837,11 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should cleanup pending matches on timeout without memory leaks`, async () => {
+      vi.useFakeTimers()
+
       const onInsert = vi.fn().mockResolvedValue({
         matchFn: () => false, // Never matches
-        timeout: 100, // Short timeout for test
+        timeout: 1, // Short timeout for test
       })
 
       const config = {
@@ -848,6 +860,12 @@ describe(`Electric Integration`, () => {
       // Start insert that will timeout
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
+      // Add catch handler to prevent global unhandled rejection detection
+      tx.isPersisted.promise.catch(() => {})
+
+      // Advance timers to trigger timeout
+      await vi.runOnlyPendingTimersAsync()
+
       // Should timeout and fail
       await expect(tx.isPersisted.promise).rejects.toThrow(
         `Timeout waiting for custom match function`
@@ -865,6 +883,8 @@ describe(`Electric Integration`, () => {
           { headers: { control: `up-to-date` } },
         ])
       }).not.toThrow()
+
+      vi.useRealTimers()
     })
 
     it(`should wait for up-to-date after custom match (commit semantics)`, async () => {
@@ -940,7 +960,7 @@ describe(`Electric Integration`, () => {
 
       // Verify persistence completed after up-to-date
       expect(persistenceCompleted).toBe(true)
-      expect(testCollection.syncedData.has(1)).toBe(true)
+      expect(testCollection._state.syncedData.has(1)).toBe(true)
     })
 
     it(`should support configurable timeout for void strategy`, async () => {
