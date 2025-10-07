@@ -782,14 +782,18 @@ function optimizeFromWithTracking(
     return new QueryRefClass(subQuery, from.alias)
   }
 
-  // Must be queryRef due to type system
-
   // SAFETY CHECK: Only check safety when pushing WHERE clauses into existing subqueries
   // We need to be careful about pushing WHERE clauses into subqueries that already have
   // aggregates, HAVING, or ORDER BY + LIMIT since that could change their semantics
   if (!isSafeToPushIntoExistingSubquery(from.query, whereClause, from.alias)) {
     // Return a copy without optimization to maintain immutability
     // Do NOT mark as optimized since we didn't actually optimize it
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
+
+  // Skip pushdown when a clause references a field that only exists via a renamed
+  // projection inside the subquery; leaving it outside preserves the alias mapping.
+  if (referencesAliasWithRemappedSelect(from.query, whereClause, from.alias)) {
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
   }
 
@@ -940,6 +944,70 @@ function whereReferencesComputedSelectFields(
     if (alias !== outerAlias) continue
     if (computed.has(field)) return true
   }
+  return false
+}
+
+/**
+ * Detects whether a WHERE clause references the subquery alias through fields that
+ * are re-exposed under different names (renamed SELECT projections or fnSelect output).
+ * In those cases we keep the clause at the outer level to avoid alias remapping bugs.
+ * TODO: in future we should handle this by rewriting the clause to use the subquery's
+ * internal field references, but it likely needs a wider refactor to do cleanly.
+ */
+function referencesAliasWithRemappedSelect(
+  subquery: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  // Only care about clauses that actually reference the outer alias.
+  if (!collectRefs(whereClause).some((ref) => ref.path[0] === outerAlias)) {
+    return false
+  }
+
+  // fnSelect always rewrites the row shape, so alias-safe pushdown is impossible.
+  if (subquery.fnSelect) {
+    return true
+  }
+
+  const select = subquery.select
+  // Without an explicit SELECT the clause still refers to the original collection.
+  if (!select) {
+    return false
+  }
+
+  for (const ref of collectRefs(whereClause)) {
+    const path = ref.path
+    // Need at least alias + field to matter.
+    if (path.length < 2) continue
+    if (path[0] !== outerAlias) continue
+
+    const projected = select[path[1]!]
+    // Unselected fields mean the alias was reshaped; treat as unsafe.
+    if (!projected) continue
+
+    // Non-PropRef projections are computed values; cannot push down.
+    if (!(projected instanceof PropRef)) {
+      return true
+    }
+
+    // Require the projection to carry both alias and field info for comparison.
+    if (projected.path.length < 2) {
+      return true
+    }
+
+    const [innerAlias, innerField] = projected.path
+
+    // Safe only when the projection points straight back to the same alias or the
+    // underlying source alias and preserves the field name.
+    if (innerAlias !== outerAlias && innerAlias !== subquery.from.alias) {
+      return true
+    }
+
+    if (innerField !== path[1]) {
+      return true
+    }
+  }
+
   return false
 }
 
