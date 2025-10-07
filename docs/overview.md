@@ -422,6 +422,50 @@ export const tempDataCollection = createCollection(
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
+**Using LocalStorage and LocalOnly Collections with Manual Transactions:**
+
+When using either LocalStorage or LocalOnly collections with manual transactions (created via `createTransaction`), you must call `utils.acceptMutations()` in your transaction's `mutationFn` to persist the changes. This is necessary because these collections don't participate in the standard mutation handler flow for manual transactions.
+
+```ts
+import { createTransaction } from "@tanstack/react-db"
+
+const localData = createCollection(
+  localOnlyCollectionOptions({
+    id: "form-draft",
+    getKey: (item) => item.id,
+  })
+)
+
+const serverCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["items"],
+    queryFn: async () => api.items.getAll(),
+    getKey: (item) => item.id,
+    onInsert: async ({ transaction }) => {
+      await api.items.create(transaction.mutations[0].modified)
+    },
+  })
+)
+
+const tx = createTransaction({
+  mutationFn: async ({ transaction }) => {
+    // Persist local collection mutations
+    localData.utils.acceptMutations(transaction)
+
+    // Server collection mutations are handled by their onInsert handler
+    // which runs automatically
+  },
+})
+
+// Apply mutations to both collections in one transaction
+tx.mutate(() => {
+  localData.insert({ id: "draft-1", data: "..." })
+  serverCollection.insert({ id: "1", name: "Item" })
+})
+
+await tx.commit()
+```
+
 #### Derived collections
 
 Live queries return collections. This allows you to derive collections from other collections.

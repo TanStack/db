@@ -42,23 +42,21 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
    * This should be called in your transaction's mutationFn to persist local-only data.
    *
    * @param transaction - The transaction containing mutations to accept
-   * @param collection - The collection instance (pass `this` from within collection context or the collection variable)
    * @example
    * const localData = createCollection(localOnlyCollectionOptions({...}))
    *
    * const tx = createTransaction({
    *   mutationFn: async ({ transaction }) => {
    *     // Persist local-only mutations
-   *     localData.utils.acceptMutations(transaction, localData)
+   *     localData.utils.acceptMutations(transaction)
    *     // Then make API call
    *     await api.save(...)
    *   }
    * })
    */
-  acceptMutations: (
-    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
-    collection: unknown
-  ) => void
+  acceptMutations: (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => void
 }
 
 /**
@@ -122,7 +120,7 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
  * const tx = createTransaction({
  *   mutationFn: async ({ transaction }) => {
  *     // Persist local-only mutations
- *     localData.utils.acceptMutations(transaction, localData)
+ *     localData.utils.acceptMutations(transaction)
  *
  *     // Use local data in API call
  *     const localMutations = transaction.mutations.filter(m => m.collection === localData)
@@ -246,13 +244,12 @@ export function localOnlyCollectionOptions(
   /**
    * Accepts mutations from a transaction that belong to this collection and persists them
    */
-  const acceptMutations = (
-    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
-    collection: unknown
-  ) => {
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => {
     // Filter mutations that belong to this collection
     const collectionMutations = transaction.mutations.filter(
-      (m) => m.collection === collection
+      (m) => m.collection === syncResult.collection
     )
 
     if (collectionMutations.length === 0) {
@@ -266,9 +263,9 @@ export function localOnlyCollectionOptions(
   return {
     ...restConfig,
     sync: syncResult.sync,
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    onInsert: wrappedOnInsert as any,
+    onUpdate: wrappedOnUpdate as any,
+    onDelete: wrappedOnDelete as any,
     utils: {
       acceptMutations,
     } as LocalOnlyCollectionUtils,
@@ -290,11 +287,12 @@ export function localOnlyCollectionOptions(
 function createLocalOnlySync<T extends object, TKey extends string | number>(
   initialData?: Array<T>
 ) {
-  // Capture sync functions for transaction confirmation
+  // Capture sync functions and collection for transaction confirmation
   let syncBegin: (() => void) | null = null
   let syncWrite: ((message: { type: OperationType; value: T }) => void) | null =
     null
   let syncCommit: (() => void) | null = null
+  let collection: any = null
 
   const sync: SyncConfig<T, TKey> = {
     /**
@@ -305,10 +303,11 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
     sync: (params) => {
       const { begin, write, commit, markReady } = params
 
-      // Capture sync functions for later use by confirmOperationsSync
+      // Capture sync functions and collection for later use
       syncBegin = begin
       syncWrite = write
       syncCommit = commit
+      collection = params.collection
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {
@@ -364,5 +363,6 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   return {
     sync,
     confirmOperationsSync,
+    collection,
   }
 }

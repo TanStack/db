@@ -677,6 +677,104 @@ await reviewTx.commit()
 // reviewTx.rollback()
 ```
 
+### Using with Local Collections
+
+LocalOnly and LocalStorage collections require special handling when used with manual transactions. Unlike server-synced collections that have `onInsert`, `onUpdate`, and `onDelete` handlers automatically invoked, local collections need you to manually accept mutations by calling `utils.acceptMutations()` in your transaction's `mutationFn`.
+
+#### Why This Is Needed
+
+Local collections (LocalOnly and LocalStorage) don't participate in the standard mutation handler flow for manual transactions. They need an explicit call to persist changes made during `tx.mutate()`.
+
+#### Basic Usage
+
+```ts
+import { createTransaction } from "@tanstack/react-db"
+import { localOnlyCollectionOptions } from "@tanstack/react-db"
+
+const formDraft = createCollection(
+  localOnlyCollectionOptions({
+    id: "form-draft",
+    getKey: (item) => item.id,
+  })
+)
+
+const tx = createTransaction({
+  autoCommit: false,
+  mutationFn: async ({ transaction }) => {
+    // Accept and persist local collection mutations
+    formDraft.utils.acceptMutations(transaction)
+
+    // Make API call with the data if needed
+    const draftData = transaction.mutations
+      .filter((m) => m.collection === formDraft)
+      .map((m) => m.modified)
+
+    await api.saveDraft(draftData)
+  },
+})
+
+// Apply mutations
+tx.mutate(() => {
+  formDraft.insert({ id: "1", field: "value" })
+})
+
+// Commit when ready
+await tx.commit()
+```
+
+#### Combining Local and Server Collections
+
+You can mix local and server collections in the same transaction:
+
+```ts
+const localSettings = createCollection(
+  localStorageCollectionOptions({
+    id: "user-settings",
+    storageKey: "app-settings",
+    getKey: (item) => item.id,
+  })
+)
+
+const userProfile = createCollection(
+  queryCollectionOptions({
+    queryKey: ["profile"],
+    queryFn: async () => api.profile.get(),
+    getKey: (item) => item.id,
+    onUpdate: async ({ transaction }) => {
+      await api.profile.update(transaction.mutations[0].modified)
+    },
+  })
+)
+
+const tx = createTransaction({
+  mutationFn: async ({ transaction }) => {
+    // Accept local collection mutations
+    localSettings.utils.acceptMutations(transaction)
+
+    // Server collection mutations are handled by their onUpdate handler automatically
+  },
+})
+
+// Update both local and server data in one transaction
+tx.mutate(() => {
+  localSettings.update("theme", (draft) => {
+    draft.mode = "dark"
+  })
+  userProfile.update("user-1", (draft) => {
+    draft.name = "Updated Name"
+  })
+})
+
+await tx.commit()
+```
+
+#### Best Practices
+
+- Always call `utils.acceptMutations()` for local collections in manual transactions
+- Filter mutations by collection if you need to process them separately
+- Local collections persist automatically - no need to wait for sync
+- Mix local and server collections freely in the same transaction
+
 ### Listening to Transaction Lifecycle
 
 Monitor transaction state changes:

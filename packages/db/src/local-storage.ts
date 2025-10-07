@@ -96,23 +96,21 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    * This should be called in your transaction's mutationFn to persist local-storage data.
    *
    * @param transaction - The transaction containing mutations to accept
-   * @param collection - The collection instance (pass the collection variable)
    * @example
    * const localSettings = createCollection(localStorageCollectionOptions({...}))
    *
    * const tx = createTransaction({
    *   mutationFn: async ({ transaction }) => {
    *     // Persist local-storage mutations
-   *     localSettings.utils.acceptMutations(transaction, localSettings)
+   *     localSettings.utils.acceptMutations(transaction)
    *     // Then make API call
    *     await api.save(...)
    *   }
    * })
    */
-  acceptMutations: (
-    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
-    collection: unknown
-  ) => void
+  acceptMutations: (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => void
 }
 
 /**
@@ -201,7 +199,7 @@ function generateUuid(): string {
  * const tx = createTransaction({
  *   mutationFn: async ({ transaction }) => {
  *     // Persist local-storage mutations
- *     localSettings.utils.acceptMutations(transaction, localSettings)
+ *     localSettings.utils.acceptMutations(transaction)
  *
  *     // Use settings data in API call
  *     const settingsMutations = transaction.mutations.filter(m => m.collection === localSettings)
@@ -456,13 +454,12 @@ export function localStorageCollectionOptions(
   /**
    * Accepts mutations from a transaction that belong to this collection and persists them to storage
    */
-  const acceptMutations = (
-    transaction: { mutations: Array<PendingMutation<Record<string, unknown>>> },
-    collection: unknown
-  ) => {
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => {
     // Filter mutations that belong to this collection
     const collectionMutations = transaction.mutations.filter(
-      (m) => m.collection === collection
+      (m) => m.collection === sync.collection
     )
 
     if (collectionMutations.length === 0) {
@@ -600,8 +597,9 @@ function createLocalStorageSync<T extends object>(
   storageEventApi: StorageEventApi,
   _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
-): SyncConfig<T> & { manualTrigger?: () => void } {
+): SyncConfig<T> & { manualTrigger?: () => void; collection: any } {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
+  let collection: any = null
 
   /**
    * Compare two Maps to find differences using version keys
@@ -676,12 +674,16 @@ function createLocalStorageSync<T extends object>(
     }
   }
 
-  const syncConfig: SyncConfig<T> & { manualTrigger?: () => void } = {
+  const syncConfig: SyncConfig<T> & {
+    manualTrigger?: () => void
+    collection: any
+  } = {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
 
-      // Store sync params for later use
+      // Store sync params and collection for later use
       syncParams = params
+      collection = params.collection
 
       // Initial load
       const initialData = loadFromStorage<T>(storageKey, storage)
@@ -733,6 +735,9 @@ function createLocalStorageSync<T extends object>(
 
     // Manual trigger function for local updates
     manualTrigger: processStorageChanges,
+
+    // Collection instance reference
+    collection,
   }
 
   return syncConfig
