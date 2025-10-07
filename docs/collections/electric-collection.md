@@ -214,7 +214,7 @@ A frequent issue developers encounter is that `awaitTxId` (or the transaction's 
 To diagnose txid issues, enable debug logging in your browser console:
 
 ```javascript
-localStorage.debug = '*'
+localStorage.debug = 'ts/db:electric'
 ```
 
 This will show you when mutations start waiting for txids and when txids arrive from Electric's sync stream.
