@@ -111,7 +111,10 @@ export class CollectionLifecycleManager<
     if (newStatus === `ready` && !this.indexes.isIndexesResolved) {
       // Resolve indexes asynchronously without blocking
       this.indexes.resolveAllIndexes().catch((error) => {
-        console.warn(`Failed to resolve indexes:`, error)
+        console.warn(
+          `${this.config.id ? `[${this.config.id}] ` : ``}Failed to resolve indexes:`,
+          error
+        )
       })
     }
 
