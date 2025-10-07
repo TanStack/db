@@ -798,8 +798,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         )
 
         const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
+          query: (qb) =>
+            qb
               .from({ vehicleDocuments: vehicleDocumentCollection })
               .groupBy((q) => q.vehicleDocuments.vin)
               .orderBy((q) => q.vehicleDocuments.vin, `asc`)
@@ -854,8 +854,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         )
 
         const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
+          query: (qb) =>
+            qb
               .from({ vehicleDocuments: vehicleDocumentCollection })
               .groupBy((q) => q.vehicleDocuments.vin)
               .orderBy((q) => max(q.vehicleDocuments.updatedAt), `desc`)
