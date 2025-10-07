@@ -101,10 +101,10 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    *
    * const tx = createTransaction({
    *   mutationFn: async ({ transaction }) => {
-   *     // Persist local-storage mutations
-   *     localSettings.utils.acceptMutations(transaction)
-   *     // Then make API call
+   *     // Make API call first
    *     await api.save(...)
+   *     // Then persist local-storage mutations after success
+   *     localSettings.utils.acceptMutations(transaction)
    *   }
    * })
    */
@@ -198,12 +198,12 @@ function generateUuid(): string {
  *
  * const tx = createTransaction({
  *   mutationFn: async ({ transaction }) => {
- *     // Persist local-storage mutations
- *     localSettings.utils.acceptMutations(transaction)
- *
  *     // Use settings data in API call
  *     const settingsMutations = transaction.mutations.filter(m => m.collection === localSettings)
  *     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
+ *
+ *     // Persist local-storage mutations after API success
+ *     localSettings.utils.acceptMutations(transaction)
  *   }
  * })
  *
@@ -487,7 +487,8 @@ export function localStorageCollectionOptions(
 
     // Apply each mutation
     for (const mutation of collectionMutations) {
-      const key = config.getKey(mutation.modified)
+      // Use the engine's pre-computed key to avoid key derivation issues
+      const key = mutation.key
 
       switch (mutation.type) {
         case `insert`:

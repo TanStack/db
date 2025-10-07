@@ -47,10 +47,10 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
    *
    * const tx = createTransaction({
    *   mutationFn: async ({ transaction }) => {
-   *     // Persist local-only mutations
-   *     localData.utils.acceptMutations(transaction)
-   *     // Then make API call
+   *     // Make API call first
    *     await api.save(...)
+   *     // Then persist local-only mutations after success
+   *     localData.utils.acceptMutations(transaction)
    *   }
    * })
    */
@@ -119,12 +119,12 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
  *
  * const tx = createTransaction({
  *   mutationFn: async ({ transaction }) => {
- *     // Persist local-only mutations
- *     localData.utils.acceptMutations(transaction)
- *
  *     // Use local data in API call
  *     const localMutations = transaction.mutations.filter(m => m.collection === localData)
  *     await api.save({ metadata: localMutations[0]?.modified })
+ *
+ *     // Persist local-only mutations after API success
+ *     localData.utils.acceptMutations(transaction)
  *   }
  * })
  *

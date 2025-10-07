@@ -701,15 +701,15 @@ const formDraft = createCollection(
 const tx = createTransaction({
   autoCommit: false,
   mutationFn: async ({ transaction }) => {
-    // Accept and persist local collection mutations
-    formDraft.utils.acceptMutations(transaction)
-
-    // Make API call with the data if needed
+    // Make API call with the data first
     const draftData = transaction.mutations
       .filter((m) => m.collection === formDraft)
       .map((m) => m.modified)
 
     await api.saveDraft(draftData)
+
+    // After API succeeds, accept and persist local collection mutations
+    formDraft.utils.acceptMutations(transaction)
   },
 })
 
@@ -748,10 +748,11 @@ const userProfile = createCollection(
 
 const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
-    // Accept local collection mutations
-    localSettings.utils.acceptMutations(transaction)
-
     // Server collection mutations are handled by their onUpdate handler automatically
+    // (onUpdate will be called and awaited first)
+
+    // After server mutations succeed, accept local collection mutations
+    localSettings.utils.acceptMutations(transaction)
   },
 })
 
@@ -768,11 +769,40 @@ tx.mutate(() => {
 await tx.commit()
 ```
 
+#### Transaction Ordering
+
+**When to call `acceptMutations`** matters for transaction semantics:
+
+**After API success (recommended for consistency):**
+```ts
+mutationFn: async ({ transaction }) => {
+  await api.save(data)  // API call first
+  localData.utils.acceptMutations(transaction)  // Persist after success
+}
+```
+
+✅ **Pros**: If the API fails, local changes roll back too (all-or-nothing semantics)
+❌ **Cons**: Local state won't reflect changes until API succeeds
+
+**Before API call (for independent local state):**
+```ts
+mutationFn: async ({ transaction }) => {
+  localData.utils.acceptMutations(transaction)  // Persist first
+  await api.save(data)  // Then API call
+}
+```
+
+✅ **Pros**: Local state persists immediately, regardless of API outcome
+❌ **Cons**: API failure leaves local changes persisted (divergent state)
+
+Choose based on whether your local data should be independent of or coupled to remote mutations.
+
 #### Best Practices
 
 - Always call `utils.acceptMutations()` for local collections in manual transactions
+- Call `acceptMutations` **after** API success if you want transactional consistency
+- Call `acceptMutations` **before** API calls if local state should persist regardless
 - Filter mutations by collection if you need to process them separately
-- Local collections persist automatically - no need to wait for sync
 - Mix local and server collections freely in the same transaction
 
 ### Listening to Transaction Lifecycle

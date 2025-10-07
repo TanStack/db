@@ -449,11 +449,11 @@ const serverCollection = createCollection(
 
 const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
-    // Persist local collection mutations
-    localData.utils.acceptMutations(transaction)
+    // Server collection mutations are handled by their onInsert handler automatically
+    // (onInsert will be called and awaited)
 
-    // Server collection mutations are handled by their onInsert handler
-    // which runs automatically
+    // After server mutations succeed, persist local collection mutations
+    localData.utils.acceptMutations(transaction)
   },
 })
 
