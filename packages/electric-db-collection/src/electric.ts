@@ -343,12 +343,12 @@ export function electricCollectionOptions(
   /**
    * Wait for a specific transaction ID to be synced
    * @param txId The transaction ID to wait for as a number
-   * @param timeout Optional timeout in milliseconds (defaults to 3000ms)
+   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
    * @returns Promise that resolves when the txId is synced
    */
   const awaitTxId: AwaitTxIdFn = async (
     txId: Txid,
-    timeout: number = 3000
+    timeout: number = 5000
   ): Promise<boolean> => {
     debug(
       `${config.id ? `[${config.id}] ` : ``}awaitTxId called with txid %d`,
@@ -410,7 +410,7 @@ export function electricCollectionOptions(
   /**
    * Wait for a custom match function to find a matching message
    * @param matchFn Function that returns true when a message matches
-   * @param timeout Optional timeout in milliseconds (defaults to 3000ms)
+   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
    * @returns Promise that resolves when a matching message is found
    */
   const awaitMatch: AwaitMatchFn<any> = async (
