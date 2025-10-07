@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.4.6
+
+### Patch Changes
+
+- Push predicates down to sync layer ([#617](https://github.com/TanStack/db/pull/617))
+
+- prefix logs and errors with collection id, when available ([#655](https://github.com/TanStack/db/pull/655))
+
 ## 0.4.5
 
 ### Patch Changes
