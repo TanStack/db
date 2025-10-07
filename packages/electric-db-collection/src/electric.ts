@@ -337,6 +337,7 @@ export function electricCollectionOptions(
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
+    collectionId: config.id,
   })
 
   /**
@@ -349,9 +350,12 @@ export function electricCollectionOptions(
     txId: Txid,
     timeout: number = 3000
   ): Promise<boolean> => {
-    debug(`awaitTxId called with txid %d`, txId)
+    debug(
+      `${config.id ? `[${config.id}] ` : ``}awaitTxId called with txid %d`,
+      txId
+    )
     if (typeof txId !== `number`) {
-      throw new ExpectedNumberInAwaitTxIdError(typeof txId)
+      throw new ExpectedNumberInAwaitTxIdError(typeof txId, config.id)
     }
 
     // First check if the txid is in the seenTxids store
@@ -368,12 +372,15 @@ export function electricCollectionOptions(
       const timeoutId = setTimeout(() => {
         unsubscribeSeenTxids()
         unsubscribeSeenSnapshots()
-        reject(new TimeoutWaitingForTxIdError(txId))
+        reject(new TimeoutWaitingForTxIdError(txId, config.id))
       }, timeout)
 
       const unsubscribeSeenTxids = seenTxids.subscribe(() => {
         if (seenTxids.state.has(txId)) {
-          debug(`awaitTxId found match for txid %o`, txId)
+          debug(
+            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
+            txId
+          )
           clearTimeout(timeoutId)
           unsubscribeSeenTxids()
           unsubscribeSeenSnapshots()
@@ -387,7 +394,7 @@ export function electricCollectionOptions(
         )
         if (visibleSnapshot) {
           debug(
-            `awaitTxId found match for txid %o in snapshot %o`,
+            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o in snapshot %o`,
             txId,
             visibleSnapshot
           )
@@ -410,7 +417,9 @@ export function electricCollectionOptions(
     matchFn: MatchFunction<any>,
     timeout: number = 3000
   ): Promise<boolean> => {
-    debug(`awaitMatch called with custom function`)
+    debug(
+      `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`
+    )
 
     return new Promise((resolve, reject) => {
       const matchId = Math.random().toString(36)
@@ -425,7 +434,7 @@ export function electricCollectionOptions(
 
       const onTimeout = () => {
         cleanupMatch()
-        reject(new TimeoutWaitingForMatchError())
+        reject(new TimeoutWaitingForMatchError(config.id))
       }
 
       const timeoutId = setTimeout(onTimeout, timeout)
@@ -434,7 +443,9 @@ export function electricCollectionOptions(
       // This will be handled by the sync configuration
       const checkMatch = (message: Message<any>) => {
         if (matchFn(message)) {
-          debug(`awaitMatch found matching message, waiting for up-to-date`)
+          debug(
+            `${config.id ? `[${config.id}] ` : ``}awaitMatch found matching message, waiting for up-to-date`
+          )
           // Mark as matched but don't resolve yet - wait for up-to-date
           pendingMatches.setState((current) => {
             const newMatches = new Map(current)
@@ -453,7 +464,7 @@ export function electricCollectionOptions(
       for (const message of currentBatchMessages.state) {
         if (matchFn(message)) {
           debug(
-            `awaitMatch found immediate match in current batch, waiting for up-to-date`
+            `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`
           )
           // Register match as already matched
           pendingMatches.setState((current) => {
@@ -574,6 +585,7 @@ function createElectricSync<T extends Row<unknown>>(
     >
     currentBatchMessages: Store<Array<Message<T>>>
     removePendingMatches: (matchIds: Array<string>) => void
+    collectionId?: string
   }
 ): SyncConfig<T> {
   const {
@@ -582,6 +594,7 @@ function createElectricSync<T extends Row<unknown>>(
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
+    collectionId,
   } = options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
@@ -737,7 +750,7 @@ function createElectricSync<T extends Row<unknown>>(
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
             debug(
-              `Received must-refetch message, starting transaction with truncate`
+              `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`
             )
 
             // Start a transaction and truncate the collection
@@ -770,7 +783,10 @@ function createElectricSync<T extends Row<unknown>>(
           seenTxids.setState((currentTxids) => {
             const clonedSeen = new Set<Txid>(currentTxids)
             if (newTxids.size > 0) {
-              debug(`new txids synced from pg %O`, Array.from(newTxids))
+              debug(
+                `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
+                Array.from(newTxids)
+              )
             }
             newTxids.forEach((txid) => clonedSeen.add(txid))
             newTxids.clear()
@@ -781,7 +797,10 @@ function createElectricSync<T extends Row<unknown>>(
           seenSnapshots.setState((currentSnapshots) => {
             const seen = [...currentSnapshots, ...newSnapshots]
             newSnapshots.forEach((snapshot) =>
-              debug(`new snapshot synced from pg %o`, snapshot)
+              debug(
+                `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
+                snapshot
+              )
             )
             newSnapshots.length = 0
             return seen

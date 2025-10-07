@@ -58,7 +58,10 @@ export function ensureIndexForField<
       options: compareFn ? { compareFn, compareOptions } : {},
     })
   } catch (error) {
-    console.warn(`Failed to create auto-index for field "${fieldName}":`, error)
+    console.warn(
+      `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field "${fieldName}":`,
+      error
+    )
   }
 }
 
