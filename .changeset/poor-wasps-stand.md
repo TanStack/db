@@ -19,7 +19,7 @@ Adds a new `awaitMatch` utility function to support custom synchronization match
 **Example Usage:**
 
 ```typescript
-import { isChangeMessage } from '@tanstack/electric-db-collection'
+import { isChangeMessage } from "@tanstack/electric-db-collection"
 
 const todosCollection = createCollection(
   electricCollectionOptions({
@@ -29,12 +29,13 @@ const todosCollection = createCollection(
 
       // Wait for sync using custom match logic
       await collection.utils.awaitMatch(
-        (message) => isChangeMessage(message) &&
-                     message.headers.operation === 'insert' &&
-                     message.value.text === newItem.text,
+        (message) =>
+          isChangeMessage(message) &&
+          message.headers.operation === "insert" &&
+          message.value.text === newItem.text,
         5000 // timeout in ms (optional, defaults to 5000)
       )
-    }
+    },
   })
 )
 ```

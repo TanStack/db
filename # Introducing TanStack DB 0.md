@@ -20,7 +20,7 @@ TanStack DB extends TanStack Query with typed collections, live queries and opti
 
 Imagine we already have a backend with a REST API that exposes the `/api/todos` endpoint to fetch a list of todos and mutate them. We can use that REST endpoint with DB.
 
-*Define a Query Collection using TanStack Query:*
+_Define a Query Collection using TanStack Query:_
 
 ```typescript
 import { createCollection } from "@tanstack/react-db"
@@ -41,7 +41,7 @@ const todoCollection = createCollection(
 )
 ```
 
-*Use live queries in your components:*
+_Use live queries in your components:_
 
 ```typescript
 import { useLiveQuery } from "@tanstack/react-db"
@@ -58,7 +58,7 @@ const Todos = () => {
 }
 ```
 
-*Make optimistic mutations:*
+_Make optimistic mutations:_
 
 ```typescript
 <Button
@@ -74,7 +74,7 @@ const Todos = () => {
 
 ## Why This Matters Now
 
-If you're already using TanStack Query, you've probably faced this architectural choice: 
+If you're already using TanStack Query, you've probably faced this architectural choice:
 
 **Option A**: Create view-specific API endpoints that return exactly the data each component needs. Clean, fast, no client-side processing. But now you have dozens of brittle API routes, network waterfalls when components need related data, and tight coupling between frontend views and backend schemas.
 
@@ -85,29 +85,39 @@ Most teams pick Option A to avoid performance problems, but you're trading clien
 **TanStack DB enables Option C**: Load normalized collections through fewer API calls, then perform fast incremental joins in the client. You get the network efficiency of broad data loading with sub-millisecond query performance that makes Option A unnecessary.
 
 Instead of this:
+
 ```javascript
 // View-specific API call every time you navigate
-const { data: projectTodos } = useQuery(
-  ['project-todos', projectId], 
-  () => fetchProjectTodosWithUsers(projectId)
+const { data: projectTodos } = useQuery(["project-todos", projectId], () =>
+  fetchProjectTodosWithUsers(projectId)
 )
 ```
 
 You can do this:
+
 ```javascript
 // Load normalized collections upfront (3 broader calls)
-const todoCollection = createQueryCollection({ queryKey: ['todos'], queryFn: fetchAllTodos })
-const userCollection = createQueryCollection({ queryKey: ['users'], queryFn: fetchAllUsers })
-const projectCollection = createQueryCollection({ queryKey: ['projects'], queryFn: fetchAllProjects })
+const todoCollection = createQueryCollection({
+  queryKey: ["todos"],
+  queryFn: fetchAllTodos,
+})
+const userCollection = createQueryCollection({
+  queryKey: ["users"],
+  queryFn: fetchAllUsers,
+})
+const projectCollection = createQueryCollection({
+  queryKey: ["projects"],
+  queryFn: fetchAllProjects,
+})
 
 // Navigation is instant - no new API calls needed
-const { data: activeProjectTodos } = useLiveQuery(query =>
+const { data: activeProjectTodos } = useLiveQuery((query) =>
   query
     .from({ t: todoCollection, u: userCollection, p: projectCollection })
-    .join({ type: 'inner', on: [`@t.userId`, `=`, `@u.id`] })
-    .join({ type: 'inner', on: [`@u.projectId`, `=`, `@p.id`] })
-    .where('@t.active', '=', true)
-    .where('@p.id', '=', currentProject.id)
+    .join({ type: "inner", on: [`@t.userId`, `=`, `@u.id`] })
+    .join({ type: "inner", on: [`@u.projectId`, `=`, `@p.id`] })
+    .where("@t.active", "=", true)
+    .where("@p.id", "=", currentProject.id)
 )
 ```
 
@@ -167,8 +177,9 @@ TanStack DB 0.1 is available now as an early preview. We're specifically looking
 If your team spends more time optimizing React re-renders than building features, or if your collaborative features feel sluggish compared to Linear/Figma, TanStack DB is designed for exactly your situation.
 
 **Start your migration today:**
+
 - [Documentation & Quick Start](https://tanstack.com/db) - See migration examples from TanStack Query
-- [Performance Benchmarks](https://tanstack.com/db/benchmarks) - Compare query speeds on large datasets  
+- [Performance Benchmarks](https://tanstack.com/db/benchmarks) - Compare query speeds on large datasets
 - [Join our Discord](https://discord.gg/tanstack) - Get direct migration support from the team
 
 The client-side data processing revolution starts with teams willing to move beyond traditional state management. Be one of them.
