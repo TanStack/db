@@ -402,4 +402,308 @@ describe(`Collection truncate operations`, () => {
     expect(collection.state.has(2)).toBe(true)
     expect(collection.state.get(2)).toEqual({ id: 2, value: `optimistic-item` })
   })
+
+  it(`should preserve optimistic delete when transaction still active during truncate`, async () => {
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    const onDeleteResolvers: Array<() => void> = []
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-optimistic-delete-active`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `item-1` } })
+          cfg.write({ type: `insert`, value: { id: 2, value: `item-2` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onDelete: async () => {
+        await new Promise<void>((resolve) => onDeleteResolvers.push(resolve))
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(collection.state.size).toBe(2)
+
+    // Optimistically delete item 1 (handler stays pending)
+    const deleteTx = collection.delete(1)
+
+    // Verify optimistic delete is applied
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.has(1)).toBe(false)
+    expect(collection._state.optimisticDeletes.has(1)).toBe(true)
+
+    // Truncate while delete transaction is still active
+    syncOps!.begin()
+    syncOps!.truncate()
+    // Server re-inserts both items (doesn't know about the delete yet)
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `item-1` } })
+    syncOps!.write({ type: `insert`, value: { id: 2, value: `item-2` } })
+    syncOps!.commit()
+
+    // Item 1 should still be deleted (optimistic delete preserved from snapshot)
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.has(1)).toBe(false)
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection._state.optimisticDeletes.has(1)).toBe(true)
+
+    // Clean up
+    onDeleteResolvers.forEach((r) => r())
+    await deleteTx.isPersisted.promise
+  })
+
+  it(`should preserve optimistic value over server value when transaction active during truncate`, async () => {
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    const onUpdateResolvers: Array<() => void> = []
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-optimistic-vs-server`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({
+            type: `insert`,
+            value: { id: 1, value: `server-value-1` },
+          })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onUpdate: async () => {
+        await new Promise<void>((resolve) => onUpdateResolvers.push(resolve))
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `server-value-1` })
+    changeEvents.length = 0
+
+    // Optimistically update item 1 (handler stays pending)
+    const updateTx = collection.update(1, (draft) => {
+      draft.value = `optimistic-value`
+    })
+
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `optimistic-value`,
+    })
+    changeEvents.length = 0
+
+    // Truncate while update transaction is still active
+    syncOps!.begin()
+    syncOps!.truncate()
+    // Server re-inserts with a DIFFERENT value
+    syncOps!.write({
+      type: `insert`,
+      value: { id: 1, value: `server-value-2` },
+    })
+    syncOps!.commit()
+
+    // Optimistic value should win (client intent preserved)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `optimistic-value`,
+    })
+
+    // Clean up
+    onUpdateResolvers.forEach((r) => r())
+    await updateTx.isPersisted.promise
+  })
+
+  it(`should handle multiple consecutive truncate operations`, async () => {
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    const onInsertResolvers: Array<() => void> = []
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-consecutive`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onInsert: async () => {
+        await new Promise<void>((resolve) => onInsertResolvers.push(resolve))
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+
+    expect(collection.state.size).toBe(1)
+    changeEvents.length = 0
+
+    // First optimistic insert (stays pending)
+    const tx1 = collection.insert({ id: 2, value: `optimistic-A` })
+    expect(collection.state.size).toBe(2)
+
+    // First truncate (item 2 should be preserved because tx1 is still active)
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
+    syncOps!.commit()
+
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.has(2)).toBe(true)
+
+    changeEvents.length = 0
+
+    // Second optimistic insert (stays pending)
+    const tx2 = collection.insert({ id: 3, value: `optimistic-B` })
+    expect(collection.state.size).toBe(3)
+
+    // Second truncate (both items 2 and 3 should be preserved)
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
+    syncOps!.commit()
+
+    // Both optimistic items should be preserved
+    expect(collection.state.size).toBe(3)
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.state.has(3)).toBe(true)
+
+    // Clean up
+    onInsertResolvers.forEach((r) => r())
+    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+  })
+
+  it(`should handle new mutation on same key after truncate snapshot`, async () => {
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    const onUpdateResolvers: Array<() => void> = []
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-same-key-mutation`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onUpdate: async () => {
+        await new Promise<void>((resolve) => onUpdateResolvers.push(resolve))
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+
+    changeEvents.length = 0
+
+    // First optimistic update
+    const tx1 = collection.update(1, (draft) => {
+      draft.value = `value-1`
+    })
+
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-1` })
+
+    // Truncate is called (snapshot captures value-1)
+    syncOps!.begin()
+    syncOps!.truncate()
+
+    // BEFORE commit, user makes another update to the same key
+    const tx2 = collection.update(1, (draft) => {
+      draft.value = `value-2`
+    })
+
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-2` })
+
+    // Now commit the truncate
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
+    syncOps!.commit()
+
+    // Should show value-2 (newest intent wins)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-2` })
+
+    // Clean up
+    onUpdateResolvers.forEach((r) => r())
+    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+  })
+
+  it(`should handle transaction completing between truncate and commit`, async () => {
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    let onInsertResolver: (() => void) | null = null
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-transaction-completes`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onInsert: async () => {
+        await new Promise<void>((resolve) => {
+          onInsertResolver = resolve
+        })
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+
+    changeEvents.length = 0
+
+    // Optimistic insert
+    const tx = collection.insert({ id: 2, value: `optimistic` })
+
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.has(2)).toBe(true)
+
+    // Truncate is called (snapshot captures item 2)
+    syncOps!.begin()
+    syncOps!.truncate()
+
+    // Transaction completes BEFORE commit
+    onInsertResolver!()
+    await tx.isPersisted.promise
+
+    // Now commit the truncate
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
+    syncOps!.commit()
+
+    // Item 2 should still be present (preserved from snapshot)
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `optimistic` })
+  })
 })
