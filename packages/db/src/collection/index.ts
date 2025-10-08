@@ -27,6 +27,7 @@ import type {
   NonSingleResult,
   OnLoadMoreOptions,
   OperationConfig,
+  OptimisticInfo,
   SingleResult,
   SubscribeChangesOptions,
   Transaction as TransactionType,
@@ -395,6 +396,38 @@ export class CollectionImpl<
    */
   public has(key: TKey): boolean {
     return this._state.has(key)
+  }
+
+  /**
+   * Get optimistic state information for a record
+   * @param key - The key of the record to check
+   * @returns OptimisticInfo object with details about optimistic mutations, or undefined if record doesn't exist
+   * @example
+   * // Check if a record is being optimistically updated
+   * const info = collection.getOptimisticInfo(todoId)
+   * if (info?.isOptimistic) {
+   *   return <Badge>Saving...</Badge>
+   * }
+   *
+   * @example
+   * // Show a diff view for optimistic changes
+   * const info = collection.getOptimisticInfo(todoId)
+   * if (info?.changes) {
+   *   showDiff(info.original, info.modified, info.changes)
+   * }
+   *
+   * @example
+   * // Check mutation details
+   * const info = collection.getOptimisticInfo(todoId)
+   * if (info?.isOptimistic) {
+   *   console.log(`${info.mutations.length} pending mutations`)
+   *   info.mutations.forEach(m => {
+   *     console.log(`- ${m.type} at ${m.createdAt}`)
+   *   })
+   * }
+   */
+  public getOptimisticInfo(key: TKey): OptimisticInfo<TOutput> | undefined {
+    return this._state.getOptimisticInfo(key)
   }
 
   /**

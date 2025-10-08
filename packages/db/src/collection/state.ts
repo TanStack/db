@@ -6,6 +6,7 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
+  OptimisticInfo,
 } from "../types"
 import type { CollectionImpl } from "./index.js"
 import type { CollectionLifecycleManager } from "./lifecycle"
@@ -117,6 +118,60 @@ export class CollectionStateManager<
 
     // Fall back to synced data
     return syncedData.has(key)
+  }
+
+  /**
+   * Get optimistic state information for a key
+   */
+  public getOptimisticInfo(key: TKey): OptimisticInfo<TOutput> | undefined {
+    // Get the current value (which includes optimistic changes)
+    const modified = this.get(key)
+    if (modified === undefined) {
+      return undefined
+    }
+
+    // Get all active mutations for this key
+    const mutations: Array<any> = []
+    let original: TOutput | undefined
+    let changes: Partial<TOutput> | undefined
+
+    for (const transaction of this.transactions.values()) {
+      if ([`completed`, `failed`].includes(transaction.state)) {
+        continue
+      }
+
+      for (const mutation of transaction.mutations) {
+        if (
+          this.isThisCollection(mutation.collection) &&
+          mutation.key === key &&
+          mutation.optimistic
+        ) {
+          mutations.push(mutation)
+
+          // Track the original value (from the first mutation)
+          if (original === undefined && mutation.type !== `insert`) {
+            original = mutation.original as TOutput
+          }
+
+          // For updates, accumulate changes
+          if (mutation.type === `update`) {
+            if (changes === undefined) {
+              changes = { ...mutation.changes } as Partial<TOutput>
+            } else {
+              changes = { ...changes, ...mutation.changes } as Partial<TOutput>
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      isOptimistic: mutations.length > 0,
+      original,
+      modified,
+      changes,
+      mutations,
+    }
   }
 
   /**

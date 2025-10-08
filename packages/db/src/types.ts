@@ -639,6 +639,23 @@ export type ChangeListener<
   TKey extends string | number = string | number,
 > = (changes: Array<ChangeMessage<T, TKey>>) => void
 
+/**
+ * Information about the optimistic state of a record
+ * @template T - The type of the record
+ */
+export interface OptimisticInfo<T extends object = Record<string, unknown>> {
+  /** Whether this record has any active optimistic mutations */
+  isOptimistic: boolean
+  /** The pre-mutation state (undefined if optimistic insert or not optimistic) */
+  original?: T
+  /** The current state of the record (after applying all optimistic mutations) */
+  modified: T
+  /** The delta changes (only present for optimistic updates) */
+  changes?: Partial<T>
+  /** All active mutations affecting this record */
+  mutations: Array<PendingMutation<T>>
+}
+
 // Adapted from https://github.com/sindresorhus/type-fest
 // MIT License Copyright (c) Sindre Sorhus
 
