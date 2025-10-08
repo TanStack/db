@@ -266,7 +266,9 @@ export function localOnlyCollectionOptions<
     }
 
     // Persist the mutations through sync
-    syncResult.confirmOperationsSync(collectionMutations)
+    syncResult.confirmOperationsSync(
+      collectionMutations as Array<PendingMutation<T>>
+    )
   }
 
   return {
