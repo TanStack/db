@@ -309,12 +309,32 @@ export function electricCollectionOptions(
       })
     }
   }
+
+  /**
+   * Helper function to resolve and cleanup matched pending matches
+   */
+  const resolveMatchedPendingMatches = () => {
+    const matchesToResolve: Array<string> = []
+    pendingMatches.state.forEach((match, matchId) => {
+      if (match.matched) {
+        clearTimeout(match.timeoutId)
+        match.resolve(true)
+        matchesToResolve.push(matchId)
+        debug(
+          `${config.id ? `[${config.id}] ` : ``}awaitMatch resolved on up-to-date for match %s`,
+          matchId
+        )
+      }
+    })
+    removePendingMatches(matchesToResolve)
+  }
   const sync = createElectricSync<any>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
+    resolveMatchedPendingMatches,
     collectionId: config.id,
   })
 
@@ -563,6 +583,7 @@ function createElectricSync<T extends Row<unknown>>(
     >
     currentBatchMessages: Store<Array<Message<T>>>
     removePendingMatches: (matchIds: Array<string>) => void
+    resolveMatchedPendingMatches: () => void
     collectionId?: string
   }
 ): SyncConfig<T> {
@@ -572,6 +593,7 @@ function createElectricSync<T extends Row<unknown>>(
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
+    resolveMatchedPendingMatches,
     collectionId,
   } = options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
@@ -785,18 +807,7 @@ function createElectricSync<T extends Row<unknown>>(
           })
 
           // Resolve all matched pending matches on up-to-date
-          const matchesToResolve: Array<string> = []
-          pendingMatches.state.forEach((match, matchId) => {
-            if (match.matched) {
-              clearTimeout(match.timeoutId)
-              match.resolve(true)
-              matchesToResolve.push(matchId)
-              debug(`awaitMatch resolved on up-to-date for match %s`, matchId)
-            }
-          })
-
-          // Remove resolved matches
-          removePendingMatches(matchesToResolve)
+          resolveMatchedPendingMatches()
         }
       })
 
