@@ -114,14 +114,6 @@ export interface ElectricCollectionConfig<
    * }
    *
    * @example
-   * // No return (void) - mutation completes without waiting
-   * onInsert: async ({ transaction }) => {
-   *   const newItem = transaction.mutations[0].modified
-   *   await api.todos.create({ data: newItem })
-   *   // No return - don't wait for sync
-   * }
-   *
-   * @example
    * // Use awaitMatch utility for custom matching
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
@@ -151,13 +143,6 @@ export interface ElectricCollectionConfig<
    * }
    *
    * @example
-   * // No return (void) - mutation completes without waiting
-   * onUpdate: async ({ transaction }) => {
-   *   const { original, changes } = transaction.mutations[0]
-   *   await api.todos.update({ where: { id: original.id }, data: changes })
-   * }
-   *
-   * @example
    * // Use awaitMatch utility for custom matching
    * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
@@ -183,13 +168,6 @@ export interface ElectricCollectionConfig<
    *     id: mutation.original.id
    *   })
    *   return { txid: result.txid }
-   * }
-   *
-   * @example
-   * // No return (void) - mutation completes without waiting
-   * onDelete: async ({ transaction }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.todos.delete({ id: mutation.original.id })
    * }
    *
    * @example
