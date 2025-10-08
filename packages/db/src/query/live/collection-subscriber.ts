@@ -103,9 +103,9 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // We need to call `maybeRunGraph` even if there's no data to load
-    // because we need to mark the collection as ready if it's not already
-    // and that's only done in `maybeRunGraph`
+    // Always call maybeRunGraph to process changes eagerly.
+    // The graph will run unless the live query is in an error state.
+    // Status management is handled separately via status:change event listeners.
     this.collectionConfigBuilder.maybeRunGraph(
       this.config,
       this.syncState,

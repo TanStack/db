@@ -290,9 +290,10 @@ describe(`Collection Error Handling`, () => {
         onUpdate: async () => {}, // Add handler to prevent "no handler" error
         onDelete: async () => {}, // Add handler to prevent "no handler" error
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             begin()
             commit()
+            markReady()
           },
         },
       })
@@ -317,10 +318,11 @@ describe(`Collection Error Handling`, () => {
           onUpdate: async () => {},
           onDelete: async () => {},
           sync: {
-            sync: ({ begin, write, commit }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               begin()
               write({ type: `insert`, value: { id: `2`, name: `test2` } })
               commit()
+              markReady()
             },
           },
         }

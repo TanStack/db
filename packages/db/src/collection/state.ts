@@ -785,12 +785,9 @@ export class CollectionStateManager<
         this.recentlySyncedKeys.clear()
       })
 
-      // Call any registered one-time commit listeners
+      // Mark that we've received the first commit (for tracking purposes)
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
-        const callbacks = [...this.lifecycle.onFirstReadyCallbacks]
-        this.lifecycle.onFirstReadyCallbacks = []
-        callbacks.forEach((callback) => callback())
       }
     }
   }
