@@ -964,11 +964,11 @@ describe(`Collection.subscribeChanges`, () => {
       value: `optimistic insert`,
     })
 
-    // Verify events are a single batch: deletes for synced keys (1,2), then inserts for preserved optimistic (1,3)
-    expect(changeEvents.length).toBe(4)
+    // Verify events are a single batch: deletes for ALL visible keys (1,2,3), then inserts for preserved optimistic (1,3)
+    expect(changeEvents.length).toBe(5)
     const deletes = changeEvents.filter((e) => e.type === `delete`)
     const inserts = changeEvents.filter((e) => e.type === `insert`)
-    expect(deletes.length).toBe(2)
+    expect(deletes.length).toBe(3)
     expect(inserts.length).toBe(2)
 
     const deleteByKey = new Map(deletes.map((e) => [e.key, e]))
@@ -983,6 +983,11 @@ describe(`Collection.subscribeChanges`, () => {
       type: `delete`,
       key: 2,
       value: { id: 2, value: `initial value 2` },
+    })
+    expect(deleteByKey.get(3)).toEqual({
+      type: `delete`,
+      key: 3,
+      value: { id: 3, value: `optimistic insert` },
     })
 
     // Insert events for preserved optimistic entries (1 and 3)

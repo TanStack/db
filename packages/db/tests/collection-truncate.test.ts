@@ -275,6 +275,74 @@ describe(`Collection truncate operations`, () => {
     await tx.isPersisted.promise
   })
 
+  it(`should preserve optimistic inserts started after truncate begins`, async () => {
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    const onInsertResolvers: Array<() => void> = []
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-late-optimistic`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `server-item` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        await new Promise<void>((resolve) => {
+          onInsertResolvers.push(resolve)
+        })
+        syncOps!.begin()
+        for (const mutation of transaction.mutations) {
+          syncOps!.write({
+            type: `insert`,
+            value: mutation.modified,
+          })
+        }
+        syncOps!.commit()
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+    changeEvents.length = 0
+
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `server-item` } })
+
+    const lateTx = collection.insert({
+      id: 2,
+      value: `late-optimistic`,
+    })
+
+    expect(collection.state.has(2)).toBe(true)
+
+    syncOps!.commit()
+
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.has(1)).toBe(true)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `server-item` })
+    expect(collection.state.has(2)).toBe(true)
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `late-optimistic`,
+    })
+
+    // Clean up the pending optimistic transactions
+    while (onInsertResolvers.length > 0) {
+      onInsertResolvers.pop()!()
+    }
+    await lateTx.isPersisted.promise
+  })
+
   it(`should preserve all optimistic inserts when truncate occurs during async mutation handler`, async () => {
     const changeEvents: Array<any> = []
     let syncOps:
