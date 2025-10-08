@@ -458,9 +458,15 @@ export function localStorageCollectionOptions(
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => {
     // Filter mutations that belong to this collection
-    const collectionMutations = transaction.mutations.filter(
-      (m) => m.collection === sync.collection
-    )
+    // Use collection ID for filtering if collection reference isn't available yet
+    const collectionMutations = transaction.mutations.filter((m) => {
+      // Try to match by collection reference first (most reliable)
+      if (sync.collection && m.collection === sync.collection) {
+        return true
+      }
+      // Fall back to matching by collection ID
+      return m.collection.id === collectionId
+    })
 
     if (collectionMutations.length === 0) {
       return
@@ -510,8 +516,9 @@ export function localStorageCollectionOptions(
     // Save to storage
     saveToStorage(currentData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Confirm the mutations in the collection to move them from optimistic to synced state
+    // This writes them through the sync interface to make them "synced" instead of "optimistic"
+    sync.confirmOperationsSync(collectionMutations)
   }
 
   return {
@@ -598,7 +605,11 @@ function createLocalStorageSync<T extends object>(
   storageEventApi: StorageEventApi,
   _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
-): SyncConfig<T> & { manualTrigger?: () => void; collection: any } {
+): SyncConfig<T> & {
+  manualTrigger?: () => void
+  collection: any
+  confirmOperationsSync: (mutations: Array<any>) => void
+} {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
   let collection: any = null
 
@@ -741,5 +752,33 @@ function createLocalStorageSync<T extends object>(
     collection,
   }
 
-  return syncConfig
+  /**
+   * Confirms mutations by writing them through the sync interface
+   * This moves mutations from optimistic to synced state
+   * @param mutations - Array of mutation objects to confirm
+   */
+  const confirmOperationsSync = (mutations: Array<any>) => {
+    if (!syncParams) {
+      // Sync not initialized yet, mutations will be handled on next sync
+      return
+    }
+
+    const { begin, write, commit } = syncParams
+
+    // Write the mutations through sync to confirm them
+    begin()
+    mutations.forEach((mutation: any) => {
+      write({
+        type: mutation.type,
+        value:
+          mutation.type === `delete` ? mutation.original : mutation.modified,
+      })
+    })
+    commit()
+  }
+
+  return {
+    ...syncConfig,
+    confirmOperationsSync,
+  }
 }
