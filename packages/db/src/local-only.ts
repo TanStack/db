@@ -1,15 +1,19 @@
 import type {
   BaseCollectionConfig,
   CollectionConfig,
+  DeleteMutationFn,
   DeleteMutationFnParams,
   InferSchemaOutput,
+  InsertMutationFn,
   InsertMutationFnParams,
   OperationType,
   PendingMutation,
   SyncConfig,
+  UpdateMutationFn,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
+import type { Collection } from "./collection/index"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**
@@ -57,6 +61,20 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
   acceptMutations: (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => void
+}
+
+type LocalOnlyCollectionOptionsResult<
+  T extends object,
+  TKey extends string | number,
+  TSchema extends StandardSchemaV1 | never = never,
+> = Omit<
+  CollectionConfig<T, TKey, TSchema>,
+  `onInsert` | `onUpdate` | `onDelete`
+> & {
+  onInsert?: InsertMutationFn<T, TKey, LocalOnlyCollectionUtils>
+  onUpdate?: UpdateMutationFn<T, TKey, LocalOnlyCollectionUtils>
+  onDelete?: DeleteMutationFn<T, TKey, LocalOnlyCollectionUtils>
+  utils: LocalOnlyCollectionUtils
 }
 
 /**
@@ -144,8 +162,7 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
-  utils: LocalOnlyCollectionUtils
+): LocalOnlyCollectionOptionsResult<InferSchemaOutput<T>, TKey, T> & {
   schema: T
 }
 
@@ -158,15 +175,17 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
-  utils: LocalOnlyCollectionUtils
+): LocalOnlyCollectionOptionsResult<T, TKey> & {
   schema?: never // no schema in the result
 }
 
-export function localOnlyCollectionOptions(
-  config: LocalOnlyCollectionConfig<any, any, string | number>
-): CollectionConfig<any, string | number, any> & {
-  utils: LocalOnlyCollectionUtils
+export function localOnlyCollectionOptions<
+  T extends object = object,
+  TSchema extends StandardSchemaV1 = never,
+  TKey extends string | number = string | number,
+>(
+  config: LocalOnlyCollectionConfig<T, TSchema, TKey>
+): LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
   schema?: StandardSchemaV1
 } {
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
@@ -179,11 +198,7 @@ export function localOnlyCollectionOptions(
    * Wraps the user's onInsert handler to also confirm the transaction immediately
    */
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: InsertMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -201,11 +216,7 @@ export function localOnlyCollectionOptions(
    * Wrapper for onUpdate handler that also confirms the transaction immediately
    */
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: UpdateMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -223,11 +234,7 @@ export function localOnlyCollectionOptions(
    * Wrapper for onDelete handler that also confirms the transaction immediately
    */
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: DeleteMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -249,7 +256,9 @@ export function localOnlyCollectionOptions(
   }) => {
     // Filter mutations that belong to this collection
     const collectionMutations = transaction.mutations.filter(
-      (m) => m.collection === syncResult.collection
+      (m) =>
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        m.collection === syncResult.collection
     )
 
     if (collectionMutations.length === 0) {
@@ -263,9 +272,9 @@ export function localOnlyCollectionOptions(
   return {
     ...restConfig,
     sync: syncResult.sync,
-    onInsert: wrappedOnInsert as any,
-    onUpdate: wrappedOnUpdate as any,
-    onDelete: wrappedOnDelete as any,
+    onInsert: wrappedOnInsert,
+    onUpdate: wrappedOnUpdate,
+    onDelete: wrappedOnDelete,
     utils: {
       acceptMutations,
     } as LocalOnlyCollectionUtils,
@@ -292,7 +301,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   let syncWrite: ((message: { type: OperationType; value: T }) => void) | null =
     null
   let syncCommit: (() => void) | null = null
-  let collection: any = null
+  let collection: Collection<T, TKey, LocalOnlyCollectionUtils> | null = null
 
   const sync: SyncConfig<T, TKey> = {
     /**
@@ -342,7 +351,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
    *
    * @param mutations - Array of mutation objects from the transaction
    */
-  const confirmOperationsSync = (mutations: Array<any>) => {
+  const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
     if (!syncBegin || !syncWrite || !syncCommit) {
       return // Sync not initialized yet, which is fine
     }
