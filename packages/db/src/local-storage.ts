@@ -460,7 +460,7 @@ export function localStorageCollectionOptions(
     // Filter mutations that belong to this collection
     // Use collection ID for filtering if collection reference isn't available yet
     const collectionMutations = transaction.mutations.filter((m) => {
-      // Try to match by collection reference first (most reliable)
+      // Try to match by collection reference first
       if (sync.collection && m.collection === sync.collection) {
         return true
       }
