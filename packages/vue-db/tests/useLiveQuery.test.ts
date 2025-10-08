@@ -1327,7 +1327,7 @@ describe(`Query Collections`, () => {
     })
 
     it(`should handle status transitions without change events`, async () => {
-      // This test reproduces the bug where status gets stuck in 'initialCommit'
+      // This test reproduces the bug where status gets stuck in 'loading'
       // when the collection status changes without triggering change events
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
