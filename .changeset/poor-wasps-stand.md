@@ -1,5 +1,5 @@
 ---
-"@tanstack/electric-db-collection": minor
+"@tanstack/electric-db-collection": patch
 ---
 
 feat: Add awaitMatch utility and reduce default timeout (#402)
@@ -12,7 +12,7 @@ Adds a new `awaitMatch` utility function to support custom synchronization match
 - Export `isChangeMessage` and `isControlMessage` helper functions for custom match functions
 - Type: `MatchFunction<T>` for custom match functions
 
-**Breaking Changes:**
+**Changes:**
 
 - Default timeout for `awaitTxId` reduced from 30 seconds to 5 seconds
 
@@ -44,5 +44,4 @@ const todosCollection = createCollection(
 
 - Supports backends that can't provide transaction IDs
 - Flexible heuristic-based matching
-- Works with existing txid-based approach (backward compatible)
 - Faster feedback on sync issues with reduced timeout
