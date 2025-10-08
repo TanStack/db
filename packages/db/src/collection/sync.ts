@@ -148,12 +148,6 @@ export class CollectionSyncManager<
 
             pendingTransaction.committed = true
 
-            // Update status to initialCommit when transitioning from loading
-            // This indicates we're in the process of committing the first transaction
-            if (this.lifecycle.status === `loading`) {
-              this.lifecycle.setStatus(`initialCommit`)
-            }
-
             this.state.commitPendingTransactions()
           },
           markReady: () => {

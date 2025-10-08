@@ -410,10 +410,7 @@ describe(`Collection Error Handling`, () => {
 
       // Valid transitions from loading
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `loading`,
-          `initialCommit`
-        )
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `ready`)
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`loading`, `error`)
@@ -421,26 +418,6 @@ describe(`Collection Error Handling`, () => {
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `loading`,
-          `cleaned-up`
-        )
-      ).not.toThrow()
-
-      // Valid transitions from initialCommit
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `ready`
-        )
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `error`
-        )
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
           `cleaned-up`
         )
       ).not.toThrow()
@@ -484,12 +461,6 @@ describe(`Collection Error Handling`, () => {
       // Allow same-state transitions (idempotent operations)
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`idle`, `idle`)
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `initialCommit`
-        )
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`ready`, `ready`)

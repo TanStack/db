@@ -284,8 +284,7 @@ describe(`createLiveQueryCollection`, () => {
     expect(liveQuery.get(1)).toEqual({ id: 1, name: `Alice`, active: true })
     expect(liveQuery.get(3)).toEqual({ id: 3, name: `Charlie`, active: true })
     expect(liveQuery.get(2)).toBeUndefined() // Bob is not active
-    // This test should fail because the live query is stuck in 'initialCommit' status
-    expect(liveQuery.status).toBe(`ready`) // This should be 'ready' but is currently 'initialCommit'
+    expect(liveQuery.status).toBe(`ready`)
 
     // Now add some new data to the source collection (this should work as per the original report)
     sourceCollection.insert({ id: 4, name: `David`, active: true })

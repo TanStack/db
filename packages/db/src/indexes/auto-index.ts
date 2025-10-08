@@ -15,10 +15,7 @@ function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   }
 
   // Don't auto-index during sync operations
-  if (
-    collection.status === `loading` ||
-    collection.status === `initialCommit`
-  ) {
+  if (collection.status === `loading`) {
     return false
   }
 
