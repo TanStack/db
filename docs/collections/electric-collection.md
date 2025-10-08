@@ -138,7 +138,7 @@ const todosCollection = createCollection(
 
 ### 3. Using Simple Timeout
 
-For quick prototyping or when you're confident about timing, you can use a simple timeout. This is crude but works:
+For quick prototyping or when you're confident about timing, you can use a simple timeout. This is crude but works as almost always the data will be synced back in under 2 seconds:
 
 ```typescript
 const todosCollection = createCollection(
