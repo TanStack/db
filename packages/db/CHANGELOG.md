@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.7
+
+### Patch Changes
+
+- Add acceptMutations utility for local collections in manual transactions. Local-only and local-storage collections now expose `utils.acceptMutations(transaction, collection)` that must be called in manual transaction `mutationFn` to persist mutations. ([#638](https://github.com/TanStack/db/pull/638))
+
 ## 0.4.6
 
 ### Patch Changes
