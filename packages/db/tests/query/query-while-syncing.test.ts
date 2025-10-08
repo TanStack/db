@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
+import { createTransaction } from "../../src/transactions.js"
 
 // Sample user type for tests
 type User = {
@@ -31,6 +32,14 @@ const sampleDepartments: Array<Department> = [
 ]
 
 describe(`Query while syncing`, () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   describe.each([`off`, `eager`] as const)(`with autoIndex %s`, (autoIndex) => {
     describe(`Basic queries with startSync: true`, () => {
       test(`should update live query results while source collection is syncing`, async () => {
@@ -71,7 +80,7 @@ describe(`Query while syncing`, () => {
         // The live query starts with startSync: true, which immediately subscribes to the source
         // This triggers the source collection to start syncing too (even though it has startSync: false)
         // Wait a moment for the subscription to set up
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Both should now be in loading state
         expect(usersCollection.status).toBe(`loading`)
@@ -156,7 +165,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger the source collection to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Add users one by one
         syncBegin!()
@@ -224,7 +233,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger the source collection to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         syncBegin!()
         syncWrite!({ type: `insert`, value: sampleUsers[0] })
@@ -303,7 +312,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger both source collections to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         expect(liveQuery.status).toBe(`loading`)
 
@@ -423,7 +432,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger both source collections to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Add a user without a department
         userSyncBegin!()
@@ -556,7 +565,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger all source collections to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         expect(liveQuery.status).toBe(`loading`)
 
@@ -624,7 +633,7 @@ describe(`Query while syncing`, () => {
         })
 
         // The live query will trigger the source collection to start syncing
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Add some data
         syncBegin!()
@@ -639,7 +648,7 @@ describe(`Query while syncing`, () => {
         usersCollection._lifecycle.setStatus(`error`)
 
         // Wait for the status change event to propagate
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Live query should also transition to error
         expect(usersCollection.status).toBe(`error`)
@@ -694,7 +703,7 @@ describe(`Query while syncing`, () => {
         const preloadPromise = liveQuery.preload()
 
         // Wait for subscription to set up
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Both should now be in loading state
         expect(usersCollection.status).toBe(`loading`)
@@ -785,7 +794,7 @@ describe(`Query while syncing`, () => {
 
         // Trigger loading
         liveQuery.preload()
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         // Add users one by one
         syncBegin!()
@@ -885,7 +894,7 @@ describe(`Query while syncing`, () => {
 
         // Trigger loading with preload
         const preloadPromise = liveQuery.preload()
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
 
         expect(liveQuery.status).toBe(`loading`)
 
@@ -958,7 +967,7 @@ describe(`Query while syncing`, () => {
         // Trigger loading and wait for ready state
         const statePromise = liveQuery.stateWhenReady()
 
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
         expect(liveQuery.status).toBe(`loading`)
 
         // Add data while loading
@@ -976,7 +985,7 @@ describe(`Query while syncing`, () => {
           stateResolved = true
         })
 
-        await new Promise((resolve) => setTimeout(resolve, 10))
+        await vi.advanceTimersByTimeAsync(10)
         expect(stateResolved).toBe(false)
 
         // Mark ready
@@ -986,6 +995,141 @@ describe(`Query while syncing`, () => {
         const state = await statePromise
         expect(stateResolved).toBe(true)
         expect(state.size).toBe(2)
+        expect(liveQuery.status).toBe(`ready`)
+      })
+
+      test(`should reflect local optimistic mutations in live query before source is ready`, async () => {
+        let syncBegin: (() => void) | undefined
+        let syncWrite: ((op: any) => void) | undefined
+        let syncCommit: (() => void) | undefined
+        let syncMarkReady: (() => void) | undefined
+
+        const usersCollection = createCollection<User, number>({
+          id: `test-users-optimistic-mutations`,
+          getKey: (user) => user.id,
+          autoIndex,
+          startSync: false,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+              syncMarkReady = markReady
+            },
+          },
+        })
+
+        const liveQuery = createLiveQueryCollection({
+          startSync: false,
+          query: (q) =>
+            q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.active, true))
+              .select(({ user }) => ({
+                id: user.id,
+                name: user.name,
+              })),
+        })
+
+        // Trigger loading
+        liveQuery.preload()
+        await vi.advanceTimersByTimeAsync(10)
+
+        expect(liveQuery.status).toBe(`loading`)
+
+        // Add initial data via sync
+        syncBegin!()
+        syncWrite!({ type: `insert`, value: sampleUsers[0] }) // Alice, active
+        syncWrite!({ type: `insert`, value: sampleUsers[2] }) // Charlie, inactive
+        syncCommit!()
+
+        // Live query should show only Alice (active user)
+        expect(usersCollection.size).toBe(2)
+        expect(liveQuery.size).toBe(1)
+        expect(liveQuery.get(1)?.name).toBe(`Alice`)
+
+        // Create a controlled promise for the mutation function
+        let resolveInsertMutation: (() => void) | undefined
+        const insertMutationPromise = new Promise<void>((resolve) => {
+          resolveInsertMutation = resolve
+        })
+
+        // Perform a local optimistic mutation while still loading
+        const insertTx = createTransaction({
+          mutationFn: async () => {
+            await insertMutationPromise
+          },
+        })
+        insertTx.mutate(() => {
+          usersCollection.insert({ id: 5, name: `Eve`, age: 28, active: true })
+        })
+
+        // The optimistic mutation should be visible immediately (before mutationFn resolves)
+        expect(usersCollection.size).toBe(3)
+        expect(liveQuery.size).toBe(2)
+        expect(liveQuery.get(5)?.name).toBe(`Eve`)
+
+        // Resolve the mutation WITHOUT syncing the data back
+        resolveInsertMutation!()
+        await vi.advanceTimersByTimeAsync(10) // Wait for rollback microtask
+
+        // The optimistic mutation should be rolled back since we didn't sync it
+        expect(usersCollection.size).toBe(2)
+        expect(liveQuery.size).toBe(1)
+        expect(liveQuery.get(5)).toBeUndefined()
+
+        // Now sync the data to persist it
+        syncBegin!()
+        syncWrite!({
+          type: `insert`,
+          value: { id: 5, name: `Eve`, age: 28, active: true },
+        })
+        syncCommit!()
+
+        // Now it should be persisted
+        expect(usersCollection.size).toBe(3)
+        expect(liveQuery.size).toBe(2)
+        expect(liveQuery.get(5)?.name).toBe(`Eve`)
+
+        // Test update with controlled resolution
+        let resolveUpdateMutation: (() => void) | undefined
+        const updateMutationPromise = new Promise<void>((resolve) => {
+          resolveUpdateMutation = resolve
+        })
+
+        const updateTx = createTransaction({
+          mutationFn: async () => {
+            await updateMutationPromise
+          },
+        })
+        updateTx.mutate(() => {
+          usersCollection.update(1, (draft) => {
+            draft.name = `Alice Updated`
+          })
+        })
+
+        // Update should be visible optimistically
+        expect(liveQuery.get(1)?.name).toBe(`Alice Updated`)
+
+        // Resolve mutation and sync the update back to persist it
+        resolveUpdateMutation!()
+        await vi.advanceTimersByTimeAsync(10)
+
+        // Without sync, it would roll back to original, but let's sync it
+        syncBegin!()
+        syncWrite!({
+          type: `update`,
+          value: { id: 1, name: `Alice Updated`, age: 25, active: true },
+        })
+        syncCommit!()
+
+        // Now it should be persisted
+        expect(liveQuery.get(1)?.name).toBe(`Alice Updated`)
+
+        // Mark ready
+        syncMarkReady!()
+
+        expect(usersCollection.status).toBe(`ready`)
         expect(liveQuery.status).toBe(`ready`)
       })
     })
