@@ -60,7 +60,7 @@ Handlers are called before mutations to persist changes to your backend:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
-Each handler should return `{ txid }` to wait for synchronization. For advanced cases without txids, use the `awaitMatch` utility function.
+Each handler should return `{ txid }` to wait for synchronization. For cases where your API can not return txids, use the `awaitMatch` utility function.
 
 ## Persistence Handlers & Synchronization
 
