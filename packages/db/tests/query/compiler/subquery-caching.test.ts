@@ -55,6 +55,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache1
     )
 
@@ -72,6 +73,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2
     )
 
@@ -91,6 +93,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2
     )
 
@@ -110,6 +113,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2
     )
     const subqueryResult2 = compileQuery(
@@ -120,6 +124,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2
     )
 
@@ -156,6 +161,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       sharedCache
     )
     expect(sharedCache.has(subquery)).toBe(true)
@@ -169,6 +175,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       sharedCache
     )
     expect(result1).toBe(result2) // Should be the exact same object reference
@@ -214,6 +221,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       sharedCache
     )
     const result2 = compileQuery(
@@ -224,6 +232,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       sharedCache
     )
 
@@ -287,6 +296,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       sharedCache
     )
     expect(result).toBeDefined()

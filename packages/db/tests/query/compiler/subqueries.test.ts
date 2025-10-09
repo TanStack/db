@@ -176,7 +176,8 @@ describe(`Query2 Subqueries`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -291,7 +292,8 @@ describe(`Query2 Subqueries`, () => {
         },
         { issues: dummyCallbacks, users: dummyCallbacks },
         lazyCollections,
-        {}
+        {},
+        () => {}
       )
 
       // Since we're doing a left join, the collection on the right should be handled lazily
@@ -359,7 +361,8 @@ describe(`Query2 Subqueries`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
