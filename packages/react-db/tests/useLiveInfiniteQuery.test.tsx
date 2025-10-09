@@ -71,7 +71,7 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.hasNextPage).toBe(true)
 
     // First item should be Post 1 (most recent by createdAt)
-    expect(result.current.pages[0][0]).toMatchObject({
+    expect(result.current.pages[0]![0]).toMatchObject({
       id: `1`,
       title: `Post 1`,
     })
@@ -287,7 +287,7 @@ describe(`useLiveInfiniteQuery`, () => {
 
     await waitFor(() => {
       // New post should be first
-      expect(result.current.pages[0][0]).toMatchObject({
+      expect(result.current.pages[0]![0]).toMatchObject({
         id: `new-1`,
         title: `New Post`,
       })
@@ -339,21 +339,21 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     expect(result.current.data).toHaveLength(20)
-    const firstItemId = result.current.data[0].id
+    const firstItemId = result.current.data[0]!.id
 
     // Delete the first item
     act(() => {
       collection.utils.begin()
       collection.utils.write({
         type: `delete`,
-        value: posts[0],
+        value: posts[0]!,
       })
       collection.utils.commit()
     })
 
     await waitFor(() => {
       // First item should have changed
-      expect(result.current.data[0].id).not.toBe(firstItemId)
+      expect(result.current.data[0]!.id).not.toBe(firstItemId)
     })
 
     // Still showing 2 pages, each pulls from remaining 24 items
@@ -400,7 +400,7 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.pages[0]).toHaveLength(5)
 
     // All items should be tech category
-    result.current.pages[0].forEach((post) => {
+    result.current.pages[0]!.forEach((post) => {
       expect(post.category).toBe(`tech`)
     })
 
@@ -472,7 +472,7 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     // All items should be life category
-    result.current.pages[0].forEach((post) => {
+    result.current.pages[0]!.forEach((post) => {
       expect(post.category).toBe(`life`)
     })
   })
