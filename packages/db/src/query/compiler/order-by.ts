@@ -107,6 +107,8 @@ export function processOrderBy(
 
   let setSizeCallback: ((getSize: () => number) => void) | undefined
 
+  let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
+
   // Optimize the orderBy operator to lazily load elements
   // by using the range index of the collection.
   // Only for orderBy clause on a single column for now (no composite ordering)
@@ -156,7 +158,7 @@ export function processOrderBy(
 
       if (index && index.supports(`gt`)) {
         // We found an index that we can use to lazily load ordered data
-        const orderByOptimizationInfo = {
+        orderByOptimizationInfo = {
           offset: offset ?? 0,
           limit,
           comparator,
@@ -173,7 +175,7 @@ export function processOrderBy(
             ...optimizableOrderByCollections[followRefCollection.id]!,
             dataNeeded: () => {
               const size = getSize()
-              return Math.max(0, limit - size)
+              return Math.max(0, orderByOptimizationInfo!.limit - size)
             },
           }
         }
@@ -188,7 +190,19 @@ export function processOrderBy(
       offset,
       comparator: compare,
       setSizeCallback,
-      setMoveFn,
+      setMoveFn: (moveFn: (offset: number, limit: number) => void) => {
+        setMoveFn(
+          // We wrap the move function such that we update the orderByOptimizationInfo
+          // because that is used by the `dataNeeded` callback to determine if we need to load more data
+          (offset, limit) => {
+            moveFn(offset, limit)
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset = offset
+              orderByOptimizationInfo.limit = limit
+            }
+          }
+        )
+      },
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )

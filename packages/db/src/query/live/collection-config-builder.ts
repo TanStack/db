@@ -56,7 +56,9 @@ export class CollectionConfigBuilder<
   // Reference to the live query collection for error state transitions
   private liveQueryCollection?: Collection<TResult, any, any>
   
-  private moveFn: undefined | ((offset: number, limit: number) => void)
+  private moveFn: ((offset: number, limit: number) => void) | undefined
+
+  private maybeRunGraphFn: (() => void) | undefined
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -118,10 +120,14 @@ export class CollectionConfigBuilder<
 
   move(offset: number, limit: number) {
     if (!this.moveFn) {
-      throw new Error(`Move function not set`)
+      console.log(
+        `This collection can't be moved because no move function was set`
+      )
+      return
     }
 
     this.moveFn(offset, limit)
+    this.maybeRunGraphFn?.()
   }
 
   // The callback function is called after the graph has run.
@@ -204,8 +210,11 @@ export class CollectionConfigBuilder<
       fullSyncState
     )
 
+    this.maybeRunGraphFn = () =>
+      this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+
     // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+    this.maybeRunGraphFn()
 
     // Return the unsubscribe function
     return () => {

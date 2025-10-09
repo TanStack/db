@@ -26,6 +26,8 @@ export type TopKChanges<V> = {
 }
 
 export type TopKMoveChanges<V> = {
+  /** Flag that marks whether there were any changes to the topK */
+  changes: boolean
   /** Indicates which elements move into the topK (if any) */
   moveIns: Array<IndexedValue<V>>
   /** Indicates which elements move out of the topK (if any) */
@@ -83,10 +85,27 @@ class TopKArray<V> implements TopK<V> {
     const newRange: HRange = [this.#topKStart, this.#topKEnd]
     const { onlyInA, onlyInB } = diffHalfOpen(oldRange, newRange)
 
-    const moveIns = onlyInB.map((index) => this.#sortedValues[index]!)
-    const moveOuts = onlyInA.map((index) => this.#sortedValues[index]!)
+    const moveIns: Array<IndexedValue<V>> = []
+    onlyInB.forEach((index) => {
+      const value = this.#sortedValues[index]
+      if (value) {
+        moveIns.push(value)
+      }
+    })
 
-    return { moveIns, moveOuts }
+    const moveOuts: Array<IndexedValue<V>> = []
+    onlyInA.forEach((index) => {
+      const value = this.#sortedValues[index]
+      if (value) {
+        moveOuts.push(value)
+      }
+    })
+
+    // It could be that there are changes (i.e. moveIns or moveOuts)
+    // but that the collection is lazy so we don't have the data yet that needs to move in/out
+    // so `moveIns` and `moveOuts` will be empty but `changes` will be true
+    // this will tell the caller that it needs to run the graph to load more data
+    return { moveIns, moveOuts, changes: onlyInA.length + onlyInB.length > 0 }
   }
 
   insert(value: V): TopKChanges<V> {
@@ -259,12 +278,15 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
 
     const result: Array<[[K, IndexedValue<T>], number]> = []
 
-    const changes = this.#topK.move(offset, limit)
+    const diff = this.#topK.move(offset, limit)
 
-    changes.moveIns.forEach((moveIn) => this.handleMoveIn(moveIn, result))
-    changes.moveOuts.forEach((moveOut) => this.handleMoveOut(moveOut, result))
+    diff.moveIns.forEach((moveIn) => this.handleMoveIn(moveIn, result))
+    diff.moveOuts.forEach((moveOut) => this.handleMoveOut(moveOut, result))
 
-    if (result.length > 0) {
+    if (diff.changes) {
+      // There are changes to the topK
+      // it could be that moveIns and moveOuts are empty
+      // because the collection is lazy, so we will run the graph again to load the data
       this.output.sendData(new MultiSet(result))
     }
   }
