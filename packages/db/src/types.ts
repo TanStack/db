@@ -503,13 +503,16 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+
+  utils?: TUtils
 }
 
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+  TUtils extends UtilsRecord = {},
+> extends BaseCollectionConfig<T, TKey, TSchema, TUtils> {
   sync: SyncConfig<T, TKey>
 }
 
@@ -528,12 +531,21 @@ export type MaybeSingleResult = {
   singleResult?: true
 }
 
+export type MoveUtils = {
+  /**
+   * Moves the offset and limit of an ordered query.
+   * Is a no-op if the query is not ordered.
+   */
+  move: (offset: number, limit: number) => void
+}
+
 // Only used for live query collections
 export type CollectionConfigSingleRowOption<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
-> = CollectionConfig<T, TKey, TSchema> & MaybeSingleResult
+  TUtils extends UtilsRecord = {},
+> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>

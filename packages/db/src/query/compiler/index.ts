@@ -58,6 +58,7 @@ export function compileQuery(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
@@ -94,6 +95,7 @@ export function compileQuery(
     callbacks,
     lazyCollections,
     optimizableOrderByCollections,
+    setMoveFn,
     cache,
     queryMapping
   )
@@ -127,6 +129,7 @@ export function compileQuery(
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
+      setMoveFn,
       rawQuery,
       compileQuery
     )
@@ -267,6 +270,7 @@ export function compileQuery(
       query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
+      setMoveFn,
       query.limit,
       query.offset
     )
@@ -332,6 +336,7 @@ function processFrom(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping
 ): { alias: string; input: KeyedStream; collectionId: string } {
@@ -356,6 +361,7 @@ function processFrom(
         callbacks,
         lazyCollections,
         optimizableOrderByCollections,
+        setMoveFn,
         cache,
         queryMapping
       )

@@ -9,6 +9,7 @@ import type { Collection } from "../../collection/index.js"
 import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
+  MoveUtils,
   ResultStream,
   SyncConfig,
 } from "../../types.js"
@@ -54,6 +55,8 @@ export class CollectionConfigBuilder<
 
   // Reference to the live query collection for error state transitions
   private liveQueryCollection?: Collection<TResult, any, any>
+  
+  private moveFn: undefined | ((offset: number, limit: number) => void)
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -90,7 +93,9 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfigSingleRowOption<TResult> {
+  getConfig(): CollectionConfigSingleRowOption<TResult> & {
+    utils: MoveUtils
+  } {
     return {
       id: this.id,
       getKey:
@@ -105,7 +110,18 @@ export class CollectionConfigBuilder<
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
       singleResult: this.query.singleResult,
+      utils: {
+        move: this.move.bind(this),
+      },
     }
+  }
+
+  move(offset: number, limit: number) {
+    if (!this.moveFn) {
+      throw new Error(`Move function not set`)
+    }
+
+    this.moveFn(offset, limit)
   }
 
   // The callback function is called after the graph has run.
@@ -229,7 +245,10 @@ export class CollectionConfigBuilder<
       this.subscriptions,
       this.lazyCollectionsCallbacks,
       this.lazyCollections,
-      this.optimizableOrderByCollections
+      this.optimizableOrderByCollections,
+      (moveFn: (offset: number, limit: number) => void) => {
+        this.moveFn = moveFn
+      }
     )
 
     this.pipelineCache = pipelineCache

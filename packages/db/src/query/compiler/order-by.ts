@@ -37,6 +37,7 @@ export function processOrderBy(
   selectClause: Select,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
@@ -187,6 +188,7 @@ export function processOrderBy(
       offset,
       comparator: compare,
       setSizeCallback,
+      setMoveFn,
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )
