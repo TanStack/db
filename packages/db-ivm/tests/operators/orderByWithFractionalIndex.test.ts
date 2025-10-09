@@ -7,17 +7,8 @@ import {
 } from "../../src/operators/index.js"
 import { orderByWithFractionalIndexBTree } from "../../src/operators/orderByBTree.js"
 import { loadBTree } from "../../src/operators/topKWithFractionalIndexBTree.js"
-import { MessageTracker } from "../test-utils.js"
+import { MessageTracker, compareFractionalIndex } from "../test-utils.js"
 import type { KeyValue } from "../../src/types.js"
-
-const compareFractionalIndex = (
-  r1: [string, [{ id: number; value: string }, string]],
-  r2: [string, [{ id: number; value: string }, string]]
-) => {
-  const [_key1, [_value1, index1]] = r1
-  const [_key2, [_value2, index2]] = r2
-  return index1 < index2 ? -1 : index1 > index2 ? 1 : 0
-}
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,

@@ -7,7 +7,11 @@ import {
   topKWithFractionalIndexBTree,
 } from "../../src/operators/topKWithFractionalIndexBTree.js"
 import { output } from "../../src/operators/index.js"
-import { MessageTracker, assertOnlyKeysAffected } from "../test-utils.js"
+import {
+  MessageTracker,
+  assertOnlyKeysAffected,
+  compareFractionalIndex,
+} from "../test-utils.js"
 
 // Helper function to check if indices are in lexicographic order
 function checkLexicographicOrder(results: Array<any>) {
@@ -763,18 +767,12 @@ describe(`Operators`, () => {
       graph.run()
 
       // Initial result should have first 3 elements (a, b, c)
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
       expect(initialResult.messageCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
-      const initialSortedByIndex = initialResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1] // fractional index
-        const bIndex = b[1][1] // fractional index
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const initialSortedValues = initialSortedByIndex.map(
+      const initialSortedValues = initialResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`])
@@ -788,16 +786,10 @@ describe(`Operators`, () => {
       moveFn!(3, 3)
       graph.run()
 
-      const moveResult = tracker.getResult()
+      const moveResult = tracker.getResult(compareFractionalIndex)
 
       // Should now show d, e, f
-      const moveSortedByIndex = moveResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues = moveSortedByIndex.map(
+      const moveSortedValues = moveResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues).toEqual([`d`, `e`, `f`])
@@ -846,18 +838,12 @@ describe(`Operators`, () => {
       graph.run()
 
       // Initial result should have first 3 elements (a, b, c)
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
       expect(initialResult.messageCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
-      const initialSortedByIndex = initialResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1] // fractional index
-        const bIndex = b[1][1] // fractional index
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const initialSortedValues = initialSortedByIndex.map(
+      const initialSortedValues = initialResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
@@ -871,16 +857,10 @@ describe(`Operators`, () => {
       moveFn!(0, 3)
       graph.run()
 
-      const moveResult = tracker.getResult()
+      const moveResult = tracker.getResult(compareFractionalIndex)
 
       // Should now show d, e, f
-      const moveSortedByIndex = moveResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues = moveSortedByIndex.map(
+      const moveSortedValues = moveResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues).toEqual([`a`, `b`, `c`])
@@ -928,16 +908,10 @@ describe(`Operators`, () => {
       graph.run()
 
       // Initial result should have first 2 elements (a, b)
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(2)
 
-      const initialSortedByIndex = initialResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const initialSortedValues = initialSortedByIndex.map(
+      const initialSortedValues = initialResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
@@ -948,16 +922,9 @@ describe(`Operators`, () => {
       moveFn!(1, 2)
       graph.run()
 
-      const moveResult = tracker.getResult()
-      // expect(moveResult.messageCount).toBeGreaterThan(0)
+      const moveResult = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex = moveResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues = moveSortedByIndex.map(
+      const moveSortedValues = moveResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues).toEqual([`b`, `c`])
@@ -968,16 +935,9 @@ describe(`Operators`, () => {
       moveFn!(2, 2)
       graph.run()
 
-      const moveResult2 = tracker.getResult()
-      // expect(moveResult2.messageCount).toBeGreaterThan(0)
+      const moveResult2 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex2 = moveResult2.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues2 = moveSortedByIndex2.map(
+      const moveSortedValues2 = moveResult2.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues2).toEqual([`c`, `d`])
@@ -986,16 +946,9 @@ describe(`Operators`, () => {
       moveFn!(0, 2)
       graph.run()
 
-      const moveResult3 = tracker.getResult()
-      // expect(moveResult3.messageCount).toBeGreaterThan(0)
+      const moveResult3 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex3 = moveResult3.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues3 = moveSortedByIndex3.map(
+      const moveSortedValues3 = moveResult3.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues3).toEqual([`a`, `b`])
@@ -1039,16 +992,10 @@ describe(`Operators`, () => {
       graph.run()
 
       // Initial result should have 2 elements starting from offset 1 (b, c)
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(2)
 
-      const initialSortedByIndex = initialResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const initialSortedValues = initialSortedByIndex.map(
+      const initialSortedValues = initialResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(initialSortedValues).toEqual([`b`, `c`])
@@ -1057,15 +1004,9 @@ describe(`Operators`, () => {
       moveFn!(1, 3)
       graph.run()
 
-      const moveResult = tracker.getResult()
+      const moveResult = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex = moveResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues = moveSortedByIndex.map(
+      const moveSortedValues = moveResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues).toEqual([`b`, `c`, `d`])
@@ -1074,15 +1015,9 @@ describe(`Operators`, () => {
       moveFn!(1, 1)
       graph.run()
 
-      const moveResult2 = tracker.getResult()
+      const moveResult2 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex2 = moveResult2.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues2 = moveSortedByIndex2.map(
+      const moveSortedValues2 = moveResult2.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues2).toEqual([`b`])
@@ -1123,16 +1058,10 @@ describe(`Operators`, () => {
       graph.run()
 
       // Initial result should have first 2 elements (a, b)
-      const initialResult = tracker.getResult()
+      const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(2)
 
-      const initialSortedByIndex = initialResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const initialSortedValues = initialSortedByIndex.map(
+      const initialSortedValues = initialResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
@@ -1141,15 +1070,9 @@ describe(`Operators`, () => {
       moveFn!(2, 2)
       graph.run()
 
-      const moveResult = tracker.getResult()
+      const moveResult = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex = moveResult.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues = moveSortedByIndex.map(
+      const moveSortedValues = moveResult.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues).toEqual([`c`]) // Only 1 element available at offset 2
@@ -1158,15 +1081,9 @@ describe(`Operators`, () => {
       moveFn!(5, 2)
       graph.run()
 
-      const moveResult2 = tracker.getResult()
+      const moveResult2 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex2 = moveResult2.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues2 = moveSortedByIndex2.map(
+      const moveSortedValues2 = moveResult2.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues2).toEqual([]) // No elements available at offset 5
@@ -1175,15 +1092,9 @@ describe(`Operators`, () => {
       moveFn!(-5, 2)
       graph.run()
 
-      const moveResult3 = tracker.getResult()
+      const moveResult3 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex3 = moveResult3.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues3 = moveSortedByIndex3.map(
+      const moveSortedValues3 = moveResult3.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues3).toEqual([])
@@ -1192,15 +1103,9 @@ describe(`Operators`, () => {
       moveFn!(0, 2)
       graph.run()
 
-      const moveResult4 = tracker.getResult()
+      const moveResult4 = tracker.getResult(compareFractionalIndex)
 
-      const moveSortedByIndex4 = moveResult4.sortedResults.sort((a, b) => {
-        const aIndex = a[1][1]
-        const bIndex = b[1][1]
-        return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      })
-
-      const moveSortedValues4 = moveSortedByIndex4.map(
+      const moveSortedValues4 = moveResult4.sortedResults.map(
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues4).toEqual([`a`, `b`])
