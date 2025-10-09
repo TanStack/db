@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.9
+
+### Patch Changes
+
+- Stop pushing where clauses that target renamed subquery projections so alias remapping stays intact, preventing a bug where a where clause would not be executed correctly. ([#654](https://github.com/TanStack/db/pull/654))
+
 ## 0.4.8
 
 ### Patch Changes
