@@ -138,6 +138,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     const lastPage = pages[pages.length - 1]
     const lastPageParam = pageParams[pageParams.length - 1]
 
+    // Ensure lastPage and lastPageParam are defined before calling getNextPageParam
+    if (!lastPage || lastPageParam === undefined) return false
+
     // Call user's getNextPageParam to determine if there's more
     const nextParam = config.getNextPageParam(
       lastPage,
