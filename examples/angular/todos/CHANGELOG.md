@@ -1,5 +1,13 @@
 # todos
 
+## 0.0.10
+
+### Patch Changes
+
+- Updated dependencies [[`4a7c44a`](https://github.com/TanStack/db/commit/4a7c44a723223ade4e226745eadffead671fff13)]:
+  - @tanstack/db@0.4.9
+  - @tanstack/angular-db@0.1.14
+
 ## 0.0.9
 
 ### Patch Changes
