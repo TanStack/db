@@ -1267,4 +1267,92 @@ describe(`Collection`, () => {
     // we truncated everything, so we should only have one item left that synced
     expect(collection.state.size).toBe(1)
   })
+
+  it(`should allow multiple sync transactions before marking collection ready and data should be visible`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `multiple-sync-before-ready`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Collection should start in loading state
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(0)
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // First sync transaction
+    begin()
+    write({ type: `insert`, value: { id: 1, value: `first batch item 1` } })
+    write({ type: `insert`, value: { id: 2, value: `first batch item 2` } })
+    commit()
+
+    // Data should be visible even though not ready
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `first batch item 1`,
+    })
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `first batch item 2`,
+    })
+
+    // Second sync transaction
+    begin()
+    write({ type: `insert`, value: { id: 3, value: `second batch item 1` } })
+    write({
+      type: `update`,
+      value: { id: 1, value: `first batch item 1 updated` },
+    })
+    commit()
+
+    // More data should be visible
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `first batch item 1 updated`,
+    })
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `second batch item 1`,
+    })
+
+    // Third sync transaction
+    begin()
+    write({ type: `delete`, value: { id: 2, value: `first batch item 2` } })
+    write({ type: `insert`, value: { id: 4, value: `third batch item 1` } })
+    commit()
+
+    // Updates should be reflected
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(3) // Deleted 2, added 4
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(4)).toEqual({
+      id: 4,
+      value: `third batch item 1`,
+    })
+
+    // Now mark as ready
+    markReady()
+
+    // Should transition to ready with all data intact
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(3)
+    expect(Array.from(collection.state.keys()).sort()).toEqual([1, 3, 4])
+
+    // Verify we can use stateWhenReady
+    const state = await collection.stateWhenReady()
+    expect(state.size).toBe(3)
+  })
 })

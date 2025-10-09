@@ -1,5 +1,28 @@
 # @tanstack/react-db
 
+## 0.1.30
+
+### Patch Changes
+
+- Refactored live queries to execute eagerly during sync. Live queries now materialize their results immediately as data arrives from source collections, even while those collections are still in a "loading" state, rather than waiting for all sources to be "ready" before executing. ([#658](https://github.com/TanStack/db/pull/658))
+
+- Updated dependencies [[`d9ae7b7`](https://github.com/TanStack/db/commit/d9ae7b76b8ab30fd55fe835531974eee333dd450), [`44555b7`](https://github.com/TanStack/db/commit/44555b733a1a4d38d8126bf8da51d4b44f898298)]:
+  - @tanstack/db@0.4.8
+
+## 0.1.29
+
+### Patch Changes
+
+- Updated dependencies [[`6692aad`](https://github.com/TanStack/db/commit/6692aad4267e127b71ce595529080d6fc0aa2066)]:
+  - @tanstack/db@0.4.7
+
+## 0.1.28
+
+### Patch Changes
+
+- Updated dependencies [[`dd6cdf7`](https://github.com/TanStack/db/commit/dd6cdf7ea62d91bfb12ea8d25bdd25549259c113), [`c30a20b`](https://github.com/TanStack/db/commit/c30a20b1df39b34f18d0aa7c7b901a27fb963f36)]:
+  - @tanstack/db@0.4.6
+
 ## 0.1.27
 
 ### Patch Changes

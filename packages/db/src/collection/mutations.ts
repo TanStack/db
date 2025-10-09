@@ -230,7 +230,8 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
-      directOpTransaction.commit()
+      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
+      directOpTransaction.commit().catch(() => undefined)
 
       // Add the transaction to the collection's transactions store
       state.transactions.set(directOpTransaction.id, directOpTransaction)
@@ -387,7 +388,8 @@ export class CollectionMutationsManager<
       const emptyTransaction = createTransaction({
         mutationFn: async () => {},
       })
-      emptyTransaction.commit()
+      // Errors still propagate through tx.isPersisted.promise; suppress the background commit from warning
+      emptyTransaction.commit().catch(() => undefined)
       // Schedule cleanup for empty transaction
       state.scheduleTransactionCleanup(emptyTransaction)
       return emptyTransaction
@@ -423,7 +425,8 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    directOpTransaction.commit()
+    // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
+    directOpTransaction.commit().catch(() => undefined)
 
     // Add the transaction to the collection's transactions store
 
@@ -524,7 +527,8 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    directOpTransaction.commit()
+    // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
+    directOpTransaction.commit().catch(() => undefined)
 
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)

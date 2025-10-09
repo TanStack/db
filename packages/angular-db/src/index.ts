@@ -184,9 +184,7 @@ export function injectLiveQuery(opts: any) {
     data,
     collection,
     status,
-    isLoading: computed(
-      () => status() === `loading` || status() === `initialCommit`
-    ),
+    isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready`),
     isIdle: computed(() => status() === `idle`),
     isError: computed(() => status() === `error`),
