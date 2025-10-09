@@ -6,6 +6,7 @@ import type { Collection } from "../collection/index.js"
 import type {
   CollectionConfig,
   CollectionConfigSingleRowOption,
+  MoveUtils,
   NonSingleResult,
   SingleResult,
   UtilsRecord,
@@ -15,16 +16,20 @@ import type { Context, GetResult } from "./builder/types.js"
 type CollectionConfigForContext<
   TContext extends Context,
   TResult extends object,
+  TUtils extends UtilsRecord = {},
 > = TContext extends SingleResult
-  ? CollectionConfigSingleRowOption<TResult> & SingleResult
-  : CollectionConfigSingleRowOption<TResult> & NonSingleResult
+  ? CollectionConfigSingleRowOption<TResult, string | number, never, TUtils> &
+      SingleResult
+  : CollectionConfigSingleRowOption<TResult, string | number, never, TUtils> &
+      NonSingleResult
 
 type CollectionForContext<
   TContext extends Context,
   TResult extends object,
+  TUtils extends UtilsRecord = {},
 > = TContext extends SingleResult
-  ? Collection<TResult> & SingleResult
-  : Collection<TResult> & NonSingleResult
+  ? Collection<TResult, string | number, TUtils> & SingleResult
+  : Collection<TResult, string | number, TUtils> & NonSingleResult
 
 /**
  * Creates live query collection options for use with createCollection
@@ -55,14 +60,15 @@ export function liveQueryCollectionOptions<
   TResult extends object = GetResult<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
-): CollectionConfigForContext<TContext, TResult> {
+): CollectionConfigForContext<TContext, TResult, MoveUtils> {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
     TResult
   >(config)
   return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
     TContext,
-    TResult
+    TResult,
+    MoveUtils
   >
 }
 
@@ -106,7 +112,7 @@ export function createLiveQueryCollection<
   TResult extends object = GetResult<TContext>,
 >(
   query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
-): CollectionForContext<TContext, TResult>
+): CollectionForContext<TContext, TResult, MoveUtils>
 
 // Overload 2: Accept full config object with optional utilities
 export function createLiveQueryCollection<
@@ -115,7 +121,7 @@ export function createLiveQueryCollection<
   TUtils extends UtilsRecord = {},
 >(
   config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
-): CollectionForContext<TContext, TResult>
+): CollectionForContext<TContext, TResult, TUtils & MoveUtils>
 
 // Implementation
 export function createLiveQueryCollection<
@@ -126,7 +132,7 @@ export function createLiveQueryCollection<
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-): CollectionForContext<TContext, TResult> {
+): CollectionForContext<TContext, TResult, MoveUtils> {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
     // Simple query function case
@@ -138,7 +144,8 @@ export function createLiveQueryCollection<
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
-      TResult
+      TResult,
+      MoveUtils
     >
   } else {
     // Config object case
@@ -149,8 +156,11 @@ export function createLiveQueryCollection<
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
     return bridgeToCreateCollection({
       ...options,
-      utils: config.utils,
-    }) as CollectionForContext<TContext, TResult>
+      utils: {
+        ...config.utils,
+        ...options.utils,
+      },
+    }) as CollectionForContext<TContext, TResult, MoveUtils>
   }
 }
 
@@ -162,7 +172,7 @@ function bridgeToCreateCollection<
   TResult extends object,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<TResult> & { utils?: TUtils }
+  options: CollectionConfig<TResult, string | number, never, TUtils>
 ): Collection<TResult, string | number, TUtils> {
   // This is the only place we need a type assertion, hidden from user API
   return createCollection(options as any) as unknown as Collection<

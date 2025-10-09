@@ -50,7 +50,8 @@ describe(`Query2 Compiler`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -105,7 +106,8 @@ describe(`Query2 Compiler`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -182,7 +184,8 @@ describe(`Query2 Compiler`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -247,7 +250,8 @@ describe(`Query2 Compiler`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []

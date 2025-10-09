@@ -62,6 +62,7 @@ export function processJoins(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn
 ): NamespacedAndKeyedStream {
@@ -82,6 +83,7 @@ export function processJoins(
       callbacks,
       lazyCollections,
       optimizableOrderByCollections,
+      setMoveFn,
       rawQuery,
       onCompileSubquery
     )
@@ -107,6 +109,7 @@ function processJoin(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn
 ): NamespacedAndKeyedStream {
@@ -123,6 +126,7 @@ function processJoin(
     callbacks,
     lazyCollections,
     optimizableOrderByCollections,
+    setMoveFn,
     cache,
     queryMapping,
     onCompileSubquery
@@ -395,6 +399,7 @@ function processJoinSource(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazyCollections: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
   onCompileSubquery: CompileQueryFn
@@ -420,6 +425,7 @@ function processJoinSource(
         callbacks,
         lazyCollections,
         optimizableOrderByCollections,
+        setMoveFn,
         cache,
         queryMapping
       )

@@ -144,3 +144,36 @@ export function* mapIterable<T, U>(
     yield fn(t)
   }
 }
+
+export type HRange = [number, number] // half-open [start, end[ i.e. end is exclusive
+
+/**
+ * Computes the difference between two half-open ranges.
+ * @param a - The first half-open range
+ * @param b - The second half-open range
+ * @returns The difference between the two ranges
+ */
+export function diffHalfOpen(a: HRange, b: HRange) {
+  const [a1, a2] = a
+  const [b1, b2] = b
+
+  // A \ B can be up to two segments (left and right of the overlap)
+  const onlyInA: Array<number> = [
+    ...range(a1, Math.min(a2, b1)), // left side of A outside B
+    ...range(Math.max(a1, b2), a2), // right side of A outside B
+  ]
+
+  // B \ A similarly
+  const onlyInB: Array<number> = [
+    ...range(b1, Math.min(b2, a1)),
+    ...range(Math.max(b1, a2), b2),
+  ]
+
+  return { onlyInA, onlyInB }
+}
+
+function range(start: number, end: number): Array<number> {
+  const out: Array<number> = []
+  for (let i = start; i < end; i++) out.push(i)
+  return out
+}
