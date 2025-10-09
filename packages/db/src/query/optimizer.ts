@@ -959,8 +959,9 @@ function referencesAliasWithRemappedSelect(
   whereClause: BasicExpression<boolean>,
   outerAlias: string
 ): boolean {
+  const refs = collectRefs(whereClause)
   // Only care about clauses that actually reference the outer alias.
-  if (!collectRefs(whereClause).some((ref) => ref.path[0] === outerAlias)) {
+  if (refs.every((ref) => ref.path[0] !== outerAlias)) {
     return false
   }
 
@@ -975,14 +976,14 @@ function referencesAliasWithRemappedSelect(
     return false
   }
 
-  for (const ref of collectRefs(whereClause)) {
+  for (const ref of refs) {
     const path = ref.path
     // Need at least alias + field to matter.
     if (path.length < 2) continue
     if (path[0] !== outerAlias) continue
 
     const projected = select[path[1]!]
-    // Unselected fields mean the alias was reshaped; treat as unsafe.
+    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
     if (!projected) continue
 
     // Non-PropRef projections are computed values; cannot push down.
@@ -990,7 +991,8 @@ function referencesAliasWithRemappedSelect(
       return true
     }
 
-    // Require the projection to carry both alias and field info for comparison.
+    // If the projection is just the alias (whole row) without a specific field,
+    // we can't verify whether the field we're referencing is being preserved or remapped.
     if (projected.path.length < 2) {
       return true
     }
