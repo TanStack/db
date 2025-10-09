@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection/index.js"
 import {
+  and,
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
@@ -1328,9 +1329,8 @@ describe(`createLiveQueryCollection`, () => {
             ({ user, post }) => eq(user.id, post.authorId),
             `inner`
           )
-          .where(
-            ({ user, post }) =>
-              eq(user.active, true) && eq(post.published, true)
+          .where(({ user, post }) =>
+            and(eq(user.active, true), eq(post.published, true))
           )
           .orderBy(({ post }) => post.title, `asc`)
           .limit(3)

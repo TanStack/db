@@ -194,11 +194,11 @@ export function processOrderBy(
         setMoveFn(
           // We wrap the move function such that we update the orderByOptimizationInfo
           // because that is used by the `dataNeeded` callback to determine if we need to load more data
-          (offset, limit) => {
-            moveFn(offset, limit)
+          (newOffset, newLimit) => {
+            moveFn(newOffset, newLimit)
             if (orderByOptimizationInfo) {
-              orderByOptimizationInfo.offset = offset
-              orderByOptimizationInfo.limit = limit
+              orderByOptimizationInfo.offset = newOffset
+              orderByOptimizationInfo.limit = newLimit
             }
           }
         )
