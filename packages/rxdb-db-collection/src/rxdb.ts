@@ -151,6 +151,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
                     },
                   },
                 ],
+                _deleted: false,
               },
               sort: [{ "_meta.lwt": `asc` }, { [primaryPath]: `asc` }],
               limit: syncBatchSize,
@@ -158,7 +159,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
             }
           } else {
             query = {
-              selector: {},
+              selector: { _deleted: false },
               sort: [{ "_meta.lwt": `asc` }, { [primaryPath]: `asc` }],
               limit: syncBatchSize,
               skip: 0,
