@@ -2,7 +2,11 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import { MissingAliasInputsError } from "../../errors.js"
+import { transactionScopedScheduler } from "../../scheduler.js"
+import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
+import { getCollectionBuilder } from "./collection-registry.js"
+import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
@@ -12,6 +16,7 @@ import type {
   KeyedStream,
   ResultStream,
   SyncConfig,
+  UtilsRecord,
 } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression, QueryIR } from "../ir.js"
@@ -23,6 +28,15 @@ import type {
   SyncState,
 } from "./types.js"
 import type { AllCollectionEvents } from "../../collection/events.js"
+
+export type LiveQueryCollectionUtils = UtilsRecord & {
+  getRunCount: () => number
+  getBuilder: () => CollectionConfigBuilder<any, any>
+}
+
+type PendingGraphRun = {
+  loadCallbacks: Set<() => boolean>
+}
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
@@ -52,12 +66,42 @@ export class CollectionConfigBuilder<
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
   private isGraphRunning = false
+  private runCount = 0
+
+  // Current sync session state (set when sync starts, cleared when it stops)
+  // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
+  public currentSyncConfig:
+    | Parameters<SyncConfig<TResult>[`sync`]>[0]
+    | undefined
+  public currentSyncState: FullSyncState | undefined
 
   // Error state tracking
   private isInErrorState = false
 
   // Reference to the live query collection for error state transitions
   private liveQueryCollection?: Collection<TResult, any, any>
+
+  private readonly aliasDependencies: Record<
+    string,
+    Array<CollectionConfigBuilder<any, any>>
+  > = {}
+
+  private readonly builderDependencies = new Set<
+    CollectionConfigBuilder<any, any>
+  >()
+
+  // Pending graph runs per scheduler context (e.g., per transaction)
+  // The builder manages its own state; the scheduler just orchestrates execution order
+  // Only stores callbacks - if sync ends, pending jobs gracefully no-op
+  private readonly pendingGraphRuns = new Map<
+    SchedulerContextId,
+    PendingGraphRun
+  >()
+
+  // Unsubscribe function for scheduler's onClear listener
+  // Registered when sync starts, unregistered when sync stops
+  // Prevents memory leaks by releasing the scheduler's reference to this builder
+  private unsubscribeFromSchedulerClears?: () => void
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -107,7 +151,9 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfigSingleRowOption<TResult> {
+  getConfig(): CollectionConfigSingleRowOption<TResult> & {
+    utils: LiveQueryCollectionUtils
+  } {
     return {
       id: this.id,
       getKey:
@@ -122,6 +168,10 @@ export class CollectionConfigBuilder<
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
       singleResult: this.query.singleResult,
+      utils: {
+        getRunCount: this.getRunCount.bind(this),
+        getBuilder: () => this,
+      },
     }
   }
 
@@ -159,12 +209,8 @@ export class CollectionConfigBuilder<
   // That can happen because even though we load N rows, the pipeline might filter some of these rows out
   // causing the orderBy operator to receive less than N rows or even no rows at all.
   // So this callback would notice that it doesn't have enough rows and load some more.
-  // The callback returns a boolean, when it's true it's done loading data.
-  maybeRunGraph(
-    config: SyncMethods<TResult>,
-    syncState: FullSyncState,
-    callback?: () => boolean
-  ) {
+  // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
+  maybeRunGraph(callback?: () => boolean) {
     if (this.isGraphRunning) {
       // no nested runs of the graph
       // which is possible if the `callback`
@@ -172,10 +218,18 @@ export class CollectionConfigBuilder<
       return
     }
 
+    // Should only be called when sync is active
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      throw new Error(
+        `maybeRunGraph called without active sync session. This should not happen.`
+      )
+    }
+
     this.isGraphRunning = true
 
     try {
-      const { begin, commit } = config
+      const { begin, commit } = this.currentSyncConfig
+      const syncState = this.currentSyncState
 
       // Don't run if the live query is in an error state
       if (this.isInErrorState) {
@@ -196,12 +250,164 @@ export class CollectionConfigBuilder<
           commit()
           // After initial commit, check if we should mark ready
           // (in case all sources were already ready before we subscribed)
-          this.updateLiveQueryStatus(config)
+          this.updateLiveQueryStatus(this.currentSyncConfig)
         }
       }
     } finally {
       this.isGraphRunning = false
     }
+  }
+
+  /**
+   * Schedules a graph run with the transaction-scoped scheduler.
+   * Ensures each builder runs at most once per transaction, with automatic dependency tracking
+   * to run parent queries before child queries. Outside a transaction, runs immediately.
+   *
+   * Multiple calls during a transaction are coalesced into a single execution.
+   * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
+   * Load callbacks are combined when entries merge.
+   *
+   * Uses the current sync session's config and syncState from instance properties.
+   *
+   * @param callback - Optional callback to load more data if needed (returns true when done)
+   * @param options - Optional scheduling configuration
+   * @param options.contextId - Transaction ID to group work; defaults to active transaction
+   * @param options.jobId - Unique identifier for this job; defaults to this builder instance
+   * @param options.alias - Source alias that triggered this schedule; adds alias-specific dependencies
+   * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
+   */
+  scheduleGraphRun(
+    callback?: () => boolean,
+    options?: {
+      contextId?: SchedulerContextId
+      jobId?: unknown
+      alias?: string
+      dependencies?: Array<CollectionConfigBuilder<any, any>>
+    }
+  ) {
+    const contextId = options?.contextId ?? getActiveTransaction()?.id
+    // Use the builder instance as the job ID for deduplication. This is memory-safe
+    // because the scheduler's context Map is deleted after flushing (no long-term retention).
+    const jobId = options?.jobId ?? this
+    const dependentBuilders = (() => {
+      if (options?.dependencies) {
+        return options.dependencies
+      }
+
+      const deps = new Set(this.builderDependencies)
+      if (options?.alias) {
+        const aliasDeps = this.aliasDependencies[options.alias]
+        if (aliasDeps) {
+          for (const dep of aliasDeps) {
+            deps.add(dep)
+          }
+        }
+      }
+
+      deps.delete(this)
+
+      return Array.from(deps)
+    })()
+
+    // We intentionally scope deduplication to the builder instance. Each instance
+    // owns caches and compiled pipelines, so sharing work across instances that
+    // merely reuse the same string id would execute the wrong builder's graph.
+
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      throw new Error(
+        `scheduleGraphRun called without active sync session. This should not happen.`
+      )
+    }
+
+    // Manage our own state - get or create pending callbacks for this context
+    let pending = contextId ? this.pendingGraphRuns.get(contextId) : undefined
+    if (!pending) {
+      pending = {
+        loadCallbacks: new Set(),
+      }
+      if (contextId) {
+        this.pendingGraphRuns.set(contextId, pending)
+      }
+    }
+
+    // Add callback if provided (this is what accumulates between schedules)
+    if (callback) {
+      pending.loadCallbacks.add(callback)
+    }
+
+    // Schedule execution (scheduler just orchestrates order, we manage state)
+    // For immediate execution (no contextId), pass pending directly since it won't be in the map
+    const pendingToPass = contextId ? undefined : pending
+    transactionScopedScheduler.schedule({
+      contextId,
+      jobId,
+      dependencies: dependentBuilders,
+      run: () => this.executeGraphRun(contextId, pendingToPass),
+    })
+  }
+
+  /**
+   * Clears pending graph run state for a specific context.
+   * Called when the scheduler clears a context (e.g., transaction rollback/abort).
+   */
+  clearPendingGraphRun(contextId: SchedulerContextId): void {
+    this.pendingGraphRuns.delete(contextId)
+  }
+
+  /**
+   * Executes a pending graph run. Called by the scheduler when dependencies are satisfied.
+   * Clears the pending state BEFORE execution so that any re-schedules during the run
+   * create fresh state and don't interfere with the current execution.
+   * Uses instance sync state - if sync has ended, gracefully returns without executing.
+   *
+   * @param contextId - Optional context ID to look up pending state
+   * @param pendingParam - For immediate execution (no context), pending state is passed directly
+   */
+  private executeGraphRun(
+    contextId?: SchedulerContextId,
+    pendingParam?: PendingGraphRun
+  ): void {
+    // Get pending state: either from parameter (no context) or from map (with context)
+    // Remove from map BEFORE checking sync state to prevent leaking entries when sync ends
+    // before the transaction flushes (e.g., unsubscribe during in-flight transaction)
+    const pending =
+      pendingParam ??
+      (contextId ? this.pendingGraphRuns.get(contextId) : undefined)
+    if (contextId) {
+      this.pendingGraphRuns.delete(contextId)
+    }
+
+    // If no pending state, nothing to execute (context was cleared)
+    if (!pending) {
+      return
+    }
+
+    // If sync session has ended, don't execute (graph is finalized, subscriptions cleared)
+    if (!this.currentSyncConfig || !this.currentSyncState) {
+      return
+    }
+
+    this.incrementRunCount()
+
+    const combinedLoader = () => {
+      let allDone = true
+      let firstError: unknown
+      pending.loadCallbacks.forEach((loader) => {
+        try {
+          allDone = loader() && allDone
+        } catch (error) {
+          allDone = false
+          firstError ??= error
+        }
+      })
+      if (firstError) {
+        throw firstError
+      }
+      // Returning false signals that callers should schedule another pass.
+      return allDone
+    }
+
+    this.maybeRunGraph(combinedLoader)
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -211,9 +417,19 @@ export class CollectionConfigBuilder<
     }
   }
 
+  incrementRunCount() {
+    this.runCount++
+  }
+
+  getRunCount() {
+    return this.runCount
+  }
+
   private syncFn(config: SyncMethods<TResult>) {
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
+    // Store config and syncState as instance properties for the duration of this sync session
+    this.currentSyncConfig = config
 
     const syncState: SyncState = {
       messagesCount: 0,
@@ -226,6 +442,15 @@ export class CollectionConfigBuilder<
       config,
       syncState
     )
+    this.currentSyncState = fullSyncState
+
+    // Listen for scheduler context clears to clean up our pending state
+    // Re-register on each sync start so the listener is active for the sync session's lifetime
+    this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
+      (contextId) => {
+        this.clearPendingGraphRun(contextId)
+      }
+    )
 
     const loadMoreDataCallbacks = this.subscribeToAllCollections(
       config,
@@ -233,11 +458,19 @@ export class CollectionConfigBuilder<
     )
 
     // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+    this.scheduleGraphRun(loadMoreDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
       syncState.unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
+
+      // Clear current sync session state
+      this.currentSyncConfig = undefined
+      this.currentSyncState = undefined
+
+      // Clear all pending graph runs to prevent memory leaks from in-flight transactions
+      // that may flush after the sync session ends
+      this.pendingGraphRuns.clear()
 
       // Reset caches so a fresh graph/pipeline is compiled on next start
       // This avoids reusing a finalized D2 graph across GC restarts
@@ -257,6 +490,11 @@ export class CollectionConfigBuilder<
         (key) => delete this.subscriptions[key]
       )
       this.compiledAliasToCollectionId = {}
+
+      // Unregister from scheduler's onClear listener to prevent memory leaks
+      // The scheduler's listener Set would otherwise keep a strong reference to this builder
+      this.unsubscribeFromSchedulerClears?.()
+      this.unsubscribeFromSchedulerClears = undefined
     }
   }
 
@@ -486,14 +724,20 @@ export class CollectionConfigBuilder<
       const collection =
         this.collectionByAlias[alias] ?? this.collections[collectionId]!
 
+      const dependencyBuilder = getCollectionBuilder(collection)
+      if (dependencyBuilder && dependencyBuilder !== this) {
+        this.aliasDependencies[alias] = [dependencyBuilder]
+        this.builderDependencies.add(dependencyBuilder)
+      } else {
+        this.aliasDependencies[alias] = []
+      }
+
       // CollectionSubscriber handles the actual subscription to the source collection
       // and feeds data into the D2 graph inputs for this specific alias
       const collectionSubscriber = new CollectionSubscriber(
         alias,
         collectionId,
         collection,
-        config,
-        syncState,
         this
       )
 
