@@ -1,10 +1,4 @@
-import {
-  consolidate,
-  filter,
-  join as joinOperator,
-  map,
-  tap,
-} from "@tanstack/db-ivm"
+import { filter, join as joinOperator, map, tap } from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
@@ -290,7 +284,6 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    consolidate(),
     processJoinResults(joinClause.type)
   )
 }
