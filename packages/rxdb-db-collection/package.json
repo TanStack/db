@@ -35,6 +35,7 @@
   "packageManager": "pnpm@10.18.1",
   "peerDependencies": {
     "rxdb": ">=16.17.2",
+    "rxjs": ">=7.8.2",
     "typescript": ">=4.7"
   },
   "author": "Kyle Mathews",
