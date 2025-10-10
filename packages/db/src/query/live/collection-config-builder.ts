@@ -8,7 +8,7 @@ import type { RootStreamBuilder } from "@tanstack/db-ivm"
 import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { Collection } from "../../collection/index.js"
 import type {
-  CollectionConfig,
+  CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
   SyncConfig,
@@ -22,9 +22,14 @@ import type {
   LiveQueryCollectionConfig,
   SyncState,
 } from "./types.js"
+import type { AllCollectionEvents } from "../../collection/events.js"
 
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
+
+type SyncMethods<TResult extends object> = Parameters<
+  SyncConfig<TResult>[`sync`]
+>[0]
 
 export class CollectionConfigBuilder<
   TContext extends Context,
@@ -47,6 +52,12 @@ export class CollectionConfigBuilder<
   private readonly compare?: (val1: TResult, val2: TResult) => number
 
   private isGraphRunning = false
+
+  // Error state tracking
+  private isInErrorState = false
+
+  // Reference to the live query collection for error state transitions
+  private liveQueryCollection?: Collection<TResult, any, any>
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -96,7 +107,7 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
-  getConfig(): CollectionConfig<TResult> {
+  getConfig(): CollectionConfigSingleRowOption<TResult> {
     return {
       id: this.id,
       getKey:
@@ -110,6 +121,7 @@ export class CollectionConfigBuilder<
       onUpdate: this.config.onUpdate,
       onDelete: this.config.onDelete,
       startSync: this.config.startSync,
+      singleResult: this.query.singleResult,
     }
   }
 
@@ -144,12 +156,12 @@ export class CollectionConfigBuilder<
   // This gives the callback a chance to load more data if needed,
   // that's used to optimize orderBy operators that set a limit,
   // in order to load some more data if we still don't have enough rows after the pipeline has run.
-  // That can happend because even though we load N rows, the pipeline might filter some of these rows out
+  // That can happen because even though we load N rows, the pipeline might filter some of these rows out
   // causing the orderBy operator to receive less than N rows or even no rows at all.
   // So this callback would notice that it doesn't have enough rows and load some more.
-  // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
+  // The callback returns a boolean, when it's true it's done loading data.
   maybeRunGraph(
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    config: SyncMethods<TResult>,
     syncState: FullSyncState,
     callback?: () => boolean
   ) {
@@ -163,13 +175,15 @@ export class CollectionConfigBuilder<
     this.isGraphRunning = true
 
     try {
-      const { begin, commit, markReady } = config
+      const { begin, commit } = config
 
-      // We only run the graph if all the collections are ready
-      if (
-        this.allCollectionsReadyOrInitialCommit() &&
-        syncState.subscribedToAllCollections
-      ) {
+      // Don't run if the live query is in an error state
+      if (this.isInErrorState) {
+        return
+      }
+
+      // Always run the graph if subscribed (eager execution)
+      if (syncState.subscribedToAllCollections) {
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
           callback?.()
@@ -180,10 +194,9 @@ export class CollectionConfigBuilder<
         if (syncState.messagesCount === 0) {
           begin()
           commit()
-        }
-        // Mark the collection as ready after the first successful run
-        if (this.allCollectionsReady()) {
-          markReady()
+          // After initial commit, check if we should mark ready
+          // (in case all sources were already ready before we subscribed)
+          this.updateLiveQueryStatus(config)
         }
       }
     } finally {
@@ -198,7 +211,10 @@ export class CollectionConfigBuilder<
     }
   }
 
-  private syncFn(config: Parameters<SyncConfig<TResult>[`sync`]>[0]) {
+  private syncFn(config: SyncMethods<TResult>) {
+    // Store reference to the live query collection for error state transitions
+    this.liveQueryCollection = config.collection
+
     const syncState: SyncState = {
       messagesCount: 0,
       subscribedToAllCollections: false,
@@ -293,7 +309,7 @@ export class CollectionConfigBuilder<
   }
 
   private extendPipelineWithChangeProcessing(
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    config: SyncMethods<TResult>,
     syncState: SyncState
   ): FullSyncState {
     const { begin, commit } = config
@@ -326,7 +342,7 @@ export class CollectionConfigBuilder<
   }
 
   private applyChanges(
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    config: SyncMethods<TResult>,
     changes: {
       deletes: number
       inserts: number
@@ -377,16 +393,71 @@ export class CollectionConfigBuilder<
     }
   }
 
+  /**
+   * Handle status changes from source collections
+   */
+  private handleSourceStatusChange(
+    config: SyncMethods<TResult>,
+    collectionId: string,
+    event: AllCollectionEvents[`status:change`]
+  ) {
+    const { status } = event
+
+    // Handle error state - any source collection in error puts live query in error
+    if (status === `error`) {
+      this.transitionToError(
+        `Source collection '${collectionId}' entered error state`
+      )
+      return
+    }
+
+    // Handle manual cleanup - this should not happen due to GC prevention,
+    // but could happen if user manually calls cleanup()
+    if (status === `cleaned-up`) {
+      this.transitionToError(
+        `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
+          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+      )
+      return
+    }
+
+    // Update ready status based on all source collections
+    this.updateLiveQueryStatus(config)
+  }
+
+  /**
+   * Update the live query status based on source collection statuses
+   */
+  private updateLiveQueryStatus(config: SyncMethods<TResult>) {
+    const { markReady } = config
+
+    // Don't update status if already in error
+    if (this.isInErrorState) {
+      return
+    }
+
+    // Mark ready when all source collections are ready
+    if (this.allCollectionsReady()) {
+      markReady()
+    }
+  }
+
+  /**
+   * Transition the live query to error state
+   */
+  private transitionToError(message: string) {
+    this.isInErrorState = true
+
+    // Log error to console for debugging
+    console.error(`[Live Query Error] ${message}`)
+
+    // Transition live query collection to error state
+    this.liveQueryCollection?._lifecycle.setStatus(`error`)
+  }
+
   private allCollectionsReady() {
     return Object.values(this.collections).every((collection) =>
       collection.isReady()
-    )
-  }
-
-  private allCollectionsReadyOrInitialCommit() {
-    return Object.values(this.collections).every(
-      (collection) =>
-        collection.status === `ready` || collection.status === `initialCommit`
     )
   }
 
@@ -396,7 +467,7 @@ export class CollectionConfigBuilder<
    * Example: `{ employee: col, manager: col }` creates two separate subscriptions.
    */
   private subscribeToAllCollections(
-    config: Parameters<SyncConfig<TResult>[`sync`]>[0],
+    config: SyncMethods<TResult>,
     syncState: FullSyncState
   ) {
     // Use compiled aliases as the source of truth - these include all aliases from the query
@@ -426,6 +497,12 @@ export class CollectionConfigBuilder<
         this
       )
 
+      // Subscribe to status changes for status flow
+      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+        this.handleSourceStatusChange(config, collectionId, event)
+      })
+      syncState.unsubscribeCallbacks.add(statusUnsubscribe)
+
       const subscription = collectionSubscriber.subscribe()
       // Store subscription by alias (not collection ID) to support lazy loading
       // which needs to look up subscriptions by their query alias
@@ -450,6 +527,9 @@ export class CollectionConfigBuilder<
     // Mark as subscribed so the graph can start running
     // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
+
+    // Initial status check after all subscriptions are set up
+    this.updateLiveQueryStatus(config)
 
     return loadMoreDataCallback
   }

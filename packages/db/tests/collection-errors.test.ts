@@ -290,9 +290,10 @@ describe(`Collection Error Handling`, () => {
         onUpdate: async () => {}, // Add handler to prevent "no handler" error
         onDelete: async () => {}, // Add handler to prevent "no handler" error
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             begin()
             commit()
+            markReady()
           },
         },
       })
@@ -317,10 +318,11 @@ describe(`Collection Error Handling`, () => {
           onUpdate: async () => {},
           onDelete: async () => {},
           sync: {
-            sync: ({ begin, write, commit }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               begin()
               write({ type: `insert`, value: { id: `2`, name: `test2` } })
               commit()
+              markReady()
             },
           },
         }
@@ -408,10 +410,7 @@ describe(`Collection Error Handling`, () => {
 
       // Valid transitions from loading
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `loading`,
-          `initialCommit`
-        )
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `ready`)
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`loading`, `error`)
@@ -419,26 +418,6 @@ describe(`Collection Error Handling`, () => {
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `loading`,
-          `cleaned-up`
-        )
-      ).not.toThrow()
-
-      // Valid transitions from initialCommit
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `ready`
-        )
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `error`
-        )
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
           `cleaned-up`
         )
       ).not.toThrow()
@@ -482,12 +461,6 @@ describe(`Collection Error Handling`, () => {
       // Allow same-state transitions (idempotent operations)
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`idle`, `idle`)
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(
-          `initialCommit`,
-          `initialCommit`
-        )
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`ready`, `ready`)

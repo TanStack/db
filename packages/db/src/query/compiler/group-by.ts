@@ -417,16 +417,7 @@ export function replaceAggregatesByRefs(
     }
 
     case `ref`: {
-      const refExpr = havingExpr
-      // Check if this is a direct reference to a SELECT alias
-      if (refExpr.path.length === 1) {
-        const alias = refExpr.path[0]!
-        if (selectClause[alias]) {
-          // This is a reference to a SELECT alias, convert to result.alias
-          return new PropRef([resultAlias, alias])
-        }
-      }
-      // Return as-is for other refs
+      // Non-aggregate refs are passed through unchanged (they reference table columns)
       return havingExpr as BasicExpression
     }
 

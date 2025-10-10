@@ -564,10 +564,9 @@ export function queryCollectionOptions(
       }
     }
 
-    // If startSync=true or there are subscribers to the collection, subscribe to the query straight away
-    if (config.startSync || collection.subscriberCount > 0) {
-      subscribeToQuery()
-    }
+    // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
+    // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
+    subscribeToQuery()
 
     // Set up event listener for subscriber changes
     const unsubscribeFromCollectionEvents = collection.on(

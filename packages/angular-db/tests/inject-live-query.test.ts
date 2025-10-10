@@ -751,4 +751,284 @@ describe(`injectLiveQuery`, () => {
       expect(returnedCollection()).toBe(liveQueryCollection)
     })
   })
+
+  describe(`eager execution during sync`, () => {
+    it(`should show state while isLoading is true during sync`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        let syncBegin: (() => void) | undefined
+        let syncWrite: ((op: any) => void) | undefined
+        let syncCommit: (() => void) | undefined
+        let syncMarkReady: (() => void) | undefined
+
+        const collection = createCollection<Person>({
+          id: `eager-execution-test-angular`,
+          getKey: (person: Person) => person.id,
+          startSync: false,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+              syncMarkReady = markReady
+            },
+          },
+          onInsert: () => Promise.resolve(),
+          onUpdate: () => Promise.resolve(),
+          onDelete: () => Promise.resolve(),
+        })
+
+        const {
+          isLoading,
+          state,
+          data,
+          collection: liveQueryCollection,
+        } = injectLiveQuery({
+          query: (q) =>
+            q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+              })),
+          startSync: false,
+        })
+
+        // Start the live query sync manually
+        liveQueryCollection().preload()
+
+        await waitForAngularUpdate()
+
+        // Now isLoading should be true
+        expect(isLoading()).toBe(true)
+        expect(state().size).toBe(0)
+        expect(data()).toEqual([])
+
+        // Add first batch of data (but don't mark ready yet)
+        syncBegin!()
+        syncWrite!({
+          type: `insert`,
+          value: {
+            id: `1`,
+            name: `John Smith`,
+            age: 35,
+            email: `john.smith@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        syncCommit!()
+
+        await waitForAngularUpdate()
+
+        // Data should be visible even though still loading
+        expect(state().size).toBe(1)
+        expect(isLoading()).toBe(true) // Still loading
+        expect(data()).toHaveLength(1)
+        expect(data()[0]).toMatchObject({
+          id: `1`,
+          name: `John Smith`,
+        })
+
+        // Add second batch of data
+        syncBegin!()
+        syncWrite!({
+          type: `insert`,
+          value: {
+            id: `2`,
+            name: `Jane Doe`,
+            age: 32,
+            email: `jane.doe@example.com`,
+            isActive: true,
+            team: `team2`,
+          },
+        })
+        syncCommit!()
+
+        await waitForAngularUpdate()
+
+        // More data should be visible
+        expect(state().size).toBe(2)
+        expect(isLoading()).toBe(true) // Still loading
+        expect(data()).toHaveLength(2)
+
+        // Now mark as ready
+        syncMarkReady!()
+
+        await waitForAngularUpdate()
+
+        // Should now be ready
+        expect(isLoading()).toBe(false)
+        expect(state().size).toBe(2)
+        expect(data()).toHaveLength(2)
+      })
+    })
+
+    it(`should show filtered results during sync with isLoading true`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        let syncBegin: (() => void) | undefined
+        let syncWrite: ((op: any) => void) | undefined
+        let syncCommit: (() => void) | undefined
+        let syncMarkReady: (() => void) | undefined
+
+        const collection = createCollection<Person>({
+          id: `eager-filter-test-angular`,
+          getKey: (person: Person) => person.id,
+          startSync: false,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+              syncMarkReady = markReady
+            },
+          },
+          onInsert: () => Promise.resolve(),
+          onUpdate: () => Promise.resolve(),
+          onDelete: () => Promise.resolve(),
+        })
+
+        const {
+          isLoading,
+          state,
+          data,
+          collection: liveQueryCollection,
+        } = injectLiveQuery({
+          query: (q) =>
+            q
+              .from({ persons: collection })
+              .where(({ persons }) => eq(persons.team, `team1`))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                team: persons.team,
+              })),
+          startSync: false,
+        })
+
+        // Start the live query sync manually
+        liveQueryCollection().preload()
+
+        await waitForAngularUpdate()
+
+        expect(isLoading()).toBe(true)
+
+        // Add items from different teams
+        syncBegin!()
+        syncWrite!({
+          type: `insert`,
+          value: {
+            id: `1`,
+            name: `Alice`,
+            age: 30,
+            email: `alice@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        syncWrite!({
+          type: `insert`,
+          value: {
+            id: `2`,
+            name: `Bob`,
+            age: 25,
+            email: `bob@example.com`,
+            isActive: true,
+            team: `team2`,
+          },
+        })
+        syncWrite!({
+          type: `insert`,
+          value: {
+            id: `3`,
+            name: `Charlie`,
+            age: 35,
+            email: `charlie@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        syncCommit!()
+
+        await waitForAngularUpdate()
+
+        // Should only show team1 members, even while loading
+        expect(state().size).toBe(2)
+        expect(isLoading()).toBe(true)
+        expect(data()).toHaveLength(2)
+        expect(data().every((p) => p.team === `team1`)).toBe(true)
+
+        // Mark ready
+        syncMarkReady!()
+
+        await waitForAngularUpdate()
+
+        expect(isLoading()).toBe(false)
+        expect(state().size).toBe(2)
+      })
+    })
+
+    it(`should update isReady when source collection is marked ready with no data`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        let syncMarkReady: (() => void) | undefined
+
+        const collection = createCollection<Person>({
+          id: `ready-no-data-test-angular`,
+          getKey: (person: Person) => person.id,
+          startSync: false,
+          sync: {
+            sync: ({ markReady }) => {
+              syncMarkReady = markReady
+              // Don't call begin/commit - just provide markReady
+            },
+          },
+          onInsert: () => Promise.resolve(),
+          onUpdate: () => Promise.resolve(),
+          onDelete: () => Promise.resolve(),
+        })
+
+        const {
+          isLoading,
+          isReady,
+          state,
+          data,
+          status,
+          collection: liveQueryCollection,
+        } = injectLiveQuery({
+          query: (q) =>
+            q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 30))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+              })),
+          startSync: false,
+        })
+
+        // Start the live query sync manually
+        liveQueryCollection().preload()
+
+        await waitForAngularUpdate()
+
+        // Now isLoading should be true
+        expect(isLoading()).toBe(true)
+        expect(isReady()).toBe(false)
+        expect(state().size).toBe(0)
+        expect(data()).toEqual([])
+
+        // Mark ready without any data commits
+        syncMarkReady!()
+
+        await waitForAngularUpdate()
+
+        // Should now be ready, even with no data
+        expect(isReady()).toBe(true)
+        expect(isLoading()).toBe(false)
+        expect(state().size).toBe(0) // Still no data
+        expect(data()).toEqual([]) // Empty array
+        expect(status()).toBe(`ready`)
+      })
+    })
+  })
 })

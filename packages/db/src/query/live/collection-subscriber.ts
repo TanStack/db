@@ -1,5 +1,8 @@
 import { MultiSet } from "@tanstack/db-ivm"
-import { convertToBasicExpression } from "../compiler/expressions.js"
+import {
+  convertOrderByToBasicExpression,
+  convertToBasicExpression,
+} from "../compiler/expressions.js"
 import { WhereClauseConversionError } from "../../errors.js"
 import type { FullSyncState } from "./types.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
@@ -85,9 +88,9 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // We need to call `maybeRunGraph` even if there's no data to load
-    // because we need to mark the collection as ready if it's not already
-    // and that's only done in `maybeRunGraph`
+    // Always call maybeRunGraph to process changes eagerly.
+    // The graph will run unless the live query is in an error state.
+    // Status management is handled separately via status:change event listeners.
     this.collectionConfigBuilder.maybeRunGraph(
       this.config,
       this.syncState,
@@ -117,7 +120,8 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo
   ) {
-    const { offset, limit, comparator, dataNeeded, index } = orderByInfo
+    const { orderBy, offset, limit, comparator, dataNeeded, index } =
+      orderByInfo
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
@@ -150,10 +154,17 @@ export class CollectionSubscriber<
 
     subscription.setOrderByIndex(index)
 
+    // Normalize the orderBy clauses such that the references are relative to the collection
+    const normalizedOrderBy = convertOrderByToBasicExpression(
+      orderBy,
+      this.alias
+    )
+
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
     subscription.requestLimitedSnapshot({
       limit: offset + limit,
+      orderBy: normalizedOrderBy,
     })
 
     return subscription
@@ -214,13 +225,21 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { valueExtractorForRawRow } = orderByInfo
+    const { orderBy, valueExtractorForRawRow } = orderByInfo
     const biggestSentRow = this.biggest
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
       : biggestSentRow
+
+    // Normalize the orderBy clauses such that the references are relative to the collection
+    const normalizedOrderBy = convertOrderByToBasicExpression(
+      orderBy,
+      this.alias
+    )
+
     // Take the `n` items after the biggest sent value
     subscription.requestLimitedSnapshot({
+      orderBy: normalizedOrderBy,
       limit: n,
       minValue: biggestSentValue,
     })

@@ -150,6 +150,18 @@ export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 export type OperationType = `insert` | `update` | `delete`
 
+export type OnLoadMoreOptions = {
+  where?: BasicExpression<boolean>
+  orderBy?: OrderBy
+  limit?: number
+}
+
+export type CleanupFn = () => void
+
+export type SyncConfigRes = {
+  cleanup?: CleanupFn
+  onLoadMore?: (options: OnLoadMoreOptions) => void | Promise<void>
+}
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -161,7 +173,7 @@ export interface SyncConfig<
     commit: () => void
     markReady: () => void
     truncate: () => void
-  }) => void
+  }) => void | CleanupFn | SyncConfigRes
 
   /**
    * Get the sync metadata for insert operations
@@ -286,17 +298,15 @@ export type DeleteMutationFn<
  *
  * @example
  * // Status transitions
- * // idle → loading → initialCommit → ready
+ * // idle → loading → ready (when markReady() is called)
  * // Any status can transition to → error or cleaned-up
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
   | `idle`
-  /** Sync has started but hasn't received the first commit yet */
+  /** Sync has started and is loading data */
   | `loading`
-  /** Collection is in the process of committing its first transaction */
-  | `initialCommit`
-  /** Collection has received at least one commit and is ready for use */
+  /** Collection has been explicitly marked ready via markReady() */
   | `ready`
   /** An error occurred during sync initialization */
   | `error`
@@ -502,6 +512,28 @@ export interface CollectionConfig<
 > extends BaseCollectionConfig<T, TKey, TSchema> {
   sync: SyncConfig<T, TKey>
 }
+
+export type SingleResult = {
+  singleResult: true
+}
+
+export type NonSingleResult = {
+  singleResult?: never
+}
+
+export type MaybeSingleResult = {
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  singleResult?: true
+}
+
+// Only used for live query collections
+export type CollectionConfigSingleRowOption<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> = CollectionConfig<T, TKey, TSchema> & MaybeSingleResult
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>

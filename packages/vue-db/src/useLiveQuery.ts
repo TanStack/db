@@ -365,9 +365,7 @@ export function useLiveQuery(
     data,
     collection: computed(() => collection.value),
     status: computed(() => status.value),
-    isLoading: computed(
-      () => status.value === `loading` || status.value === `initialCommit`
-    ),
+    isLoading: computed(() => status.value === `loading`),
     isReady: computed(() => status.value === `ready`),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),

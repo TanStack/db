@@ -24,7 +24,10 @@ import type {
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
+  NonSingleResult,
+  OnLoadMoreOptions,
   OperationConfig,
+  SingleResult,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -50,6 +53,7 @@ export interface Collection<
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
+  readonly singleResult?: true
 }
 
 /**
@@ -132,8 +136,22 @@ export function createCollection<
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-  }
-): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>>
+  } & NonSingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  NonSingleResult
+
+// Overload for when schema is provided and singleResult is true
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+    schema: T
+    utils?: TUtils
+  } & SingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  SingleResult
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -145,8 +163,21 @@ export function createCollection<
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-  }
-): Collection<T, TKey, TUtils, never, T>
+  } & NonSingleResult
+): Collection<T, TKey, TUtils, never, T> & NonSingleResult
+
+// Overload for when no schema is provided and singleResult is true
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = {},
+>(
+  options: CollectionConfig<T, TKey, never> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils?: TUtils
+  } & SingleResult
+): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Implementation
 export function createCollection(
@@ -186,7 +217,7 @@ export class CollectionImpl<
   // Managers
   private _events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
-  private _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private _mutations: CollectionMutationsManager<
@@ -333,6 +364,18 @@ export class CollectionImpl<
   }
 
   /**
+   * Requests the sync layer to load more data.
+   * @param options Options to control what data is being loaded
+   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
+   *          If data loading is synchronous, the data is loaded when the method returns.
+   */
+  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
+    if (this._sync.syncOnLoadMoreFn) {
+      return this._sync.syncOnLoadMoreFn(options)
+    }
+  }
+
+  /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
    */
@@ -428,7 +471,10 @@ export class CollectionImpl<
    * // Create a ordered index with custom options
    * const ageIndex = collection.createIndex((row) => row.age, {
    *   indexType: BTreeIndex,
-   *   options: { compareFn: customComparator },
+   *   options: {
+   *     compareFn: customComparator,
+   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
+   *   },
    *   name: 'age_btree'
    * })
    *

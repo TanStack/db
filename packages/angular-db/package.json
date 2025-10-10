@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/angular-db",
   "description": "Angular integration for @tanstack/db",
-  "version": "0.1.8",
+  "version": "0.1.13",
   "author": "Ethan McDaniel",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,7 @@
     "angular",
     "typescript"
   ],
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.18.1",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },

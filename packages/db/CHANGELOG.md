@@ -1,5 +1,51 @@
 # @tanstack/db
 
+## 0.4.8
+
+### Patch Changes
+
+- Fixed critical bug where optimistic mutations were lost when their async handlers completed during a truncate operation. The fix captures a snapshot of optimistic state when `truncate()` is called and restores it during commit, then overlays any still-active transactions to handle late-arriving mutations. This ensures client-side optimistic state is preserved through server-initiated must-refetch scenarios. ([#659](https://github.com/TanStack/db/pull/659))
+
+- Refactored live queries to execute eagerly during sync. Live queries now materialize their results immediately as data arrives from source collections, even while those collections are still in a "loading" state, rather than waiting for all sources to be "ready" before executing. ([#658](https://github.com/TanStack/db/pull/658))
+
+## 0.4.7
+
+### Patch Changes
+
+- Add acceptMutations utility for local collections in manual transactions. Local-only and local-storage collections now expose `utils.acceptMutations(transaction, collection)` that must be called in manual transaction `mutationFn` to persist mutations. ([#638](https://github.com/TanStack/db/pull/638))
+
+## 0.4.6
+
+### Patch Changes
+
+- Push predicates down to sync layer ([#617](https://github.com/TanStack/db/pull/617))
+
+- prefix logs and errors with collection id, when available ([#655](https://github.com/TanStack/db/pull/655))
+
+## 0.4.5
+
+### Patch Changes
+
+- Fixed race condition which could result in a live query throwing and becoming stuck after multiple mutations complete asynchronously. ([#650](https://github.com/TanStack/db/pull/650))
+
+## 0.4.4
+
+### Patch Changes
+
+- Fix live queries getting stuck during long-running sync commits by always ([#631](https://github.com/TanStack/db/pull/631))
+  clearing the batching flag on forced emits, tolerating duplicate insert echoes,
+  and allowing optimistic recomputes to run while commits are still applying. Adds
+  regression coverage for concurrent optimistic inserts, queued updates, and the
+  offline-transactions example to ensure everything stays in sync.
+
+- Fixed bug where orderBy would fail when a collection alias had the same name as one of its schema fields. For example, .from({ email: emailCollection }).orderBy(({ email }) => email.createdAt) now works correctly even when the collection has an email field in its schema. ([#637](https://github.com/TanStack/db/pull/637))
+
+- Optimization: reverse the index when the direction does not match. ([#627](https://github.com/TanStack/db/pull/627))
+
+- Fixed a bug that could result in a duplicate delete event for a row ([#621](https://github.com/TanStack/db/pull/621))
+
+- Fix bug where optimized queries would use the wrong index because the index is on the right column but was built using different comparison options (e.g. different direction, string sort, or null ordering). ([#623](https://github.com/TanStack/db/pull/623))
+
 ## 0.4.3
 
 ### Patch Changes
