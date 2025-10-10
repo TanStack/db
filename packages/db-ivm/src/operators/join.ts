@@ -116,7 +116,8 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
 
     // Update state and send results
     // IMPORTANT: All emissions use pre-append snapshots of indexA/indexB.
-    // Append deltas to indices (consolidated multiplicity tracking is handled automatically)
+    // Now append ALL deltas to indices - this happens unconditionally for every key,
+    // regardless of whether presence flipped. Consolidated multiplicity tracking is automatic.
     this.#indexA.append(deltaA)
     this.#indexB.append(deltaB)
 
@@ -168,15 +169,22 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
         if (deltaMult === 0) continue
         const after = before + deltaMult
 
-        // Skip if presence doesn't flip
+        // Skip transition handling if presence doesn't flip (both zero or both non-zero)
+        // Note: Index updates happen later regardless - we're only skipping null-extension emissions here
         if ((before === 0) === (after === 0)) continue
 
-        const retract = before === 0 // 0->!0 => retract, else (>0->0) emit
+        // Determine the type of transition:
+        // - 0 → non-zero: Right becomes non-empty, left rows transition from unmatched to matched
+        //   → RETRACT previously emitted null-extended rows (emit with negative multiplicity)
+        // - non-zero → 0: Right becomes empty, left rows transition from matched to unmatched
+        //   → EMIT new null-extended rows (emit with positive multiplicity)
+        const transitioningToMatched = before === 0
+
         for (const [value, multiplicity] of this.#indexA.getIterator(key)) {
           if (multiplicity !== 0) {
             results.add(
               [key, [value, null]],
-              retract ? -multiplicity : +multiplicity
+              transitioningToMatched ? -multiplicity : +multiplicity
             )
           }
         }
@@ -215,15 +223,22 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
         if (deltaMult === 0) continue
         const after = before + deltaMult
 
-        // Skip if presence doesn't flip
+        // Skip transition handling if presence doesn't flip (both zero or both non-zero)
+        // Note: Index updates happen later regardless - we're only skipping null-extension emissions here
         if ((before === 0) === (after === 0)) continue
 
-        const retract = before === 0 // 0->!0 => retract, else (>0->0) emit
+        // Determine the type of transition:
+        // - 0 → non-zero: Left becomes non-empty, right rows transition from unmatched to matched
+        //   → RETRACT previously emitted null-extended rows (emit with negative multiplicity)
+        // - non-zero → 0: Left becomes empty, right rows transition from matched to unmatched
+        //   → EMIT new null-extended rows (emit with positive multiplicity)
+        const transitioningToMatched = before === 0
+
         for (const [value, multiplicity] of this.#indexB.getIterator(key)) {
           if (multiplicity !== 0) {
             results.add(
               [key, [null, value]],
-              retract ? -multiplicity : +multiplicity
+              transitioningToMatched ? -multiplicity : +multiplicity
             )
           }
         }
