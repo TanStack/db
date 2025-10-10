@@ -468,14 +468,45 @@ describe.each([
   })
   if (autoIndex === `eager`) {
     it(`should load more data via requestSnapshot when creating live query with higher limit`, async () => {
+      // Create a new electric collection with on-demand syncMode for this test
+      vi.clearAllMocks()
+
+      const testSubscriber = vi.fn<(messages: Array<Message<User>>) => void>()
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber.mockImplementation(callback)
+        return () => {}
+      })
+
+      const testElectricCollection = createCollection({
+        ...electricCollectionOptions({
+          id: `test-incremental-loading`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `users` },
+          },
+          syncMode: `on-demand`,
+          getKey: (user: User) => user.id,
+        }),
+        startSync: true,
+        autoIndex: `eager` as const,
+      })
+
       mockRequestSnapshot.mockResolvedValue({
         data: [],
       })
 
       // Initial sync with limited data
-      simulateInitialSync()
-      expect(electricCollection.status).toBe(`ready`)
-      expect(electricCollection.size).toBe(4)
+      testSubscriber([
+        ...sampleUsers.map((user) => ({
+          key: user.id.toString(),
+          value: user,
+          headers: { operation: `insert` as const },
+        })),
+        { headers: { control: `up-to-date` as const } },
+      ])
+
+      expect(testElectricCollection.status).toBe(`ready`)
+      expect(testElectricCollection.size).toBe(4)
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(0)
 
       // Create first live query with limit of 2
@@ -484,7 +515,7 @@ describe.each([
         startSync: true,
         query: (q) =>
           q
-            .from({ user: electricCollection })
+            .from({ user: testElectricCollection })
             .where(({ user }) => eq(user.active, true))
             .select(({ user }) => ({
               id: user.id,
@@ -544,7 +575,7 @@ describe.each([
         startSync: true,
         query: (q) =>
           q
-            .from({ user: electricCollection })
+            .from({ user: testElectricCollection })
             .where(({ user }) => eq(user.active, true))
             .select(({ user }) => ({
               id: user.id,
@@ -593,4 +624,286 @@ describe.each([
       expect(expandedLiveQuery.size).toBe(5) // Alice, Bob, Dave from initial + Eve and Frank from additional data
     })
   }
+})
+
+// Tests specifically for syncMode behavior with live queries
+describe(`Electric Collection with Live Query - syncMode integration`, () => {
+  let subscriber: (messages: Array<Message<User>>) => void
+
+  function createElectricCollectionWithSyncMode(
+    syncMode: `eager` | `on-demand` | `progressive`
+  ) {
+    vi.clearAllMocks()
+
+    mockSubscribe.mockImplementation((callback) => {
+      subscriber = callback
+      return () => {}
+    })
+
+    mockRequestSnapshot.mockResolvedValue({
+      data: [],
+    })
+
+    const config = {
+      id: `electric-users-${syncMode}`,
+      shapeOptions: {
+        url: `http://test-url`,
+        params: {
+          table: `users`,
+        },
+      },
+      syncMode,
+      getKey: (user: User) => user.id,
+    }
+
+    const options = electricCollectionOptions(config)
+    return createCollection({
+      ...options,
+      startSync: true,
+      autoIndex: `eager` as const,
+    })
+  }
+
+  function simulateInitialSync(users: Array<User> = sampleUsers) {
+    const messages: Array<Message<User>> = users.map((user) => ({
+      key: user.id.toString(),
+      value: user,
+      headers: { operation: `insert` },
+    }))
+
+    messages.push({
+      headers: { control: `up-to-date` },
+    })
+
+    subscriber(messages)
+  }
+
+  it(`should trigger requestSnapshot in on-demand mode when live query needs more data`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+
+    // Initial sync with limited data
+    simulateInitialSync([sampleUsers[0]!, sampleUsers[1]!]) // Only Alice and Bob
+    expect(electricCollection.status).toBe(`ready`)
+    expect(electricCollection.size).toBe(2)
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(0)
+
+    // Mock requestSnapshot to return additional data
+    mockRequestSnapshot.mockResolvedValueOnce({
+      data: [
+        {
+          headers: { operation: `insert` },
+          key: 3,
+          value: sampleUsers[2]!, // Charlie
+        },
+        {
+          headers: { operation: `insert` },
+          key: 4,
+          value: sampleUsers[3]!, // Dave
+        },
+      ],
+    })
+
+    // Create live query with limit that exceeds available data
+    const liveQuery = createLiveQueryCollection({
+      id: `on-demand-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.age, `asc`)
+          .limit(5),
+    })
+
+    // Wait for the live query to process
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should have requested more data from Electric
+    expect(mockRequestSnapshot).toHaveBeenCalled()
+    expect(liveQuery.size).toBeGreaterThan(2)
+  })
+
+  it(`should trigger requestSnapshot in progressive mode when live query needs more data`, async () => {
+    const electricCollection =
+      createElectricCollectionWithSyncMode(`progressive`)
+
+    // Initial sync with limited data
+    simulateInitialSync([sampleUsers[0]!, sampleUsers[1]!]) // Only Alice and Bob
+    expect(electricCollection.status).toBe(`ready`)
+    expect(electricCollection.size).toBe(2)
+
+    // Mock requestSnapshot to return additional data
+    mockRequestSnapshot.mockResolvedValueOnce({
+      data: [
+        {
+          headers: { operation: `insert` },
+          key: 3,
+          value: sampleUsers[2]!, // Charlie
+        },
+      ],
+    })
+
+    // Create live query that needs more data
+    createLiveQueryCollection({
+      id: `progressive-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .orderBy(({ user }) => user.id, `asc`)
+          .limit(3),
+    })
+
+    // Wait for the live query to process
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should have requested more data from Electric
+    expect(mockRequestSnapshot).toHaveBeenCalled()
+  })
+
+  it(`should NOT trigger requestSnapshot in eager mode even when live query needs more data`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`eager`)
+
+    // Initial sync with limited data
+    simulateInitialSync([sampleUsers[0]!, sampleUsers[1]!]) // Only Alice and Bob
+    expect(electricCollection.status).toBe(`ready`)
+    expect(electricCollection.size).toBe(2)
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(0)
+
+    // Create live query with limit that exceeds available data
+    const liveQuery = createLiveQueryCollection({
+      id: `eager-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.age, `asc`)
+          .limit(5),
+    })
+
+    // Wait for the live query to process
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should NOT have requested more data (eager mode doesn't support incremental loading)
+    expect(mockRequestSnapshot).not.toHaveBeenCalled()
+    expect(liveQuery.size).toBe(2) // Only has the initially synced data
+  })
+
+  it(`should request additional snapshots progressively as live query expands in on-demand mode`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+
+    // Initial sync with just Alice
+    simulateInitialSync([sampleUsers[0]!])
+    expect(electricCollection.size).toBe(1)
+
+    const callArgs = (index: number) =>
+      mockRequestSnapshot.mock.calls[index]?.[0]
+
+    // First snapshot returns Bob and Charlie
+    mockRequestSnapshot.mockResolvedValueOnce({
+      data: [
+        {
+          headers: { operation: `insert` },
+          key: 2,
+          value: sampleUsers[1]!, // Bob
+        },
+        {
+          headers: { operation: `insert` },
+          key: 3,
+          value: sampleUsers[2]!, // Charlie
+        },
+      ],
+    })
+
+    // Create live query with limit of 3
+    createLiveQueryCollection({
+      id: `expanding-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .orderBy(({ user }) => user.age, `asc`)
+          .limit(3),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should have requested snapshot for limit 3
+    expect(mockRequestSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 3,
+        orderBy: `age NULLS FIRST`,
+      })
+    )
+
+    // After receiving Bob and Charlie, the collection now has 3 users (Alice + Bob + Charlie)
+    // but it still requests 2 more... TODO: check if this is correct?
+    expect(callArgs(1)).toMatchObject({
+      limit: 2,
+      orderBy: `age NULLS FIRST`,
+    })
+  })
+
+  it(`should pass correct WHERE clause to requestSnapshot when live query has filters`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+
+    simulateInitialSync([])
+    expect(electricCollection.size).toBe(0)
+
+    // Create filtered live query
+    createLiveQueryCollection({
+      id: `filtered-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `desc`)
+          .limit(10),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should have requested snapshot with WHERE clause
+    expect(mockRequestSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: `active = $1`,
+        params: { "1": `true` },
+        orderBy: `name DESC NULLS FIRST`,
+        limit: 10,
+      })
+    )
+  })
+
+  it(`should handle complex filters in requestSnapshot`, async () => {
+    const electricCollection =
+      createElectricCollectionWithSyncMode(`progressive`)
+
+    simulateInitialSync([])
+
+    // Create live query with complex WHERE clause
+    createLiveQueryCollection({
+      id: `complex-filter-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .where(({ user }) => gt(user.age, 20))
+          .orderBy(({ user }) => user.age, `asc`)
+          .limit(5),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // Should have requested snapshot with complex WHERE clause
+    expect(mockRequestSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: `age > $1`,
+        params: { "1": `20` },
+        orderBy: `age NULLS FIRST`,
+        limit: 5,
+      })
+    )
+  })
 })

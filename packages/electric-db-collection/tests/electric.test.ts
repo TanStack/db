@@ -19,8 +19,10 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
+const mockRequestSnapshot = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
+  requestSnapshot: mockRequestSnapshot,
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -49,6 +51,9 @@ describe(`Electric Integration`, () => {
       subscriber = callback
       return () => {}
     })
+
+    // Reset mock requestSnapshot
+    mockRequestSnapshot.mockResolvedValue(undefined)
 
     // Create collection with Electric configuration
     const config = {
@@ -1245,6 +1250,181 @@ describe(`Electric Integration`, () => {
 
       // Snapshot txid should also resolve
       await expect(testCollection.utils.awaitTxId(105)).resolves.toBe(true)
+    })
+  })
+
+  // Tests for syncMode configuration
+  describe(`syncMode configuration`, () => {
+    it(`should not request snapshots during subscription in eager mode`, () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `eager-no-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Subscribe and try to get more data
+      const subscription = testCollection.subscribeChanges(() => {})
+
+      // In eager mode, requestSnapshot should not be called
+      expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+      subscription.unsubscribe()
+    })
+
+    it(`should request incremental snapshots in on-demand mode when syncMore is called`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `on-demand-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send up-to-date to mark collection as ready
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // In on-demand mode, calling syncMore should request a snapshot
+      await testCollection.syncMore({ limit: 10 })
+
+      // Verify requestSnapshot was called
+      expect(mockRequestSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: 10,
+          params: {},
+        })
+      )
+    })
+
+    it(`should request incremental snapshots in progressive mode when syncMore is called`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `progressive-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send up-to-date to mark collection as ready
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // In progressive mode, calling syncMore should request a snapshot
+      await testCollection.syncMore({ limit: 20 })
+
+      // Verify requestSnapshot was called
+      expect(mockRequestSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: 20,
+          params: {},
+        })
+      )
+    })
+
+    it(`should not request snapshots when syncMore is called in eager mode`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `eager-no-syncmore-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send up-to-date to mark collection as ready
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // In eager mode, syncMore should do nothing
+      await testCollection.syncMore({ limit: 10 })
+
+      // Verify requestSnapshot was NOT called
+      expect(mockRequestSnapshot).not.toHaveBeenCalled()
+    })
+
+    it(`should handle progressive mode syncing in background`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `progressive-background-sync-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send initial data and up-to-date
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Initial User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Collection should be ready with initial data
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+
+      // Should still be able to request more data incrementally
+      await testCollection.syncMore({ limit: 10 })
+      expect(mockRequestSnapshot).toHaveBeenCalled()
     })
 
     it(`should resync after garbage collection and new subscription`, () => {

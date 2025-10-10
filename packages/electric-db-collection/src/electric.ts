@@ -20,6 +20,7 @@ import type {
   DeleteMutationFnParams,
   Fn,
   InsertMutationFnParams,
+  OnLoadMoreOptions,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -68,6 +69,24 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
+ * The mode of sync to use for the collection.
+ * @default `eager`
+ * @description
+ * - `eager`:
+ *   - syncs all data immediately on preload
+ *   - collection will be marked as ready once the sync is complete
+ *   - there is no incremental sync
+ * - `on-demand`:
+ *   - syncs data synced in incremental snapshots as the collection is queried
+ *   - collection will be marked as ready immediately after the first snapshot is synced
+ * - `progressive`:
+ *   - syncs all data in the shape in the background
+ *   - uses incremental snapshots during the initial sync to provide a fast path to the data required for queries
+ *   - collection will be marked as ready once the initial sync is complete
+ */
+export type SyncMode = `eager` | `on-demand` | `progressive`
+
+/**
  * Configuration interface for Electric collection options
  * @template T - The type of items in the collection
  * @template TSchema - The schema type for validation
@@ -86,6 +105,7 @@ export interface ElectricCollectionConfig<
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+  syncMode?: SyncMode
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -174,9 +194,11 @@ export function electricCollectionOptions(
 } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
   const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
+  const syncMode = config.syncMode ?? `eager`
   const sync = createElectricSync<any>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
+    syncMode,
   })
 
   /**
@@ -332,12 +354,12 @@ export function electricCollectionOptions(
 function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
+    syncMode: SyncMode
     seenTxids: Store<Set<Txid>>
     seenSnapshots: Store<Array<PostgresSnapshot>>
   }
 ): SyncConfig<T> {
-  const { seenTxids } = options
-  const { seenSnapshots } = options
+  const { seenTxids, seenSnapshots, syncMode } = options
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
@@ -383,6 +405,8 @@ function createElectricSync<T extends Row<unknown>>(
 
       const stream = new ShapeStream({
         ...shapeOptions,
+        log: syncMode === `on-demand` ? `changes_only` : undefined,
+        // TODO: under the `on-demand` we should be setting the offset to `now` when there is no saved offset rather than -1
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -495,11 +519,19 @@ function createElectricSync<T extends Row<unknown>>(
         }
       })
 
+      // Only set onLoadMore if the sync mode is not eager, this indicates to the sync
+      // layer can load more data on demand via the requestSnapshot method when,
+      // the syncMode = `on-demand` or `progressive`
+      const onLoadMore =
+        syncMode === `eager`
+          ? undefined
+          : async (opts: OnLoadMoreOptions) => {
+              const snapshotParams = compileSQL<T>(opts)
+              await stream.requestSnapshot(snapshotParams)
+            }
+
       return {
-        onLoadMore: async (opts) => {
-          const snapshotParams = compileSQL<T>(opts)
-          await stream.requestSnapshot(snapshotParams)
-        },
+        onLoadMore,
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
