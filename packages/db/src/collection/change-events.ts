@@ -20,7 +20,10 @@ import type { BasicExpression } from "../query/ir.js"
 export interface CollectionLike<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> extends Pick<Collection<T, TKey>, `get` | `has` | `entries` | `indexes`> {}
+> extends Pick<
+    Collection<T, TKey>,
+    `get` | `has` | `entries` | `indexes` | `id`
+  > {}
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -109,7 +112,7 @@ export function currentStateAsChanges<
   } catch (error) {
     // If anything goes wrong with the where clause, fall back to full scan
     console.warn(
-      `Error processing where clause, falling back to full scan:`,
+      `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`,
       error
     )
 

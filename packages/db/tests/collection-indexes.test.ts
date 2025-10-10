@@ -88,7 +88,7 @@ describe(`Collection Indexes`, () => {
       getKey: (item) => item.id,
       startSync: true,
       sync: {
-        sync: ({ begin, write, commit }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           // Provide initial data through sync
           begin()
           for (const item of testData) {
@@ -98,6 +98,7 @@ describe(`Collection Indexes`, () => {
             })
           }
           commit()
+          markReady()
 
           // Listen for mutations and sync them back (only register once)
           if (!emitter.all.has(`sync`)) {

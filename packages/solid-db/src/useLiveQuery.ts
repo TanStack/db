@@ -319,7 +319,7 @@ export function useLiveQuery(
     data,
     collection,
     status,
-    isLoading: () => status() === `loading` || status() === `initialCommit`,
+    isLoading: () => status() === `loading`,
     isReady: () => status() === `ready`,
     isIdle: () => status() === `idle`,
     isError: () => status() === `error`,
