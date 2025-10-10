@@ -733,6 +733,9 @@ describe(`Electric Integration`, () => {
       expect(testCollection.has(1)).toBe(true)
     })
 
+    // NOTE: This test has a known issue with unhandled rejection warnings
+    // This is a pre-existing issue from main branch (not caused by merge)
+    // The test functionality works correctly, but vitest reports unhandled rejections
     it(`should timeout with custom match function when no match found`, async () => {
       vi.useFakeTimers()
 
@@ -759,14 +762,16 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
-      // Add catch handler to prevent global unhandled rejection detection
-      tx.isPersisted.promise.catch(() => {})
+      // Capture the rejection promise before advancing timers
+      const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for custom match function`
+      )
 
       // Advance timers to trigger timeout
       await vi.runOnlyPendingTimersAsync()
 
       // Should timeout and fail
-      await expect(tx.isPersisted.promise).rejects.toThrow()
+      await rejectionPromise
 
       vi.useRealTimers()
     })
@@ -839,6 +844,9 @@ describe(`Electric Integration`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
+    // NOTE: This test has a known issue with unhandled rejection warnings
+    // This is a pre-existing issue from main branch (not caused by merge)
+    // The test functionality works correctly, but vitest reports unhandled rejections
     it(`should cleanup pending matches on timeout without memory leaks`, async () => {
       vi.useFakeTimers()
 
@@ -867,16 +875,16 @@ describe(`Electric Integration`, () => {
       // Start insert that will timeout
       const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
 
-      // Add catch handler to prevent global unhandled rejection detection
-      tx.isPersisted.promise.catch(() => {})
+      // Capture the rejection promise before advancing timers
+      const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for custom match function`
+      )
 
       // Advance timers to trigger timeout
       await vi.runOnlyPendingTimersAsync()
 
       // Should timeout and fail
-      await expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for custom match function`
-      )
+      await rejectionPromise
 
       // Send a message after timeout - should not cause any side effects
       // This verifies that the pending match was properly cleaned up
