@@ -74,6 +74,9 @@ export class CollectionConfigBuilder<
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
+    // Build a reverse lookup map from alias to collection instance.
+    // This enables self-join support where the same collection can be referenced
+    // multiple times with different aliases (e.g., { employee: col, manager: col })
     this.collectionByAlias = {}
     for (const [collectionId, aliases] of collectionAliasesById.entries()) {
       const collection = this.collections[collectionId]
@@ -110,6 +113,17 @@ export class CollectionConfigBuilder<
     }
   }
 
+  /**
+   * Resolves a collection alias to its collection ID.
+   *
+   * Uses a two-tier lookup strategy:
+   * 1. First checks compiled aliases (includes subquery inner aliases)
+   * 2. Falls back to declared aliases from the query's from/join clauses
+   *
+   * @param alias - The alias to resolve (e.g., "employee", "manager")
+   * @returns The collection ID that the alias references
+   * @throws {Error} If the alias is not found in either lookup
+   */
   getCollectionIdForAlias(alias: string): string {
     const compiled = this.compiledAliasToCollectionId[alias]
     if (compiled) {
@@ -385,6 +399,8 @@ export class CollectionConfigBuilder<
     config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     syncState: FullSyncState
   ) {
+    // Use compiled aliases as the source of truth - these include all aliases from the query
+    // including those from subqueries, which may not be in collectionByAlias
     const compiledAliases = Object.entries(this.compiledAliasToCollectionId)
     if (compiledAliases.length === 0) {
       throw new Error(
@@ -392,10 +408,15 @@ export class CollectionConfigBuilder<
       )
     }
 
+    // Create a separate subscription for each alias, enabling self-joins where the same
+    // collection can be used multiple times with different filters and subscriptions
     const loaders = compiledAliases.map(([alias, collectionId]) => {
+      // Try collectionByAlias first (for declared aliases), fall back to collections (for subquery aliases)
       const collection =
         this.collectionByAlias[alias] ?? this.collections[collectionId]!
 
+      // CollectionSubscriber handles the actual subscription to the source collection
+      // and feeds data into the D2 graph inputs for this specific alias
       const collectionSubscriber = new CollectionSubscriber(
         alias,
         collectionId,
@@ -406,8 +427,11 @@ export class CollectionConfigBuilder<
       )
 
       const subscription = collectionSubscriber.subscribe()
-      this.subscriptions[alias] = subscription // Keyed by alias for lazy loading lookup
+      // Store subscription by alias (not collection ID) to support lazy loading
+      // which needs to look up subscriptions by their query alias
+      this.subscriptions[alias] = subscription
 
+      // Create a callback for loading more data if needed (used by OrderBy optimization)
       const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
         collectionSubscriber,
         subscription
@@ -416,12 +440,15 @@ export class CollectionConfigBuilder<
       return loadMore
     })
 
+    // Combine all loaders into a single callback that attempts to load more data
+    // from any source that needs it (returns true when done loading)
     const loadMoreDataCallback = () => {
       loaders.map((loader) => loader())
       return true
     }
 
-    // Mark the collections as subscribed in the sync state
+    // Mark as subscribed so the graph can start running
+    // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
 
     return loadMoreDataCallback
@@ -505,6 +532,29 @@ function extractCollectionsFromQuery(
   return collections
 }
 
+/**
+ * Extracts all aliases used for each collection across the entire query tree.
+ *
+ * Traverses the QueryIR recursively to build a map from collection ID to all aliases
+ * that reference that collection. This is essential for self-join support, where the
+ * same collection may be referenced multiple times with different aliases.
+ *
+ * For example, given a query like:
+ * ```ts
+ * q.from({ employee: employeesCollection })
+ *   .join({ manager: employeesCollection }, ({ employee, manager }) =>
+ *     eq(employee.managerId, manager.id)
+ *   )
+ * ```
+ *
+ * This function would return:
+ * ```
+ * Map { "employees" => Set { "employee", "manager" } }
+ * ```
+ *
+ * @param query - The query IR to extract aliases from
+ * @returns A map from collection ID to the set of all aliases referencing that collection
+ */
 function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
   const aliasesById = new Map<string, Set<string>>()
 
