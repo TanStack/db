@@ -1,5 +1,6 @@
 import { map } from "@tanstack/db-ivm"
 import { PropRef, Value as ValClass, isExpressionLike } from "../ir.js"
+import { AggregateNotSupportedError } from "../../errors.js"
 import { compileExpression } from "./evaluators.js"
 import type { Aggregate, BasicExpression, Select } from "../ir.js"
 import type {
@@ -157,9 +158,7 @@ export function processArgument(
   namespacedRow: NamespacedRow
 ): any {
   if (isAggregateExpression(arg)) {
-    throw new Error(
-      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`
-    )
+    throw new AggregateNotSupportedError()
   }
 
   // Pre-compile the expression and evaluate immediately

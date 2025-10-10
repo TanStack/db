@@ -162,8 +162,8 @@ export interface GroupedWhereClauses {
 export interface OptimizationResult {
   /** The optimized query with WHERE clauses potentially moved to subqueries */
   optimizedQuery: QueryIR
-  /** Map of collection aliases to their extracted WHERE clauses for index optimization */
-  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+  /** Map of source aliases to their extracted WHERE clauses for index optimization */
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>
 }
 
 /**
@@ -184,14 +184,14 @@ export interface OptimizationResult {
  *   where: [eq(u.dept_id, 1), gt(p.views, 100)]
  * }
  *
- * const { optimizedQuery, collectionWhereClauses } = optimizeQuery(originalQuery)
+ * const { optimizedQuery, sourceWhereClauses } = optimizeQuery(originalQuery)
  * // Result: Single-source clauses moved to deepest possible subqueries
- * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
+ * // sourceWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
  * ```
  */
 export function optimizeQuery(query: QueryIR): OptimizationResult {
-  // First, extract collection WHERE clauses before optimization
-  const collectionWhereClauses = extractCollectionWhereClauses(query)
+  // First, extract source WHERE clauses before optimization
+  const sourceWhereClauses = extractSourceWhereClauses(query)
 
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
@@ -214,7 +214,7 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
 
   return {
     optimizedQuery: cleaned,
-    collectionWhereClauses,
+    sourceWhereClauses,
   }
 }
 
@@ -224,16 +224,16 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
  * to specific collections, but only for simple queries without joins.
  *
  * @param query - The original QueryIR to analyze
- * @returns Map of collection aliases to their WHERE clauses
+ * @returns Map of source aliases to their WHERE clauses
  */
-function extractCollectionWhereClauses(
+function extractSourceWhereClauses(
   query: QueryIR
 ): Map<string, BasicExpression<boolean>> {
-  const collectionWhereClauses = new Map<string, BasicExpression<boolean>>()
+  const sourceWhereClauses = new Map<string, BasicExpression<boolean>>()
 
   // Only analyze queries that have WHERE clauses
   if (!query.where || query.where.length === 0) {
-    return collectionWhereClauses
+    return sourceWhereClauses
   }
 
   // Split all AND clauses at the root level for granular analysis
@@ -254,12 +254,12 @@ function extractCollectionWhereClauses(
     if (isCollectionReference(query, sourceAlias)) {
       // Check if the WHERE clause can be converted to collection-compatible format
       if (isConvertibleToCollectionFilter(whereClause)) {
-        collectionWhereClauses.set(sourceAlias, whereClause)
+        sourceWhereClauses.set(sourceAlias, whereClause)
       }
     }
   }
 
-  return collectionWhereClauses
+  return sourceWhereClauses
 }
 
 /**

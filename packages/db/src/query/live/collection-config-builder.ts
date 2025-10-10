@@ -1,6 +1,7 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
+import { MissingAliasInputsError } from "../../errors.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -37,6 +38,9 @@ export class CollectionConfigBuilder<
   private readonly id: string
   readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
+  private readonly collectionByAlias: Record<string, Collection<any, any, any>>
+  // Populated during compilation with all aliases (including subquery inner aliases)
+  private compiledAliasToCollectionId: Record<string, string> = {}
 
   // WeakMap to store the keys of the results
   // so that we can retrieve them in the getKey function
@@ -58,16 +62,16 @@ export class CollectionConfigBuilder<
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
-  public collectionWhereClausesCache:
+  public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
 
-  // Map of collection ID to subscription
+  // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
-  // Map of collection IDs to functions that load keys for that lazy collection
-  lazyCollectionsCallbacks: Record<string, LazyCollectionCallbacks> = {}
-  // Set of collection IDs that are lazy collections
-  readonly lazyCollections = new Set<string>()
+  // Map of source aliases to functions that load keys for that lazy source
+  lazySourcesCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  // Set of source aliases that are lazy (don't load initial state)
+  readonly lazySources = new Set<string>()
   // Set of collection IDs that include an optimizable ORDER BY clause
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
@@ -79,6 +83,19 @@ export class CollectionConfigBuilder<
 
     this.query = buildQueryFromConfig(config)
     this.collections = extractCollectionsFromQuery(this.query)
+    const collectionAliasesById = extractCollectionAliases(this.query)
+
+    // Build a reverse lookup map from alias to collection instance.
+    // This enables self-join support where the same collection can be referenced
+    // multiple times with different aliases (e.g., { employee: col, manager: col })
+    this.collectionByAlias = {}
+    for (const [collectionId, aliases] of collectionAliasesById.entries()) {
+      const collection = this.collections[collectionId]
+      if (!collection) continue
+      for (const alias of aliases) {
+        this.collectionByAlias[alias] = collection
+      }
+    }
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -106,6 +123,33 @@ export class CollectionConfigBuilder<
       startSync: this.config.startSync,
       singleResult: this.query.singleResult,
     }
+  }
+
+  /**
+   * Resolves a collection alias to its collection ID.
+   *
+   * Uses a two-tier lookup strategy:
+   * 1. First checks compiled aliases (includes subquery inner aliases)
+   * 2. Falls back to declared aliases from the query's from/join clauses
+   *
+   * @param alias - The alias to resolve (e.g., "employee", "manager")
+   * @returns The collection ID that the alias references
+   * @throws {Error} If the alias is not found in either lookup
+   */
+  getCollectionIdForAlias(alias: string): string {
+    const compiled = this.compiledAliasToCollectionId[alias]
+    if (compiled) {
+      return compiled
+    }
+    const collection = this.collectionByAlias[alias]
+    if (collection) {
+      return collection.id
+    }
+    throw new Error(`Unknown source alias "${alias}"`)
+  }
+
+  isLazyAlias(alias: string): boolean {
+    return this.lazySources.has(alias)
   }
 
   // The callback function is called after the graph has run.
@@ -200,40 +244,57 @@ export class CollectionConfigBuilder<
       this.graphCache = undefined
       this.inputsCache = undefined
       this.pipelineCache = undefined
-      this.collectionWhereClausesCache = undefined
+      this.sourceWhereClausesCache = undefined
 
-      // Reset lazy collection state
-      this.lazyCollections.clear()
+      // Reset lazy source alias state
+      this.lazySources.clear()
       this.optimizableOrderByCollections = {}
-      this.lazyCollectionsCallbacks = {}
+      this.lazySourcesCallbacks = {}
+
+      // Clear subscription references to prevent memory leaks
+      // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
+      Object.keys(this.subscriptions).forEach(
+        (key) => delete this.subscriptions[key]
+      )
+      this.compiledAliasToCollectionId = {}
     }
   }
 
+  /**
+   * Compiles the query pipeline with all declared aliases.
+   */
   private compileBasePipeline() {
     this.graphCache = new D2()
     this.inputsCache = Object.fromEntries(
-      Object.entries(this.collections).map(([key]) => [
-        key,
+      Object.keys(this.collectionByAlias).map((alias) => [
+        alias,
         this.graphCache!.newInput<any>(),
       ])
     )
 
-    // Compile the query and get both pipeline and collection WHERE clauses
-    const {
-      pipeline: pipelineCache,
-      collectionWhereClauses: collectionWhereClausesCache,
-    } = compileQuery(
+    const compilation = compileQuery(
       this.query,
       this.inputsCache as Record<string, KeyedStream>,
       this.collections,
       this.subscriptions,
-      this.lazyCollectionsCallbacks,
-      this.lazyCollections,
+      this.lazySourcesCallbacks,
+      this.lazySources,
       this.optimizableOrderByCollections
     )
 
-    this.pipelineCache = pipelineCache
-    this.collectionWhereClausesCache = collectionWhereClausesCache
+    this.pipelineCache = compilation.pipeline
+    this.sourceWhereClausesCache = compilation.sourceWhereClauses
+    this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+
+    // Defensive check: verify all compiled aliases have corresponding inputs
+    // This should never happen since all aliases come from user declarations,
+    // but catch it early if the assumption is violated in the future.
+    const missingAliases = Object.keys(this.compiledAliasToCollectionId).filter(
+      (alias) => !Object.hasOwn(this.inputsCache!, alias)
+    )
+    if (missingAliases.length > 0) {
+      throw new MissingAliasInputsError(missingAliases)
+    }
   }
 
   private maybeCompileBasePipeline() {
@@ -400,44 +461,71 @@ export class CollectionConfigBuilder<
     )
   }
 
+  /**
+   * Creates per-alias subscriptions enabling self-join support.
+   * Each alias gets its own subscription with independent filters, even for the same collection.
+   * Example: `{ employee: col, manager: col }` creates two separate subscriptions.
+   */
   private subscribeToAllCollections(
     config: SyncMethods<TResult>,
     syncState: FullSyncState
   ) {
-    const loaders = Object.entries(this.collections).map(
-      ([collectionId, collection]) => {
-        const collectionSubscriber = new CollectionSubscriber(
-          collectionId,
-          collection,
-          config,
-          syncState,
-          this
-        )
+    // Use compiled aliases as the source of truth - these include all aliases from the query
+    // including those from subqueries, which may not be in collectionByAlias
+    const compiledAliases = Object.entries(this.compiledAliasToCollectionId)
+    if (compiledAliases.length === 0) {
+      throw new Error(
+        `Compiler returned no alias metadata for query '${this.id}'. This should not happen; please report.`
+      )
+    }
 
-        const subscription = collectionSubscriber.subscribe()
-        this.subscriptions[collectionId] = subscription
+    // Create a separate subscription for each alias, enabling self-joins where the same
+    // collection can be used multiple times with different filters and subscriptions
+    const loaders = compiledAliases.map(([alias, collectionId]) => {
+      // Try collectionByAlias first (for declared aliases), fall back to collections (for subquery aliases)
+      const collection =
+        this.collectionByAlias[alias] ?? this.collections[collectionId]!
 
-        // Subscribe to status changes for status flow
-        const statusUnsubscribe = collection.on(`status:change`, (event) => {
-          this.handleSourceStatusChange(config, collectionId, event)
-        })
-        syncState.unsubscribeCallbacks.add(statusUnsubscribe)
+      // CollectionSubscriber handles the actual subscription to the source collection
+      // and feeds data into the D2 graph inputs for this specific alias
+      const collectionSubscriber = new CollectionSubscriber(
+        alias,
+        collectionId,
+        collection,
+        config,
+        syncState,
+        this
+      )
 
-        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
-          collectionSubscriber,
-          subscription
-        )
+      // Subscribe to status changes for status flow
+      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+        this.handleSourceStatusChange(config, collectionId, event)
+      })
+      syncState.unsubscribeCallbacks.add(statusUnsubscribe)
 
-        return loadMore
-      }
-    )
+      const subscription = collectionSubscriber.subscribe()
+      // Store subscription by alias (not collection ID) to support lazy loading
+      // which needs to look up subscriptions by their query alias
+      this.subscriptions[alias] = subscription
 
+      // Create a callback for loading more data if needed (used by OrderBy optimization)
+      const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+        collectionSubscriber,
+        subscription
+      )
+
+      return loadMore
+    })
+
+    // Combine all loaders into a single callback that attempts to load more data
+    // from any source that needs it (returns true when done loading)
     const loadMoreDataCallback = () => {
       loaders.map((loader) => loader())
       return true
     }
 
-    // Mark the collections as subscribed in the sync state
+    // Mark as subscribed so the graph can start running
+    // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
 
     // Initial status check after all subscriptions are set up
@@ -522,6 +610,65 @@ function extractCollectionsFromQuery(
   extractFromQuery(query)
 
   return collections
+}
+
+/**
+ * Extracts all aliases used for each collection across the entire query tree.
+ *
+ * Traverses the QueryIR recursively to build a map from collection ID to all aliases
+ * that reference that collection. This is essential for self-join support, where the
+ * same collection may be referenced multiple times with different aliases.
+ *
+ * For example, given a query like:
+ * ```ts
+ * q.from({ employee: employeesCollection })
+ *   .join({ manager: employeesCollection }, ({ employee, manager }) =>
+ *     eq(employee.managerId, manager.id)
+ *   )
+ * ```
+ *
+ * This function would return:
+ * ```
+ * Map { "employees" => Set { "employee", "manager" } }
+ * ```
+ *
+ * @param query - The query IR to extract aliases from
+ * @returns A map from collection ID to the set of all aliases referencing that collection
+ */
+function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
+  const aliasesById = new Map<string, Set<string>>()
+
+  function recordAlias(source: any) {
+    if (!source) return
+
+    if (source.type === `collectionRef`) {
+      const { id } = source.collection
+      const existing = aliasesById.get(id)
+      if (existing) {
+        existing.add(source.alias)
+      } else {
+        aliasesById.set(id, new Set([source.alias]))
+      }
+    } else if (source.type === `queryRef`) {
+      traverse(source.query)
+    }
+  }
+
+  function traverse(q?: QueryIR) {
+    if (!q) return
+
+    recordAlias(q.from)
+
+    if (q.join) {
+      for (const joinClause of q.join) {
+        recordAlias(joinClause.from)
+      }
+    }
+  }
+
+  traverse(query)
+
+  return aliasesById
 }
 
 function accumulateChanges<T>(

@@ -31,24 +31,53 @@ import type {
 import type { QueryCache, QueryMapping } from "./types.js"
 
 /**
- * Result of query compilation including both the pipeline and collection-specific WHERE clauses
+ * Result of query compilation including both the pipeline and source-specific WHERE clauses
  */
 export interface CompilationResult {
   /** The ID of the main collection */
   collectionId: string
-  /** The compiled query pipeline */
+
+  /** The compiled query pipeline (D2 stream) */
   pipeline: ResultStream
-  /** Map of collection aliases to their WHERE clauses for index optimization */
-  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+
+  /** Map of source aliases to their WHERE clauses for index optimization */
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>
+
+  /**
+   * Maps each source alias to its collection ID. Enables per-alias subscriptions for self-joins.
+   * Example: `{ employee: 'employees-col-id', manager: 'employees-col-id' }`
+   */
+  aliasToCollectionId: Record<string, string>
+
+  /**
+   * Flattened mapping from outer alias to innermost alias for subqueries.
+   * Always provides one-hop lookups, never recursive chains.
+   *
+   * Example: `{ activeUser: 'user' }` when `.from({ activeUser: subquery })`
+   * where the subquery uses `.from({ user: collection })`.
+   *
+   * For deeply nested subqueries, the mapping goes directly to the innermost alias:
+   * `{ author: 'user' }` (not `{ author: 'activeUser' }`), so `aliasRemapping[alias]`
+   * always resolves in a single lookup.
+   *
+   * Used to resolve subscriptions during lazy loading when join aliases differ from
+   * the inner aliases where collection subscriptions were created.
+   */
+  aliasRemapping: Record<string, string>
 }
 
 /**
- * Compiles a query2 IR into a D2 pipeline
+ * Compiles a query IR into a D2 pipeline
  * @param rawQuery The query IR to compile
- * @param inputs Mapping of collection names to input streams
+ * @param inputs Mapping of source aliases to input streams (e.g., `{ employee: input1, manager: input2 }`)
+ * @param collections Mapping of collection IDs to Collection instances
+ * @param subscriptions Mapping of source aliases to CollectionSubscription instances
+ * @param callbacks Mapping of source aliases to lazy loading callbacks
+ * @param lazySources Set of source aliases that should load data lazily
+ * @param optimizableOrderByCollections Map of collection IDs to order-by optimization info
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
  * @param queryMapping Optional mapping from optimized queries to original queries
- * @returns A CompilationResult with the pipeline and collection WHERE clauses
+ * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
  */
 export function compileQuery(
   rawQuery: QueryIR,
@@ -56,7 +85,7 @@ export function compileQuery(
   collections: Record<string, Collection<any, any, any, any, any>>,
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>,
+  lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
@@ -68,8 +97,7 @@ export function compileQuery(
   }
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, collectionWhereClauses } =
-    optimizeQuery(rawQuery)
+  const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -78,12 +106,24 @@ export function compileQuery(
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = { ...inputs }
 
-  // Create a map of table aliases to inputs
-  const tables: Record<string, KeyedStream> = {}
+  // Track alias to collection id relationships discovered during compilation.
+  // This includes all user-declared aliases plus inner aliases from subqueries.
+  const aliasToCollectionId: Record<string, string> = {}
 
-  // Process the FROM clause to get the main table
+  // Track alias remapping for subqueries (outer alias → inner alias)
+  // e.g., when .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
+  // we store: aliasRemapping['activeUser'] = 'user'
+  const aliasRemapping: Record<string, string> = {}
+
+  // Create a map of source aliases to input streams.
+  // Inputs MUST be keyed by alias (e.g., `{ employee: input1, manager: input2 }`),
+  // not by collection ID. This enables per-alias subscriptions where different aliases
+  // of the same collection (e.g., self-joins) maintain independent filtered streams.
+  const sources: Record<string, KeyedStream> = {}
+
+  // Process the FROM clause to get the main source
   const {
-    alias: mainTableAlias,
+    alias: mainSource,
     input: mainInput,
     collectionId: mainCollectionId,
   } = processFrom(
@@ -92,18 +132,20 @@ export function compileQuery(
     collections,
     subscriptions,
     callbacks,
-    lazyCollections,
+    lazySources,
     optimizableOrderByCollections,
     cache,
-    queryMapping
+    queryMapping,
+    aliasToCollectionId,
+    aliasRemapping
   )
-  tables[mainTableAlias] = mainInput
+  sources[mainSource] = mainInput
 
-  // Prepare the initial pipeline with the main table wrapped in its alias
+  // Prepare the initial pipeline with the main source wrapped in its alias
   let pipeline: NamespacedAndKeyedStream = mainInput.pipe(
     map(([key, row]) => {
       // Initialize the record with a nested structure
-      const ret = [key, { [mainTableAlias]: row }] as [
+      const ret = [key, { [mainSource]: row }] as [
         string,
         Record<string, typeof row>,
       ]
@@ -116,19 +158,21 @@ export function compileQuery(
     pipeline = processJoins(
       pipeline,
       query.join,
-      tables,
+      sources,
       mainCollectionId,
-      mainTableAlias,
+      mainSource,
       allInputs,
       cache,
       queryMapping,
       collections,
       subscriptions,
       callbacks,
-      lazyCollections,
+      lazySources,
       optimizableOrderByCollections,
       rawQuery,
-      compileQuery
+      compileQuery,
+      aliasToCollectionId,
+      aliasRemapping
     )
   }
 
@@ -185,7 +229,7 @@ export function compileQuery(
       map(([key, namespacedRow]) => {
         const selectResults =
           !query.join && !query.groupBy
-            ? namespacedRow[mainTableAlias]
+            ? namespacedRow[mainSource]
             : namespacedRow
 
         return [
@@ -286,7 +330,9 @@ export function compileQuery(
     const compilationResult = {
       collectionId: mainCollectionId,
       pipeline: result,
-      collectionWhereClauses,
+      sourceWhereClauses,
+      aliasToCollectionId,
+      aliasRemapping,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -314,7 +360,9 @@ export function compileQuery(
   const compilationResult = {
     collectionId: mainCollectionId,
     pipeline: result,
-    collectionWhereClauses,
+    sourceWhereClauses,
+    aliasToCollectionId,
+    aliasRemapping,
   }
   cache.set(rawQuery, compilationResult)
 
@@ -322,7 +370,8 @@ export function compileQuery(
 }
 
 /**
- * Processes the FROM clause to extract the main table alias and input stream
+ * Processes the FROM clause, handling direct collection references and subqueries.
+ * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
 function processFrom(
   from: CollectionRef | QueryRef,
@@ -330,17 +379,24 @@ function processFrom(
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
   callbacks: Record<string, LazyCollectionCallbacks>,
-  lazyCollections: Set<string>,
+  lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   cache: QueryCache,
-  queryMapping: QueryMapping
+  queryMapping: QueryMapping,
+  aliasToCollectionId: Record<string, string>,
+  aliasRemapping: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.collection.id]
+      const input = allInputs[from.alias]
       if (!input) {
-        throw new CollectionInputNotFoundError(from.collection.id)
+        throw new CollectionInputNotFoundError(
+          from.alias,
+          from.collection.id,
+          Object.keys(allInputs)
+        )
       }
+      aliasToCollectionId[from.alias] = from.collection.id
       return { alias: from.alias, input, collectionId: from.collection.id }
     }
     case `queryRef`: {
@@ -354,11 +410,38 @@ function processFrom(
         collections,
         subscriptions,
         callbacks,
-        lazyCollections,
+        lazySources,
         optimizableOrderByCollections,
         cache,
         queryMapping
       )
+
+      // Pull up alias mappings from subquery to parent scope.
+      // This includes both the innermost alias-to-collection mappings AND
+      // any existing remappings from nested subquery levels.
+      Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
+      Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Create a FLATTENED remapping from outer alias to innermost alias.
+      // For nested subqueries, this ensures one-hop lookups (not recursive chains).
+      //
+      // Example with 3-level nesting:
+      //   Inner:  .from({ user: usersCollection })
+      //   Middle: .from({ activeUser: innerSubquery })     → creates: activeUser → user
+      //   Outer:  .from({ author: middleSubquery })        → creates: author → user (not author → activeUser)
+      //
+      // The key insight: We search through the PULLED-UP aliasToCollectionId (which contains
+      // the innermost 'user' alias), so we always map directly to the deepest level.
+      // This means aliasRemapping[alias] is always a single lookup, never recursive.
+      // Needed for subscription resolution during lazy loading.
+      const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
+        (alias) =>
+          subQueryResult.aliasToCollectionId[alias] ===
+          subQueryResult.collectionId
+      )
+      if (innerAlias && innerAlias !== from.alias) {
+        aliasRemapping[from.alias] = innerAlias
+      }
 
       // Extract the pipeline from the compilation result
       const subQueryInput = subQueryResult.pipeline
