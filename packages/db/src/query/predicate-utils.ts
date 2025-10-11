@@ -131,8 +131,10 @@ function isWhereSubsetInternal(
         areRefsEqual(subsetFieldEq.ref, supersetFieldIn.ref)
       ) {
         // field = X is subset of field IN [X, Y, Z] if X is in the array
+        // Build Set once for the IN array to optimize lookup
         const inArray = supersetFieldIn.values
-        return inArray.some((val) => areValuesEqual(subsetFieldEq.value, val))
+        const inSet = buildPrimitiveSet(inArray)
+        return arrayIncludesWithSet(inArray, subsetFieldEq.value, inSet)
       }
     }
 
@@ -146,10 +148,11 @@ function isWhereSubsetInternal(
         areRefsEqual(subsetFieldIn.ref, supersetFieldIn.ref)
       ) {
         // field IN [A, B] is subset of field IN [A, B, C] if all values in subset are in superset
+        // Build Set once for the superset array and reuse for all subset lookups
+        const supersetArray = supersetFieldIn.values
+        const supersetSet = buildPrimitiveSet(supersetArray)
         return subsetFieldIn.values.every((subVal) =>
-          supersetFieldIn.values.some((superVal) =>
-            areValuesEqual(subVal, superVal)
-          )
+          arrayIncludesWithSet(supersetArray, subVal, supersetSet)
         )
       }
     }
@@ -593,6 +596,76 @@ function areRefsEqual(a: PropRef, b: PropRef): boolean {
 }
 
 /**
+ * Check if a value is a primitive (string, number, boolean, null, undefined)
+ * Primitives can use Set for fast lookups
+ */
+function isPrimitive(value: any): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `boolean`
+  )
+}
+
+/**
+ * Check if all values in an array are primitives
+ */
+function areAllPrimitives(values: Array<any>): boolean {
+  return values.every(isPrimitive)
+}
+
+/**
+ * Build a Set from an array if it contains only primitives and is large enough.
+ * Returns null if Set optimization is not applicable.
+ */
+function buildPrimitiveSet(array: Array<any>): Set<any> | null {
+  if (array.length > 10 && areAllPrimitives(array)) {
+    return new Set(array)
+  }
+  return null
+}
+
+/**
+ * Check if a value is in an array, with optional pre-built Set for optimization.
+ * The primitiveSet should be built once using buildPrimitiveSet and reused for multiple lookups.
+ */
+function arrayIncludesWithSet(
+  array: Array<any>,
+  value: any,
+  primitiveSet: Set<any> | null
+): boolean {
+  // Fast path: use pre-built Set for O(1) lookup
+  if (primitiveSet && isPrimitive(value)) {
+    return primitiveSet.has(value)
+  }
+
+  // Fallback: use areValuesEqual for Dates and objects
+  return array.some((v) => areValuesEqual(v, value))
+}
+
+/**
+ * Intersect two arrays, with optional pre-built Set for optimization.
+ * The set2 should be built once using buildPrimitiveSet and reused.
+ */
+function intersectArraysWithSet(
+  arr1: Array<any>,
+  arr2: Array<any>,
+  set2: Set<any> | null
+): Array<any> {
+  // Fast path: use pre-built Set for O(n) intersection
+  if (set2) {
+    // If set2 exists, arr2 contains ONLY primitives (that's when we build the Set).
+    // So we can skip non-primitives in arr1 immediately - they can't be in arr2.
+    return arr1.filter((v) => isPrimitive(v) && set2.has(v))
+  }
+
+  // Fallback: use areValuesEqual for all comparisons
+  return arr1.filter((v) => arr2.some((v2) => areValuesEqual(v, v2)))
+}
+
+/**
  * Get the maximum of two values, handling both numbers and Dates
  */
 function maxValue(a: any, b: any): any {
@@ -854,9 +927,10 @@ function intersectSameFieldPredicates(
       return { type: `val`, value: false } as BasicExpression<boolean>
     }
 
-    // Check if it's in all IN sets (use areValuesEqual for Date support)
+    // Check if it's in all IN sets (build Sets once for each IN array)
     for (const inSet of inValueSets) {
-      if (!inSet.some((v) => areValuesEqual(v, eqValue))) {
+      const primitiveSet = buildPrimitiveSet(inSet)
+      if (!arrayIncludesWithSet(inSet, eqValue, primitiveSet)) {
         return { type: `val`, value: false } as BasicExpression<boolean>
       }
     }
@@ -872,19 +946,25 @@ function intersectSameFieldPredicates(
     })!
   }
 
-  // Handle intersection of multiple IN clauses (use areValuesEqual for Date support)
+  // Handle intersection of multiple IN clauses (build Sets once for each array)
   let intersectedInValues: Array<any> | null = null
   if (inValueSets.length > 0) {
+    // Build primitive Sets for all IN value arrays upfront (scan each array once)
+    const inValuePrimitiveSets = inValueSets.map(buildPrimitiveSet)
+
     intersectedInValues = [...inValueSets[0]!]
     for (let i = 1; i < inValueSets.length; i++) {
-      const currentSet = inValueSets[i]!
-      intersectedInValues = intersectedInValues.filter((v) =>
-        currentSet.some((cv) => areValuesEqual(v, cv))
+      const currentArray = inValueSets[i]!
+      const currentSet = inValuePrimitiveSets[i]!
+      intersectedInValues = intersectArraysWithSet(
+        intersectedInValues,
+        currentArray,
+        currentSet
       )
-    }
-    // If intersection is empty, return false literal
-    if (intersectedInValues.length === 0) {
-      return { type: `val`, value: false } as BasicExpression<boolean>
+      // Early exit if intersection becomes empty
+      if (intersectedInValues.length === 0) {
+        return { type: `val`, value: false } as BasicExpression<boolean>
+      }
     }
   }
 
