@@ -131,10 +131,13 @@ function isWhereSubsetInternal(
         areRefsEqual(subsetFieldEq.ref, supersetFieldIn.ref)
       ) {
         // field = X is subset of field IN [X, Y, Z] if X is in the array
-        // Build Set once for the IN array to optimize lookup
-        const inArray = supersetFieldIn.values
-        const inSet = buildPrimitiveSet(inArray)
-        return arrayIncludesWithSet(inArray, subsetFieldEq.value, inSet)
+        // Use cached primitive set and metadata from extraction
+        return arrayIncludesWithSet(
+          supersetFieldIn.values,
+          subsetFieldEq.value,
+          supersetFieldIn.primitiveSet ?? null,
+          supersetFieldIn.areAllPrimitives
+        )
       }
     }
 
@@ -148,11 +151,14 @@ function isWhereSubsetInternal(
         areRefsEqual(subsetFieldIn.ref, supersetFieldIn.ref)
       ) {
         // field IN [A, B] is subset of field IN [A, B, C] if all values in subset are in superset
-        // Build Set once for the superset array and reuse for all subset lookups
-        const supersetArray = supersetFieldIn.values
-        const supersetSet = buildPrimitiveSet(supersetArray)
+        // Use cached primitive set and metadata from extraction
         return subsetFieldIn.values.every((subVal) =>
-          arrayIncludesWithSet(supersetArray, subVal, supersetSet)
+          arrayIncludesWithSet(
+            supersetFieldIn.values,
+            subVal,
+            supersetFieldIn.primitiveSet ?? null,
+            supersetFieldIn.areAllPrimitives
+          )
         )
       }
     }
@@ -571,18 +577,16 @@ function areValuesEqual(a: any, b: any): boolean {
     return a.getTime() === b.getTime()
   }
 
-  // For arrays and objects, use JSON comparison (simple but not perfect)
+  // For arrays and objects, use reference equality
+  // (In practice, we don't need deep equality for these cases -
+  // same object reference means same value for our use case)
   if (
     typeof a === `object` &&
     typeof b === `object` &&
     a !== null &&
     b !== null
   ) {
-    try {
-      return JSON.stringify(a) === JSON.stringify(b)
-    } catch {
-      return false
-    }
+    return a === b
   }
 
   return false
@@ -617,28 +621,23 @@ function areAllPrimitives(values: Array<any>): boolean {
 }
 
 /**
- * Build a Set from an array if it contains only primitives and is large enough.
- * Returns null if Set optimization is not applicable.
- */
-function buildPrimitiveSet(array: Array<any>): Set<any> | null {
-  if (array.length > 10 && areAllPrimitives(array)) {
-    return new Set(array)
-  }
-  return null
-}
-
-/**
  * Check if a value is in an array, with optional pre-built Set for optimization.
- * The primitiveSet should be built once using buildPrimitiveSet and reused for multiple lookups.
+ * The primitiveSet is cached in InField during extraction and reused for all lookups.
  */
 function arrayIncludesWithSet(
   array: Array<any>,
   value: any,
-  primitiveSet: Set<any> | null
+  primitiveSet: Set<any> | null,
+  arrayIsAllPrimitives?: boolean
 ): boolean {
   // Fast path: use pre-built Set for O(1) lookup
-  if (primitiveSet && isPrimitive(value)) {
-    return primitiveSet.has(value)
+  if (primitiveSet) {
+    // Skip isPrimitive check if we know the value must be primitive for a match
+    // (if array is all primitives, only primitives can match)
+    if (arrayIsAllPrimitives || isPrimitive(value)) {
+      return primitiveSet.has(value)
+    }
+    return false // Non-primitive can't be in primitive-only set
   }
 
   // Fallback: use areValuesEqual for Dates and objects
@@ -647,7 +646,7 @@ function arrayIncludesWithSet(
 
 /**
  * Intersect two arrays, with optional pre-built Set for optimization.
- * The set2 should be built once using buildPrimitiveSet and reused.
+ * The set2 is cached in InField during extraction and reused for all operations.
  */
 function intersectArraysWithSet(
   arr1: Array<any>,
@@ -734,6 +733,9 @@ function extractEqualityField(func: Func): ComparisonField | null {
 interface InField {
   ref: PropRef
   values: Array<any>
+  // Cached optimization data (computed once, reused many times)
+  areAllPrimitives?: boolean
+  primitiveSet?: Set<any> | null
 }
 
 function extractInField(func: Func): InField | null {
@@ -746,9 +748,25 @@ function extractInField(func: Func): InField | null {
       secondArg?.type === `val` &&
       Array.isArray(secondArg.value)
     ) {
+      let values = secondArg.value
+      // Precompute optimization metadata once
+      const allPrimitives = areAllPrimitives(values)
+      let primitiveSet: Set<any> | null = null
+
+      if (allPrimitives && values.length > 10) {
+        // Build Set and dedupe values at the same time
+        primitiveSet = new Set(values)
+        // If we found duplicates, use the deduped array going forward
+        if (primitiveSet.size < values.length) {
+          values = Array.from(primitiveSet)
+        }
+      }
+
       return {
         ref: firstArg,
-        values: secondArg.value,
+        values,
+        areAllPrimitives: allPrimitives,
+        primitiveSet,
       }
     }
   }
@@ -768,6 +786,10 @@ function isComparisonSubset(
   if (subOp === superOp) {
     if (subOp === `eq`) {
       // field = X is subset of field = X only
+      // Fast path: primitives can use strict equality
+      if (isPrimitive(subsetValue) && isPrimitive(supersetValue)) {
+        return subsetValue === supersetValue
+      }
       return areValuesEqual(subsetValue, supersetValue)
     } else if (subOp === `gt`) {
       // field > 20 is subset of field > 10 if 20 > 10
@@ -862,7 +884,7 @@ function intersectSameFieldPredicates(
   let maxLt: number | null = null
   let maxLte: number | null = null
   const eqValues: Set<any> = new Set()
-  const inValueSets: Array<Array<any>> = []
+  const inFields: Array<InField> = [] // Store full InField objects to access cached data
   const otherPredicates: Array<BasicExpression<boolean>> = []
 
   for (const pred of predicates) {
@@ -888,7 +910,7 @@ function intersectSameFieldPredicates(
       } else {
         const inField = extractInField(func)
         if (inField) {
-          inValueSets.push(inField.values)
+          inFields.push(inField) // Store full InField with cached primitiveSet
         } else {
           otherPredicates.push(pred)
         }
@@ -927,10 +949,16 @@ function intersectSameFieldPredicates(
       return { type: `val`, value: false } as BasicExpression<boolean>
     }
 
-    // Check if it's in all IN sets (build Sets once for each IN array)
-    for (const inSet of inValueSets) {
-      const primitiveSet = buildPrimitiveSet(inSet)
-      if (!arrayIncludesWithSet(inSet, eqValue, primitiveSet)) {
+    // Check if it's in all IN sets (use cached primitive sets and metadata)
+    for (const inField of inFields) {
+      if (
+        !arrayIncludesWithSet(
+          inField.values,
+          eqValue,
+          inField.primitiveSet ?? null,
+          inField.areAllPrimitives
+        )
+      ) {
         return { type: `val`, value: false } as BasicExpression<boolean>
       }
     }
@@ -946,20 +974,17 @@ function intersectSameFieldPredicates(
     })!
   }
 
-  // Handle intersection of multiple IN clauses (build Sets once for each array)
+  // Handle intersection of multiple IN clauses (use cached primitive sets)
   let intersectedInValues: Array<any> | null = null
-  if (inValueSets.length > 0) {
-    // Build primitive Sets for all IN value arrays upfront (scan each array once)
-    const inValuePrimitiveSets = inValueSets.map(buildPrimitiveSet)
-
-    intersectedInValues = [...inValueSets[0]!]
-    for (let i = 1; i < inValueSets.length; i++) {
-      const currentArray = inValueSets[i]!
-      const currentSet = inValuePrimitiveSets[i]!
+  if (inFields.length > 0) {
+    // All primitive sets already cached in inFields from extraction
+    intersectedInValues = [...inFields[0]!.values]
+    for (let i = 1; i < inFields.length; i++) {
+      const currentField = inFields[i]!
       intersectedInValues = intersectArraysWithSet(
         intersectedInValues,
-        currentArray,
-        currentSet
+        currentField.values,
+        currentField.primitiveSet ?? null
       )
       // Early exit if intersection becomes empty
       if (intersectedInValues.length === 0) {
