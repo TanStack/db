@@ -716,6 +716,7 @@ function createElectricSync<T extends Row<unknown>>(
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
+        let hasSnapshotEnd = false
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
@@ -780,6 +781,7 @@ function createElectricSync<T extends Row<unknown>>(
             })
           } else if (isSnapshotEndMessage(message)) {
             newSnapshots.push(parseSnapshotMessage(message))
+            hasSnapshotEnd = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -797,10 +799,11 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Reset hasUpToDate so we continue accumulating changes until next up-to-date
             hasUpToDate = false
+            hasSnapshotEnd = false
           }
         }
 
-        if (hasUpToDate) {
+        if (hasUpToDate || hasSnapshotEnd) {
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
 
@@ -810,8 +813,10 @@ function createElectricSync<T extends Row<unknown>>(
             transactionStarted = false
           }
 
-          // Mark the collection as ready now that sync is up to date
-          markReady()
+          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
+            // Mark the collection as ready now that sync is up to date
+            markReady()
+          }
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {

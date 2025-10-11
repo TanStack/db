@@ -1906,7 +1906,248 @@ describe(`Electric Integration`, () => {
         })
       )
     })
+  })
 
+  // Tests for commit and ready behavior with snapshot-end and up-to-date messages
+  describe(`Commit and ready behavior`, () => {
+    it(`should commit on snapshot-end in eager mode but not mark ready`, () => {
+      const config = {
+        id: `eager-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end (but no up-to-date)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should be committed (available in state)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+
+      // But collection should NOT be marked as ready yet in eager mode
+      expect(testCollection.status).toBe(`loading`)
+
+      // Now send up-to-date
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now it should be ready
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should commit and mark ready on snapshot-end in on-demand mode`, () => {
+      const config = {
+        id: `on-demand-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end (but no up-to-date)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should be committed (available in state)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+
+      // Collection SHOULD be marked as ready in on-demand mode
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should commit on snapshot-end in progressive mode but not mark ready`, () => {
+      const config = {
+        id: `progressive-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end (but no up-to-date)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should be committed (available in state)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+
+      // But collection should NOT be marked as ready yet in progressive mode
+      expect(testCollection.status).toBe(`loading`)
+
+      // Now send up-to-date
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now it should be ready
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should commit multiple snapshot-end messages before up-to-date in eager mode`, () => {
+      const config = {
+        id: `eager-multiple-snapshots-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // First snapshot with data
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // First data should be committed
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Second snapshot with more data
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `110`,
+            xmax: `120`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Second data should also be committed
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.size).toBe(2)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Finally send up-to-date
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now should be ready
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should handle up-to-date without snapshot-end (traditional behavior)`, () => {
+      const config = {
+        id: `traditional-up-to-date-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by up-to-date (no snapshot-end)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Data should be committed and collection ready
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.status).toBe(`ready`)
+    })
+  })
+
+  describe(`syncMode configuration - GC and resync`, () => {
     it(`should resync after garbage collection and new subscription`, () => {
       // Use fake timers for this test
       vi.useFakeTimers()
