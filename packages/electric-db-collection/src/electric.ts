@@ -678,8 +678,15 @@ function createElectricSync<T extends Row<unknown>>(
 
       const stream = new ShapeStream({
         ...shapeOptions,
+        // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
         log: syncMode === `on-demand` ? `changes_only` : undefined,
-        // TODO: under the `on-demand` we should be setting the offset to `now` when there is no saved offset rather than -1
+        // In on-demand mode, we only need the changes from the point of time the collection was created
+        // so we default to `now` when there is no saved offset.
+        offset: shapeOptions.offset
+          ? shapeOptions.offset
+          : syncMode === `on-demand`
+            ? `now`
+            : undefined,
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking

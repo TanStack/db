@@ -1790,6 +1790,123 @@ describe(`Electric Integration`, () => {
       expect(mockRequestSnapshot).toHaveBeenCalled()
     })
 
+    it(`should default offset to 'now' in on-demand mode when no offset provided`, async () => {
+      vi.clearAllMocks()
+
+      // Import ShapeStream to check constructor calls
+      const { ShapeStream } = await import(`@electric-sql/client`)
+
+      const config = {
+        id: `on-demand-offset-now-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          // No offset provided
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Check that ShapeStream was called with offset: 'now'
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: `now`,
+        })
+      )
+    })
+
+    it(`should use undefined offset in eager mode when no offset provided`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+
+      const config = {
+        id: `eager-offset-undefined-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          // No offset provided
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Check that ShapeStream was called with offset: undefined
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: undefined,
+        })
+      )
+    })
+
+    it(`should use undefined offset in progressive mode when no offset provided`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+
+      const config = {
+        id: `progressive-offset-undefined-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          // No offset provided
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Check that ShapeStream was called with offset: undefined
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: undefined,
+        })
+      )
+    })
+
+    it(`should use explicit offset when provided regardless of syncMode`, async () => {
+      vi.clearAllMocks()
+
+      const { ShapeStream } = await import(`@electric-sql/client`)
+
+      const config = {
+        id: `explicit-offset-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          offset: -1 as any, // Explicit offset
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Check that ShapeStream was called with the explicit offset
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offset: -1,
+        })
+      )
+    })
+
     it(`should resync after garbage collection and new subscription`, () => {
       // Use fake timers for this test
       vi.useFakeTimers()
