@@ -937,4 +937,92 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
   })
+
+  describe(`isLoadingMore integration`, () => {
+    it(`live query result collection has isLoadingMore property`, async () => {
+      const sourceCollection = createCollection<{ id: string; value: string }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q.from({ item: sourceCollection })
+      )
+
+      await liveQuery.preload()
+
+      expect(liveQuery.isLoadingMore).toBeDefined()
+      expect(liveQuery.isLoadingMore).toBe(false)
+    })
+
+    it(`isLoadingMore property exists and starts as false`, async () => {
+      const sourceCollection = createCollection<{ id: string; value: string }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      expect(liveQuery.isLoadingMore).toBe(false)
+    })
+
+    it(`source collection isLoadingMore is independent`, async () => {
+      let resolveLoadMore: () => void
+      const loadMorePromise = new Promise<void>((resolve) => {
+        resolveLoadMore = resolve
+      })
+
+      const sourceCollection = createCollection<{ id: string; value: number }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, value: 1 } })
+            commit()
+            markReady()
+            return {
+              onLoadMore: () => loadMorePromise,
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      // Calling syncMore directly on source collection sets its own isLoadingMore
+      sourceCollection.syncMore({})
+      expect(sourceCollection.isLoadingMore).toBe(true)
+
+      // But live query isLoadingMore tracks subscription-driven loads, not direct syncMore calls
+      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      expect(liveQuery.isLoadingMore).toBe(false)
+
+      resolveLoadMore!()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(sourceCollection.isLoadingMore).toBe(false)
+      expect(liveQuery.isLoadingMore).toBe(false)
+    })
+  })
 })

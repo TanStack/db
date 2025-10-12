@@ -1356,3 +1356,210 @@ describe(`Collection`, () => {
     expect(state.size).toBe(3)
   })
 })
+
+describe(`Collection isLoadingMore property`, () => {
+  it(`isLoadingMore is false initially`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+    })
+
+    expect(collection.isLoadingMore).toBe(false)
+  })
+
+  it(`isLoadingMore becomes true when syncMore returns a promise`, async () => {
+    let resolveLoadMore: () => void
+    const loadMorePromise = new Promise<void>((resolve) => {
+      resolveLoadMore = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            onLoadMore: () => loadMorePromise,
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingMore).toBe(false)
+
+    collection.syncMore({})
+    expect(collection.isLoadingMore).toBe(true)
+
+    resolveLoadMore!()
+    await flushPromises()
+
+    expect(collection.isLoadingMore).toBe(false)
+  })
+
+  it(`isLoadingMore becomes false when promise resolves`, async () => {
+    let resolveLoadMore: () => void
+    const loadMorePromise = new Promise<void>((resolve) => {
+      resolveLoadMore = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            onLoadMore: () => loadMorePromise,
+          }
+        },
+      },
+    })
+
+    collection.syncMore({})
+    expect(collection.isLoadingMore).toBe(true)
+
+    resolveLoadMore!()
+    await flushPromises()
+
+    expect(collection.isLoadingMore).toBe(false)
+  })
+
+  it(`concurrent syncMore calls keep isLoadingMore true until all resolve`, async () => {
+    let resolveLoadMore1: () => void
+    let resolveLoadMore2: () => void
+    let callCount = 0
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            onLoadMore: () => {
+              callCount++
+              if (callCount === 1) {
+                return new Promise<void>((resolve) => {
+                  resolveLoadMore1 = resolve
+                })
+              } else {
+                return new Promise<void>((resolve) => {
+                  resolveLoadMore2 = resolve
+                })
+              }
+            },
+          }
+        },
+      },
+    })
+
+    collection.syncMore({})
+    collection.syncMore({})
+
+    expect(collection.isLoadingMore).toBe(true)
+
+    resolveLoadMore1!()
+    await flushPromises()
+
+    // Should still be loading because second promise is pending
+    expect(collection.isLoadingMore).toBe(true)
+
+    resolveLoadMore2!()
+    await flushPromises()
+
+    // Now should be false
+    expect(collection.isLoadingMore).toBe(false)
+  })
+
+  it(`emits loadingMore:change event`, async () => {
+    let resolveLoadMore: () => void
+    const loadMorePromise = new Promise<void>((resolve) => {
+      resolveLoadMore = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            onLoadMore: () => loadMorePromise,
+          }
+        },
+      },
+    })
+
+    const loadingChanges: Array<{
+      isLoadingMore: boolean
+      previousIsLoadingMore: boolean
+    }> = []
+
+    collection.on(`loadingMore:change`, (event) => {
+      loadingChanges.push({
+        isLoadingMore: event.isLoadingMore,
+        previousIsLoadingMore: event.previousIsLoadingMore,
+      })
+    })
+
+    collection.syncMore({})
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(1)
+    expect(loadingChanges[0]).toEqual({
+      isLoadingMore: true,
+      previousIsLoadingMore: false,
+    })
+
+    resolveLoadMore!()
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(2)
+    expect(loadingChanges[1]).toEqual({
+      isLoadingMore: false,
+      previousIsLoadingMore: true,
+    })
+  })
+
+  it(`rejected promises still clean up`, async () => {
+    let rejectLoadMore: (error: Error) => void
+    const loadMorePromise = new Promise<void>((_, reject) => {
+      rejectLoadMore = reject
+    })
+    // Attach catch handler before rejecting to avoid unhandled rejection
+    const handledPromise = loadMorePromise.catch(() => {})
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            onLoadMore: () => handledPromise,
+          }
+        },
+      },
+    })
+
+    collection.syncMore({})
+    expect(collection.isLoadingMore).toBe(true)
+
+    // Reject the promise
+    rejectLoadMore!(new Error(`Load failed`))
+    await flushPromises()
+
+    expect(collection.isLoadingMore).toBe(false)
+  })
+})

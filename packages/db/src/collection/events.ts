@@ -31,9 +31,20 @@ export interface CollectionSubscribersChangeEvent {
   subscriberCount: number
 }
 
+/**
+ * Event emitted when the collection's loading more state changes
+ */
+export interface CollectionLoadingMoreChangeEvent {
+  type: `loadingMore:change`
+  collection: Collection<any, any, any, any, any>
+  isLoadingMore: boolean
+  previousIsLoadingMore: boolean
+}
+
 export type AllCollectionEvents = {
   "status:change": CollectionStatusChangeEvent
   "subscribers:change": CollectionSubscribersChangeEvent
+  "loadingMore:change": CollectionLoadingMoreChangeEvent
 } & {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
@@ -42,6 +53,7 @@ export type CollectionEvent =
   | AllCollectionEvents[keyof AllCollectionEvents]
   | CollectionStatusChangeEvent
   | CollectionSubscribersChangeEvent
+  | CollectionLoadingMoreChangeEvent
 
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T]

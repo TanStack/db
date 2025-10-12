@@ -303,6 +303,7 @@ export class CollectionImpl<
       collection: this, // Required for passing to config.sync callback
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
 
     // Only start sync immediately if explicitly enabled
@@ -356,6 +357,14 @@ export class CollectionImpl<
   }
 
   /**
+   * Check if the collection is currently loading more data
+   * @returns true if the collection has pending load more operations, false otherwise
+   */
+  public get isLoadingMore(): boolean {
+    return this._sync.isLoadingMore
+  }
+
+  /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
    */
@@ -368,11 +377,18 @@ export class CollectionImpl<
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
    *          If data loading is synchronous, the data is loaded when the method returns.
+   *          Returns undefined if no sync function is configured.
    */
-  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
-    if (this._sync.syncOnLoadMoreFn) {
-      return this._sync.syncOnLoadMoreFn(options)
-    }
+  public syncMore(options: OnLoadMoreOptions): Promise<void> | undefined {
+    return this._sync.syncMore(options)
+  }
+
+  /**
+   * Tracks a load promise for isLoadingMore state.
+   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
+   */
+  public trackLoadPromise(promise: Promise<void>): void {
+    this._sync.trackLoadPromise(promise)
   }
 
   /**

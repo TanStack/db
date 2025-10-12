@@ -19,6 +19,7 @@ import type {
 import type { CollectionImpl } from "./index.js"
 import type { CollectionStateManager } from "./state"
 import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionEventsManager } from "./events.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -29,6 +30,7 @@ export class CollectionSyncManager<
   private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private _events!: CollectionEventsManager
   private config!: CollectionConfig<TOutput, TKey, TSchema>
   private id: string
 
@@ -37,6 +39,8 @@ export class CollectionSyncManager<
   public syncOnLoadMoreFn:
     | ((options: OnLoadMoreOptions) => void | Promise<void>)
     | null = null
+
+  private pendingLoadMorePromises: Set<Promise<void>> = new Set()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -50,10 +54,12 @@ export class CollectionSyncManager<
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
   }) {
     this.collection = deps.collection
     this.state = deps.state
     this.lifecycle = deps.lifecycle
+    this._events = deps.events
   }
 
   /**
@@ -240,15 +246,67 @@ export class CollectionSyncManager<
   }
 
   /**
+   * Gets whether the collection is currently loading more data
+   */
+  public get isLoadingMore(): boolean {
+    return this.pendingLoadMorePromises.size > 0
+  }
+
+  /**
+   * Tracks a load promise for isLoadingMore state.
+   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
+   */
+  public trackLoadPromise(promise: Promise<void>): void {
+    const wasLoading = this.isLoadingMore
+    this.pendingLoadMorePromises.add(promise)
+    const isLoadingNow = this.isLoadingMore
+
+    if (!wasLoading && isLoadingNow) {
+      this._events.emit(`loadingMore:change`, {
+        type: `loadingMore:change`,
+        collection: this.collection,
+        isLoadingMore: true,
+        previousIsLoadingMore: false,
+      })
+    }
+
+    promise.finally(() => {
+      // Check loading state BEFORE removing the promise
+      const wasLoadingBeforeRemoval = this.isLoadingMore
+      this.pendingLoadMorePromises.delete(promise)
+      const stillLoading = this.isLoadingMore
+
+      if (wasLoadingBeforeRemoval && !stillLoading) {
+        this._events.emit(`loadingMore:change`, {
+          type: `loadingMore:change`,
+          collection: this.collection,
+          isLoadingMore: false,
+          previousIsLoadingMore: true,
+        })
+      }
+    })
+  }
+
+  /**
    * Requests the sync layer to load more data.
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
    *          If data loading is synchronous, the data is loaded when the method returns.
+   *          Returns undefined if no sync function is configured.
    */
-  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
+  public syncMore(options: OnLoadMoreOptions): Promise<void> | undefined {
     if (this.syncOnLoadMoreFn) {
-      return this.syncOnLoadMoreFn(options)
+      const result = this.syncOnLoadMoreFn(options)
+
+      // If the result is void (synchronous), wrap in Promise.resolve()
+      const promise = result === undefined ? Promise.resolve() : result
+
+      // Track the promise
+      this.trackLoadPromise(promise)
+
+      return promise
     }
+    return undefined
   }
 
   public cleanup(): void {

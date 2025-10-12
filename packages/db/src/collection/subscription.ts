@@ -28,6 +28,32 @@ type CollectionSubscriptionOptions = {
   onUnsubscribe?: () => void
 }
 
+type SubscriptionStatus = `ready` | `loadingMore`
+
+interface SubscriptionStatusChangeEvent {
+  type: `status:change`
+  subscription: CollectionSubscription
+  previousStatus: SubscriptionStatus
+  status: SubscriptionStatus
+}
+
+interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
+  type: `status:${T}`
+  subscription: CollectionSubscription
+  previousStatus: SubscriptionStatus
+  status: T
+}
+
+type AllSubscriptionEvents = {
+  "status:change": SubscriptionStatusChangeEvent
+  "status:ready": SubscriptionStatusEvent<`ready`>
+  "status:loadingMore": SubscriptionStatusEvent<`loadingMore`>
+}
+
+type SubscriptionEventHandler<T extends keyof AllSubscriptionEvents> = (
+  event: AllSubscriptionEvents[T]
+) => void
+
 export class CollectionSubscription {
   private loadedInitialState = false
 
@@ -41,6 +67,16 @@ export class CollectionSubscription {
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
 
   private orderByIndex: IndexInterface<string | number> | undefined
+
+  // Status tracking
+  public status: SubscriptionStatus = `ready`
+  private pendingLoadMorePromises: Set<Promise<void>> = new Set()
+
+  // Event emitter
+  private listeners = new Map<
+    keyof AllSubscriptionEvents,
+    Set<SubscriptionEventHandler<any>>
+  >()
 
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
@@ -69,6 +105,95 @@ export class CollectionSubscription {
 
   setOrderByIndex(index: IndexInterface<any>) {
     this.orderByIndex = index
+  }
+
+  /**
+   * Subscribe to a subscription event
+   */
+  on<T extends keyof AllSubscriptionEvents>(
+    event: T,
+    callback: SubscriptionEventHandler<T>
+  ) {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, new Set())
+    }
+    this.listeners.get(event)!.add(callback)
+
+    return () => {
+      this.listeners.get(event)?.delete(callback)
+    }
+  }
+
+  /**
+   * Subscribe to a subscription event once
+   */
+  once<T extends keyof AllSubscriptionEvents>(
+    event: T,
+    callback: SubscriptionEventHandler<T>
+  ) {
+    const unsubscribe = this.on(event, (eventPayload) => {
+      callback(eventPayload)
+      unsubscribe()
+    })
+    return unsubscribe
+  }
+
+  /**
+   * Unsubscribe from a subscription event
+   */
+  off<T extends keyof AllSubscriptionEvents>(
+    event: T,
+    callback: SubscriptionEventHandler<T>
+  ) {
+    this.listeners.get(event)?.delete(callback)
+  }
+
+  /**
+   * Emit a subscription event
+   */
+  private emit<T extends keyof AllSubscriptionEvents>(
+    event: T,
+    eventPayload: AllSubscriptionEvents[T]
+  ) {
+    this.listeners.get(event)?.forEach((listener) => {
+      try {
+        listener(eventPayload)
+      } catch (error) {
+        // Re-throw in a microtask to surface the error
+        queueMicrotask(() => {
+          throw error
+        })
+      }
+    })
+  }
+
+  /**
+   * Set subscription status and emit events if changed
+   */
+  private setStatus(newStatus: SubscriptionStatus) {
+    if (this.status === newStatus) {
+      return // No change
+    }
+
+    const previousStatus = this.status
+    this.status = newStatus
+
+    // Emit status:change event
+    this.emit(`status:change`, {
+      type: `status:change`,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    })
+
+    // Emit specific status event
+    const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
+    this.emit(eventKey, {
+      type: eventKey,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    } as AllSubscriptionEvents[typeof eventKey])
   }
 
   hasLoadedInitialState() {
@@ -121,9 +246,22 @@ export class CollectionSubscription {
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    this.collection.syncMore({
+    const syncPromise = this.collection.syncMore({
       where: stateOpts.where,
     })
+
+    // Track the promise if it exists
+    if (syncPromise) {
+      this.pendingLoadMorePromises.add(syncPromise)
+      this.setStatus(`loadingMore`)
+
+      syncPromise.finally(() => {
+        this.pendingLoadMorePromises.delete(syncPromise)
+        if (this.pendingLoadMorePromises.size === 0) {
+          this.setStatus(`ready`)
+        }
+      })
+    }
 
     // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
@@ -215,11 +353,24 @@ export class CollectionSubscription {
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    this.collection.syncMore({
+    const syncPromise = this.collection.syncMore({
       where: whereWithValueFilter,
       limit,
       orderBy,
     })
+
+    // Track the promise if it exists
+    if (syncPromise) {
+      this.pendingLoadMorePromises.add(syncPromise)
+      this.setStatus(`loadingMore`)
+
+      syncPromise.finally(() => {
+        this.pendingLoadMorePromises.delete(syncPromise)
+        if (this.pendingLoadMorePromises.size === 0) {
+          this.setStatus(`ready`)
+        }
+      })
+    }
   }
 
   /**
@@ -264,6 +415,8 @@ export class CollectionSubscription {
   }
 
   unsubscribe() {
+    // Clear all event listeners to prevent memory leaks
+    this.listeners.clear()
     this.options.onUnsubscribe?.()
   }
 }

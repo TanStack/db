@@ -21,12 +21,19 @@ export class CollectionSubscriber<
 
   private collectionAlias: string
 
+  // Track deferred promises for subscription loading states
+  private subscriptionLoadingPromises = new Map<
+    CollectionSubscription,
+    { resolve: () => void }
+  >()
+
   constructor(
     private collectionId: string,
     private collection: Collection,
     private config: Parameters<SyncConfig<TResult>[`sync`]>[0],
     private syncState: FullSyncState,
-    private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
+    private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>,
+    private resultCollection: Collection<any, any, any, any, any>
   ) {
     this.collectionAlias = findCollectionAlias(
       this.collectionId,
@@ -80,7 +87,43 @@ export class CollectionSubscriber<
         includeInitialState
       )
     }
+
+    // Subscribe to subscription status changes to propagate loading state
+    const statusUnsubscribe = subscription.on(`status:change`, (event) => {
+      if (event.status === `loadingMore`) {
+        // Guard against duplicate transitions
+        if (!this.subscriptionLoadingPromises.has(subscription)) {
+          let resolve: () => void
+          const promise = new Promise<void>((res) => {
+            resolve = res
+          })
+
+          this.subscriptionLoadingPromises.set(subscription, {
+            resolve: resolve!,
+          })
+          this.resultCollection.trackLoadPromise(promise)
+        }
+      } else {
+        // status is 'ready'
+        const deferred = this.subscriptionLoadingPromises.get(subscription)
+        if (deferred) {
+          // Clear the map entry FIRST (before resolving)
+          this.subscriptionLoadingPromises.delete(subscription)
+          deferred.resolve()
+        }
+      }
+    })
+
     const unsubscribe = () => {
+      // If subscription has a pending promise, resolve it before unsubscribing
+      const deferred = this.subscriptionLoadingPromises.get(subscription)
+      if (deferred) {
+        // Clear the map entry FIRST (before resolving)
+        this.subscriptionLoadingPromises.delete(subscription)
+        deferred.resolve()
+      }
+
+      statusUnsubscribe()
       subscription.unsubscribe()
     }
     this.syncState.unsubscribeCallbacks.add(unsubscribe)

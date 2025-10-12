@@ -411,7 +411,8 @@ export class CollectionConfigBuilder<
           collection,
           config,
           syncState,
-          this
+          this,
+          config.collection // Pass the result collection
         )
 
         const subscription = collectionSubscriber.subscribe()
