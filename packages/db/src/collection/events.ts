@@ -1,3 +1,4 @@
+import { EventEmitter } from "../event-emitter.js"
 import type { Collection } from "./index.js"
 import type { CollectionStatus } from "../types.js"
 
@@ -59,89 +60,26 @@ export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T]
 ) => void
 
-export class CollectionEventsManager {
+export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
   private collection!: Collection<any, any, any, any, any>
-  private listeners = new Map<
-    keyof AllCollectionEvents,
-    Set<CollectionEventHandler<any>>
-  >()
 
-  constructor() {}
+  constructor() {
+    super()
+  }
 
   setDeps(deps: { collection: Collection<any, any, any, any, any> }) {
     this.collection = deps.collection
   }
 
-  on<T extends keyof AllCollectionEvents>(
-    event: T,
-    callback: CollectionEventHandler<T>
-  ) {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set())
-    }
-    this.listeners.get(event)!.add(callback)
-
-    return () => {
-      this.listeners.get(event)?.delete(callback)
-    }
-  }
-
-  once<T extends keyof AllCollectionEvents>(
-    event: T,
-    callback: CollectionEventHandler<T>
-  ) {
-    const unsubscribe = this.on(event, (eventPayload) => {
-      callback(eventPayload)
-      unsubscribe()
-    })
-    return unsubscribe
-  }
-
-  off<T extends keyof AllCollectionEvents>(
-    event: T,
-    callback: CollectionEventHandler<T>
-  ) {
-    this.listeners.get(event)?.delete(callback)
-  }
-
-  waitFor<T extends keyof AllCollectionEvents>(
-    event: T,
-    timeout?: number
-  ): Promise<AllCollectionEvents[T]> {
-    return new Promise((resolve, reject) => {
-      let timeoutId: NodeJS.Timeout | undefined
-      const unsubscribe = this.on(event, (eventPayload) => {
-        if (timeoutId) {
-          clearTimeout(timeoutId)
-          timeoutId = undefined
-        }
-        resolve(eventPayload)
-        unsubscribe()
-      })
-      if (timeout) {
-        timeoutId = setTimeout(() => {
-          timeoutId = undefined
-          unsubscribe()
-          reject(new Error(`Timeout waiting for event ${event}`))
-        }, timeout)
-      }
-    })
-  }
-
+  /**
+   * Emit an event to all listeners
+   * Public API for emitting collection events
+   */
   emit<T extends keyof AllCollectionEvents>(
     event: T,
     eventPayload: AllCollectionEvents[T]
-  ) {
-    this.listeners.get(event)?.forEach((listener) => {
-      try {
-        listener(eventPayload)
-      } catch (error) {
-        // Re-throw in a microtask to surface the error
-        queueMicrotask(() => {
-          throw error
-        })
-      }
-    })
+  ): void {
+    this.emitInner(event, eventPayload)
   }
 
   emitStatusChange<T extends CollectionStatus>(
@@ -178,6 +116,6 @@ export class CollectionEventsManager {
   }
 
   cleanup() {
-    this.listeners.clear()
+    this.clearListeners()
   }
 }

@@ -1647,7 +1647,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
   })
 
-  it(`should emit change events for multiple sync transactions before marking ready`, async () => {
+  it(`should emit change events for multiple sync transactions before marking ready`, () => {
     const changeEvents: Array<any> = []
     let testSyncFunctions: any = null
 
@@ -1750,7 +1750,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.get(3)).toEqual({ id: 3, value: `third item` })
   })
 
-  it(`should emit change events while collection is loading for filtered subscriptions`, async () => {
+  it(`should emit change events while collection is loading for filtered subscriptions`, () => {
     const changeEvents: Array<any> = []
     let testSyncFunctions: any = null
 

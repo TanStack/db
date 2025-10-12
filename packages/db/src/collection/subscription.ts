@@ -1,6 +1,7 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
 import { and, gt, lt } from "../query/builder/functions.js"
 import { Value } from "../query/ir.js"
+import { EventEmitter } from "../event-emitter.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -50,11 +51,7 @@ type AllSubscriptionEvents = {
   "status:loadingMore": SubscriptionStatusEvent<`loadingMore`>
 }
 
-type SubscriptionEventHandler<T extends keyof AllSubscriptionEvents> = (
-  event: AllSubscriptionEvents[T]
-) => void
-
-export class CollectionSubscription {
+export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> {
   private loadedInitialState = false
 
   // Flag to indicate that we have sent at least 1 snapshot.
@@ -72,17 +69,12 @@ export class CollectionSubscription {
   public status: SubscriptionStatus = `ready`
   private pendingLoadMorePromises: Set<Promise<void>> = new Set()
 
-  // Event emitter
-  private listeners = new Map<
-    keyof AllSubscriptionEvents,
-    Set<SubscriptionEventHandler<any>>
-  >()
-
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
     private options: CollectionSubscriptionOptions
   ) {
+    super()
     // Auto-index for where expressions if enabled
     if (options.whereExpression) {
       ensureIndexForExpression(options.whereExpression, this.collection)
@@ -108,66 +100,6 @@ export class CollectionSubscription {
   }
 
   /**
-   * Subscribe to a subscription event
-   */
-  on<T extends keyof AllSubscriptionEvents>(
-    event: T,
-    callback: SubscriptionEventHandler<T>
-  ) {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set())
-    }
-    this.listeners.get(event)!.add(callback)
-
-    return () => {
-      this.listeners.get(event)?.delete(callback)
-    }
-  }
-
-  /**
-   * Subscribe to a subscription event once
-   */
-  once<T extends keyof AllSubscriptionEvents>(
-    event: T,
-    callback: SubscriptionEventHandler<T>
-  ) {
-    const unsubscribe = this.on(event, (eventPayload) => {
-      callback(eventPayload)
-      unsubscribe()
-    })
-    return unsubscribe
-  }
-
-  /**
-   * Unsubscribe from a subscription event
-   */
-  off<T extends keyof AllSubscriptionEvents>(
-    event: T,
-    callback: SubscriptionEventHandler<T>
-  ) {
-    this.listeners.get(event)?.delete(callback)
-  }
-
-  /**
-   * Emit a subscription event
-   */
-  private emit<T extends keyof AllSubscriptionEvents>(
-    event: T,
-    eventPayload: AllSubscriptionEvents[T]
-  ) {
-    this.listeners.get(event)?.forEach((listener) => {
-      try {
-        listener(eventPayload)
-      } catch (error) {
-        // Re-throw in a microtask to surface the error
-        queueMicrotask(() => {
-          throw error
-        })
-      }
-    })
-  }
-
-  /**
    * Set subscription status and emit events if changed
    */
   private setStatus(newStatus: SubscriptionStatus) {
@@ -179,7 +111,7 @@ export class CollectionSubscription {
     this.status = newStatus
 
     // Emit status:change event
-    this.emit(`status:change`, {
+    this.emitInner(`status:change`, {
       type: `status:change`,
       subscription: this,
       previousStatus,
@@ -188,7 +120,7 @@ export class CollectionSubscription {
 
     // Emit specific status event
     const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
-    this.emit(eventKey, {
+    this.emitInner(eventKey, {
       type: eventKey,
       subscription: this,
       previousStatus,
@@ -416,7 +348,7 @@ export class CollectionSubscription {
 
   unsubscribe() {
     // Clear all event listeners to prevent memory leaks
-    this.listeners.clear()
+    this.clearListeners()
     this.options.onUnsubscribe?.()
   }
 }
