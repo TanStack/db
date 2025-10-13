@@ -3,6 +3,7 @@ import type { Collection } from "./collection/index.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 import type { BasicExpression, OrderBy } from "./query/ir.js"
+import type { EventEmitter } from "./event-emitter.js"
 
 /**
  * Helper type to extract the output type from a standard schema
@@ -197,33 +198,9 @@ export type SubscriptionEvents = {
  * Public interface for a collection subscription
  * Used by sync implementations to track subscription lifecycle
  */
-export interface Subscription {
+export interface Subscription extends EventEmitter<SubscriptionEvents> {
   /** Current status of the subscription */
   readonly status: SubscriptionStatus
-
-  /** Subscribe to a subscription event */
-  on: <T extends keyof SubscriptionEvents>(
-    event: T,
-    callback: (eventPayload: SubscriptionEvents[T]) => void
-  ) => () => void
-
-  /** Subscribe to a subscription event once */
-  once: <T extends keyof SubscriptionEvents>(
-    event: T,
-    callback: (eventPayload: SubscriptionEvents[T]) => void
-  ) => () => void
-
-  /** Unsubscribe from a subscription event */
-  off: <T extends keyof SubscriptionEvents>(
-    event: T,
-    callback: (eventPayload: SubscriptionEvents[T]) => void
-  ) => void
-
-  /** Wait for a subscription event */
-  waitFor: <T extends keyof SubscriptionEvents>(
-    event: T,
-    timeout?: number
-  ) => Promise<SubscriptionEvents[T]>
 }
 
 export type LoadSubsetOptions = {

@@ -54,8 +54,12 @@ export class CollectionSubscription
   private orderByIndex: IndexInterface<string | number> | undefined
 
   // Status tracking
-  public readonly status: SubscriptionStatus = `ready`
+  private _status: SubscriptionStatus = `ready`
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+
+  public get status(): SubscriptionStatus {
+    return this._status
+  }
 
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
@@ -95,13 +99,12 @@ export class CollectionSubscription
    * Set subscription status and emit events if changed
    */
   private setStatus(newStatus: SubscriptionStatus) {
-    if (this.status === newStatus) {
+    if (this._status === newStatus) {
       return // No change
     }
 
-    const previousStatus = this.status
-    // Cast to mutable for internal mutation
-    this.status = newStatus
+    const previousStatus = this._status
+    this._status = newStatus
 
     // Emit status:change event
     this.emitInner(`status:change`, {

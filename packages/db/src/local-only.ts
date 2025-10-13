@@ -191,7 +191,7 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync(initialData)
+  const syncResult = createLocalOnlySync<T, TKey>(initialData)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
