@@ -6,6 +6,7 @@ import {
   isOrderBySubset,
   isPredicateSubset,
   isWhereSubset,
+  minusWherePredicates,
   unionPredicates,
   unionWherePredicates,
 } from "../src/query/predicate-utils"
@@ -1004,5 +1005,328 @@ describe(`unionPredicates`, () => {
     const result = unionPredicates([pred1, pred2])
 
     expect(result.limit).toBeUndefined()
+  })
+})
+
+describe(`minusWherePredicates`, () => {
+  describe(`basic cases`, () => {
+    it(`should return original predicate when nothing to subtract`, () => {
+      const pred = gt(ref(`age`), val(10))
+      const result = minusWherePredicates(pred, undefined)
+
+      expect(result).toEqual(pred)
+    })
+
+    it(`should return null when from is undefined (can't simplify NOT(B))`, () => {
+      const subtract = gt(ref(`age`), val(10))
+      const result = minusWherePredicates(undefined, subtract)
+
+      expect(result).toBeNull()
+    })
+
+    it(`should return empty set when from is subset of subtract`, () => {
+      const from = gt(ref(`age`), val(20)) // age > 20
+      const subtract = gt(ref(`age`), val(10)) // age > 10
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+
+    it(`should return null when predicates are on different fields`, () => {
+      const from = gt(ref(`age`), val(10))
+      const subtract = eq(ref(`status`), val(`active`))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toBeNull()
+    })
+  })
+
+  describe(`IN minus IN`, () => {
+    it(`should compute set difference: IN [A,B,C,D] - IN [B,C] = IN [A,D]`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`, `C`, `D`])
+      const subtract = inOp(ref(`status`), [`B`, `C`])
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `in`,
+        args: [ref(`status`), val([`A`, `D`])],
+      })
+    })
+
+    it(`should return empty set when all values are subtracted`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`])
+      const subtract = inOp(ref(`status`), [`A`, `B`])
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+
+    it(`should return original when no overlap`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`])
+      const subtract = inOp(ref(`status`), [`C`, `D`])
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual(from)
+    })
+
+    it(`should collapse to equality when one value remains`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`])
+      const subtract = inOp(ref(`status`), [`B`])
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `eq`,
+        args: [ref(`status`), val(`A`)],
+      })
+    })
+  })
+
+  describe(`IN minus equality`, () => {
+    it(`should remove value from IN: IN [A,B,C] - eq(B) = IN [A,C]`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`, `C`])
+      const subtract = eq(ref(`status`), val(`B`))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `in`,
+        args: [ref(`status`), val([`A`, `C`])],
+      })
+    })
+
+    it(`should collapse to equality when one value remains`, () => {
+      const from = inOp(ref(`status`), [`A`, `B`])
+      const subtract = eq(ref(`status`), val(`A`))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `eq`,
+        args: [ref(`status`), val(`B`)],
+      })
+    })
+
+    it(`should return empty set when removing last value`, () => {
+      const from = inOp(ref(`status`), [`A`])
+      const subtract = eq(ref(`status`), val(`A`))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+  })
+
+  describe(`equality minus equality`, () => {
+    it(`should return empty set when same value`, () => {
+      const from = eq(ref(`age`), val(15))
+      const subtract = eq(ref(`age`), val(15))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+
+    it(`should return original when different values`, () => {
+      const from = eq(ref(`age`), val(15))
+      const subtract = eq(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual(from)
+    })
+  })
+
+  describe(`range minus range - gt/gte`, () => {
+    it(`should compute difference: age > 10 - age > 20 = (age > 10 AND age <= 20)`, () => {
+      const from = gt(ref(`age`), val(10))
+      const subtract = gt(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gt(ref(`age`), val(10)), lte(ref(`age`), val(20))],
+      })
+    })
+
+    it(`should return original when no overlap: age > 20 - age > 10`, () => {
+      const from = gt(ref(`age`), val(20))
+      const subtract = gt(ref(`age`), val(10))
+      const result = minusWherePredicates(from, subtract)
+
+      // age > 20 is subset of age > 10, so result is empty
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+
+    it(`should compute difference: age >= 10 - age >= 20 = (age >= 10 AND age < 20)`, () => {
+      const from = gte(ref(`age`), val(10))
+      const subtract = gte(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gte(ref(`age`), val(10)), lt(ref(`age`), val(20))],
+      })
+    })
+
+    it(`should compute difference: age > 10 - age >= 20 = (age > 10 AND age < 20)`, () => {
+      const from = gt(ref(`age`), val(10))
+      const subtract = gte(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gt(ref(`age`), val(10)), lt(ref(`age`), val(20))],
+      })
+    })
+
+    it(`should compute difference: age >= 10 - age > 20 = (age >= 10 AND age <= 20)`, () => {
+      const from = gte(ref(`age`), val(10))
+      const subtract = gt(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gte(ref(`age`), val(10)), lte(ref(`age`), val(20))],
+      })
+    })
+  })
+
+  describe(`range minus range - lt/lte`, () => {
+    it(`should compute difference: age < 30 - age < 20 = (age >= 20 AND age < 30)`, () => {
+      const from = lt(ref(`age`), val(30))
+      const subtract = lt(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gte(ref(`age`), val(20)), lt(ref(`age`), val(30))],
+      })
+    })
+
+    it(`should return original when no overlap: age < 20 - age < 30`, () => {
+      const from = lt(ref(`age`), val(20))
+      const subtract = lt(ref(`age`), val(30))
+      const result = minusWherePredicates(from, subtract)
+
+      // age < 20 is subset of age < 30, so result is empty
+      expect(result).toEqual({ type: `val`, value: false })
+    })
+
+    it(`should compute difference: age <= 30 - age <= 20 = (age > 20 AND age <= 30)`, () => {
+      const from = lte(ref(`age`), val(30))
+      const subtract = lte(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gt(ref(`age`), val(20)), lte(ref(`age`), val(30))],
+      })
+    })
+
+    it(`should compute difference: age < 30 - age <= 20 = (age > 20 AND age < 30)`, () => {
+      const from = lt(ref(`age`), val(30))
+      const subtract = lte(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gt(ref(`age`), val(20)), lt(ref(`age`), val(30))],
+      })
+    })
+
+    it(`should compute difference: age <= 30 - age < 20 = (age >= 20 AND age <= 30)`, () => {
+      const from = lte(ref(`age`), val(30))
+      const subtract = lt(ref(`age`), val(20))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gte(ref(`age`), val(20)), lte(ref(`age`), val(30))],
+      })
+    })
+  })
+
+  describe(`Date support`, () => {
+    it(`should handle Date IN minus Date IN`, () => {
+      const date1 = new Date(`2024-01-01`)
+      const date2 = new Date(`2024-01-15`)
+      const date3 = new Date(`2024-02-01`)
+
+      const from = inOp(ref(`createdAt`), [date1, date2, date3])
+      const subtract = inOp(ref(`createdAt`), [date2])
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `in`,
+        args: [ref(`createdAt`), val([date1, date3])],
+      })
+    })
+
+    it(`should handle Date range difference: date > 2024-01-01 - date > 2024-01-15`, () => {
+      const date1 = new Date(`2024-01-01`)
+      const date15 = new Date(`2024-01-15`)
+
+      const from = gt(ref(`createdAt`), val(date1))
+      const subtract = gt(ref(`createdAt`), val(date15))
+      const result = minusWherePredicates(from, subtract)
+
+      expect(result).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [
+          gt(ref(`createdAt`), val(date1)),
+          lte(ref(`createdAt`), val(date15)),
+        ],
+      })
+    })
+  })
+
+  describe(`real-world sync scenarios`, () => {
+    it(`should compute missing data range: need age > 10, already have age > 20`, () => {
+      const requested = gt(ref(`age`), val(10))
+      const alreadyLoaded = gt(ref(`age`), val(20))
+      const needToFetch = minusWherePredicates(requested, alreadyLoaded)
+
+      // Need to fetch: 10 < age <= 20
+      expect(needToFetch).toEqual({
+        type: `func`,
+        name: `and`,
+        args: [gt(ref(`age`), val(10)), lte(ref(`age`), val(20))],
+      })
+    })
+
+    it(`should compute missing IDs: need IN [1..100], already have IN [50..100]`, () => {
+      const allIds = Array.from({ length: 100 }, (_, i) => i + 1)
+      const loadedIds = Array.from({ length: 51 }, (_, i) => i + 50)
+
+      const requested = inOp(ref(`id`), allIds)
+      const alreadyLoaded = inOp(ref(`id`), loadedIds)
+      const needToFetch = minusWherePredicates(requested, alreadyLoaded)
+
+      // Need to fetch: ids 1..49
+      const expectedIds = Array.from({ length: 49 }, (_, i) => i + 1)
+      expect(needToFetch).toEqual({
+        type: `func`,
+        name: `in`,
+        args: [ref(`id`), val(expectedIds)],
+      })
+    })
+
+    it(`should return empty when all requested data is already loaded`, () => {
+      const requested = gt(ref(`age`), val(20))
+      const alreadyLoaded = gt(ref(`age`), val(10))
+      const needToFetch = minusWherePredicates(requested, alreadyLoaded)
+
+      // Requested is subset of already loaded - nothing more to fetch
+      expect(needToFetch).toEqual({ type: `val`, value: false })
+    })
   })
 })

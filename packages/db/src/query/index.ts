@@ -63,6 +63,7 @@ export {
   isWhereSubset,
   intersectWherePredicates,
   unionWherePredicates,
+  minusWherePredicates,
   isOrderBySubset,
   isLimitSubset,
   isPredicateSubset,
