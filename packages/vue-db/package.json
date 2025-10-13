@@ -15,7 +15,7 @@
     "vue",
     "typescript"
   ],
-  "packageManager": "pnpm@10.18.1",
+  "packageManager": "pnpm@10.18.2",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },

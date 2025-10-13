@@ -9,14 +9,11 @@ import {
 import type {
   BaseCollectionConfig,
   CollectionConfig,
-  DeleteMutationFn,
   DeleteMutationFnParams,
   InferSchemaOutput,
-  InsertMutationFn,
   InsertMutationFnParams,
   PendingMutation,
   SyncConfig,
-  UpdateMutationFn,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
@@ -226,25 +223,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): Omit<
-  CollectionConfig<InferSchemaOutput<T>, TKey, T>,
-  `onInsert` | `onUpdate` | `onDelete`
-> & {
-  onInsert?: InsertMutationFn<
-    InferSchemaOutput<T>,
-    TKey,
-    LocalStorageCollectionUtils
-  >
-  onUpdate?: UpdateMutationFn<
-    InferSchemaOutput<T>,
-    TKey,
-    LocalStorageCollectionUtils
-  >
-  onDelete?: DeleteMutationFn<
-    InferSchemaOutput<T>,
-    TKey,
-    LocalStorageCollectionUtils
-  >
+): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema: T
@@ -259,13 +238,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): Omit<
-  CollectionConfig<T, TKey, never>,
-  `onInsert` | `onUpdate` | `onDelete`
-> & {
-  onInsert?: InsertMutationFn<T, TKey, LocalStorageCollectionUtils>
-  onUpdate?: UpdateMutationFn<T, TKey, LocalStorageCollectionUtils>
-  onDelete?: DeleteMutationFn<T, TKey, LocalStorageCollectionUtils>
+): CollectionConfig<T, TKey> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
@@ -273,13 +246,7 @@ export function localStorageCollectionOptions<
 
 export function localStorageCollectionOptions(
   config: LocalStorageCollectionConfig<any, any, string | number>
-): Omit<
-  CollectionConfig<any, string | number, any>,
-  `id` | `onInsert` | `onUpdate` | `onDelete`
-> & {
-  onInsert?: InsertMutationFn<any, string | number, LocalStorageCollectionUtils>
-  onUpdate?: UpdateMutationFn<any, string | number, LocalStorageCollectionUtils>
-  onDelete?: DeleteMutationFn<any, string | number, LocalStorageCollectionUtils>
+): Omit<CollectionConfig<any, string | number, any>, `id`> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: StandardSchemaV1

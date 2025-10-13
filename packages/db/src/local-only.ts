@@ -1,6 +1,5 @@
 import type {
   BaseCollectionConfig,
-  CollectionConfig,
   DeleteMutationFn,
   DeleteMutationFnParams,
   InferSchemaOutput,
@@ -63,12 +62,20 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {
   }) => void
 }
 
+type LocalOnlyCollectionOptionsBase<
+  T extends object,
+  TKey extends string | number,
+  TSchema extends StandardSchemaV1 | never = never,
+> = BaseCollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils> & {
+  sync: SyncConfig<T, TKey>
+}
+
 type LocalOnlyCollectionOptionsResult<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 | never = never,
 > = Omit<
-  CollectionConfig<T, TKey, TSchema>,
+  LocalOnlyCollectionOptionsBase<T, TKey, TSchema>,
   `onInsert` | `onUpdate` | `onDelete`
 > & {
   onInsert?: InsertMutationFn<T, TKey, LocalOnlyCollectionUtils>
@@ -191,7 +198,7 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<T, TKey>(initialData)
+  const syncResult = createLocalOnlySync(initialData)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
