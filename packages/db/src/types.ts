@@ -150,17 +150,107 @@ export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 export type OperationType = `insert` | `update` | `delete`
 
-export type LoadSubsetOptions = {
-  where?: BasicExpression<boolean>
-  orderBy?: OrderBy
-  limit?: number
+/**
+ * Subscription status values
+ */
+export type SubscriptionStatus = `ready` | `loadingMore`
+
+/**
+ * Event emitted when subscription status changes
+ */
+export interface SubscriptionStatusChangeEvent {
+  type: `status:change`
+  subscription: Subscription
+  previousStatus: SubscriptionStatus
+  status: SubscriptionStatus
 }
+
+/**
+ * Event emitted when subscription status changes to a specific status
+ */
+export interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
+  type: `status:${T}`
+  subscription: Subscription
+  previousStatus: SubscriptionStatus
+  status: T
+}
+
+/**
+ * Event emitted when subscription is unsubscribed
+ */
+export interface SubscriptionUnsubscribedEvent {
+  type: `unsubscribed`
+  subscription: Subscription
+}
+
+/**
+ * All subscription events
+ */
+export type SubscriptionEvents = {
+  "status:change": SubscriptionStatusChangeEvent
+  "status:ready": SubscriptionStatusEvent<`ready`>
+  "status:loadingMore": SubscriptionStatusEvent<`loadingMore`>
+  unsubscribed: SubscriptionUnsubscribedEvent
+}
+
+/**
+ * Public interface for a collection subscription
+ * Used by sync implementations to track subscription lifecycle
+ */
+export interface Subscription {
+  /** Current status of the subscription */
+  readonly status: SubscriptionStatus
+
+  /** Subscribe to a subscription event */
+  on: <T extends keyof SubscriptionEvents>(
+    event: T,
+    callback: (eventPayload: SubscriptionEvents[T]) => void
+  ) => () => void
+
+  /** Subscribe to a subscription event once */
+  once: <T extends keyof SubscriptionEvents>(
+    event: T,
+    callback: (eventPayload: SubscriptionEvents[T]) => void
+  ) => () => void
+
+  /** Unsubscribe from a subscription event */
+  off: <T extends keyof SubscriptionEvents>(
+    event: T,
+    callback: (eventPayload: SubscriptionEvents[T]) => void
+  ) => void
+
+  /** Wait for a subscription event */
+  waitFor: <T extends keyof SubscriptionEvents>(
+    event: T,
+    timeout?: number
+  ) => Promise<SubscriptionEvents[T]>
+}
+
+export type LoadSubsetOptions = {
+  /** The where expression to filter the data */
+  where?: BasicExpression<boolean>
+  /** The order by clause to sort the data */
+  orderBy?: OrderBy
+  /** The limit of the data to load */
+  limit?: number
+  /**
+   * The subscription that triggered the load.
+   * Advanced sync implementations can use this for:
+   * - LRU caching keyed by subscription
+   * - Reference counting to track active subscriptions
+   * - Subscribing to subscription events (e.g., finalization/unsubscribe)
+   * @optional Available when called from CollectionSubscription, may be undefined for direct calls
+   */
+  subscription?: Subscription
+}
+
+export type LoadSubsetFn = (options: LoadSubsetOptions) => void | Promise<void>
 
 export type CleanupFn = () => void
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn
-  loadSubset?: (options: LoadSubsetOptions) => void | Promise<void>
+  loadSubset?: LoadSubsetFn
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,

@@ -8,7 +8,13 @@ import {
 } from "./change-events.js"
 import type { BasicExpression, OrderBy } from "../query/ir.js"
 import type { IndexInterface } from "../indexes/base-index.js"
-import type { ChangeMessage } from "../types.js"
+import type {
+  ChangeMessage,
+  Subscription,
+  SubscriptionEvents,
+  SubscriptionStatus,
+  SubscriptionUnsubscribedEvent,
+} from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
 type RequestSnapshotOptions = {
@@ -23,35 +29,17 @@ type RequestLimitedSnapshotOptions = {
 }
 
 type CollectionSubscriptionOptions = {
+  includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
-  onUnsubscribe?: () => void
+  onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
 }
 
-type SubscriptionStatus = `ready` | `loadingMore`
-
-interface SubscriptionStatusChangeEvent {
-  type: `status:change`
-  subscription: CollectionSubscription
-  previousStatus: SubscriptionStatus
-  status: SubscriptionStatus
-}
-
-interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
-  type: `status:${T}`
-  subscription: CollectionSubscription
-  previousStatus: SubscriptionStatus
-  status: T
-}
-
-type AllSubscriptionEvents = {
-  "status:change": SubscriptionStatusChangeEvent
-  "status:ready": SubscriptionStatusEvent<`ready`>
-  "status:loadingMore": SubscriptionStatusEvent<`loadingMore`>
-}
-
-export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> {
+export class CollectionSubscription
+  extends EventEmitter<SubscriptionEvents>
+  implements Subscription
+{
   private loadedInitialState = false
 
   // Flag to indicate that we have sent at least 1 snapshot.
@@ -66,7 +54,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
   private orderByIndex: IndexInterface<string | number> | undefined
 
   // Status tracking
-  public status: SubscriptionStatus = `ready`
+  public readonly status: SubscriptionStatus = `ready`
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   constructor(
@@ -75,6 +63,10 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
     private options: CollectionSubscriptionOptions
   ) {
     super()
+    if (options.onUnsubscribe) {
+      this.on(`unsubscribed`, (event) => options.onUnsubscribe!(event))
+    }
+
     // Auto-index for where expressions if enabled
     if (options.whereExpression) {
       ensureIndexForExpression(options.whereExpression, this.collection)
@@ -108,6 +100,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
     }
 
     const previousStatus = this.status
+    // Cast to mutable for internal mutation
     this.status = newStatus
 
     // Emit status:change event
@@ -125,7 +118,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
       subscription: this,
       previousStatus,
       status: newStatus,
-    } as AllSubscriptionEvents[typeof eventKey])
+    } as SubscriptionEvents[typeof eventKey])
   }
 
   hasLoadedInitialState() {
@@ -180,6 +173,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
     // don't await it, we will load the data into the collection when it comes in
     const syncPromise = this.collection._sync.loadSubset({
       where: stateOpts.where,
+      subscription: this,
     })
 
     // Track the promise if it exists
@@ -289,6 +283,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
       where: whereWithValueFilter,
       limit,
       orderBy,
+      subscription: this,
     })
 
     // Track the promise if it exists
@@ -347,8 +342,11 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
   }
 
   unsubscribe() {
+    this.emitInner(`unsubscribed`, {
+      type: `unsubscribed`,
+      subscription: this,
+    })
     // Clear all event listeners to prevent memory leaks
     this.clearListeners()
-    this.options.onUnsubscribe?.()
   }
 }
