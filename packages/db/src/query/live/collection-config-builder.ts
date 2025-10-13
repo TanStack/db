@@ -517,8 +517,9 @@ export class CollectionConfigBuilder<
       return loadMore
     })
 
-    // Combine all loaders into a single callback that attempts to load more data
-    // from any source that needs it (returns true when done loading)
+    // Combine all loaders into a single callback that initiates loading more data
+    // from any source that needs it. Returns true once all loaders have been called,
+    // but the actual async loading may still be in progress.
     const loadMoreDataCallback = () => {
       loaders.map((loader) => loader())
       return true
