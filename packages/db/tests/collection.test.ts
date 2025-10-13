@@ -1381,6 +1381,7 @@ describe(`Collection isLoadingMore property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       startSync: true,
       sync: {
         sync: ({ markReady }) => {
@@ -1412,6 +1413,7 @@ describe(`Collection isLoadingMore property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       startSync: true,
       sync: {
         sync: ({ markReady }) => {
@@ -1440,6 +1442,7 @@ describe(`Collection isLoadingMore property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       startSync: true,
       sync: {
         sync: ({ markReady }) => {
@@ -1489,6 +1492,7 @@ describe(`Collection isLoadingMore property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       startSync: true,
       sync: {
         sync: ({ markReady }) => {
@@ -1542,6 +1546,7 @@ describe(`Collection isLoadingMore property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       startSync: true,
       sync: {
         sync: ({ markReady }) => {

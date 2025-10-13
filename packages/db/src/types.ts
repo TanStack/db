@@ -380,6 +380,16 @@ export type CollectionStatus =
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
+/**
+ * @default `eager`
+ * @description
+ * Collections have two modes of sync: eager and on-demand.
+ * - eager: syncs all data immediately on preload
+ * - on-demand: syncs data in incremental snapshots when the collection is queried
+ * The exact implementation of the sync mode is up to the sync implementation.
+ */
+export type SyncMode = `eager` | `on-demand`
+
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -441,6 +451,15 @@ export interface BaseCollectionConfig<
    * compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
    */
   compare?: (x: T, y: T) => number
+  /**
+   * The mode of sync to use for the collection.
+   * @default `eager`
+   * @description
+   * - `eager`: syncs all data immediately on preload
+   * - `on-demand`: syncs data in incremental snapshots when the collection is queried
+   * The exact implementation of the sync mode is up to the sync implementation.
+   */
+  syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information

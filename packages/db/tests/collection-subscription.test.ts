@@ -29,6 +29,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -70,6 +71,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -102,6 +104,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -160,6 +163,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -215,6 +219,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()

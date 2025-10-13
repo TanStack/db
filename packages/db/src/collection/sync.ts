@@ -1,4 +1,5 @@
 import {
+  CollectionConfigurationError,
   CollectionIsInErrorStateError,
   DuplicateKeySyncError,
   NoPendingSyncTransactionCommitError,
@@ -33,6 +34,7 @@ export class CollectionSyncManager<
   private _events!: CollectionEventsManager
   private config!: CollectionConfig<TOutput, TKey, TSchema>
   private id: string
+  private syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
@@ -48,6 +50,7 @@ export class CollectionSyncManager<
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
     this.config = config
     this.id = id
+    this.syncMode = config.syncMode ?? `eager`
   }
 
   setDeps(deps: {
@@ -197,6 +200,14 @@ export class CollectionSyncManager<
 
       // Store loadSubset function if provided
       this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
+
+      // Validate: on-demand mode requires a loadSubset function
+      if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
+        throw new CollectionConfigurationError(
+          `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
+            `Either provide a loadSubset handler or use syncMode "eager".`
+        )
+      }
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
@@ -292,9 +303,14 @@ export class CollectionSyncManager<
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
    *          If data loading is synchronous, the data is loaded when the method returns.
-   *          Returns undefined if no sync function is configured.
+   *          Returns undefined if no sync function is configured or if syncMode is 'eager'.
    */
   public loadSubset(options: LoadSubsetOptions): Promise<void> | undefined {
+    // Bypass loadSubset when syncMode is 'eager'
+    if (this.syncMode === `eager`) {
+      return undefined
+    }
+
     if (this.syncLoadSubsetFn) {
       const result = this.syncLoadSubsetFn(options)
 

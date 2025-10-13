@@ -990,6 +990,7 @@ describe(`createLiveQueryCollection`, () => {
       const sourceCollection = createCollection<{ id: string; value: number }>({
         id: `source`,
         getKey: (item) => item.id,
+        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady, begin, write, commit }) => {
             begin()
