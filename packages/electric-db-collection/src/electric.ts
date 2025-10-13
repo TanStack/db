@@ -587,6 +587,10 @@ function createElectricSync<T extends Row<unknown>>(
     collectionId?: string
   }
 ): SyncConfig<T> {
+  // Track first error for grace period before setting collection to error status
+  let firstErrorTimestamp: number | null = null
+  let errorGracePeriodTimeout: ReturnType<typeof setTimeout> | null = null
+  const ERROR_GRACE_PERIOD_MS = 10000 // 10 seconds
   const {
     seenTxids,
     seenSnapshots,
@@ -620,7 +624,7 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate, collection } = params
+      const { begin, write, commit, markReady, markError, truncate } = params
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
@@ -655,25 +659,29 @@ function createElectricSync<T extends Row<unknown>>(
         ...shapeOptions,
         signal: abortController.signal,
         onError: (errorParams) => {
-          // Just immediately mark ready if there's an error to avoid blocking
-          // apps waiting for `.preload()` to finish.
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
-          // ShapeStream handled this and it will not reach this handler, therefor
-          // this markReady will not be triggers by a `must-refetch`.
-          markReady()
+          // ShapeStream handles this and it will not reach this handler.
+          // If the error is transitory, ShapeStream will retry and eventually call
+          // markReady() naturally when it receives 'up-to-date'.
+
+          // Track first error for grace period
+          if (firstErrorTimestamp === null) {
+            firstErrorTimestamp = Date.now()
+
+            // After 10 seconds of continuous errors, set collection status to error
+            errorGracePeriodTimeout = setTimeout(() => {
+              markError()
+            }, ERROR_GRACE_PERIOD_MS)
+          }
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
           } else {
-            console.error(
-              `An error occurred while syncing collection: ${collection.id}, \n` +
-                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
-                `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
-              errorParams
-            )
+            // If no custom error handler is provided, throw the error
+            // This ensures errors propagate to the app and aligns with
+            // Electric SQL's documented behavior
+            throw errorParams
           }
-
-          return
         },
       })
       let transactionStarted = false
@@ -767,6 +775,15 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (hasUpToDate) {
+          // Clear error tracking on successful sync (recovery from transitory errors)
+          if (firstErrorTimestamp !== null) {
+            firstErrorTimestamp = null
+            if (errorGracePeriodTimeout !== null) {
+              clearTimeout(errorGracePeriodTimeout)
+              errorGracePeriodTimeout = null
+            }
+          }
+
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
 

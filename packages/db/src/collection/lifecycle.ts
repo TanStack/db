@@ -78,7 +78,7 @@ export class CollectionLifecycleManager<
       loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
       initialCommit: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
-      error: [`cleaned-up`, `idle`],
+      error: [`cleaned-up`, `idle`, `loading`],
       "cleaned-up": [`loading`, `error`],
     }
 
@@ -144,6 +144,11 @@ export class CollectionLifecycleManager<
    * @private - Should only be called by sync implementations
    */
   public markReady(): void {
+    // If recovering from error, transition to loading first
+    if (this.status === `error`) {
+      this.setStatus(`loading`)
+    }
+
     this.validateStatusTransition(this.status, `ready`)
     // Can transition to ready from loading or initialCommit states
     if (this.status === `loading` || this.status === `initialCommit`) {
@@ -168,6 +173,15 @@ export class CollectionLifecycleManager<
         this.changes.emitEmptyReadyEvent()
       }
     }
+  }
+
+  /**
+   * Mark the collection as being in an error state
+   * This is called by sync implementations when persistent errors occur
+   * @private - Should only be called by sync implementations
+   */
+  public markError(): void {
+    this.setStatus(`error`)
   }
 
   /**
