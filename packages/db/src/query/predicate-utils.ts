@@ -324,6 +324,369 @@ export function unionWherePredicates(
 }
 
 /**
+ * Compute the difference between two where predicates: `fromPredicate AND NOT(subtractPredicate)`.
+ * Returns the simplified predicate, or null if the difference cannot be simplified
+ * (in which case the caller should fetch the full fromPredicate).
+ *
+ * @example
+ * // Range difference
+ * minusWherePredicates(
+ *   gt(ref('age'), val(10)),      // age > 10
+ *   gt(ref('age'), val(20))       // age > 20
+ * ) // → age > 10 AND age <= 20
+ *
+ * @example
+ * // Set difference
+ * minusWherePredicates(
+ *   inOp(ref('status'), ['A', 'B', 'C', 'D']),  // status IN ['A','B','C','D']
+ *   inOp(ref('status'), ['B', 'C'])             // status IN ['B','C']
+ * ) // → status IN ['A', 'D']
+ *
+ * @example
+ * // Complete overlap - empty result
+ * minusWherePredicates(
+ *   gt(ref('age'), val(20)),     // age > 20
+ *   gt(ref('age'), val(10))      // age > 10
+ * ) // → {type: 'val', value: false} (empty set)
+ *
+ * @param fromPredicate - The predicate to subtract from
+ * @param subtractPredicate - The predicate to subtract
+ * @returns The simplified difference, or null if cannot be simplified
+ */
+export function minusWherePredicates(
+  fromPredicate: BasicExpression<boolean> | undefined,
+  subtractPredicate: BasicExpression<boolean> | undefined
+): BasicExpression<boolean> | null {
+  // If nothing to subtract, return the original
+  if (subtractPredicate === undefined) {
+    return (
+      fromPredicate ??
+      ({ type: `val`, value: true } as BasicExpression<boolean>)
+    )
+  }
+
+  // If from is undefined (all data), we can't simplify NOT(subtract)
+  // Return null to indicate caller should fetch all data
+  if (fromPredicate === undefined) {
+    return null
+  }
+
+  // Check if fromPredicate is entirely contained in subtractPredicate
+  // In that case, fromPredicate AND NOT(subtractPredicate) = empty set
+  if (isWhereSubset(fromPredicate, subtractPredicate)) {
+    return { type: `val`, value: false } as BasicExpression<boolean>
+  }
+
+  // Check if they are on the same field - if so, we can try to simplify
+  if (fromPredicate.type === `func` && subtractPredicate.type === `func`) {
+    const result = minusSameFieldPredicates(fromPredicate, subtractPredicate)
+    if (result !== null) {
+      return result
+    }
+  }
+
+  // Can't simplify - return null to indicate caller should fetch full fromPredicate
+  return null
+}
+
+/**
+ * Helper function to compute difference for same-field predicates
+ */
+function minusSameFieldPredicates(
+  fromPred: Func,
+  subtractPred: Func
+): BasicExpression<boolean> | null {
+  // Extract field information
+  const fromField =
+    extractComparisonField(fromPred) ||
+    extractEqualityField(fromPred) ||
+    extractInField(fromPred)
+  const subtractField =
+    extractComparisonField(subtractPred) ||
+    extractEqualityField(subtractPred) ||
+    extractInField(subtractPred)
+
+  // Must be on the same field
+  if (
+    !fromField ||
+    !subtractField ||
+    !areRefsEqual(fromField.ref, subtractField.ref)
+  ) {
+    return null
+  }
+
+  // Handle IN minus IN: status IN [A,B,C,D] - status IN [B,C] = status IN [A,D]
+  if (fromPred.name === `in` && subtractPred.name === `in`) {
+    const fromInField = fromField as InField
+    const subtractInField = subtractField as InField
+
+    // Filter out values that are in the subtract set
+    const remainingValues = fromInField.values.filter(
+      (v) =>
+        !arrayIncludesWithSet(
+          subtractInField.values,
+          v,
+          subtractInField.primitiveSet ?? null,
+          subtractInField.areAllPrimitives
+        )
+    )
+
+    if (remainingValues.length === 0) {
+      return { type: `val`, value: false } as BasicExpression<boolean>
+    }
+
+    if (remainingValues.length === 1) {
+      return {
+        type: `func`,
+        name: `eq`,
+        args: [fromField.ref, { type: `val`, value: remainingValues[0] }],
+      } as BasicExpression<boolean>
+    }
+
+    return {
+      type: `func`,
+      name: `in`,
+      args: [fromField.ref, { type: `val`, value: remainingValues }],
+    } as BasicExpression<boolean>
+  }
+
+  // Handle IN minus equality: status IN [A,B,C] - status = B = status IN [A,C]
+  if (fromPred.name === `in` && subtractPred.name === `eq`) {
+    const fromInField = fromField as InField
+    const subtractValue = (subtractField as { ref: PropRef; value: any }).value
+
+    const remainingValues = fromInField.values.filter(
+      (v) => !areValuesEqual(v, subtractValue)
+    )
+
+    if (remainingValues.length === 0) {
+      return { type: `val`, value: false } as BasicExpression<boolean>
+    }
+
+    if (remainingValues.length === 1) {
+      return {
+        type: `func`,
+        name: `eq`,
+        args: [fromField.ref, { type: `val`, value: remainingValues[0] }],
+      } as BasicExpression<boolean>
+    }
+
+    return {
+      type: `func`,
+      name: `in`,
+      args: [fromField.ref, { type: `val`, value: remainingValues }],
+    } as BasicExpression<boolean>
+  }
+
+  // Handle equality minus equality: age = 15 - age = 15 = empty, age = 15 - age = 20 = age = 15
+  if (fromPred.name === `eq` && subtractPred.name === `eq`) {
+    const fromValue = (fromField as { ref: PropRef; value: any }).value
+    const subtractValue = (subtractField as { ref: PropRef; value: any }).value
+
+    if (areValuesEqual(fromValue, subtractValue)) {
+      return { type: `val`, value: false } as BasicExpression<boolean>
+    }
+
+    // No overlap - return original
+    return fromPred as BasicExpression<boolean>
+  }
+
+  // Handle range minus range: age > 10 - age > 20 = age > 10 AND age <= 20
+  const fromComp = extractComparisonField(fromPred)
+  const subtractComp = extractComparisonField(subtractPred)
+
+  if (
+    fromComp &&
+    subtractComp &&
+    areRefsEqual(fromComp.ref, subtractComp.ref)
+  ) {
+    // Try to compute the difference using range logic
+    const result = minusRangePredicates(
+      fromPred,
+      fromComp.value,
+      subtractPred,
+      subtractComp.value
+    )
+    return result
+  }
+
+  // Can't simplify
+  return null
+}
+
+/**
+ * Helper to compute difference between range predicates
+ */
+function minusRangePredicates(
+  fromFunc: Func,
+  fromValue: any,
+  subtractFunc: Func,
+  subtractValue: any
+): BasicExpression<boolean> | null {
+  const fromOp = fromFunc.name as `gt` | `gte` | `lt` | `lte` | `eq`
+  const subtractOp = subtractFunc.name as `gt` | `gte` | `lt` | `lte` | `eq`
+  const ref = (extractComparisonField(fromFunc) ||
+    extractEqualityField(fromFunc))!.ref
+
+  // age > 10 - age > 20 = (age > 10 AND age <= 20)
+  if (fromOp === `gt` && subtractOp === `gt`) {
+    if (fromValue < subtractValue) {
+      // Result is: fromValue < field <= subtractValue
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          fromFunc as BasicExpression<boolean>,
+          {
+            type: `func`,
+            name: `lte`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    // fromValue >= subtractValue means no overlap
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age >= 10 - age >= 20 = (age >= 10 AND age < 20)
+  if (fromOp === `gte` && subtractOp === `gte`) {
+    if (fromValue < subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          fromFunc as BasicExpression<boolean>,
+          {
+            type: `func`,
+            name: `lt`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age > 10 - age >= 20 = (age > 10 AND age < 20)
+  if (fromOp === `gt` && subtractOp === `gte`) {
+    if (fromValue < subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          fromFunc as BasicExpression<boolean>,
+          {
+            type: `func`,
+            name: `lt`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age >= 10 - age > 20 = (age >= 10 AND age <= 20)
+  if (fromOp === `gte` && subtractOp === `gt`) {
+    if (fromValue <= subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          fromFunc as BasicExpression<boolean>,
+          {
+            type: `func`,
+            name: `lte`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age < 30 - age < 20 = (age >= 20 AND age < 30)
+  if (fromOp === `lt` && subtractOp === `lt`) {
+    if (fromValue > subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          {
+            type: `func`,
+            name: `gte`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+          fromFunc as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age <= 30 - age <= 20 = (age > 20 AND age <= 30)
+  if (fromOp === `lte` && subtractOp === `lte`) {
+    if (fromValue > subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          {
+            type: `func`,
+            name: `gt`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+          fromFunc as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age < 30 - age <= 20 = (age > 20 AND age < 30)
+  if (fromOp === `lt` && subtractOp === `lte`) {
+    if (fromValue > subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          {
+            type: `func`,
+            name: `gt`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+          fromFunc as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // age <= 30 - age < 20 = (age >= 20 AND age <= 30)
+  if (fromOp === `lte` && subtractOp === `lt`) {
+    if (fromValue >= subtractValue) {
+      return {
+        type: `func`,
+        name: `and`,
+        args: [
+          {
+            type: `func`,
+            name: `gte`,
+            args: [ref, { type: `val`, value: subtractValue }],
+          } as BasicExpression<boolean>,
+          fromFunc as BasicExpression<boolean>,
+        ],
+      } as BasicExpression<boolean>
+    }
+    return fromFunc as BasicExpression<boolean>
+  }
+
+  // Can't simplify other combinations
+  return null
+}
+
+/**
  * Check if one orderBy clause is a subset of another.
  * Returns true if the subset ordering requirements are satisfied by the superset ordering.
  *
