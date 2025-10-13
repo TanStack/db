@@ -150,7 +150,7 @@ export type Row<TExtensions = never> = Record<string, Value<TExtensions>>
 
 export type OperationType = `insert` | `update` | `delete`
 
-export type OnLoadMoreOptions = {
+export type LoadSubsetOptions = {
   where?: BasicExpression<boolean>
   orderBy?: OrderBy
   limit?: number
@@ -160,7 +160,7 @@ export type CleanupFn = () => void
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn
-  onLoadMore?: (options: OnLoadMoreOptions) => void | Promise<void>
+  loadSubset?: (options: LoadSubsetOptions) => void | Promise<void>
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,

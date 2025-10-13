@@ -25,7 +25,6 @@ import type {
   InferSchemaOutput,
   InsertConfig,
   NonSingleResult,
-  OnLoadMoreOptions,
   OperationConfig,
   SingleResult,
   SubscribeChangesOptions,
@@ -218,7 +217,7 @@ export class CollectionImpl<
   private _events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
-  private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private _mutations: CollectionMutationsManager<
     TOutput,
@@ -370,17 +369,6 @@ export class CollectionImpl<
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
-  }
-
-  /**
-   * Requests the sync layer to load more data.
-   * @param options Options to control what data is being loaded
-   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
-   *          If data loading is synchronous, the data is loaded when the method returns.
-   *          Returns undefined if no sync function is configured.
-   */
-  public syncMore(options: OnLoadMoreOptions): Promise<void> | undefined {
-    return this._sync.syncMore(options)
   }
 
   /**

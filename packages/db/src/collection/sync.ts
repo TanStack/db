@@ -13,7 +13,7 @@ import type {
   ChangeMessage,
   CleanupFn,
   CollectionConfig,
-  OnLoadMoreOptions,
+  LoadSubsetOptions,
   SyncConfigRes,
 } from "../types"
 import type { CollectionImpl } from "./index.js"
@@ -36,11 +36,11 @@ export class CollectionSyncManager<
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
-  public syncOnLoadMoreFn:
-    | ((options: OnLoadMoreOptions) => void | Promise<void>)
+  public syncLoadSubsetFn:
+    | ((options: LoadSubsetOptions) => void | Promise<void>)
     | null = null
 
-  private pendingLoadMorePromises: Set<Promise<void>> = new Set()
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -195,8 +195,8 @@ export class CollectionSyncManager<
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
 
-      // Store onLoadMore function if provided
-      this.syncOnLoadMoreFn = syncRes?.onLoadMore ?? null
+      // Store loadSubset function if provided
+      this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
@@ -249,7 +249,7 @@ export class CollectionSyncManager<
    * Gets whether the collection is currently loading more data
    */
   public get isLoadingMore(): boolean {
-    return this.pendingLoadMorePromises.size > 0
+    return this.pendingLoadSubsetPromises.size > 0
   }
 
   /**
@@ -258,7 +258,7 @@ export class CollectionSyncManager<
    */
   public trackLoadPromise(promise: Promise<void>): void {
     const wasLoading = this.isLoadingMore
-    this.pendingLoadMorePromises.add(promise)
+    this.pendingLoadSubsetPromises.add(promise)
     const isLoadingNow = this.isLoadingMore
 
     if (!wasLoading && isLoadingNow) {
@@ -273,7 +273,7 @@ export class CollectionSyncManager<
     promise.finally(() => {
       // Check loading state BEFORE removing the promise
       const wasLoadingBeforeRemoval = this.isLoadingMore
-      this.pendingLoadMorePromises.delete(promise)
+      this.pendingLoadSubsetPromises.delete(promise)
       const stillLoading = this.isLoadingMore
 
       if (wasLoadingBeforeRemoval && !stillLoading) {
@@ -294,9 +294,9 @@ export class CollectionSyncManager<
    *          If data loading is synchronous, the data is loaded when the method returns.
    *          Returns undefined if no sync function is configured.
    */
-  public syncMore(options: OnLoadMoreOptions): Promise<void> | undefined {
-    if (this.syncOnLoadMoreFn) {
-      const result = this.syncOnLoadMoreFn(options)
+  public loadSubset(options: LoadSubsetOptions): Promise<void> | undefined {
+    if (this.syncLoadSubsetFn) {
+      const result = this.syncLoadSubsetFn(options)
 
       // If the result is void (synchronous), wrap in Promise.resolve()
       const promise = result === undefined ? Promise.resolve() : result

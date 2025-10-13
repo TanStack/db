@@ -183,13 +183,13 @@ export class CollectionConfigBuilder<
       syncState
     )
 
-    const loadMoreDataCallbacks = this.subscribeToAllCollections(
+    const loadSubsetDataCallbacks = this.subscribeToAllCollections(
       config,
       fullSyncState
     )
 
     // Initial run with callback to load more data if needed
-    this.maybeRunGraph(config, fullSyncState, loadMoreDataCallbacks)
+    this.maybeRunGraph(config, fullSyncState, loadSubsetDataCallbacks)
 
     // Return the unsubscribe function
     return () => {
@@ -424,16 +424,16 @@ export class CollectionConfigBuilder<
         })
         syncState.unsubscribeCallbacks.add(statusUnsubscribe)
 
-        const loadMore = collectionSubscriber.loadMoreIfNeeded.bind(
+        const loadSubset = collectionSubscriber.loadSubsetIfNeeded.bind(
           collectionSubscriber,
           subscription
         )
 
-        return loadMore
+        return loadSubset
       }
     )
 
-    const loadMoreDataCallback = () => {
+    const loadSubsetDataCallback = () => {
       loaders.map((loader) => loader())
       return true
     }
@@ -444,7 +444,7 @@ export class CollectionConfigBuilder<
     // Initial status check after all subscriptions are set up
     this.updateLiveQueryStatus(config)
 
-    return loadMoreDataCallback
+    return loadSubsetDataCallback
   }
 }
 

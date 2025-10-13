@@ -67,7 +67,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
 
   // Status tracking
   public status: SubscriptionStatus = `ready`
-  private pendingLoadMorePromises: Set<Promise<void>> = new Set()
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
@@ -178,18 +178,18 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncPromise = this.collection.syncMore({
+    const syncPromise = this.collection._sync.loadSubset({
       where: stateOpts.where,
     })
 
     // Track the promise if it exists
     if (syncPromise) {
-      this.pendingLoadMorePromises.add(syncPromise)
+      this.pendingLoadSubsetPromises.add(syncPromise)
       this.setStatus(`loadingMore`)
 
       syncPromise.finally(() => {
-        this.pendingLoadMorePromises.delete(syncPromise)
-        if (this.pendingLoadMorePromises.size === 0) {
+        this.pendingLoadSubsetPromises.delete(syncPromise)
+        if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
       })
@@ -285,7 +285,7 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncPromise = this.collection.syncMore({
+    const syncPromise = this.collection._sync.loadSubset({
       where: whereWithValueFilter,
       limit,
       orderBy,
@@ -293,12 +293,12 @@ export class CollectionSubscription extends EventEmitter<AllSubscriptionEvents> 
 
     // Track the promise if it exists
     if (syncPromise) {
-      this.pendingLoadMorePromises.add(syncPromise)
+      this.pendingLoadSubsetPromises.add(syncPromise)
       this.setStatus(`loadingMore`)
 
       syncPromise.finally(() => {
-        this.pendingLoadMorePromises.delete(syncPromise)
-        if (this.pendingLoadMorePromises.size === 0) {
+        this.pendingLoadSubsetPromises.delete(syncPromise)
+        if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
       })

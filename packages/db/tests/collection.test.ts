@@ -1372,10 +1372,10 @@ describe(`Collection isLoadingMore property`, () => {
     expect(collection.isLoadingMore).toBe(false)
   })
 
-  it(`isLoadingMore becomes true when syncMore returns a promise`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+  it(`isLoadingMore becomes true when loadSubset returns a promise`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -1386,7 +1386,7 @@ describe(`Collection isLoadingMore property`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
@@ -1394,19 +1394,19 @@ describe(`Collection isLoadingMore property`, () => {
 
     expect(collection.isLoadingMore).toBe(false)
 
-    collection.syncMore({})
+    collection._sync.loadSubset({})
     expect(collection.isLoadingMore).toBe(true)
 
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     expect(collection.isLoadingMore).toBe(false)
   })
 
   it(`isLoadingMore becomes false when promise resolves`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -1417,24 +1417,24 @@ describe(`Collection isLoadingMore property`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
     })
 
-    collection.syncMore({})
+    collection._sync.loadSubset({})
     expect(collection.isLoadingMore).toBe(true)
 
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     expect(collection.isLoadingMore).toBe(false)
   })
 
-  it(`concurrent syncMore calls keep isLoadingMore true until all resolve`, async () => {
-    let resolveLoadMore1: () => void
-    let resolveLoadMore2: () => void
+  it(`concurrent loadSubset calls keep isLoadingMore true until all resolve`, async () => {
+    let resolveLoadSubset1: () => void
+    let resolveLoadSubset2: () => void
     let callCount = 0
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -1445,15 +1445,15 @@ describe(`Collection isLoadingMore property`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => {
+            loadSubset: () => {
               callCount++
               if (callCount === 1) {
                 return new Promise<void>((resolve) => {
-                  resolveLoadMore1 = resolve
+                  resolveLoadSubset1 = resolve
                 })
               } else {
                 return new Promise<void>((resolve) => {
-                  resolveLoadMore2 = resolve
+                  resolveLoadSubset2 = resolve
                 })
               }
             },
@@ -1462,18 +1462,18 @@ describe(`Collection isLoadingMore property`, () => {
       },
     })
 
-    collection.syncMore({})
-    collection.syncMore({})
+    collection._sync.loadSubset({})
+    collection._sync.loadSubset({})
 
     expect(collection.isLoadingMore).toBe(true)
 
-    resolveLoadMore1!()
+    resolveLoadSubset1!()
     await flushPromises()
 
     // Should still be loading because second promise is pending
     expect(collection.isLoadingMore).toBe(true)
 
-    resolveLoadMore2!()
+    resolveLoadSubset2!()
     await flushPromises()
 
     // Now should be false
@@ -1481,9 +1481,9 @@ describe(`Collection isLoadingMore property`, () => {
   })
 
   it(`emits loadingMore:change event`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -1494,7 +1494,7 @@ describe(`Collection isLoadingMore property`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
@@ -1512,7 +1512,7 @@ describe(`Collection isLoadingMore property`, () => {
       })
     })
 
-    collection.syncMore({})
+    collection._sync.loadSubset({})
     await flushPromises()
 
     expect(loadingChanges).toHaveLength(1)
@@ -1521,7 +1521,7 @@ describe(`Collection isLoadingMore property`, () => {
       previousIsLoadingMore: false,
     })
 
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     expect(loadingChanges).toHaveLength(2)
@@ -1532,12 +1532,12 @@ describe(`Collection isLoadingMore property`, () => {
   })
 
   it(`rejected promises still clean up`, async () => {
-    let rejectLoadMore: (error: Error) => void
-    const loadMorePromise = new Promise<void>((_, reject) => {
-      rejectLoadMore = reject
+    let rejectLoadSubset: (error: Error) => void
+    const loadSubsetPromise = new Promise<void>((_, reject) => {
+      rejectLoadSubset = reject
     })
     // Attach catch handler before rejecting to avoid unhandled rejection
-    const handledPromise = loadMorePromise.catch(() => {})
+    const handledPromise = loadSubsetPromise.catch(() => {})
 
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
@@ -1547,17 +1547,17 @@ describe(`Collection isLoadingMore property`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => handledPromise,
+            loadSubset: () => handledPromise,
           }
         },
       },
     })
 
-    collection.syncMore({})
+    collection._sync.loadSubset({})
     expect(collection.isLoadingMore).toBe(true)
 
     // Reject the promise
-    rejectLoadMore!(new Error(`Load failed`))
+    rejectLoadSubset!(new Error(`Load failed`))
     await flushPromises()
 
     expect(collection.isLoadingMore).toBe(false)

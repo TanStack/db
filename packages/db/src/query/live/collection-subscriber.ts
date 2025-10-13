@@ -232,7 +232,7 @@ export class CollectionSubscriber<
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  loadMoreIfNeeded(subscription: CollectionSubscription) {
+  loadSubsetIfNeeded(subscription: CollectionSubscription) {
     const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[
         this.collectionId
@@ -274,7 +274,7 @@ export class CollectionSubscriber<
     const trackedChanges = this.trackSentValues(changes, comparator)
     this.sendChangesToPipeline(
       trackedChanges,
-      this.loadMoreIfNeeded.bind(this, subscription)
+      this.loadSubsetIfNeeded.bind(this, subscription)
     )
   }
 

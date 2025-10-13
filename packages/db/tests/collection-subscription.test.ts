@@ -21,9 +21,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`status changes to 'loadingMore' when requestSnapshot triggers a promise`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -33,7 +33,7 @@ describe(`CollectionSubscription status tracking`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
@@ -45,14 +45,14 @@ describe(`CollectionSubscription status tracking`, () => {
 
     expect(subscription.status).toBe(`ready`)
 
-    // Trigger a snapshot request that will call syncMore
+    // Trigger a snapshot request that will call loadSubset
     subscription.requestSnapshot({ optimizedOnly: false })
 
     // Status should now be loadingMore
     expect(subscription.status).toBe(`loadingMore`)
 
     // Resolve the load more promise
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     // Status should be back to ready
@@ -62,9 +62,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`status changes back to 'ready' when promise resolves`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -74,7 +74,7 @@ describe(`CollectionSubscription status tracking`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
@@ -87,7 +87,7 @@ describe(`CollectionSubscription status tracking`, () => {
     subscription.requestSnapshot({ optimizedOnly: false })
     expect(subscription.status).toBe(`loadingMore`)
 
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     expect(subscription.status).toBe(`ready`)
@@ -95,8 +95,8 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`concurrent promises keep status as 'loadingMore' until all resolve`, async () => {
-    let resolveLoadMore1: () => void
-    let resolveLoadMore2: () => void
+    let resolveLoadSubset1: () => void
+    let resolveLoadSubset2: () => void
     let callCount = 0
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -106,15 +106,15 @@ describe(`CollectionSubscription status tracking`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => {
+            loadSubset: () => {
               callCount++
               if (callCount === 1) {
                 return new Promise<void>((resolve) => {
-                  resolveLoadMore1 = resolve
+                  resolveLoadSubset1 = resolve
                 })
               } else {
                 return new Promise<void>((resolve) => {
-                  resolveLoadMore2 = resolve
+                  resolveLoadSubset2 = resolve
                 })
               }
             },
@@ -136,14 +136,14 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(subscription.status).toBe(`loadingMore`)
 
     // Resolve first promise
-    resolveLoadMore1!()
+    resolveLoadSubset1!()
     await flushPromises()
 
     // Should still be loading because second promise is pending
     expect(subscription.status).toBe(`loadingMore`)
 
     // Resolve second promise
-    resolveLoadMore2!()
+    resolveLoadSubset2!()
     await flushPromises()
 
     // Now should be ready
@@ -152,9 +152,9 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`emits 'status:change' event`, async () => {
-    let resolveLoadMore: () => void
-    const loadMorePromise = new Promise<void>((resolve) => {
-      resolveLoadMore = resolve
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
     })
 
     const collection = createCollection<{ id: string; value: string }>({
@@ -164,7 +164,7 @@ describe(`CollectionSubscription status tracking`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => loadMorePromise,
+            loadSubset: () => loadSubsetPromise,
           }
         },
       },
@@ -192,7 +192,7 @@ describe(`CollectionSubscription status tracking`, () => {
       current: `loadingMore`,
     })
 
-    resolveLoadMore!()
+    resolveLoadSubset!()
     await flushPromises()
 
     expect(statusChanges).toHaveLength(2)
@@ -205,12 +205,12 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`promise rejection still cleans up and sets status back to 'ready'`, async () => {
-    let rejectLoadMore: (error: Error) => void
-    const loadMorePromise = new Promise<void>((_, reject) => {
-      rejectLoadMore = reject
+    let rejectLoadSubset: (error: Error) => void
+    const loadSubsetPromise = new Promise<void>((_, reject) => {
+      rejectLoadSubset = reject
     })
     // Attach catch handler before rejecting to avoid unhandled rejection
-    const handledPromise = loadMorePromise.catch(() => {})
+    const handledPromise = loadSubsetPromise.catch(() => {})
 
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
@@ -219,7 +219,7 @@ describe(`CollectionSubscription status tracking`, () => {
         sync: ({ markReady }) => {
           markReady()
           return {
-            onLoadMore: () => handledPromise,
+            loadSubset: () => handledPromise,
           }
         },
       },
@@ -233,7 +233,7 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(subscription.status).toBe(`loadingMore`)
 
     // Reject the promise
-    rejectLoadMore!(new Error(`Load failed`))
+    rejectLoadSubset!(new Error(`Load failed`))
     await flushPromises()
 
     // Status should still be back to ready

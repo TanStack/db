@@ -982,9 +982,9 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     it(`source collection isLoadingMore is independent`, async () => {
-      let resolveLoadMore: () => void
-      const loadMorePromise = new Promise<void>((resolve) => {
-        resolveLoadMore = resolve
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
       })
 
       const sourceCollection = createCollection<{ id: string; value: number }>({
@@ -997,7 +997,7 @@ describe(`createLiveQueryCollection`, () => {
             commit()
             markReady()
             return {
-              onLoadMore: () => loadMorePromise,
+              loadSubset: () => loadSubsetPromise,
             }
           },
         },
@@ -1010,15 +1010,15 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
-      // Calling syncMore directly on source collection sets its own isLoadingMore
-      sourceCollection.syncMore({})
+      // Calling loadSubset directly on source collection sets its own isLoadingMore
+      sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingMore).toBe(true)
 
-      // But live query isLoadingMore tracks subscription-driven loads, not direct syncMore calls
+      // But live query isLoadingMore tracks subscription-driven loads, not direct loadSubset calls
       // so it remains false unless subscriptions trigger loads via predicate pushdown
       expect(liveQuery.isLoadingMore).toBe(false)
 
-      resolveLoadMore!()
+      resolveLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       expect(sourceCollection.isLoadingMore).toBe(false)
