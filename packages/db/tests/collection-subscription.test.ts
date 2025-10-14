@@ -20,7 +20,7 @@ describe(`CollectionSubscription status tracking`, () => {
     subscription.unsubscribe()
   })
 
-  it(`status changes to 'loadingMore' when requestSnapshot triggers a promise`, async () => {
+  it(`status changes to 'loadingSubset' when requestSnapshot triggers a promise`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {
       resolveLoadSubset = resolve
@@ -49,8 +49,8 @@ describe(`CollectionSubscription status tracking`, () => {
     // Trigger a snapshot request that will call loadSubset
     subscription.requestSnapshot({ optimizedOnly: false })
 
-    // Status should now be loadingMore
-    expect(subscription.status).toBe(`loadingMore`)
+    // Status should now be loadingSubset
+    expect(subscription.status).toBe(`loadingSubset`)
 
     // Resolve the load more promise
     resolveLoadSubset!()
@@ -87,7 +87,7 @@ describe(`CollectionSubscription status tracking`, () => {
     })
 
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect(subscription.status).toBe(`loadingMore`)
+    expect(subscription.status).toBe(`loadingSubset`)
 
     resolveLoadSubset!()
     await flushPromises()
@@ -96,7 +96,7 @@ describe(`CollectionSubscription status tracking`, () => {
     subscription.unsubscribe()
   })
 
-  it(`concurrent promises keep status as 'loadingMore' until all resolve`, async () => {
+  it(`concurrent promises keep status as 'loadingSubset' until all resolve`, async () => {
     let resolveLoadSubset1: () => void
     let resolveLoadSubset2: () => void
     let callCount = 0
@@ -132,18 +132,18 @@ describe(`CollectionSubscription status tracking`, () => {
 
     // Trigger first load
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect(subscription.status).toBe(`loadingMore`)
+    expect(subscription.status).toBe(`loadingSubset`)
 
     // Trigger second load
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect(subscription.status).toBe(`loadingMore`)
+    expect(subscription.status).toBe(`loadingSubset`)
 
     // Resolve first promise
     resolveLoadSubset1!()
     await flushPromises()
 
     // Should still be loading because second promise is pending
-    expect(subscription.status).toBe(`loadingMore`)
+    expect(subscription.status).toBe(`loadingSubset`)
 
     // Resolve second promise
     resolveLoadSubset2!()
@@ -193,7 +193,7 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(statusChanges).toHaveLength(1)
     expect(statusChanges[0]).toEqual({
       previous: `ready`,
-      current: `loadingMore`,
+      current: `loadingSubset`,
     })
 
     resolveLoadSubset!()
@@ -201,7 +201,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
     expect(statusChanges).toHaveLength(2)
     expect(statusChanges[1]).toEqual({
-      previous: `loadingMore`,
+      previous: `loadingSubset`,
       current: `ready`,
     })
 
@@ -235,7 +235,7 @@ describe(`CollectionSubscription status tracking`, () => {
     })
 
     subscription.requestSnapshot({ optimizedOnly: false })
-    expect(subscription.status).toBe(`loadingMore`)
+    expect(subscription.status).toBe(`loadingSubset`)
 
     // Reject the promise
     rejectLoadSubset!(new Error(`Load failed`))

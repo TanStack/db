@@ -154,7 +154,7 @@ export type OperationType = `insert` | `update` | `delete`
 /**
  * Subscription status values
  */
-export type SubscriptionStatus = `ready` | `loadingMore`
+export type SubscriptionStatus = `ready` | `loadingSubset`
 
 /**
  * Event emitted when subscription status changes
@@ -190,7 +190,7 @@ export interface SubscriptionUnsubscribedEvent {
 export type SubscriptionEvents = {
   "status:change": SubscriptionStatusChangeEvent
   "status:ready": SubscriptionStatusEvent<`ready`>
-  "status:loadingMore": SubscriptionStatusEvent<`loadingMore`>
+  "status:loadingSubset": SubscriptionStatusEvent<`loadingSubset`>
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -380,14 +380,6 @@ export type CollectionStatus =
   /** Collection has been cleaned up and resources freed */
   | `cleaned-up`
 
-/**
- * @default `eager`
- * @description
- * Collections have two modes of sync: eager and on-demand.
- * - eager: syncs all data immediately on preload
- * - on-demand: syncs data in incremental snapshots when the collection is queried
- * The exact implementation of the sync mode is up to the sync implementation.
- */
 export type SyncMode = `eager` | `on-demand`
 
 export interface BaseCollectionConfig<

@@ -1357,8 +1357,8 @@ describe(`Collection`, () => {
   })
 })
 
-describe(`Collection isLoadingMore property`, () => {
-  it(`isLoadingMore is false initially`, () => {
+describe(`Collection isLoadingSubset property`, () => {
+  it(`isLoadingSubset is false initially`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
@@ -1369,10 +1369,10 @@ describe(`Collection isLoadingMore property`, () => {
       },
     })
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`isLoadingMore becomes true when loadSubset returns a promise`, async () => {
+  it(`isLoadingSubset becomes true when loadSubset returns a promise`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {
       resolveLoadSubset = resolve
@@ -1393,18 +1393,18 @@ describe(`Collection isLoadingMore property`, () => {
       },
     })
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
 
     collection._sync.loadSubset({})
-    expect(collection.isLoadingMore).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
 
     resolveLoadSubset!()
     await flushPromises()
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`isLoadingMore becomes false when promise resolves`, async () => {
+  it(`isLoadingSubset becomes false when promise resolves`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {
       resolveLoadSubset = resolve
@@ -1426,15 +1426,15 @@ describe(`Collection isLoadingMore property`, () => {
     })
 
     collection._sync.loadSubset({})
-    expect(collection.isLoadingMore).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
 
     resolveLoadSubset!()
     await flushPromises()
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`concurrent loadSubset calls keep isLoadingMore true until all resolve`, async () => {
+  it(`concurrent loadSubset calls keep isLoadingSubset true until all resolve`, async () => {
     let resolveLoadSubset1: () => void
     let resolveLoadSubset2: () => void
     let callCount = 0
@@ -1468,22 +1468,22 @@ describe(`Collection isLoadingMore property`, () => {
     collection._sync.loadSubset({})
     collection._sync.loadSubset({})
 
-    expect(collection.isLoadingMore).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
 
     resolveLoadSubset1!()
     await flushPromises()
 
     // Should still be loading because second promise is pending
-    expect(collection.isLoadingMore).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
 
     resolveLoadSubset2!()
     await flushPromises()
 
     // Now should be false
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`emits loadingMore:change event`, async () => {
+  it(`emits loadingSubset:change event`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {
       resolveLoadSubset = resolve
@@ -1505,14 +1505,14 @@ describe(`Collection isLoadingMore property`, () => {
     })
 
     const loadingChanges: Array<{
-      isLoadingMore: boolean
-      previousIsLoadingMore: boolean
+      isLoadingSubset: boolean
+      previousIsLoadingSubset: boolean
     }> = []
 
-    collection.on(`loadingMore:change`, (event) => {
+    collection.on(`loadingSubset:change`, (event) => {
       loadingChanges.push({
-        isLoadingMore: event.isLoadingMore,
-        previousIsLoadingMore: event.previousIsLoadingMore,
+        isLoadingSubset: event.isLoadingSubset,
+        previousIsLoadingSubset: event.previousIsLoadingSubset,
       })
     })
 
@@ -1521,8 +1521,8 @@ describe(`Collection isLoadingMore property`, () => {
 
     expect(loadingChanges).toHaveLength(1)
     expect(loadingChanges[0]).toEqual({
-      isLoadingMore: true,
-      previousIsLoadingMore: false,
+      isLoadingSubset: true,
+      previousIsLoadingSubset: false,
     })
 
     resolveLoadSubset!()
@@ -1530,8 +1530,8 @@ describe(`Collection isLoadingMore property`, () => {
 
     expect(loadingChanges).toHaveLength(2)
     expect(loadingChanges[1]).toEqual({
-      isLoadingMore: false,
-      previousIsLoadingMore: true,
+      isLoadingSubset: false,
+      previousIsLoadingSubset: true,
     })
   })
 
@@ -1559,16 +1559,16 @@ describe(`Collection isLoadingMore property`, () => {
     })
 
     collection._sync.loadSubset({})
-    expect(collection.isLoadingMore).toBe(true)
+    expect(collection.isLoadingSubset).toBe(true)
 
     // Reject the promise
     rejectLoadSubset!(new Error(`Load failed`))
     await flushPromises()
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`isLoadingMore stays false when loadSubset returns true (no work to do)`, () => {
+  it(`isLoadingSubset stays false when loadSubset returns true (no work to do)`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
@@ -1584,11 +1584,11 @@ describe(`Collection isLoadingMore property`, () => {
       },
     })
 
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
 
     // Call loadSubset - it should return true and not track any promise
     const result = collection._sync.loadSubset({})
     expect(result).toBe(true)
-    expect(collection.isLoadingMore).toBe(false)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 })

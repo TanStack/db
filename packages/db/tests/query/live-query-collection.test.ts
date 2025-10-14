@@ -938,8 +938,8 @@ describe(`createLiveQueryCollection`, () => {
     })
   })
 
-  describe(`isLoadingMore integration`, () => {
-    it(`live query result collection has isLoadingMore property`, async () => {
+  describe(`isLoadingSubset integration`, () => {
+    it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
         getKey: (item) => item.id,
@@ -956,11 +956,11 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
-      expect(liveQuery.isLoadingMore).toBeDefined()
-      expect(liveQuery.isLoadingMore).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBeDefined()
+      expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`isLoadingMore property exists and starts as false`, async () => {
+    it(`isLoadingSubset property exists and starts as false`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
         getKey: (item) => item.id,
@@ -978,10 +978,10 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
-      expect(liveQuery.isLoadingMore).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingMore is independent`, async () => {
+    it(`source collection isLoadingSubset is independent`, async () => {
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
         resolveLoadSubset = resolve
@@ -1011,19 +1011,19 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
-      // Calling loadSubset directly on source collection sets its own isLoadingMore
+      // Calling loadSubset directly on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
-      expect(sourceCollection.isLoadingMore).toBe(true)
+      expect(sourceCollection.isLoadingSubset).toBe(true)
 
-      // But live query isLoadingMore tracks subscription-driven loads, not direct loadSubset calls
+      // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
       // so it remains false unless subscriptions trigger loads via predicate pushdown
-      expect(liveQuery.isLoadingMore).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
 
       resolveLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(sourceCollection.isLoadingMore).toBe(false)
-      expect(liveQuery.isLoadingMore).toBe(false)
+      expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
     })
   })
 })

@@ -259,40 +259,41 @@ export class CollectionSyncManager<
   /**
    * Gets whether the collection is currently loading more data
    */
-  public get isLoadingMore(): boolean {
+  public get isLoadingSubset(): boolean {
     return this.pendingLoadSubsetPromises.size > 0
   }
 
   /**
-   * Tracks a load promise for isLoadingMore state.
+   * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<void>): void {
-    const wasLoading = this.isLoadingMore
+    const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
-    const isLoadingNow = this.isLoadingMore
 
-    if (!wasLoading && isLoadingNow) {
-      this._events.emit(`loadingMore:change`, {
-        type: `loadingMore:change`,
+    if (loadingStarting) {
+      this._events.emit(`loadingSubset:change`, {
+        type: `loadingSubset:change`,
         collection: this.collection,
-        isLoadingMore: true,
-        previousIsLoadingMore: false,
+        isLoadingSubset: true,
+        previousIsLoadingSubset: false,
+        loadingSubsetTransition: `start`,
       })
     }
 
     promise.finally(() => {
-      // Check loading state BEFORE removing the promise
-      const wasLoadingBeforeRemoval = this.isLoadingMore
+      const loadingEnding =
+        this.pendingLoadSubsetPromises.size === 1 &&
+        this.pendingLoadSubsetPromises.has(promise)
       this.pendingLoadSubsetPromises.delete(promise)
-      const stillLoading = this.isLoadingMore
 
-      if (wasLoadingBeforeRemoval && !stillLoading) {
-        this._events.emit(`loadingMore:change`, {
-          type: `loadingMore:change`,
+      if (loadingEnding) {
+        this._events.emit(`loadingSubset:change`, {
+          type: `loadingSubset:change`,
           collection: this.collection,
-          isLoadingMore: false,
-          previousIsLoadingMore: true,
+          isLoadingSubset: false,
+          previousIsLoadingSubset: true,
+          loadingSubsetTransition: `end`,
         })
       }
     })

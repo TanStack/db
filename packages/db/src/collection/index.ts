@@ -359,8 +359,8 @@ export class CollectionImpl<
    * Check if the collection is currently loading more data
    * @returns true if the collection has pending load more operations, false otherwise
    */
-  public get isLoadingMore(): boolean {
-    return this._sync.isLoadingMore
+  public get isLoadingSubset(): boolean {
+    return this._sync.isLoadingSubset
   }
 
   /**
@@ -372,7 +372,7 @@ export class CollectionImpl<
   }
 
   /**
-   * Tracks a load promise for isLoadingMore state.
+   * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<void>): void {

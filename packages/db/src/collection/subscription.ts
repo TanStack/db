@@ -124,6 +124,24 @@ export class CollectionSubscription
     } as SubscriptionEvents[typeof eventKey])
   }
 
+  /**
+   * Track a loadSubset promise and manage loading status
+   */
+  private trackLoadSubsetPromise(syncResult: Promise<void> | true) {
+    // Track the promise if it's actually a promise (async work)
+    if (syncResult instanceof Promise) {
+      this.pendingLoadSubsetPromises.add(syncResult)
+      this.setStatus(`loadingSubset`)
+
+      syncResult.finally(() => {
+        this.pendingLoadSubsetPromises.delete(syncResult)
+        if (this.pendingLoadSubsetPromises.size === 0) {
+          this.setStatus(`ready`)
+        }
+      })
+    }
+  }
+
   hasLoadedInitialState() {
     return this.loadedInitialState
   }
@@ -179,18 +197,7 @@ export class CollectionSubscription
       subscription: this,
     })
 
-    // Track the promise if it's actually a promise (async work)
-    if (syncResult instanceof Promise) {
-      this.pendingLoadSubsetPromises.add(syncResult)
-      this.setStatus(`loadingMore`)
-
-      syncResult.finally(() => {
-        this.pendingLoadSubsetPromises.delete(syncResult)
-        if (this.pendingLoadSubsetPromises.size === 0) {
-          this.setStatus(`ready`)
-        }
-      })
-    }
+    this.trackLoadSubsetPromise(syncResult)
 
     // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
@@ -289,18 +296,7 @@ export class CollectionSubscription
       subscription: this,
     })
 
-    // Track the promise if it's actually a promise (async work)
-    if (syncResult instanceof Promise) {
-      this.pendingLoadSubsetPromises.add(syncResult)
-      this.setStatus(`loadingMore`)
-
-      syncResult.finally(() => {
-        this.pendingLoadSubsetPromises.delete(syncResult)
-        if (this.pendingLoadSubsetPromises.size === 0) {
-          this.setStatus(`ready`)
-        }
-      })
-    }
+    this.trackLoadSubsetPromise(syncResult)
   }
 
   /**
