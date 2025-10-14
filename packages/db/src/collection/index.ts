@@ -48,7 +48,7 @@ import type { IndexProxy } from "../indexes/lazy-index.js"
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
@@ -131,7 +131,7 @@ export interface Collection<
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
@@ -144,7 +144,7 @@ export function createCollection<
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
@@ -158,7 +158,7 @@ export function createCollection<
 export function createCollection<
   T extends object,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
@@ -171,7 +171,7 @@ export function createCollection<
 export function createCollection<
   T extends object,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
