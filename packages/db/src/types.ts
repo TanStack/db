@@ -531,14 +531,6 @@ export type MaybeSingleResult = {
   singleResult?: true
 }
 
-export type MoveUtils = {
-  /**
-   * Moves the offset and limit of an ordered query.
-   * Is a no-op if the query is not ordered.
-   */
-  move: (offset: number, limit: number) => void
-}
-
 // Only used for live query collections
 export type CollectionConfigSingleRowOption<
   T extends object = Record<string, unknown>,

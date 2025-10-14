@@ -11,7 +11,6 @@ import type { Collection } from "../collection/index.js"
 import type {
   CollectionConfig,
   CollectionConfigSingleRowOption,
-  MoveUtils,
   NonSingleResult,
   SingleResult,
   UtilsRecord,
@@ -66,7 +65,7 @@ export function liveQueryCollectionOptions<
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>
 ): CollectionConfigForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils & MoveUtils
+  utils: LiveQueryCollectionUtils
 } {
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
@@ -75,7 +74,7 @@ export function liveQueryCollectionOptions<
   return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
     TContext,
     TResult
-  > & { utils: LiveQueryCollectionUtils & MoveUtils }
+  > & { utils: LiveQueryCollectionUtils }
 }
 
 /**
@@ -119,7 +118,7 @@ export function createLiveQueryCollection<
 >(
   query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): CollectionForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils & MoveUtils
+  utils: LiveQueryCollectionUtils
 }
 
 // Overload 2: Accept full config object with optional utilities
@@ -130,7 +129,7 @@ export function createLiveQueryCollection<
 >(
   config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
 ): CollectionForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils & TUtils & MoveUtils
+  utils: LiveQueryCollectionUtils & TUtils
 }
 
 // Implementation
@@ -143,7 +142,7 @@ export function createLiveQueryCollection<
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
 ): CollectionForContext<TContext, TResult> & {
-  utils: LiveQueryCollectionUtils & TUtils & MoveUtils
+  utils: LiveQueryCollectionUtils & TUtils
 } {
   // Determine if the argument is a function (query) or a config object
   if (typeof configOrQuery === `function`) {
@@ -157,7 +156,7 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
       TResult
-    > & { utils: LiveQueryCollectionUtils & TUtils & MoveUtils }
+    > & { utils: LiveQueryCollectionUtils & TUtils }
   } else {
     // Config object case
     const config = configOrQuery as LiveQueryCollectionConfig<
@@ -174,7 +173,7 @@ export function createLiveQueryCollection<
     return bridgeToCreateCollection(options) as CollectionForContext<
       TContext,
       TResult
-    > & { utils: LiveQueryCollectionUtils & TUtils & MoveUtils }
+    > & { utils: LiveQueryCollectionUtils & TUtils }
   }
 }
 

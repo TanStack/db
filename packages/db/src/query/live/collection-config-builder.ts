@@ -14,7 +14,6 @@ import type { Collection } from "../../collection/index.js"
 import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
-  MoveUtils,
   ResultStream,
   SyncConfig,
   UtilsRecord,
@@ -33,6 +32,11 @@ import type { AllCollectionEvents } from "../../collection/events.js"
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
   getBuilder: () => CollectionConfigBuilder<any, any>
+  /**
+   * Moves the offset and limit of an ordered query.
+   * Is a no-op if the query is not ordered.
+   */
+  move: (offset: number, limit: number) => void
 }
 
 type PendingGraphRun = {
@@ -157,7 +161,7 @@ export class CollectionConfigBuilder<
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
-    utils: LiveQueryCollectionUtils & MoveUtils
+    utils: LiveQueryCollectionUtils
   } {
     return {
       id: this.id,
