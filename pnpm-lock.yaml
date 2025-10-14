@@ -196,10 +196,10 @@ importers:
         specifier: ^5.90.2
         version: 5.90.2
       '@tanstack/query-db-collection':
-        specifier: ^0.2.29
+        specifier: ^0.2.30
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.30
+        specifier: ^0.1.31
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.132.47
@@ -478,7 +478,7 @@ importers:
         version: 0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11)
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -12654,11 +12654,6 @@ snapshots:
       kysely: 0.28.5
       pg: 8.16.3
       postgres: 3.4.7
-
-  drizzle-zod@0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11):
     dependencies:
