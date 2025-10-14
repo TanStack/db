@@ -39,7 +39,7 @@ export class CollectionSyncManager<
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
   public syncLoadSubsetFn:
-    | ((options: LoadSubsetOptions) => void | Promise<void>)
+    | ((options: LoadSubsetOptions) => true | Promise<void>)
     | null = null
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
@@ -302,27 +302,24 @@ export class CollectionSyncManager<
    * Requests the sync layer to load more data.
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
-   *          If data loading is synchronous, the data is loaded when the method returns.
-   *          Returns undefined if no sync function is configured or if syncMode is 'eager'.
+   *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
    */
-  public loadSubset(options: LoadSubsetOptions): Promise<void> | undefined {
+  public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
     // Bypass loadSubset when syncMode is 'eager'
     if (this.syncMode === `eager`) {
-      return undefined
+      return true
     }
 
     if (this.syncLoadSubsetFn) {
       const result = this.syncLoadSubsetFn(options)
-
-      // If the result is void (synchronous), wrap in Promise.resolve()
-      const promise = result === undefined ? Promise.resolve() : result
-
-      // Track the promise
-      this.trackLoadPromise(promise)
-
-      return promise
+      // If the result is a promise, track it
+      if (result instanceof Promise) {
+        this.trackLoadPromise(result)
+        return result
+      }
     }
-    return undefined
+
+    return true
   }
 
   public cleanup(): void {

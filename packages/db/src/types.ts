@@ -221,7 +221,7 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
-export type LoadSubsetFn = (options: LoadSubsetOptions) => void | Promise<void>
+export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 export type CleanupFn = () => void
 

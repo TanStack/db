@@ -174,18 +174,18 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncPromise = this.collection._sync.loadSubset({
+    const syncResult = this.collection._sync.loadSubset({
       where: stateOpts.where,
       subscription: this,
     })
 
-    // Track the promise if it exists
-    if (syncPromise) {
-      this.pendingLoadSubsetPromises.add(syncPromise)
+    // Track the promise if it's actually a promise (async work)
+    if (syncResult instanceof Promise) {
+      this.pendingLoadSubsetPromises.add(syncResult)
       this.setStatus(`loadingMore`)
 
-      syncPromise.finally(() => {
-        this.pendingLoadSubsetPromises.delete(syncPromise)
+      syncResult.finally(() => {
+        this.pendingLoadSubsetPromises.delete(syncResult)
         if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }
@@ -282,20 +282,20 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncPromise = this.collection._sync.loadSubset({
+    const syncResult = this.collection._sync.loadSubset({
       where: whereWithValueFilter,
       limit,
       orderBy,
       subscription: this,
     })
 
-    // Track the promise if it exists
-    if (syncPromise) {
-      this.pendingLoadSubsetPromises.add(syncPromise)
+    // Track the promise if it's actually a promise (async work)
+    if (syncResult instanceof Promise) {
+      this.pendingLoadSubsetPromises.add(syncResult)
       this.setStatus(`loadingMore`)
 
-      syncPromise.finally(() => {
-        this.pendingLoadSubsetPromises.delete(syncPromise)
+      syncResult.finally(() => {
+        this.pendingLoadSubsetPromises.delete(syncResult)
         if (this.pendingLoadSubsetPromises.size === 0) {
           this.setStatus(`ready`)
         }

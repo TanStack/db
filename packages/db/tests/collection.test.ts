@@ -1567,4 +1567,28 @@ describe(`Collection isLoadingMore property`, () => {
 
     expect(collection.isLoadingMore).toBe(false)
   })
+
+  it(`isLoadingMore stays false when loadSubset returns true (no work to do)`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true, // No work to do
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingMore).toBe(false)
+
+    // Call loadSubset - it should return true and not track any promise
+    const result = collection._sync.loadSubset({})
+    expect(result).toBe(true)
+    expect(collection.isLoadingMore).toBe(false)
+  })
 })
