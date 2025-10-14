@@ -451,16 +451,16 @@ importers:
     dependencies:
       '@tanstack/electric-db-collection':
         specifier: ^0.1.28
-        version: 0.1.29(typescript@5.9.2)
+        version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.2
         version: 5.90.2
       '@tanstack/query-db-collection':
         specifier: ^0.2.25
-        version: 0.2.26(@tanstack/query-core@5.90.2)(typescript@5.9.2)
+        version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.1.26
-        version: 0.1.27(solid-js@1.9.9)(typescript@5.9.2)
+        version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.132.41
         version: 1.132.49(solid-js@1.9.9)
@@ -469,7 +469,7 @@ importers:
         version: 1.132.49(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(solid-js@1.9.9)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.0)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.0)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
         specifier: ^0.1.26
-        version: 0.1.27(typescript@5.9.2)
+        version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -478,7 +478,7 @@ importers:
         version: 0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11)
+        version: 0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -3215,24 +3215,11 @@ packages:
     resolution: {integrity: sha512-RDz7vI1FSkocPda882nhEQoshU5F2bB5hTV/gXtB6krm/LTqMpK18ngvKtI1gbSd2RbsKCFtpJxqag3lvPgzgg==}
     engines: {node: '>=18'}
 
-  '@tanstack/db-ivm@0.1.9':
-    resolution: {integrity: sha512-EfrtTn34SQ6HOw1ZI4O1DKsrCSCzMufIYMpAYlO6kE7/DMZ7M9N8tQdXYyN2ZasL0zR8zjB1AHj4tMqcmPIt7w==}
-    peerDependencies:
-      typescript: '>=4.7'
-
-  '@tanstack/db@0.4.5':
-    resolution: {integrity: sha512-O/WlfZaIcHQNPXhTIwfJimNM4md4pNwBG0D9ieWy3wBBR76iZgeIh76zjZf79oSyOcKQIwDlLUQuAZBZjYN6EQ==}
-    peerDependencies:
-      typescript: '>=4.7'
-
   '@tanstack/directive-functions-plugin@1.132.42':
     resolution: {integrity: sha512-GIPaal17gt/huxIJ3k5nsNkKHR/vv+PMtNtwsZYNT0aw27bXwPsLoNiFE+L+qjmm8hg4o0uPRzL2yKs57W8Oow==}
     engines: {node: '>=12'}
     peerDependencies:
       vite: '>=6.0.0 || >=7.0.0'
-
-  '@tanstack/electric-db-collection@0.1.29':
-    resolution: {integrity: sha512-A71SgKCrJ+/yMnAhv4AkwhbhPDvTw0frcK1eAwW1CPq+55KQebJR9unshwG6fIGJCvWFf5ex+RfQRZo/EckjrA==}
 
   '@tanstack/eslint-config@0.3.2':
     resolution: {integrity: sha512-2g+PuGR3GuvvCiR3xZs+IMqAvnYU9bvH+jRml0BFBSxHBj22xFCTNvJWhvgj7uICFF9IchDkFUto91xDPMu5cg==}
@@ -3251,12 +3238,6 @@ packages:
 
   '@tanstack/query-core@5.90.2':
     resolution: {integrity: sha512-k/TcR3YalnzibscALLwxeiLUub6jN5EDLwKDiO7q5f4ICEoptJ+n9+7vcEFy5/x/i6Q+Lb/tXrsKCggf5uQJXQ==}
-
-  '@tanstack/query-db-collection@0.2.26':
-    resolution: {integrity: sha512-pIGmcOA/ZnH3wIFFP+8oW/L63Mbw0IPI3pkSe6tZDNgubgg5JjCPCO6OggkWhNXRhcqMOb4IWI+h6z4mMLkiEg==}
-    peerDependencies:
-      '@tanstack/query-core': ^5.0.0
-      typescript: '>=4.7'
 
   '@tanstack/react-query@5.83.0':
     resolution: {integrity: sha512-/XGYhZ3foc5H0VM2jLSD/NyBRIOK4q9kfeml4+0x2DlL6xVuAcVEW+hTlTapAmejObg0i3eNqhkr2dT+eciwoQ==}
@@ -3364,11 +3345,6 @@ packages:
     resolution: {integrity: sha512-wwEuLlh7ty+L6jGV8FXKO50MMpDXtpAdDdrjfHBl4ekRQUFbegkpRRYFiYwUVz3ZDVZSypsKGgvdJzyxo+W/5w==}
     engines: {node: '>=12'}
 
-  '@tanstack/solid-db@0.1.27':
-    resolution: {integrity: sha512-1OkxjKBbGKpkWVts0SFEOS1mfLb7TKI1Pgb18lCAKrIdFvsyyqLqdU3sM9DjlHNxyQB/jDmavHnLz+UiL5pM1g==}
-    peerDependencies:
-      solid-js: '>=1.9.0'
-
   '@tanstack/solid-router@1.132.49':
     resolution: {integrity: sha512-6ACsikae/CfgmFgCMShqd6qpYkTVi6J6i7vI++DeXw2Xzf0VCkqnm0ShgXXofFChrwytcSLxsUicPQ9JIviLAw==}
     engines: {node: '>=12'}
@@ -3425,11 +3401,6 @@ packages:
 
   '@tanstack/store@0.7.7':
     resolution: {integrity: sha512-xa6pTan1bcaqYDS9BDpSiS63qa6EoDkPN9RsRaxHuDdVDNntzq3xNwR5YKTU/V3SkSyC9T4YVOPh2zRQN0nhIQ==}
-
-  '@tanstack/trailbase-db-collection@0.1.27':
-    resolution: {integrity: sha512-fpe1pzT5vNzRT0u1XGzJxxKz9qv/RaYHc5ZLN6fxwYn9klyYvLke7JYwixx8AuyMLEEzZiSxhb+HEmqhmYTS+g==}
-    peerDependencies:
-      typescript: '>=4.7'
 
   '@tanstack/typedoc-config@0.2.1':
     resolution: {integrity: sha512-3miLBNiyWX54bQKBNnh7Fj6otWX8ZDiU6/ffOsNnikwBdKjFkA7ddrBtC5/JQkLCE6CBIqcJvtNIwI+DZu4y1Q==}
@@ -11062,18 +11033,6 @@ snapshots:
       - typescript
       - vite
 
-  '@tanstack/db-ivm@0.1.9(typescript@5.9.2)':
-    dependencies:
-      fractional-indexing: 3.2.0
-      sorted-btree: 1.8.1
-      typescript: 5.9.2
-
-  '@tanstack/db@0.4.5(typescript@5.9.2)':
-    dependencies:
-      '@standard-schema/spec': 1.0.0
-      '@tanstack/db-ivm': 0.1.9(typescript@5.9.2)
-      typescript: 5.9.2
-
   '@tanstack/directive-functions-plugin@1.132.42(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.0)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@babel/code-frame': 7.27.1
@@ -11116,17 +11075,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@tanstack/electric-db-collection@0.1.29(typescript@5.9.2)':
-    dependencies:
-      '@electric-sql/client': 1.0.14
-      '@standard-schema/spec': 1.0.0
-      '@tanstack/db': 0.4.5(typescript@5.9.2)
-      '@tanstack/store': 0.7.7
-      debug: 4.4.3
-    transitivePeerDependencies:
-      - supports-color
-      - typescript
-
   '@tanstack/eslint-config@0.3.2(@typescript-eslint/utils@8.45.0(eslint@9.37.0(jiti@2.6.0))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.0))(typescript@5.9.2)':
     dependencies:
       '@eslint/js': 9.37.0
@@ -11157,13 +11105,6 @@ snapshots:
   '@tanstack/query-core@5.83.0': {}
 
   '@tanstack/query-core@5.90.2': {}
-
-  '@tanstack/query-db-collection@0.2.26(@tanstack/query-core@5.90.2)(typescript@5.9.2)':
-    dependencies:
-      '@standard-schema/spec': 1.0.0
-      '@tanstack/db': 0.4.5(typescript@5.9.2)
-      '@tanstack/query-core': 5.90.2
-      typescript: 5.9.2
 
   '@tanstack/react-query@5.83.0(react@19.2.0)':
     dependencies:
@@ -11456,14 +11397,6 @@ snapshots:
       - supports-color
       - vite
 
-  '@tanstack/solid-db@0.1.27(solid-js@1.9.9)(typescript@5.9.2)':
-    dependencies:
-      '@solid-primitives/map': 0.7.2(solid-js@1.9.9)
-      '@tanstack/db': 0.4.5(typescript@5.9.2)
-      solid-js: 1.9.9
-    transitivePeerDependencies:
-      - typescript
-
   '@tanstack/solid-router@1.132.49(solid-js@1.9.9)':
     dependencies:
       '@solid-devtools/logger': 0.9.11(solid-js@1.9.9)
@@ -11644,17 +11577,6 @@ snapshots:
   '@tanstack/store@0.7.5': {}
 
   '@tanstack/store@0.7.7': {}
-
-  '@tanstack/trailbase-db-collection@0.1.27(typescript@5.9.2)':
-    dependencies:
-      '@standard-schema/spec': 1.0.0
-      '@tanstack/db': 0.4.5(typescript@5.9.2)
-      '@tanstack/store': 0.7.7
-      debug: 4.4.3
-      trailbase: 0.7.4
-      typescript: 5.9.2
-    transitivePeerDependencies:
-      - supports-color
 
   '@tanstack/typedoc-config@0.2.1(typescript@5.9.2)':
     dependencies:
@@ -13227,6 +13149,11 @@ snapshots:
       kysely: 0.28.5
       pg: 8.16.3
       postgres: 3.4.7
+
+  drizzle-zod@0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
+    dependencies:
+      drizzle-orm: 0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
+      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11):
     dependencies:
