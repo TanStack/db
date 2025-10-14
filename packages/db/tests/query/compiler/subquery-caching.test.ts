@@ -5,12 +5,24 @@ import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection/index.js"
 
+// Helper to create a minimal mock collection for compiler tests
+function createMockCollection(id: string): CollectionImpl {
+  return {
+    id,
+    autoIndex: `off`,
+    config: {
+      autoIndex: `off`,
+      getKey: (item: any) => item.id,
+      sync: { sync: () => {} },
+    },
+    size: 0,
+  } as any
+}
+
 describe(`Subquery Caching`, () => {
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
-    const usersCollection = {
-      id: `users`,
-    } as CollectionImpl
+    const usersCollection = createMockCollection(`users`)
 
     // Create a subquery that will be used in multiple places
     const subquery: QueryIR = {
@@ -38,15 +50,16 @@ describe(`Subquery Caching`, () => {
       },
     }
 
-    // Set up D2 inputs
+    // Set up D2 inputs - keyed by alias, not collection ID
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     // Test: Compile the main query twice - first without shared cache, then with shared cache
 
     // First compilation without shared cache
     const cache1 = new WeakMap()
+    const queryMapping1 = new WeakMap()
     const result1 = compileQuery(
       mainQuery,
       inputs,
@@ -56,7 +69,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      cache1
+      cache1,
+      queryMapping1
     )
 
     // Verify subquery is in first cache
@@ -65,6 +79,7 @@ describe(`Subquery Caching`, () => {
 
     // Second compilation with different cache (should recompile everything)
     const cache2 = new WeakMap()
+    const queryMapping2 = new WeakMap()
     const result2 = compileQuery(
       mainQuery,
       inputs,
@@ -74,7 +89,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      cache2
+      cache2,
+      queryMapping2
     )
 
     // Results should be different objects (different compilation)
@@ -94,7 +110,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      cache2
+      cache2,
+      new WeakMap()
     )
 
     // Result should be the same object as #2 (reused from cache)
@@ -114,7 +131,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      cache2
+      cache2,
+      new WeakMap()
     )
     const subqueryResult2 = compileQuery(
       subquery,
@@ -125,7 +143,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      cache2
+      cache2,
+      new WeakMap()
     )
 
     // Both subquery compilations should return the same cached result
@@ -133,9 +152,7 @@ describe(`Subquery Caching`, () => {
   })
 
   it(`should reuse cached results for the same query object`, () => {
-    const usersCollection = {
-      id: `users`,
-    } as CollectionImpl
+    const usersCollection = createMockCollection(`users`)
 
     const subquery: QueryIR = {
       from: new CollectionRef(usersCollection, `u`),
@@ -147,7 +164,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     // Create a shared cache
     const sharedCache = new WeakMap()
@@ -162,7 +179,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      sharedCache
+      sharedCache,
+      new WeakMap()
     )
     expect(sharedCache.has(subquery)).toBe(true)
 
@@ -176,15 +194,14 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      sharedCache
+      sharedCache,
+      new WeakMap()
     )
     expect(result1).toBe(result2) // Should be the exact same object reference
   })
 
   it(`should compile different query objects separately even with shared cache`, () => {
-    const usersCollection = {
-      id: `users`,
-    } as CollectionImpl
+    const usersCollection = createMockCollection(`users`)
 
     // Create two structurally identical but different query objects
     const subquery1: QueryIR = {
@@ -208,7 +225,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     const sharedCache = new WeakMap()
 
@@ -222,7 +239,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      sharedCache
+      sharedCache,
+      new WeakMap()
     )
     const result2 = compileQuery(
       subquery,
@@ -233,7 +251,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      sharedCache
+      sharedCache,
+      new WeakMap()
     )
 
     // Should have different results since they are different objects
@@ -245,9 +264,7 @@ describe(`Subquery Caching`, () => {
   })
 
   it(`should use cache to avoid recompilation in nested subqueries`, () => {
-    const usersCollection = {
-      id: `users`,
-    } as CollectionImpl
+    const usersCollection = createMockCollection(`users`)
 
     // Create a deeply nested subquery that references the same query multiple times
     const innerSubquery: QueryIR = {
@@ -283,7 +300,7 @@ describe(`Subquery Caching`, () => {
 
     const graph = new D2()
     const userInput = graph.newInput<[number, any]>()
-    const inputs = { users: userInput }
+    const inputs = { u: userInput }
 
     const sharedCache = new WeakMap()
 
@@ -297,7 +314,8 @@ describe(`Subquery Caching`, () => {
       new Set(),
       {},
       () => {},
-      sharedCache
+      sharedCache,
+      new WeakMap()
     )
     expect(result).toBeDefined()
 

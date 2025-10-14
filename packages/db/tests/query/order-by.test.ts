@@ -1790,6 +1790,58 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
       )
 
       itWhenAutoIndex(
+        `optimizes orderBy with alias paths in joins`,
+        async () => {
+          // Patch getConfig to expose the builder on the returned config for test access
+          const { CollectionConfigBuilder } = await import(
+            `../../src/query/live/collection-config-builder.js`
+          )
+          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+            const cfg = originalGetConfig.call(this)
+            ;(cfg as any).__builder = this
+            return cfg
+          }
+
+          try {
+            const collection = createLiveQueryCollection((q) =>
+              q
+                .from({ employees: employeesCollection })
+                .join(
+                  { departments: departmentsCollection },
+                  ({ employees, departments }) =>
+                    eq(employees.department_id, departments.id)
+                )
+                .orderBy(({ departments }) => departments?.name, `asc`)
+                .limit(5)
+                .select(({ employees, departments }) => ({
+                  employeeId: employees.id,
+                  employeeName: employees.name,
+                  departmentName: departments?.name,
+                }))
+            )
+
+            await collection.preload()
+
+            const builder = (collection as any).config.__builder
+            expect(builder).toBeTruthy()
+
+            // Verify that the order-by optimization is scoped to the departments alias
+            const orderByInfo = Object.values(
+              builder.optimizableOrderByCollections
+            )[0] as any
+            expect(orderByInfo).toBeDefined()
+            expect(orderByInfo.alias).toBe(`departments`)
+            expect(orderByInfo.offset).toBe(0)
+            expect(orderByInfo.limit).toBe(5)
+          } finally {
+            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+          }
+        }
+      )
+
+      itWhenAutoIndex(
         `optimizes single-column orderBy when passed as array with single element`,
         async () => {
           // Patch getConfig to expose the builder on the returned config for test access

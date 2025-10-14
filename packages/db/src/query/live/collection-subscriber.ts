@@ -3,14 +3,19 @@ import {
   convertOrderByToBasicExpression,
   convertToBasicExpression,
 } from "../compiler/expressions.js"
-import type { FullSyncState } from "./types.js"
+import { WhereClauseConversionError } from "../../errors.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
-import type { ChangeMessage, SyncConfig } from "../../types.js"
+import type { ChangeMessage } from "../../types.js"
 import type { Context, GetResult } from "../builder/types.js"
 import type { BasicExpression } from "../ir.js"
+import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
 import type { CollectionConfigBuilder } from "./collection-config-builder.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
+
+const loadMoreCallbackSymbol = Symbol.for(
+  `@tanstack/db.collection-config-builder`
+)
 
 export class CollectionSubscriber<
   TContext extends Context,
@@ -19,61 +24,42 @@ export class CollectionSubscriber<
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
-  private collectionAlias: string
-
   constructor(
+    private alias: string,
     private collectionId: string,
     private collection: Collection,
-    private config: Parameters<SyncConfig<TResult>[`sync`]>[0],
-    private syncState: FullSyncState,
     private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
-  ) {
-    this.collectionAlias = findCollectionAlias(
-      this.collectionId,
-      this.collectionConfigBuilder.query
-    )!
-  }
+  ) {}
 
   subscribe(): CollectionSubscription {
-    const whereClause = this.getWhereClauseFromAlias(this.collectionAlias)
+    const whereClause = this.getWhereClauseForAlias()
 
     if (whereClause) {
-      // Convert WHERE clause to BasicExpression format for collection subscription
-      const whereExpression = convertToBasicExpression(
-        whereClause,
-        this.collectionAlias
-      )
+      const whereExpression = convertToBasicExpression(whereClause, this.alias)
 
       if (whereExpression) {
-        // Use index optimization for this collection
         return this.subscribeToChanges(whereExpression)
-      } else {
-        // This should not happen - if we have a whereClause but can't create whereExpression,
-        // it indicates a bug in our optimization logic
-        throw new Error(
-          `Failed to convert WHERE clause to collection filter for collection '${this.collectionId}'. ` +
-            `This indicates a bug in the query optimization logic.`
-        )
       }
-    } else {
-      // No WHERE clause for this collection, use regular subscription
-      return this.subscribeToChanges()
+
+      throw new WhereClauseConversionError(this.collectionId, this.alias)
     }
+
+    return this.subscribeToChanges()
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     let subscription: CollectionSubscription
-    if (
-      Object.hasOwn(
-        this.collectionConfigBuilder.optimizableOrderByCollections,
-        this.collectionId
+    const orderByInfo = this.getOrderByInfo()
+    if (orderByInfo) {
+      subscription = this.subscribeToOrderedChanges(
+        whereExpression,
+        orderByInfo
       )
-    ) {
-      subscription = this.subscribeToOrderedChanges(whereExpression)
     } else {
-      // If the collection is lazy then we should not include the initial state
-      const includeInitialState =
-        !this.collectionConfigBuilder.lazyCollections.has(this.collectionId)
+      // If the source alias is lazy then we should not include the initial state
+      const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
+        this.alias
+      )
 
       subscription = this.subscribeToMatchingChanges(
         whereExpression,
@@ -83,7 +69,11 @@ export class CollectionSubscriber<
     const unsubscribe = () => {
       subscription.unsubscribe()
     }
-    this.syncState.unsubscribeCallbacks.add(unsubscribe)
+    // currentSyncState is always defined when subscribe() is called
+    // (called during sync session setup)
+    this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
+      unsubscribe
+    )
     return subscription
   }
 
@@ -91,7 +81,10 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean
   ) {
-    const input = this.syncState.inputs[this.collectionId]!
+    // currentSyncState and input are always defined when this method is called
+    // (only called from active subscriptions during a sync session)
+    const input =
+      this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
       changes,
@@ -103,14 +96,12 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader = sentChanges > 0 ? callback : undefined
 
-    // Always call maybeRunGraph to process changes eagerly.
-    // The graph will run unless the live query is in an error state.
-    // Status management is handled separately via status:change event listeners.
-    this.collectionConfigBuilder.maybeRunGraph(
-      this.config,
-      this.syncState,
-      dataLoader
-    )
+    // We need to schedule a graph run even if there's no data to load
+    // because we need to mark the collection as ready if it's not already
+    // and that's only done in `scheduleGraphRun`
+    this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
+      alias: this.alias,
+    })
   }
 
   private subscribeToMatchingChanges(
@@ -132,12 +123,11 @@ export class CollectionSubscriber<
   }
 
   private subscribeToOrderedChanges(
-    whereExpression: BasicExpression<boolean> | undefined
+    whereExpression: BasicExpression<boolean> | undefined,
+    orderByInfo: OrderByOptimizationInfo
   ) {
     const { orderBy, offset, limit, comparator, dataNeeded, index } =
-      this.collectionConfigBuilder.optimizableOrderByCollections[
-        this.collectionId
-      ]!
+      orderByInfo
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
@@ -147,7 +137,7 @@ export class CollectionSubscriber<
       // because they can't affect the topK (and if later we need more data, we will dynamically load more data)
       const splittedChanges = splitUpdates(changes)
       let filteredChanges = splittedChanges
-      if (dataNeeded!() === 0) {
+      if (dataNeeded && dataNeeded() === 0) {
         // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
         // because they can never make it into the topK.
         // However, if the topK isn't full yet, we need to also send changes > maxSentValue
@@ -173,7 +163,7 @@ export class CollectionSubscriber<
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = convertOrderByToBasicExpression(
       orderBy,
-      this.collectionAlias
+      this.alias
     )
 
     // Load the first `offset + limit` values from the index
@@ -190,10 +180,7 @@ export class CollectionSubscriber<
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
   loadMoreIfNeeded(subscription: CollectionSubscription) {
-    const orderByInfo =
-      this.collectionConfigBuilder.optimizableOrderByCollections[
-        this.collectionId
-      ]
+    const orderByInfo = this.getOrderByInfo()
 
     if (!orderByInfo) {
       // This query has no orderBy operator
@@ -224,24 +211,40 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     subscription: CollectionSubscription
   ) {
-    const { comparator } =
-      this.collectionConfigBuilder.optimizableOrderByCollections[
-        this.collectionId
-      ]!
-    const trackedChanges = this.trackSentValues(changes, comparator)
+    const orderByInfo = this.getOrderByInfo()
+    if (!orderByInfo) {
+      this.sendChangesToPipeline(changes)
+      return
+    }
+
+    const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
+
+    // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
+    // This ensures we pass the same function instance to the scheduler each time,
+    // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
+    type SubscriptionWithLoader = CollectionSubscription & {
+      [loadMoreCallbackSymbol]?: () => boolean
+    }
+
+    const subscriptionWithLoader = subscription as SubscriptionWithLoader
+
+    subscriptionWithLoader[loadMoreCallbackSymbol] ??=
+      this.loadMoreIfNeeded.bind(this, subscription)
+
     this.sendChangesToPipeline(
       trackedChanges,
-      this.loadMoreIfNeeded.bind(this, subscription)
+      subscriptionWithLoader[loadMoreCallbackSymbol]
     )
   }
 
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
   private loadNextItems(n: number, subscription: CollectionSubscription) {
-    const { orderBy, valueExtractorForRawRow } =
-      this.collectionConfigBuilder.optimizableOrderByCollections[
-        this.collectionId
-      ]!
+    const orderByInfo = this.getOrderByInfo()
+    if (!orderByInfo) {
+      return
+    }
+    const { orderBy, valueExtractorForRawRow } = orderByInfo
     const biggestSentRow = this.biggest
     const biggestSentValue = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
@@ -250,7 +253,7 @@ export class CollectionSubscriber<
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = convertOrderByToBasicExpression(
       orderBy,
-      this.collectionAlias
+      this.alias
     )
 
     // Take the `n` items after the biggest sent value
@@ -261,13 +264,22 @@ export class CollectionSubscriber<
     })
   }
 
-  private getWhereClauseFromAlias(
-    collectionAlias: string | undefined
-  ): BasicExpression<boolean> | undefined {
-    const collectionWhereClausesCache =
-      this.collectionConfigBuilder.collectionWhereClausesCache
-    if (collectionAlias && collectionWhereClausesCache) {
-      return collectionWhereClausesCache.get(collectionAlias)
+  private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {
+    const sourceWhereClausesCache =
+      this.collectionConfigBuilder.sourceWhereClausesCache
+    if (!sourceWhereClausesCache) {
+      return undefined
+    }
+    return sourceWhereClausesCache.get(this.alias)
+  }
+
+  private getOrderByInfo(): OrderByOptimizationInfo | undefined {
+    const info =
+      this.collectionConfigBuilder.optimizableOrderByCollections[
+        this.collectionId
+      ]
+    if (info && info.alias === this.alias) {
+      return info
     }
     return undefined
   }
@@ -286,36 +298,6 @@ export class CollectionSubscriber<
       yield change
     }
   }
-}
-
-/**
- * Finds the alias for a collection ID in the query
- */
-function findCollectionAlias(
-  collectionId: string,
-  query: any
-): string | undefined {
-  // Check FROM clause
-  if (
-    query.from?.type === `collectionRef` &&
-    query.from.collection?.id === collectionId
-  ) {
-    return query.from.alias
-  }
-
-  // Check JOIN clauses
-  if (query.join) {
-    for (const joinClause of query.join) {
-      if (
-        joinClause.from?.type === `collectionRef` &&
-        joinClause.from.collection?.id === collectionId
-      ) {
-        return joinClause.from.alias
-      }
-    }
-  }
-
-  return undefined
 }
 
 /**
