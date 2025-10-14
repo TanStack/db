@@ -1,5 +1,60 @@
 # @tanstack/electric-db-collection
 
+## 0.1.32
+
+### Patch Changes
+
+- Updated dependencies [[`d9ae7b7`](https://github.com/TanStack/db/commit/d9ae7b76b8ab30fd55fe835531974eee333dd450), [`44555b7`](https://github.com/TanStack/db/commit/44555b733a1a4d38d8126bf8da51d4b44f898298)]:
+  - @tanstack/db@0.4.8
+
+## 0.1.31
+
+### Patch Changes
+
+- feat: Add awaitMatch utility and reduce default timeout (#402) ([#499](https://github.com/TanStack/db/pull/499))
+
+  Adds a new `awaitMatch` utility function to support custom synchronization matching logic when transaction IDs (txids) are not available. Also reduces the default timeout for `awaitTxId` from 30 seconds to 5 seconds for faster feedback.
+
+  **New Features:**
+  - New utility method: `collection.utils.awaitMatch(matchFn, timeout?)` - Wait for custom match logic
+  - Export `isChangeMessage` and `isControlMessage` helper functions for custom match functions
+  - Type: `MatchFunction<T>` for custom match functions
+
+  **Changes:**
+  - Default timeout for `awaitTxId` reduced from 30 seconds to 5 seconds
+
+  **Example Usage:**
+
+  ```typescript
+  import { isChangeMessage } from "@tanstack/electric-db-collection"
+
+  const todosCollection = createCollection(
+    electricCollectionOptions({
+      onInsert: async ({ transaction, collection }) => {
+        const newItem = transaction.mutations[0].modified
+        await api.todos.create(newItem)
+
+        // Wait for sync using custom match logic
+        await collection.utils.awaitMatch(
+          (message) =>
+            isChangeMessage(message) &&
+            message.headers.operation === "insert" &&
+            message.value.text === newItem.text,
+          5000 // timeout in ms (optional, defaults to 5000)
+        )
+      },
+    })
+  )
+  ```
+
+  **Benefits:**
+  - Supports backends that can't provide transaction IDs
+  - Flexible heuristic-based matching
+  - Faster feedback on sync issues with reduced timeout
+
+- Updated dependencies [[`6692aad`](https://github.com/TanStack/db/commit/6692aad4267e127b71ce595529080d6fc0aa2066)]:
+  - @tanstack/db@0.4.7
+
 ## 0.1.30
 
 ### Patch Changes

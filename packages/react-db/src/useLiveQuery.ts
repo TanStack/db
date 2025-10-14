@@ -522,9 +522,7 @@ export function useLiveQuery(
         },
         collection: snapshot.collection,
         status: snapshot.collection.status,
-        isLoading:
-          snapshot.collection.status === `loading` ||
-          snapshot.collection.status === `initialCommit`,
+        isLoading: snapshot.collection.status === `loading`,
         isReady: snapshot.collection.status === `ready`,
         isIdle: snapshot.collection.status === `idle`,
         isError: snapshot.collection.status === `error`,

@@ -217,7 +217,7 @@ export class CollectionImpl<
   // Managers
   private _events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
-  private _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private _mutations: CollectionMutationsManager<

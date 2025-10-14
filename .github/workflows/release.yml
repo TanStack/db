@@ -31,6 +31,7 @@ jobs:
       - name: Run Tests
         run: pnpm run lint && pnpm run build && pnpm run test
       - name: Run Changesets (version or publish)
+        id: changesets
         uses: changesets/action@v1.5.3
         with:
           version: pnpm run changeset:version

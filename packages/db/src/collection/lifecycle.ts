@@ -75,8 +75,7 @@ export class CollectionLifecycleManager<
       Array<CollectionStatus>
     > = {
       idle: [`loading`, `error`, `cleaned-up`],
-      loading: [`initialCommit`, `ready`, `error`, `cleaned-up`],
-      initialCommit: [`ready`, `error`, `cleaned-up`],
+      loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
       error: [`cleaned-up`, `idle`],
       "cleaned-up": [`loading`, `error`],
@@ -145,8 +144,8 @@ export class CollectionLifecycleManager<
    */
   public markReady(): void {
     this.validateStatusTransition(this.status, `ready`)
-    // Can transition to ready from loading or initialCommit states
-    if (this.status === `loading` || this.status === `initialCommit`) {
+    // Can transition to ready from loading state
+    if (this.status === `loading`) {
       this.setStatus(`ready`, true)
 
       // Call any registered first ready callbacks (only on first time becoming ready)

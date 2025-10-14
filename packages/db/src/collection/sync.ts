@@ -148,12 +148,6 @@ export class CollectionSyncManager<
 
             pendingTransaction.committed = true
 
-            // Update status to initialCommit when transitioning from loading
-            // This indicates we're in the process of committing the first transaction
-            if (this.lifecycle.status === `loading`) {
-              this.lifecycle.setStatus(`initialCommit`)
-            }
-
             this.state.commitPendingTransactions()
           },
           markReady: () => {
@@ -181,6 +175,13 @@ export class CollectionSyncManager<
             // - Subsequent synced ops applied on the fresh base
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
+
+            // Capture optimistic state NOW to preserve it even if transactions complete
+            // before this truncate transaction is committed
+            pendingTransaction.optimisticSnapshot = {
+              upserts: new Map(this.state.optimisticUpserts),
+              deletes: new Set(this.state.optimisticDeletes),
+            }
           },
         })
       )

@@ -298,17 +298,15 @@ export type DeleteMutationFn<
  *
  * @example
  * // Status transitions
- * // idle → loading → initialCommit → ready
+ * // idle → loading → ready (when markReady() is called)
  * // Any status can transition to → error or cleaned-up
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
   | `idle`
-  /** Sync has started but hasn't received the first commit yet */
+  /** Sync has started and is loading data */
   | `loading`
-  /** Collection is in the process of committing its first transaction */
-  | `initialCommit`
-  /** Collection has received at least one commit and is ready for use */
+  /** Collection has been explicitly marked ready via markReady() */
   | `ready`
   /** An error occurred during sync initialization */
   | `error`
