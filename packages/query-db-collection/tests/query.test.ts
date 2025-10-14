@@ -431,7 +431,9 @@ describe(`QueryCollection`, () => {
     })
 
     // Verify queryFn was called with the correct context, including the meta object
-    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } })
+    )
   })
 
   describe(`Select method testing`, () => {
@@ -696,6 +698,20 @@ describe(`QueryCollection`, () => {
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
       const optionsDefault = queryCollectionOptions(configDefault)
+
+      // Call sync to force the query to be created
+      optionsDefault.sync.sync({
+        begin: () => {},
+        write: () => {},
+        commit: () => {},
+        collection: {
+          subscriberCount: 1,
+          on: () => {
+            return () => {}
+          },
+        },
+      } as any)
+
       await optionsDefault.onInsert!(insertMockParams)
 
       // Verify handler was called and refetch was triggered
@@ -2338,6 +2354,555 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
+    })
+
+    it(`should transition to ready immediately in on-demand mode without loading data`, async () => {
+      const queryKey = [`preload-on-demand-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `preload-on-demand-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`, // No initial query in on-demand mode
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should be idle initially
+      expect(collection.status).toBe(`idle`)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.size).toBe(0)
+
+      // Preload should resolve immediately without calling queryFn
+      // since there's no initial query in on-demand mode
+      await collection.preload()
+
+      // After preload, collection should be ready
+      // but queryFn should NOT have been called and collection should still be empty
+      expect(collection.status).toBe(`ready`)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.size).toBe(0)
+
+      // Now if we call loadSubset, it should actually load data
+      await collection._sync.loadSubset({})
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(items.length)
+      })
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.get(`1`)).toEqual(items[0])
+      expect(collection.get(`2`)).toEqual(items[1])
+    })
+  })
+
+  describe(`Query Garbage Collection`, () => {
+    it(`should delete all rows when a single query is garbage collected`, async () => {
+      const queryKey = [`single-query-gc-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+        { id: `3`, name: `Item 3` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `single-query-gc-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+        expect(collection.get(`1`)).toEqual(items[0])
+        expect(collection.get(`2`)).toEqual(items[1])
+        expect(collection.get(`3`)).toEqual(items[2])
+      })
+
+      // Verify all items are in the collection
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // Simulate query garbage collection by removing the query from the cache
+      queryClient.removeQueries({ queryKey })
+
+      // Wait for GC to process
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // Verify all items are removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should only delete non-shared rows when one of multiple overlapping queries is GCed`, async () => {
+      const baseQueryKey = [`overlapping-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
+        const { where, orderBy, limit } = loadSubsetOptions
+
+        // Query 1: items 1, 2, 3 (no predicates)
+        if (!where && !orderBy && !limit) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1` },
+            { id: `2`, name: `Item 2` },
+            { id: `3`, name: `Item 3` },
+          ])
+        }
+
+        // Query 2: items 2, 3, 4 (where: { category: 'B' })
+        if (where?.category === `B`) {
+          return Promise.resolve([
+            { id: `2`, name: `Item 2` },
+            { id: `3`, name: `Item 3` },
+            { id: `4`, name: `Item 4` },
+          ])
+        }
+
+        // Query 3: items 3, 4, 5 (where: { category: 'C' })
+        if (where?.category === `C`) {
+          return Promise.resolve([
+            { id: `3`, name: `Item 3` },
+            { id: `4`, name: `Item 4` },
+            { id: `5`, name: `Item 5` },
+          ])
+        }
+        return Promise.resolve([])
+      })
+
+      const queryKey = (ctx: any) => {
+        if (ctx.where) {
+          return [...baseQueryKey, ctx.where]
+        }
+        return baseQueryKey
+      }
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `overlapping-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2, 3)
+      await collection._sync.loadSubset({})
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+
+      // Add query 2 with different predicates (items 2, 3, 4)
+      // We abuse the `where` clause being typed as `any` to pass a category
+      // but in real usage this would be some Intermediate Representation of the where clause
+      await collection._sync.loadSubset({ where: { category: `B` } } as any)
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 1, 2, 3, 4
+      })
+
+      // Add query 3 with different predicates
+      await collection._sync.loadSubset({ where: { category: `C` } } as any)
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(5) // Should have items 1, 2, 3, 4, 5
+      })
+
+      // Verify all items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 1 (no predicates) - should only remove item 1 (unique to query 1)
+      // Items 2 and 3 should remain because they're shared with other queries
+      queryClient.removeQueries({ queryKey: queryKey({}), exact: true })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+      })
+
+      // Verify item 1 is removed (it was only in query 1)
+      expect(collection.has(`1`)).toBe(false)
+
+      // Verify shared items are still present
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 2 (where: { category: 'B' }) - should remove item 2
+      // Items 3 and 4 should remain because they are shared with query 3
+      queryClient.removeQueries({
+        queryKey: queryKey({ where: { category: `B` } }),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should have items 3, 4, 5
+      })
+
+      // Verify item 2 is removed (it was only in query 2)
+      expect(collection.has(`2`)).toBe(false)
+
+      // Verify items 3 and 4 are still present (shared with query 3)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 3 (where: { category: 'C' }) - should remove all remaining items
+      queryClient.removeQueries({
+        queryKey: queryKey({ where: { category: `C` } }),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // Verify all items are now removed
+      expect(collection.has(`3`)).toBe(false)
+      expect(collection.has(`4`)).toBe(false)
+      expect(collection.has(`5`)).toBe(false)
+    })
+
+    it(`should handle GC of queries with identical data`, async () => {
+      const baseQueryKey = [`identical-query-test`]
+
+      // Mock queryFn to return the same data for all queries
+      const queryFn = vi.fn().mockImplementation(() => {
+        // All queries return the same data regardless of predicates
+        return Promise.resolve([
+          { id: `1`, name: `Item 1` },
+          { id: `2`, name: `Item 2` },
+          { id: `3`, name: `Item 3` },
+        ])
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `identical-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          if (ctx.where) {
+            return [...baseQueryKey, ctx.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2, 3)
+      await collection._sync.loadSubset({})
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+
+      // Add query 2 with different predicates (but returns same data)
+      await collection._sync.loadSubset({ where: { category: `A` } } as any)
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Same data, no new items
+      })
+
+      // Add query 3 with different predicates (but returns same data)
+      await collection._sync.loadSubset({ where: { category: `B` } } as any)
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Same data, no new items
+      })
+
+      // GC query 1 - should not remove any items (all items are shared with other queries)
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({}),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Items still present due to other queries
+      })
+
+      // All items should still be present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC query 2 - should still not remove any items (all items are shared with query 3)
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: { category: `A` } }),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Items still present due to query 3
+      })
+
+      // All items should still be present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC query 3 - should remove all items (no more queries reference them)
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: { category: `B` } }),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // All items should now be removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should handle GC of empty queries gracefully`, async () => {
+      const baseQueryKey = [`empty-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions || {}
+        const { where, orderBy, limit } = loadSubsetOptions
+
+        // Query 1: empty array (no predicates)
+        if (!where && !orderBy && !limit) {
+          return Promise.resolve([])
+        }
+
+        // Query 2: some items (where: { category: 'A' })
+        if (where?.category === `A`) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1` },
+            { id: `2`, name: `Item 2` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `empty-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          if (ctx.where) {
+            return [...baseQueryKey, ctx.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (returns empty array)
+      await collection._sync.loadSubset({})
+
+      // Wait for query 1 data to load (still empty)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0) // Empty query
+      })
+
+      // Add query 2 with different predicates (items 1, 2)
+      await collection._sync.loadSubset({ where: { category: `A` } } as any)
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2) // Should have items 1, 2
+      })
+
+      // Verify items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+
+      // GC empty query 1 - should not affect the collection
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({}),
+        exact: true,
+      })
+
+      await flushPromises()
+
+      // Collection should still have items from query 2
+      expect(collection.size).toBe(2)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+
+      // GC non-empty query 2 - should remove its items
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: { category: `A` } }),
+        exact: true,
+      })
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+    })
+
+    it(`should handle concurrent GC of multiple queries`, async () => {
+      const baseQueryKey = [`concurrent-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions || {}
+        const { where, orderBy, limit } = loadSubsetOptions
+
+        // Query 1: items 1, 2 (no predicates)
+        if (!where && !orderBy && !limit) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1` },
+            { id: `2`, name: `Item 2` },
+          ])
+        }
+
+        // Query 2: items 2, 3 (where: { type: 'A' })
+        if (where?.type === `A`) {
+          return Promise.resolve([
+            { id: `2`, name: `Item 2` },
+            { id: `3`, name: `Item 3` },
+          ])
+        }
+
+        // Query 3: items 3, 4 (where: { type: 'B' })
+        if (where?.type === `B`) {
+          return Promise.resolve([
+            { id: `3`, name: `Item 3` },
+            { id: `4`, name: `Item 4` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `concurrent-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          if (ctx.where) {
+            return [...baseQueryKey, ctx.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2)
+      await collection._sync.loadSubset({})
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Add query 2 with different predicates (items 2, 3)
+      await collection._sync.loadSubset({ where: { type: `A` } } as any)
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should have items 1, 2, 3
+      })
+
+      // Add query 3 with different predicates
+      await collection._sync.loadSubset({ where: { type: `B` } } as any)
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 1, 2, 3, 4
+      })
+
+      // GC all queries concurrently
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({}),
+        exact: true,
+      })
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: { type: `A` } }),
+        exact: true,
+      })
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: { type: `B` } }),
+        exact: true,
+      })
+
+      // Wait for all GC operations to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // Verify all items are removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+      expect(collection.has(`4`)).toBe(false)
     })
   })
 })
