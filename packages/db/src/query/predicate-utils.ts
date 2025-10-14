@@ -51,29 +51,6 @@ function isWhereSubsetInternal(
     return true
   }
 
-  // Handle subset being an AND: (A AND B) implies both A and B
-  if (subset.type === `func` && subset.name === `and`) {
-    // Special case: if superset is also AND, check if all conjuncts in superset are implied by subset
-    if (superset.type === `func` && superset.name === `and`) {
-      // For (A AND B) ⊆ (C AND D), we need every conjunct in superset to be implied by subset
-      // For each conjunct in superset, at least one conjunct in subset must be a subset of it
-      // OR the entire subset implies it
-      return superset.args.every((superArg) => {
-        // Check if any conjunct in subset is a subset of this superset conjunct
-        return subset.args.some((subArg) =>
-          isWhereSubsetInternal(
-            subArg as BasicExpression<boolean>,
-            superArg as BasicExpression<boolean>
-          )
-        )
-      })
-    }
-    // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
-    return subset.args.some((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
-    )
-  }
-
   // Handle superset being an AND: subset must imply ALL conjuncts
   // If superset is (A AND B), then subset ⊆ (A AND B) only if subset ⊆ A AND subset ⊆ B
   // Example: (age > 20) ⊆ (age > 10 AND status = 'active') is false (doesn't imply status condition)
@@ -83,12 +60,11 @@ function isWhereSubsetInternal(
     )
   }
 
-  // Handle OR in superset: subset ⊆ (A OR B) if subset ⊆ A or subset ⊆ B
-  // (A OR B) as superset means data can satisfy A or B
-  // If subset is contained in any disjunct, it's contained in the union
-  if (superset.type === `func` && superset.name === `or`) {
-    return superset.args.some((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>)
+  // Handle subset being an AND: (A AND B) implies both A and B
+  if (subset.type === `func` && subset.name === `and`) {
+    // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
+    return subset.args.some((arg) =>
+      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
     )
   }
 
@@ -96,6 +72,15 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `or`) {
     return subset.args.every((arg) =>
       isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
+    )
+  }
+
+  // Handle OR in superset: subset ⊆ (A OR B) if subset ⊆ A or subset ⊆ B
+  // (A OR B) as superset means data can satisfy A or B
+  // If subset is contained in any disjunct, it's contained in the union
+  if (superset.type === `func` && superset.name === `or`) {
+    return superset.args.some((arg) =>
+      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>)
     )
   }
 
