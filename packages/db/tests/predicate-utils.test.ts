@@ -270,6 +270,15 @@ describe(`isWhereSubset`, () => {
       ).toBe(true)
     })
 
+    it(`should handle OR in both: (age > 20 OR status = 'active') is subset of (age > 10 OR status = 'active')`, () => {
+      expect(
+        isWhereSubset(
+          or(gt(ref(`age`), val(20)), eq(ref(`status`), val(`active`))),
+          or(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
+        )
+      ).toBe(true)
+    })
+
     it(`should handle OR in subset: (A OR B) is NOT subset of C if either is not a subset`, () => {
       expect(
         isWhereSubset(
