@@ -309,7 +309,7 @@ export interface InsertConfig {
 export type UpdateMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
 > = {
   transaction: TransactionWithMutations<T, `update`>
   collection: Collection<T, TKey, TUtils>
@@ -318,7 +318,7 @@ export type UpdateMutationFnParams<
 export type InsertMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
 > = {
   transaction: TransactionWithMutations<T, `insert`>
   collection: Collection<T, TKey, TUtils>
@@ -326,7 +326,7 @@ export type InsertMutationFnParams<
 export type DeleteMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
 > = {
   transaction: TransactionWithMutations<T, `delete`>
   collection: Collection<T, TKey, TUtils>
@@ -335,21 +335,21 @@ export type DeleteMutationFnParams<
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
   TReturn = any,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
   TReturn = any,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
   TReturn = any,
 > = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
@@ -390,7 +390,7 @@ export interface BaseCollectionConfig<
   // then it would conflict with the overloads of createCollection which
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
-  TUtils extends UtilsRecord = Record<string, Fn>,
+  TUtils extends UtilsRecord = UtilsRecord,
   TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
@@ -581,13 +581,16 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+
+  utils?: TUtils
 }
 
 export interface CollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+  TUtils extends UtilsRecord = UtilsRecord,
+> extends BaseCollectionConfig<T, TKey, TSchema, TUtils> {
   sync: SyncConfig<T, TKey>
 }
 
@@ -611,7 +614,8 @@ export type CollectionConfigSingleRowOption<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
-> = CollectionConfig<T, TKey, TSchema> & MaybeSingleResult
+  TUtils extends UtilsRecord = {},
+> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult
 
 export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
   ChangeMessage<T>

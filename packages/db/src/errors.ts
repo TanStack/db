@@ -629,3 +629,15 @@ export class MissingAliasInputsError extends QueryCompilationError {
     )
   }
 }
+
+/**
+ * Error thrown when setWindow is called on a collection without an ORDER BY clause.
+ */
+export class SetWindowRequiresOrderByError extends QueryCompilationError {
+  constructor() {
+    super(
+      `setWindow() can only be called on collections with an ORDER BY clause. ` +
+        `Add .orderBy() to your query to enable window movement.`
+    )
+  }
+}

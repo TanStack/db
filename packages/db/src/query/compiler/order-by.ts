@@ -5,6 +5,7 @@ import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
 import { replaceAggregatesByRefs } from "./group-by.js"
+import type { WindowOptions } from "./types.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
 import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
@@ -38,6 +39,7 @@ export function processOrderBy(
   selectClause: Select,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
@@ -107,6 +109,8 @@ export function processOrderBy(
 
   let setSizeCallback: ((getSize: () => number) => void) | undefined
 
+  let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
+
   // Optimize the orderBy operator to lazily load elements
   // by using the range index of the collection.
   // Only for orderBy clause on a single column for now (no composite ordering)
@@ -161,7 +165,7 @@ export function processOrderBy(
             ? String(orderByExpression.path[0])
             : rawQuery.from.alias
 
-        const orderByOptimizationInfo = {
+        orderByOptimizationInfo = {
           alias: orderByAlias,
           offset: offset ?? 0,
           limit,
@@ -179,7 +183,7 @@ export function processOrderBy(
             ...optimizableOrderByCollections[followRefCollection.id]!,
             dataNeeded: () => {
               const size = getSize()
-              return Math.max(0, limit - size)
+              return Math.max(0, orderByOptimizationInfo!.limit - size)
             },
           }
         }
@@ -194,6 +198,23 @@ export function processOrderBy(
       offset,
       comparator: compare,
       setSizeCallback,
+      setWindowFn: (
+        windowFn: (options: { offset?: number; limit?: number }) => void
+      ) => {
+        setWindowFn(
+          // We wrap the move function such that we update the orderByOptimizationInfo
+          // because that is used by the `dataNeeded` callback to determine if we need to load more data
+          (options) => {
+            windowFn(options)
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset =
+                options.offset ?? orderByOptimizationInfo.offset
+              orderByOptimizationInfo.limit =
+                options.limit ?? orderByOptimizationInfo.limit
+            }
+          }
+        )
+      },
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )

@@ -299,3 +299,12 @@ export function assertOnlyKeysAffected<K, V>(
     )
   }
 }
+
+export const compareFractionalIndex = (
+  r1: [unknown, [unknown, string]],
+  r2: [unknown, [unknown, string]]
+) => {
+  const [_key1, [_value1, index1]] = r1
+  const [_key2, [_value2, index2]] = r2
+  return index1 < index2 ? -1 : index1 > index2 ? 1 : 0
+}

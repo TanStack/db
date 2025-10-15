@@ -1,11 +1,15 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
-import { MissingAliasInputsError } from "../../errors.js"
+import {
+  MissingAliasInputsError,
+  SetWindowRequiresOrderByError,
+} from "../../errors.js"
 import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import { getCollectionBuilder } from "./collection-registry.js"
+import type { WindowOptions } from "../compiler/index.js"
 import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -32,6 +36,11 @@ import type { AllCollectionEvents } from "../../collection/events.js"
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
   getBuilder: () => CollectionConfigBuilder<any, any>
+  /**
+   * Sets the offset and limit of an ordered query.
+   * Is a no-op if the query is not ordered.
+   */
+  setWindow: (options: WindowOptions) => void
 }
 
 type PendingGraphRun = {
@@ -80,6 +89,10 @@ export class CollectionConfigBuilder<
 
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
+
+  private windowFn: ((options: WindowOptions) => void) | undefined
+
+  private maybeRunGraphFn: (() => void) | undefined
 
   private readonly aliasDependencies: Record<
     string,
@@ -171,8 +184,18 @@ export class CollectionConfigBuilder<
       utils: {
         getRunCount: this.getRunCount.bind(this),
         getBuilder: () => this,
+        setWindow: this.setWindow.bind(this),
       },
     }
+  }
+
+  setWindow(options: WindowOptions) {
+    if (!this.windowFn) {
+      throw new SetWindowRequiresOrderByError()
+    }
+
+    this.windowFn(options)
+    this.maybeRunGraphFn?.()
   }
 
   /**
@@ -457,6 +480,8 @@ export class CollectionConfigBuilder<
       fullSyncState
     )
 
+    this.maybeRunGraphFn = () => this.scheduleGraphRun(loadSubsetDataCallbacks)
+
     // Initial run with callback to load more data if needed
     this.scheduleGraphRun(loadSubsetDataCallbacks)
 
@@ -517,7 +542,10 @@ export class CollectionConfigBuilder<
       this.subscriptions,
       this.lazySourcesCallbacks,
       this.lazySources,
-      this.optimizableOrderByCollections
+      this.optimizableOrderByCollections,
+      (windowFn: (options: WindowOptions) => void) => {
+        this.windowFn = windowFn
+      }
     )
 
     this.pipelineCache = compilation.pipeline

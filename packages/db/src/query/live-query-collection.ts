@@ -20,16 +20,20 @@ import type { Context, GetResult } from "./builder/types.js"
 type CollectionConfigForContext<
   TContext extends Context,
   TResult extends object,
+  TUtils extends UtilsRecord = {},
 > = TContext extends SingleResult
-  ? CollectionConfigSingleRowOption<TResult> & SingleResult
-  : CollectionConfigSingleRowOption<TResult> & NonSingleResult
+  ? CollectionConfigSingleRowOption<TResult, string | number, never, TUtils> &
+      SingleResult
+  : CollectionConfigSingleRowOption<TResult, string | number, never, TUtils> &
+      NonSingleResult
 
 type CollectionForContext<
   TContext extends Context,
   TResult extends object,
+  TUtils extends UtilsRecord = {},
 > = TContext extends SingleResult
-  ? Collection<TResult> & SingleResult
-  : Collection<TResult> & NonSingleResult
+  ? Collection<TResult, string | number, TUtils> & SingleResult
+  : Collection<TResult, string | number, TUtils> & NonSingleResult
 
 /**
  * Creates live query collection options for use with createCollection

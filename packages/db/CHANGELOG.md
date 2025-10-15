@@ -1,5 +1,18 @@
 # @tanstack/db
 
+## 0.4.9
+
+### Patch Changes
+
+- Fix self-join bug by implementing per-alias subscriptions in live queries ([#625](https://github.com/TanStack/db/pull/625))
+
+- Stop pushing where clauses that target renamed subquery projections so alias remapping stays intact, preventing a bug where a where clause would not be executed correctly. ([#654](https://github.com/TanStack/db/pull/654))
+
+- Add a scheduler that ensures that if a transaction touches multiple collections that feed into a single live query, the live query only emits a single batch of updates. This fixes an issue where multiple renders could be triggered from a live query under this situation. ([#628](https://github.com/TanStack/db/pull/628))
+
+- Updated dependencies [[`eeb05d4`](https://github.com/TanStack/db/commit/eeb05d449defbaaac584f4bb8febcb8946cfdf21)]:
+  - @tanstack/db-ivm@0.1.10
+
 ## 0.4.8
 
 ### Patch Changes
