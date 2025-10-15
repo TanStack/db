@@ -14,6 +14,30 @@ import type {
   TransactionWithMutations,
 } from "./types"
 
+// Detect duplicate @tanstack/db instances
+const DB_INSTANCE_MARKER = Symbol.for(`@tanstack/db/instance-marker`)
+
+if ((globalThis as any)[DB_INSTANCE_MARKER]) {
+  throw new Error(
+    `Multiple instances of @tanstack/db detected!\n\n` +
+      `This causes transaction context to be lost because each instance maintains ` +
+      `its own transaction stack.\n\n` +
+      `Common causes:\n` +
+      `1. Different versions of @tanstack/db installed\n` +
+      `2. Incompatible peer dependency versions in packages\n` +
+      `3. Module resolution issues in bundler configuration\n\n` +
+      `To fix:\n` +
+      `1. Check installed versions: npm list @tanstack/db (or pnpm/yarn list)\n` +
+      `2. Force a single version using package manager overrides:\n` +
+      `   - npm: "overrides" in package.json\n` +
+      `   - pnpm: "pnpm.overrides" in package.json\n` +
+      `   - yarn: "resolutions" in package.json\n` +
+      `3. Clear node_modules and lockfile, then reinstall\n\n` +
+      `See: https://tanstack.com/db/latest/docs/troubleshooting#duplicate-instances`
+  )
+}
+;(globalThis as any)[DB_INSTANCE_MARKER] = true
+
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
 
@@ -233,7 +257,9 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together
+   * @param callback - Function containing collection operations to group together. If the
+   * callback returns a Promise, the transaction context will remain active until the promise
+   * settles, allowing optimistic writes after `await` boundaries.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -276,6 +302,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     registerTransaction(this)
+
     try {
       callback()
     } finally {

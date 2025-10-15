@@ -1,4 +1,5 @@
 import { SpanStatusCode, context, trace } from "@opentelemetry/api"
+import { OnMutateMustBeSynchronousError } from "@tanstack/db"
 import { OfflineTransaction } from "./OfflineTransaction"
 import type { Transaction } from "@tanstack/db"
 import type {
@@ -6,6 +7,14 @@ import type {
   OfflineMutationFn,
   OfflineTransaction as OfflineTransactionType,
 } from "../types"
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    !!value &&
+    (typeof value === `object` || typeof value === `function`) &&
+    typeof (value as { then?: unknown }).then === `function`
+  )
+}
 
 export function createOfflineAction<T>(
   options: CreateOfflineActionOptions<T>,
@@ -29,7 +38,11 @@ export function createOfflineAction<T>(
 
     const transaction = offlineTransaction.mutate(() => {
       console.log(`mutate`)
-      onMutate(variables)
+      const maybePromise = onMutate(variables) as unknown
+
+      if (isPromiseLike(maybePromise)) {
+        throw new OnMutateMustBeSynchronousError()
+      }
     })
 
     // Immediately commit with span instrumentation

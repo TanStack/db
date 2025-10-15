@@ -229,6 +229,15 @@ export class MissingMutationFunctionError extends TransactionError {
   }
 }
 
+export class OnMutateMustBeSynchronousError extends TransactionError {
+  constructor() {
+    super(
+      `onMutate must be synchronous and cannot return a promise. Remove async/await or returned promises from onMutate.`
+    )
+    this.name = `OnMutateMustBeSynchronousError`
+  }
+}
+
 export class TransactionNotPendingMutateError extends TransactionError {
   constructor() {
     super(
