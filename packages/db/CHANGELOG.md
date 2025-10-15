@@ -1,5 +1,97 @@
 # @tanstack/db
 
+## 0.4.10
+
+### Patch Changes
+
+- Add `utils.setWindow()` method to live query collections to dynamically change limit and offset on ordered queries. ([#663](https://github.com/TanStack/db/pull/663))
+
+  You can now change the pagination window of an ordered live query without recreating the collection:
+
+  ```ts
+  const users = createLiveQueryCollection((q) =>
+    q
+      .from({ user: usersCollection })
+      .orderBy(({ user }) => user.name, "asc")
+      .limit(10)
+      .offset(0)
+  )
+
+  users.utils.setWindow({ offset: 10, limit: 10 })
+  ```
+
+- Added comprehensive loading state tracking and configurable sync modes to collections and live queries: ([#669](https://github.com/TanStack/db/pull/669))
+  - Added `isLoadingSubset` property and `loadingSubset:change` events to all collections for tracking when data is being loaded
+  - Added `syncMode` configuration option to collections:
+    - `'eager'` (default): Loads all data immediately during initial sync
+    - `'on-demand'`: Only loads data as requested via `loadSubset` calls
+  - Added comprehensive status tracking to collection subscriptions with `status` property (`'ready'` | `'loadingSubset'`) and events (`status:change`, `status:ready`, `status:loadingSubset`, `unsubscribed`)
+  - Live queries automatically reflect loading state from their source collection subscriptions, with each query maintaining isolated loading state to prevent status "bleed" between independent queries
+  - Enhanced `setWindow` utility to return `Promise<void>` when loading is triggered, allowing callers to await data loading completion
+  - Added `subscription` parameter to `loadSubset` handler for advanced sync implementations that need to track subscription lifecycle
+
+- Updated dependencies [[`63aa8ef`](https://github.com/TanStack/db/commit/63aa8ef8b09960ce0f93e068d41b37fb0503a21a)]:
+  - @tanstack/db-ivm@0.1.11
+
+## 0.4.9
+
+### Patch Changes
+
+- Fix self-join bug by implementing per-alias subscriptions in live queries ([#625](https://github.com/TanStack/db/pull/625))
+
+- Stop pushing where clauses that target renamed subquery projections so alias remapping stays intact, preventing a bug where a where clause would not be executed correctly. ([#654](https://github.com/TanStack/db/pull/654))
+
+- Add a scheduler that ensures that if a transaction touches multiple collections that feed into a single live query, the live query only emits a single batch of updates. This fixes an issue where multiple renders could be triggered from a live query under this situation. ([#628](https://github.com/TanStack/db/pull/628))
+
+- Updated dependencies [[`eeb05d4`](https://github.com/TanStack/db/commit/eeb05d449defbaaac584f4bb8febcb8946cfdf21)]:
+  - @tanstack/db-ivm@0.1.10
+
+## 0.4.8
+
+### Patch Changes
+
+- Fixed critical bug where optimistic mutations were lost when their async handlers completed during a truncate operation. The fix captures a snapshot of optimistic state when `truncate()` is called and restores it during commit, then overlays any still-active transactions to handle late-arriving mutations. This ensures client-side optimistic state is preserved through server-initiated must-refetch scenarios. ([#659](https://github.com/TanStack/db/pull/659))
+
+- Refactored live queries to execute eagerly during sync. Live queries now materialize their results immediately as data arrives from source collections, even while those collections are still in a "loading" state, rather than waiting for all sources to be "ready" before executing. ([#658](https://github.com/TanStack/db/pull/658))
+
+## 0.4.7
+
+### Patch Changes
+
+- Add acceptMutations utility for local collections in manual transactions. Local-only and local-storage collections now expose `utils.acceptMutations(transaction, collection)` that must be called in manual transaction `mutationFn` to persist mutations. ([#638](https://github.com/TanStack/db/pull/638))
+
+## 0.4.6
+
+### Patch Changes
+
+- Push predicates down to sync layer ([#617](https://github.com/TanStack/db/pull/617))
+
+- prefix logs and errors with collection id, when available ([#655](https://github.com/TanStack/db/pull/655))
+
+## 0.4.5
+
+### Patch Changes
+
+- Fixed race condition which could result in a live query throwing and becoming stuck after multiple mutations complete asynchronously. ([#650](https://github.com/TanStack/db/pull/650))
+
+## 0.4.4
+
+### Patch Changes
+
+- Fix live queries getting stuck during long-running sync commits by always ([#631](https://github.com/TanStack/db/pull/631))
+  clearing the batching flag on forced emits, tolerating duplicate insert echoes,
+  and allowing optimistic recomputes to run while commits are still applying. Adds
+  regression coverage for concurrent optimistic inserts, queued updates, and the
+  offline-transactions example to ensure everything stays in sync.
+
+- Fixed bug where orderBy would fail when a collection alias had the same name as one of its schema fields. For example, .from({ email: emailCollection }).orderBy(({ email }) => email.createdAt) now works correctly even when the collection has an email field in its schema. ([#637](https://github.com/TanStack/db/pull/637))
+
+- Optimization: reverse the index when the direction does not match. ([#627](https://github.com/TanStack/db/pull/627))
+
+- Fixed a bug that could result in a duplicate delete event for a row ([#621](https://github.com/TanStack/db/pull/621))
+
+- Fix bug where optimized queries would use the wrong index because the index is on the right column but was built using different comparison options (e.g. different direction, string sort, or null ordering). ([#623](https://github.com/TanStack/db/pull/623))
+
 ## 0.4.3
 
 ### Patch Changes

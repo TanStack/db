@@ -162,8 +162,8 @@ export interface GroupedWhereClauses {
 export interface OptimizationResult {
   /** The optimized query with WHERE clauses potentially moved to subqueries */
   optimizedQuery: QueryIR
-  /** Map of collection aliases to their extracted WHERE clauses for index optimization */
-  collectionWhereClauses: Map<string, BasicExpression<boolean>>
+  /** Map of source aliases to their extracted WHERE clauses for index optimization */
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>
 }
 
 /**
@@ -184,14 +184,14 @@ export interface OptimizationResult {
  *   where: [eq(u.dept_id, 1), gt(p.views, 100)]
  * }
  *
- * const { optimizedQuery, collectionWhereClauses } = optimizeQuery(originalQuery)
+ * const { optimizedQuery, sourceWhereClauses } = optimizeQuery(originalQuery)
  * // Result: Single-source clauses moved to deepest possible subqueries
- * // collectionWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
+ * // sourceWhereClauses: Map { 'u' => eq(u.dept_id, 1), 'p' => gt(p.views, 100) }
  * ```
  */
 export function optimizeQuery(query: QueryIR): OptimizationResult {
-  // First, extract collection WHERE clauses before optimization
-  const collectionWhereClauses = extractCollectionWhereClauses(query)
+  // First, extract source WHERE clauses before optimization
+  const sourceWhereClauses = extractSourceWhereClauses(query)
 
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
@@ -214,7 +214,7 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
 
   return {
     optimizedQuery: cleaned,
-    collectionWhereClauses,
+    sourceWhereClauses,
   }
 }
 
@@ -224,16 +224,16 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
  * to specific collections, but only for simple queries without joins.
  *
  * @param query - The original QueryIR to analyze
- * @returns Map of collection aliases to their WHERE clauses
+ * @returns Map of source aliases to their WHERE clauses
  */
-function extractCollectionWhereClauses(
+function extractSourceWhereClauses(
   query: QueryIR
 ): Map<string, BasicExpression<boolean>> {
-  const collectionWhereClauses = new Map<string, BasicExpression<boolean>>()
+  const sourceWhereClauses = new Map<string, BasicExpression<boolean>>()
 
   // Only analyze queries that have WHERE clauses
   if (!query.where || query.where.length === 0) {
-    return collectionWhereClauses
+    return sourceWhereClauses
   }
 
   // Split all AND clauses at the root level for granular analysis
@@ -254,12 +254,12 @@ function extractCollectionWhereClauses(
     if (isCollectionReference(query, sourceAlias)) {
       // Check if the WHERE clause can be converted to collection-compatible format
       if (isConvertibleToCollectionFilter(whereClause)) {
-        collectionWhereClauses.set(sourceAlias, whereClause)
+        sourceWhereClauses.set(sourceAlias, whereClause)
       }
     }
   }
 
-  return collectionWhereClauses
+  return sourceWhereClauses
 }
 
 /**
@@ -782,14 +782,18 @@ function optimizeFromWithTracking(
     return new QueryRefClass(subQuery, from.alias)
   }
 
-  // Must be queryRef due to type system
-
   // SAFETY CHECK: Only check safety when pushing WHERE clauses into existing subqueries
   // We need to be careful about pushing WHERE clauses into subqueries that already have
   // aggregates, HAVING, or ORDER BY + LIMIT since that could change their semantics
   if (!isSafeToPushIntoExistingSubquery(from.query, whereClause, from.alias)) {
     // Return a copy without optimization to maintain immutability
     // Do NOT mark as optimized since we didn't actually optimize it
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
+
+  // Skip pushdown when a clause references a field that only exists via a renamed
+  // projection inside the subquery; leaving it outside preserves the alias mapping.
+  if (referencesAliasWithRemappedSelect(from.query, whereClause, from.alias)) {
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
   }
 
@@ -940,6 +944,72 @@ function whereReferencesComputedSelectFields(
     if (alias !== outerAlias) continue
     if (computed.has(field)) return true
   }
+  return false
+}
+
+/**
+ * Detects whether a WHERE clause references the subquery alias through fields that
+ * are re-exposed under different names (renamed SELECT projections or fnSelect output).
+ * In those cases we keep the clause at the outer level to avoid alias remapping bugs.
+ * TODO: in future we should handle this by rewriting the clause to use the subquery's
+ * internal field references, but it likely needs a wider refactor to do cleanly.
+ */
+function referencesAliasWithRemappedSelect(
+  subquery: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string
+): boolean {
+  const refs = collectRefs(whereClause)
+  // Only care about clauses that actually reference the outer alias.
+  if (refs.every((ref) => ref.path[0] !== outerAlias)) {
+    return false
+  }
+
+  // fnSelect always rewrites the row shape, so alias-safe pushdown is impossible.
+  if (subquery.fnSelect) {
+    return true
+  }
+
+  const select = subquery.select
+  // Without an explicit SELECT the clause still refers to the original collection.
+  if (!select) {
+    return false
+  }
+
+  for (const ref of refs) {
+    const path = ref.path
+    // Need at least alias + field to matter.
+    if (path.length < 2) continue
+    if (path[0] !== outerAlias) continue
+
+    const projected = select[path[1]!]
+    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
+    if (!projected) continue
+
+    // Non-PropRef projections are computed values; cannot push down.
+    if (!(projected instanceof PropRef)) {
+      return true
+    }
+
+    // If the projection is just the alias (whole row) without a specific field,
+    // we can't verify whether the field we're referencing is being preserved or remapped.
+    if (projected.path.length < 2) {
+      return true
+    }
+
+    const [innerAlias, innerField] = projected.path
+
+    // Safe only when the projection points straight back to the same alias or the
+    // underlying source alias and preserves the field name.
+    if (innerAlias !== outerAlias && innerAlias !== subquery.from.alias) {
+      return true
+    }
+
+    if (innerField !== path[1]) {
+      return true
+    }
+  }
+
   return false
 }
 

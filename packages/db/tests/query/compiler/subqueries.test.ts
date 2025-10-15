@@ -4,6 +4,7 @@ import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionImpl } from "../../../src/collection/index.js"
 import { avg, count, eq } from "../../../src/query/builder/functions.js"
+import type { CollectionSubscription } from "../../../src/collection/subscription.js"
 
 // Test schema types
 interface Issue {
@@ -171,12 +172,13 @@ describe(`Query2 Subqueries`, () => {
       const issuesInput = createIssueInput(graph)
       const { pipeline } = compileQuery(
         builtQuery,
-        { issues: issuesInput },
+        { issue: issuesInput },
         { issues: issuesCollection },
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -273,29 +275,36 @@ describe(`Query2 Subqueries`, () => {
       const usersSubscription = usersCollection.subscribeChanges(() => {})
       const issuesSubscription = issuesCollection.subscribeChanges(() => {})
 
+      // Create subscriptions keyed by alias (matching production behavior)
+      const subscriptions: Record<string, CollectionSubscription> = {
+        issue: issuesSubscription,
+        user: usersSubscription,
+      }
+
       // Compile and execute the query
       const graph = new D2()
       const issuesInput = createIssueInput(graph)
       const usersInput = createUserInput(graph)
-      const lazyCollections = new Set<string>()
-      const { pipeline } = compileQuery(
+      const lazySources = new Set<string>()
+      const compilation = compileQuery(
         builtQuery,
         {
-          issues: issuesInput,
-          users: usersInput,
+          issue: issuesInput,
+          user: usersInput,
         },
         { issues: issuesCollection, users: usersCollection },
-        {
-          [usersCollection.id]: usersSubscription,
-          [issuesCollection.id]: issuesSubscription,
-        },
-        { issues: dummyCallbacks, users: dummyCallbacks },
-        lazyCollections,
-        {}
+        subscriptions,
+        { issue: dummyCallbacks, user: dummyCallbacks },
+        lazySources,
+        {},
+        () => {}
       )
+      const { pipeline } = compilation
 
-      // Since we're doing a left join, the collection on the right should be handled lazily
-      expect(lazyCollections).contains(usersCollection.id)
+      // Since we're doing a left join, the alias on the right (from the subquery) should be handled lazily
+      // The subquery uses 'user' alias, but the join uses 'activeUser' - we expect the lazy alias
+      // to be the one that's marked (which is 'activeUser' since it's the joinedTableAlias)
+      expect(lazySources).contains(`activeUser`)
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -333,6 +342,80 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Complex composable queries`, () => {
+    it(`exports alias metadata from nested subqueries`, () => {
+      // Create a nested subquery structure to test alias metadata propagation
+      const innerQuery = new Query()
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.status, `active`))
+
+      const middleQuery = new Query()
+        .from({ activeUser: innerQuery })
+        .select(({ activeUser }) => ({
+          id: activeUser.id,
+          name: activeUser.name,
+        }))
+
+      const outerQuery = new Query()
+        .from({ issue: issuesCollection })
+        .join({ userInfo: middleQuery }, ({ issue, userInfo }) =>
+          eq(issue.userId, userInfo.id)
+        )
+        .select(({ issue, userInfo }) => ({
+          issueId: issue.id,
+          issueTitle: issue.title,
+          userName: userInfo?.name,
+        }))
+
+      const builtQuery = getQueryIR(outerQuery)
+
+      const usersSubscription = usersCollection.subscribeChanges(() => {})
+      const issuesSubscription = issuesCollection.subscribeChanges(() => {})
+
+      // Create subscriptions keyed by alias (matching production behavior)
+      const subscriptions: Record<string, CollectionSubscription> = {
+        issue: issuesSubscription,
+        user: usersSubscription,
+      }
+
+      const dummyCallbacks = {
+        loadKeys: (_: any) => {},
+        loadInitialState: () => {},
+      }
+
+      // Compile the query
+      const graph = new D2()
+      const issuesInput = createIssueInput(graph)
+      const usersInput = createUserInput(graph)
+      const lazyCollections = new Set<string>()
+      const compilation = compileQuery(
+        builtQuery,
+        {
+          issue: issuesInput,
+          user: usersInput,
+        },
+        { issues: issuesCollection, users: usersCollection },
+        subscriptions,
+        { issue: dummyCallbacks, user: dummyCallbacks },
+        lazyCollections,
+        {},
+        () => {}
+      )
+
+      // Verify that alias metadata includes aliases from the query
+      const aliasToCollectionId = compilation.aliasToCollectionId
+
+      // Should include the main table alias (note: alias is 'issue', not 'issues')
+      expect(aliasToCollectionId.issue).toBe(issuesCollection.id)
+
+      // Should include the user alias from the subquery
+      expect(aliasToCollectionId.user).toBe(usersCollection.id)
+
+      // Verify that the compiler correctly maps aliases to collection IDs
+      expect(Object.keys(aliasToCollectionId)).toHaveLength(2)
+      expect(aliasToCollectionId.issue).toBe(issuesCollection.id)
+      expect(aliasToCollectionId.user).toBe(usersCollection.id)
+    })
+
     it(`executes simple aggregate subquery`, () => {
       // Create a base query that filters issues for project 1
       const baseQuery = new Query()
@@ -354,12 +437,13 @@ describe(`Query2 Subqueries`, () => {
       const issuesInput = createIssueInput(graph)
       const { pipeline } = compileQuery(
         builtQuery,
-        { issues: issuesInput },
+        { issue: issuesInput },
         { issues: issuesCollection },
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []

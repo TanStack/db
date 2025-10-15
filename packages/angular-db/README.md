@@ -258,7 +258,7 @@ An object with Angular signals:
 - state: Signal<Map<Key, T>> - Map of results by key, automatically updates
 - collection: Signal<Collection> - The underlying collection instance
 - status: Signal<CollectionStatus> - Current status ('idle' | 'loading' | 'ready' | 'error' | 'cleaned-up')
-- isLoading: Signal<boolean> - true when status is 'loading' or 'initialCommit'
+- isLoading: Signal<boolean> - true when status is 'loading'
 - isReady: Signal<boolean> - true when status is 'ready'
 - isIdle: Signal<boolean> - true when status is 'idle'
 - isError: Signal<boolean> - true when status is 'error'

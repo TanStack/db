@@ -1,12 +1,20 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and } from "../query/builder/functions.js"
+import { and, gt, lt } from "../query/builder/functions.js"
+import { Value } from "../query/ir.js"
+import { EventEmitter } from "../event-emitter.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
-import type { BasicExpression } from "../query/ir.js"
-import type { BaseIndex } from "../indexes/base-index.js"
-import type { ChangeMessage } from "../types.js"
+import type { BasicExpression, OrderBy } from "../query/ir.js"
+import type { IndexInterface } from "../indexes/base-index.js"
+import type {
+  ChangeMessage,
+  Subscription,
+  SubscriptionEvents,
+  SubscriptionStatus,
+  SubscriptionUnsubscribedEvent,
+} from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
 type RequestSnapshotOptions = {
@@ -15,18 +23,23 @@ type RequestSnapshotOptions = {
 }
 
 type RequestLimitedSnapshotOptions = {
-  minValue?: any
+  orderBy: OrderBy
   limit: number
+  minValue?: any
 }
 
 type CollectionSubscriptionOptions = {
+  includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
-  onUnsubscribe?: () => void
+  onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
 }
 
-export class CollectionSubscription {
+export class CollectionSubscription
+  extends EventEmitter<SubscriptionEvents>
+  implements Subscription
+{
   private loadedInitialState = false
 
   // Flag to indicate that we have sent at least 1 snapshot.
@@ -38,13 +51,26 @@ export class CollectionSubscription {
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
 
-  private orderByIndex: BaseIndex<string | number> | undefined
+  private orderByIndex: IndexInterface<string | number> | undefined
+
+  // Status tracking
+  private _status: SubscriptionStatus = `ready`
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+
+  public get status(): SubscriptionStatus {
+    return this._status
+  }
 
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
     private options: CollectionSubscriptionOptions
   ) {
+    super()
+    if (options.onUnsubscribe) {
+      this.on(`unsubscribed`, (event) => options.onUnsubscribe!(event))
+    }
+
     // Auto-index for where expressions if enabled
     if (options.whereExpression) {
       ensureIndexForExpression(options.whereExpression, this.collection)
@@ -65,8 +91,55 @@ export class CollectionSubscription {
       : this.callback
   }
 
-  setOrderByIndex(index: BaseIndex<any>) {
+  setOrderByIndex(index: IndexInterface<any>) {
     this.orderByIndex = index
+  }
+
+  /**
+   * Set subscription status and emit events if changed
+   */
+  private setStatus(newStatus: SubscriptionStatus) {
+    if (this._status === newStatus) {
+      return // No change
+    }
+
+    const previousStatus = this._status
+    this._status = newStatus
+
+    // Emit status:change event
+    this.emitInner(`status:change`, {
+      type: `status:change`,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    })
+
+    // Emit specific status event
+    const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
+    this.emitInner(eventKey, {
+      type: eventKey,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    } as SubscriptionEvents[typeof eventKey])
+  }
+
+  /**
+   * Track a loadSubset promise and manage loading status
+   */
+  private trackLoadSubsetPromise(syncResult: Promise<void> | true) {
+    // Track the promise if it's actually a promise (async work)
+    if (syncResult instanceof Promise) {
+      this.pendingLoadSubsetPromises.add(syncResult)
+      this.setStatus(`loadingSubset`)
+
+      syncResult.finally(() => {
+        this.pendingLoadSubsetPromises.delete(syncResult)
+        if (this.pendingLoadSubsetPromises.size === 0) {
+          this.setStatus(`ready`)
+        }
+      })
+    }
   }
 
   hasLoadedInitialState() {
@@ -117,6 +190,16 @@ export class CollectionSubscription {
       this.loadedInitialState = true
     }
 
+    // Request the sync layer to load more data
+    // don't await it, we will load the data into the collection when it comes in
+    const syncResult = this.collection._sync.loadSubset({
+      where: stateOpts.where,
+      subscription: this,
+    })
+
+    this.trackLoadSubsetPromise(syncResult)
+
+    // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
 
     if (snapshot === undefined) {
@@ -140,7 +223,11 @@ export class CollectionSubscription {
    * It uses that range index to load the items in the order of the index.
    * Note: it does not send keys that have already been sent before.
    */
-  requestLimitedSnapshot({ limit, minValue }: RequestLimitedSnapshotOptions) {
+  requestLimitedSnapshot({
+    orderBy,
+    limit,
+    minValue,
+  }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -190,6 +277,26 @@ export class CollectionSubscription {
     }
 
     this.callback(changes)
+
+    let whereWithValueFilter = where
+    if (typeof minValue !== `undefined`) {
+      // Only request data that we haven't seen yet (i.e. is bigger than the minValue)
+      const { expression, compareOptions } = orderBy[0]!
+      const operator = compareOptions.direction === `asc` ? gt : lt
+      const valueFilter = operator(expression, new Value(minValue))
+      whereWithValueFilter = where ? and(where, valueFilter) : valueFilter
+    }
+
+    // Request the sync layer to load more data
+    // don't await it, we will load the data into the collection when it comes in
+    const syncResult = this.collection._sync.loadSubset({
+      where: whereWithValueFilter,
+      limit,
+      orderBy,
+      subscription: this,
+    })
+
+    this.trackLoadSubsetPromise(syncResult)
   }
 
   /**
@@ -234,6 +341,11 @@ export class CollectionSubscription {
   }
 
   unsubscribe() {
-    this.options.onUnsubscribe?.()
+    this.emitInner(`unsubscribed`, {
+      type: `unsubscribed`,
+      subscription: this,
+    })
+    // Clear all event listeners to prevent memory leaks
+    this.clearListeners()
   }
 }

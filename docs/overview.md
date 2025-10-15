@@ -105,33 +105,11 @@ todoCollection.update(todo.id, (draft) => {
 })
 ```
 
-Rather than mutating the collection data directly, the collection internally treats its synced/loaded data as immutable and maintains a separate set of local mutations as optimistic state. When live queries read from the collection, they see a local view that overlays the local optimistic mutations on-top-of the immutable synced data.
+The collection maintains optimistic state separately from synced data. When live queries read from the collection, they see a local view that overlays the optimistic mutations on top of the immutable synced data.
 
-The optimistic state is held until the `onUpdate` (in this case) handler resolves - at which point the data is persisted to the server and synced back to the local collection.
+The optimistic state is held until the handler resolves, at which point the data is persisted to the server and synced back. If the handler throws an error, the optimistic state is rolled back.
 
-If the handler throws an error, the optimistic state is rolled back.
-
-### Explicit transactions
-
-Mutations are based on a `Transaction` primitive.
-
-For simple state changes, directly mutating the collection and persisting with the operator handlers is enough.
-
-But for more complex use cases, you can directly create custom actions with `createOptimisticAction` or custom transactions with `createTransaction`. This lets you do things such as do transactions with multiple mutations across multiple collections, do chained transactions w/ intermediate rollbacks, etc.
-
-For example, in the following code, the mutationFn first sends the write to the server using `await api.todos.update(updatedTodo)` and then calls `await collection.refetch()` to trigger a re-fetch of the collection contents using TanStack Query. When this second await resolves, the collection is up-to-date with the latest changes and the optimistic state is safely discarded.
-
-```ts
-const updateTodo = createOptimisticAction<{ id: string }>({
-  onMutate,
-  mutationFn: async ({ transaction }) => {
-    const { collection, modified: updatedTodo } = transaction.mutations[0]
-
-    await api.todos.update(updatedTodo)
-    await collection.refetch()
-  },
-})
-```
+For more complex mutations, you can create custom actions with `createOptimisticAction` or custom transactions with `createTransaction`. See the [Mutations guide](../guides/mutations.md) for details.
 
 ### Uni-directional data flow
 
@@ -444,6 +422,50 @@ export const tempDataCollection = createCollection(
 > [!TIP]
 > LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
 
+**Using LocalStorage and LocalOnly Collections with Manual Transactions:**
+
+When using either LocalStorage or LocalOnly collections with manual transactions (created via `createTransaction`), you must call `utils.acceptMutations()` in your transaction's `mutationFn` to persist the changes. This is necessary because these collections don't participate in the standard mutation handler flow for manual transactions.
+
+```ts
+import { createTransaction } from "@tanstack/react-db"
+
+const localData = createCollection(
+  localOnlyCollectionOptions({
+    id: "form-draft",
+    getKey: (item) => item.id,
+  })
+)
+
+const serverCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["items"],
+    queryFn: async () => api.items.getAll(),
+    getKey: (item) => item.id,
+    onInsert: async ({ transaction }) => {
+      await api.items.create(transaction.mutations[0].modified)
+    },
+  })
+)
+
+const tx = createTransaction({
+  mutationFn: async ({ transaction }) => {
+    // Server collection mutations are handled by their onInsert handler automatically
+    // (onInsert will be called and awaited)
+
+    // After server mutations succeed, persist local collection mutations
+    localData.utils.acceptMutations(transaction)
+  },
+})
+
+// Apply mutations to both collections in one transaction
+tx.mutate(() => {
+  localData.insert({ id: "draft-1", data: "..." })
+  serverCollection.insert({ id: "1", name: "Item" })
+})
+
+await tx.commit()
+```
+
 #### Derived collections
 
 Live queries return collections. This allows you to derive collections from other collections.
@@ -554,369 +576,16 @@ See the [Live Queries](../guides/live-queries.md) documentation for more details
 
 ### Transactional mutators
 
-Transactional mutators allow you to batch and stage local changes across collections with:
-
-- immediate application of local optimistic updates
-- flexible mutationFns to handle writes, with automatic rollbacks and management of optimistic state
-
-#### `mutationFn`
-
-Mutators are created with a `mutationFn`. You can define a single, generic `mutationFn` for your whole app. Or you can define collection or mutation specific functions.
-
-The `mutationFn` is responsible for handling the local changes and processing them, usually to send them to a server or database to be stored.
-
-**Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back before you return, as the optimistic state is dropped when you return from the mutation function. You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`, direct write APIs, or Electric's `utils.awaitTxId()`.
-
-For example:
-
-```tsx
-import type { MutationFn } from "@tanstack/react-db"
-
-const mutationFn: MutationFn = async ({ transaction }) => {
-  const response = await api.todos.create(transaction.mutations)
-
-  if (!response.ok) {
-    // Throwing an error will rollback the optimistic state.
-    throw new Error(`HTTP Error: ${response.status}`)
-  }
-
-  const result = await response.json()
-
-  // Wait for the transaction to be synced back from the server
-  // before discarding the optimistic state.
-  const collection: Collection = transaction.mutations[0].collection
-  await collection.refetch()
-}
-```
-
-#### `createOptimisticAction`
-
-Use `createOptimisticAction` with your `mutationFn` and `onMutate` functions to create an action that you can use to mutate data in your components in fully custom ways:
-
-```tsx
-import { createOptimisticAction } from "@tanstack/react-db"
-
-// Create the `addTodo` action, passing in your `mutationFn` and `onMutate`.
-const addTodo = createOptimisticAction<string>({
-  onMutate: (text) => {
-    // Instantly applies the local optimistic state.
-    todoCollection.insert({
-      id: uuid(),
-      text,
-      completed: false,
-    })
-  },
-  mutationFn: async (text, params) => {
-    // Persist the todo to your backend
-    const response = await fetch("/api/todos", {
-      method: "POST",
-      body: JSON.stringify({ text, completed: false }),
-    })
-    const result = await response.json()
-
-    // IMPORTANT: Ensure server writes have synced back before returning
-    // This ensures the optimistic state can be safely discarded
-    await todoCollection.utils.refetch()
-
-    return result
-  },
-})
-
-const Todo = () => {
-  const handleClick = () => {
-    // Triggers the onMutate and then the mutationFn
-    addTodo("🔥 Make app faster")
-  }
-
-  return <Button onClick={handleClick} />
-}
-```
-
-## Manual Transactions
-
-By manually creating transactions, you can fully control their lifecycles and behaviors. `createOptimisticAction` is a ~25 line
-function which implements a common transaction pattern. Feel free to invent your own patterns!
-
-Here's one way you could use transactions.
-
-```ts
-import { createTransaction } from "@tanstack/react-db"
-
-const addTodoTx = createTransaction({
-  autoCommit: false,
-  mutationFn: async ({ transaction }) => {
-    // Persist data to backend
-    await Promise.all(transaction.mutations.map(mutation => {
-      return await api.saveTodo(mutation.modified)
-    })
-  },
-})
-
-// Apply first change
-addTodoTx.mutate(() => todoCollection.insert({ id: '1', text: 'First todo', completed: false }))
-
-// user reviews change
-
-// Apply another change
-addTodoTx.mutate(() => todoCollection.insert({ id: '2', text: 'Second todo', completed: false }))
-
-// User decides to save and we call .commit() and the mutations are persisted to the backend.
-addTodoTx.commit()
-```
-
-### Mutation Merging
-
-When multiple mutations operate on the same item within a transaction, TanStack DB intelligently merges them to reduce over-the-wire churn and keep the optimistic local view aligned with user intent.
-
-The merging behavior follows a truth table based on the mutation types:
-
-| Existing → New      | Result    | Description                                       |
-| ------------------- | --------- | ------------------------------------------------- |
-| **insert + update** | `insert`  | Keeps insert type, merges changes, empty original |
-| **insert + delete** | _removed_ | Mutations cancel each other out                   |
-| **update + delete** | `delete`  | Delete dominates                                  |
-| **update + update** | `update`  | Union changes, keep first original                |
-| **same type**       | _latest_  | Replace with most recent mutation                 |
-
-#### Examples
-
-**Insert followed by update:**
-
-```ts
-const tx = createTransaction({ autoCommit: false, mutationFn })
-
-// Insert a new todo
-tx.mutate(() =>
-  todoCollection.insert({
-    id: "1",
-    text: "Buy groceries",
-    completed: false,
-  })
-)
-
-// Update the same todo
-tx.mutate(() =>
-  todoCollection.update("1", (draft) => {
-    draft.text = "Buy organic groceries"
-    draft.priority = "high"
-  })
-)
-
-// Result: Single insert mutation with merged data
-// { id: '1', text: 'Buy organic groceries', completed: false, priority: 'high' }
-```
-
-**Insert followed by delete:**
-
-```ts
-// Insert then delete cancels out - no mutations sent to server
-tx.mutate(() => todoCollection.insert({ id: "1", text: "Temp todo" }))
-tx.mutate(() => todoCollection.delete("1"))
-
-// Result: No mutations (they cancel each other out)
-```
-
-This intelligent merging ensures that:
-
-- **Network efficiency**: Fewer mutations sent to the server
-- **User intent preservation**: Final state matches what user expects
-- **Optimistic UI consistency**: Local state always reflects user actions
-
-## Transaction lifecycle
-
-Transactions progress through the following states:
-
-1. `pending`: Initial state when a transaction is created and optimistic mutations can be applied
-2. `persisting`: Transaction is being persisted to the backend
-3. `completed`: Transaction has been successfully persisted and any backend changes have been synced back.
-4. `failed`: An error was thrown while persisting or syncing back the Transaction
-
-#### Write operations
-
-Collections support `insert`, `update` and `delete` operations.
-
-##### `insert`
-
-```typescript
-// Insert a single item
-myCollection.insert({ text: "Buy groceries", completed: false })
-
-// Insert multiple items
-insert([
-  { text: "Buy groceries", completed: false },
-  { text: "Walk dog", completed: false },
-])
-
-// Insert with optimistic updates disabled
-myCollection.insert(
-  { text: "Server-validated item", completed: false },
-  { optimistic: false }
-)
-
-// Insert with metadata and optimistic control
-myCollection.insert(
-  { text: "Custom item", completed: false },
-  {
-    metadata: { source: "import" },
-    optimistic: true, // default behavior
-  }
-)
-```
-
-##### `update`
-
-We use a proxy to capture updates as immutable draft optimistic updates.
-
-```typescript
-// Update a single item
-update(todo.id, (draft) => {
-  draft.completed = true
-})
-
-// Update multiple items
-update([todo1.id, todo2.id], (drafts) => {
-  drafts.forEach((draft) => {
-    draft.completed = true
-  })
-})
-
-// Update with metadata
-update(todo.id, { metadata: { reason: "user update" } }, (draft) => {
-  draft.text = "Updated text"
-})
-
-// Update without optimistic updates
-update(todo.id, { optimistic: false }, (draft) => {
-  draft.status = "server-validated"
-})
-
-// Update with both metadata and optimistic control
-update(
-  todo.id,
-  {
-    metadata: { reason: "admin update" },
-    optimistic: false,
-  },
-  (draft) => {
-    draft.priority = "high"
-  }
-)
-```
-
-##### `delete`
-
-```typescript
-// Delete a single item
-delete todo.id
-
-// Delete multiple items
-delete [todo1.id, todo2.id]
-
-// Delete with metadata
-delete (todo.id, { metadata: { reason: "completed" } })
-
-// Delete without optimistic updates (waits for server confirmation)
-delete (todo.id, { optimistic: false })
-
-// Delete with metadata and optimistic control
-delete (todo.id,
-{
-  metadata: { reason: "admin deletion" },
-  optimistic: false,
-})
-```
-
-#### Controlling optimistic behavior
-
-By default, all mutations (`insert`, `update`, `delete`) apply optimistic updates immediately to provide instant feedback in your UI. However, there are cases where you may want to disable this behavior and wait for server confirmation before applying changes locally.
-
-##### When to use `optimistic: false`
-
-Consider disabling optimistic updates when:
-
-- **Complex server-side processing**: Inserts that depend on server-side generation (e.g., cascading foreign keys, computed fields)
-- **Validation requirements**: Operations where backend validation might reject the change
-- **Confirmation workflows**: Deletes where UX should wait for confirmation before removing data
-- **Batch operations**: Large operations where optimistic rollback would be disruptive
-
-##### Behavior differences
-
-**`optimistic: true` (default)**:
-
-- Immediately applies mutation to the local store
-- Provides instant UI feedback
-- Requires rollback if server rejects the mutation
-- Best for simple, predictable operations
-
-**`optimistic: false`**:
-
-- Does not modify local store until server confirms
-- No immediate UI feedback, but no rollback needed
-- UI updates only after successful server response
-- Best for complex or validation-heavy operations
-
-```typescript
-// Example: Critical deletion that needs confirmation
-const handleDeleteAccount = () => {
-  // Don't remove from UI until server confirms
-  userCollection.delete(userId, { optimistic: false })
-}
-
-// Example: Server-generated data
-const handleCreateInvoice = () => {
-  // Server generates invoice number, tax calculations, etc.
-  invoiceCollection.insert(invoiceData, { optimistic: false })
-}
-
-// Example: Mixed approach in same transaction
-tx.mutate(() => {
-  // Instant UI feedback for simple change
-  todoCollection.update(todoId, (draft) => {
-    draft.completed = true
-  })
-
-  // Wait for server confirmation for complex change
-  auditCollection.insert(auditRecord, { optimistic: false })
-})
-```
-
-##### Common workflow: Wait for persistence before navigation
-
-A common pattern with `optimistic: false` is to wait for the mutation to complete before navigating to a new page or showing success feedback:
-
-```typescript
-const handleCreatePost = async (postData) => {
-  // Insert without optimistic updates
-  const tx = postsCollection.insert(postData, { optimistic: false })
-
-  try {
-    // Wait for write to server and sync back to complete
-    await tx.isPersisted.promise
-
-    // Server write and sync back were successful - safe to navigate
-    navigate(`/posts/${postData.id}`)
-  } catch (error) {
-    // Show error toast or notification
-    toast.error('Failed to create post: ' + error.message)
-  }
-}
-
-// Works with updates and deletes too
-const handleUpdateTodo = async (todoId, changes) => {
-  const tx = todoCollection.update(
-    todoId,
-    { optimistic: false },
-    (draft) => Object.assign(draft, changes)
-  )
-
-  try {
-    await tx.isPersisted.promise
-    navigate('/todos')
-  } catch (error) {
-    toast.error('Failed to update todo: ' + error.message)
-  }
-}
-```
+For more complex mutations beyond simple CRUD operations, TanStack DB provides `createOptimisticAction` and `createTransaction` for creating custom mutations with full control over the mutation lifecycle.
+
+See the [Mutations guide](../guides/mutations.md) for comprehensive documentation on:
+
+- Creating custom actions with `createOptimisticAction`
+- Manual transactions with `createTransaction`
+- Mutation merging behavior
+- Controlling optimistic vs non-optimistic updates
+- Handling temporary IDs
+- Transaction lifecycle states
 
 ## Usage examples
 

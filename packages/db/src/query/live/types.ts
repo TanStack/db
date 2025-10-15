@@ -90,4 +90,9 @@ export interface LiveQueryCollectionConfig<
    * GC time for the collection
    */
   gcTime?: number
+
+  /**
+   * If enabled the collection will return a single object instead of an array
+   */
+  singleResult?: true
 }

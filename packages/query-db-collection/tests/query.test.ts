@@ -2270,4 +2270,74 @@ describe(`QueryCollection`, () => {
       expect(collection.utils.isError()).toBe(true)
     })
   })
+
+  describe(`preload()`, () => {
+    it(`should resolve preload() even without startSync or subscribers`, async () => {
+      const queryKey = [`preload-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `preload-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        // Note: NOT setting startSync: true
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should be idle initially
+      expect(collection.status).toBe(`idle`)
+      expect(queryFn).not.toHaveBeenCalled()
+
+      // Preload should resolve without any subscribers
+      await collection.preload()
+
+      // After preload, collection should be ready and queryFn should have been called
+      expect(collection.status).toBe(`ready`)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.size).toBe(items.length)
+      expect(collection.get(`1`)).toEqual(items[0])
+      expect(collection.get(`2`)).toEqual(items[1])
+    })
+
+    it(`should not call queryFn multiple times if preload() is called concurrently`, async () => {
+      const queryKey = [`preload-concurrent-test`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `preload-concurrent-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Call preload() multiple times concurrently
+      const promises = [
+        collection.preload(),
+        collection.preload(),
+        collection.preload(),
+      ]
+
+      await Promise.all(promises)
+
+      // queryFn should only be called once despite multiple preload() calls
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.size).toBe(items.length)
+    })
+  })
 })

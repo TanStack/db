@@ -9,6 +9,7 @@ export {
   type Context,
   type Source,
   type GetResult,
+  type InferResultType,
 } from "./builder/index.js"
 
 // Expression functions exports
@@ -55,3 +56,4 @@ export {
 } from "./live-query-collection.js"
 
 export { type LiveQueryCollectionConfig } from "./live/types.js"
+export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.js"

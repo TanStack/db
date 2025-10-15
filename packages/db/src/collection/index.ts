@@ -24,7 +24,9 @@ import type {
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
+  NonSingleResult,
   OperationConfig,
+  SingleResult,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -45,11 +47,12 @@ import type { IndexProxy } from "../indexes/lazy-index.js"
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
+  readonly singleResult?: true
 }
 
 /**
@@ -127,26 +130,53 @@ export interface Collection<
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
     utils?: TUtils
-  }
-): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>>
+  } & NonSingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  NonSingleResult
+
+// Overload for when schema is provided and singleResult is true
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+    schema: T
+    utils?: TUtils
+  } & SingleResult
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  SingleResult
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
 export function createCollection<
   T extends object,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
-  }
-): Collection<T, TKey, TUtils, never, T>
+  } & NonSingleResult
+): Collection<T, TKey, TUtils, never, T> & NonSingleResult
+
+// Overload for when no schema is provided and singleResult is true
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: CollectionConfig<T, TKey, never> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils?: TUtils
+  } & SingleResult
+): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Implementation
 export function createCollection(
@@ -186,8 +216,8 @@ export class CollectionImpl<
   // Managers
   private _events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
-  private _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
-  private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private _mutations: CollectionMutationsManager<
     TOutput,
@@ -272,6 +302,7 @@ export class CollectionImpl<
       collection: this, // Required for passing to config.sync callback
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
 
     // Only start sync immediately if explicitly enabled
@@ -322,6 +353,14 @@ export class CollectionImpl<
    */
   public isReady(): boolean {
     return this._lifecycle.status === `ready`
+  }
+
+  /**
+   * Check if the collection is currently loading more data
+   * @returns true if the collection has pending load more operations, false otherwise
+   */
+  public get isLoadingSubset(): boolean {
+    return this._sync.isLoadingSubset
   }
 
   /**
@@ -428,7 +467,10 @@ export class CollectionImpl<
    * // Create a ordered index with custom options
    * const ageIndex = collection.createIndex((row) => row.age, {
    *   indexType: BTreeIndex,
-   *   options: { compareFn: customComparator },
+   *   options: {
+   *     compareFn: customComparator,
+   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
+   *   },
    *   name: 'age_btree'
    * })
    *

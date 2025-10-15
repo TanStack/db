@@ -384,7 +384,7 @@ export function useLiveQuery(
       return status
     },
     get isLoading() {
-      return status === `loading` || status === `initialCommit`
+      return status === `loading`
     },
     get isReady() {
       return status === `ready`

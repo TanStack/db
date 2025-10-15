@@ -200,6 +200,32 @@ query
 
 ***
 
+### findOne()
+
+```ts
+findOne(): QueryBuilder<TContext>
+```
+
+Specify that the query should return a single row as `data` and not an array.
+
+#### Returns
+
+[`QueryBuilder`](../../type-aliases/querybuilder.md)\<`TContext`\>
+
+A QueryBuilder with single return enabled
+
+#### Example
+
+```ts
+// Get an user by ID
+query
+  .from({ users: usersCollection })
+  .where(({users}) => eq(users.id, 1))
+  .findOne()
+```
+
+***
+
 ### from()
 
 ```ts

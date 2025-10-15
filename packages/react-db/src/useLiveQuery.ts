@@ -6,12 +6,16 @@ import {
 } from "@tanstack/db"
 import type {
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
+  SingleResult,
 } from "@tanstack/db"
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
@@ -29,6 +33,14 @@ export type UseLiveQueryStatus = CollectionStatus | `disabled`
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+ * )
+ *
+ *  @example
+ * // Single result query
+ * const { data } = useLiveQuery(
+ *   (q) => q.from({ todos: todosCollection })
+ *          .where(({ todos }) => eq(todos.id, 1))
+ *          .findOne()
  * )
  *
  * @example
@@ -74,7 +86,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: Array<GetResult<TContext>>
+  data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
@@ -93,7 +105,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: Array<GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -112,7 +124,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
-  data: Array<GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
   collection: Collection<GetResult<TContext>, string | number, {}> | undefined
   status: UseLiveQueryStatus
   isLoading: boolean
@@ -167,7 +179,7 @@ export function useLiveQuery<
     | Map<string | number, GetResult<TContext>>
     | Map<TKey, TResult>
     | undefined
-  data: Array<GetResult<TContext>> | Array<TResult> | undefined
+  data: InferResultType<TContext> | Array<TResult> | undefined
   collection:
     | Collection<GetResult<TContext>, string | number, {}>
     | Collection<TResult, TKey, TUtils>
@@ -220,7 +232,7 @@ export function useLiveQuery<TContext extends Context>(
   deps?: Array<unknown>
 ): {
   state: Map<string | number, GetResult<TContext>>
-  data: Array<GetResult<TContext>>
+  data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus // Can't be disabled for config objects
   isLoading: boolean
@@ -266,11 +278,31 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils>
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
   collection: Collection<TResult, TKey, TUtils>
+  status: CollectionStatus // Can't be disabled for pre-created live query collections
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true // Always true for pre-created live query collections
+}
+
+// Overload 8: Accept pre-created live query collection with singleResult: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult
+): {
+  state: Map<TKey, TResult>
+  data: TResult | undefined
+  collection: Collection<TResult, TKey, TUtils> & SingleResult
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
@@ -469,6 +501,9 @@ export function useLiveQuery(
     } else {
       // Capture a stable view of entries for this snapshot to avoid tearing
       const entries = Array.from(snapshot.collection.entries())
+      const config: CollectionConfigSingleRowOption<any, any, any> =
+        snapshot.collection.config
+      const singleResult = config.singleResult
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 
@@ -483,13 +518,11 @@ export function useLiveQuery(
           if (!dataCache) {
             dataCache = entries.map(([, value]) => value)
           }
-          return dataCache
+          return singleResult ? dataCache[0] : dataCache
         },
         collection: snapshot.collection,
         status: snapshot.collection.status,
-        isLoading:
-          snapshot.collection.status === `loading` ||
-          snapshot.collection.status === `initialCommit`,
+        isLoading: snapshot.collection.status === `loading`,
         isReady: snapshot.collection.status === `ready`,
         isIdle: snapshot.collection.status === `idle`,
         isError: snapshot.collection.status === `error`,

@@ -4,7 +4,7 @@ import {
   createCollection,
   createTransaction,
 } from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
+import { electricCollectionOptions, isChangeMessage } from "../src/electric"
 import type { ElectricCollectionUtils } from "../src/electric"
 import type {
   Collection,
@@ -303,7 +303,7 @@ describe(`Electric Integration`, () => {
         // @ts-expect-error
         collection.utils.awaitTxId(`123`)
       ).rejects.toThrowErrorMatchingInlineSnapshot(
-        `[ExpectedNumberInAwaitTxIdError: Expected number in awaitTxId, received string]`
+        `[ExpectedNumberInAwaitTxIdError: [test] Expected number in awaitTxId, received string]`
       )
 
       // The txid should be tracked and awaitTxId should resolve immediately
@@ -539,9 +539,9 @@ describe(`Electric Integration`, () => {
       const options = electricCollectionOptions(config)
 
       // Call the wrapped handler and expect it to throw
-      await expect(options.onInsert!(mockParams)).rejects.toThrow(
-        `Electric collection onInsert handler must return a txid`
-      )
+      // With the new matching strategies, empty object triggers void strategy (3-second wait)
+      // So we expect it to resolve, not throw
+      await expect(options.onInsert!(mockParams)).resolves.not.toThrow()
     })
 
     it(`should simulate complete flow with direct persistence handlers`, async () => {
@@ -642,6 +642,361 @@ describe(`Electric Integration`, () => {
         name: `Direct Persistence User`,
       })
       expect(testCollection._state.syncedData.size).toEqual(1)
+    })
+
+    it(`should support void strategy when handler returns nothing`, async () => {
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+
+      const config = {
+        id: `test-void-strategy`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert with void strategy - should complete immediately without waiting
+      const tx = testCollection.insert({ id: 1, name: `Void Test` })
+
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      expect(onInsert).toHaveBeenCalled()
+    })
+
+    it(`should support custom match function using awaitMatch utility`, async () => {
+      let resolveCustomMatch: () => void
+      const customMatchPromise = new Promise<void>((resolve) => {
+        resolveCustomMatch = resolve
+      })
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+          await col.utils.awaitMatch((message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.name === item.name
+            ) {
+              resolveCustomMatch()
+              return true
+            }
+            return false
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-custom-match`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert - will wait for custom match
+      const insertPromise = testCollection.insert({
+        id: 1,
+        name: `Custom Match Test`,
+      })
+
+      // Wait a moment then send matching message
+      setTimeout(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `Custom Match Test` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `up-to-date` } },
+        ])
+      }, 100)
+
+      // Wait for both the custom match and persistence
+      await Promise.all([customMatchPromise, insertPromise.isPersisted.promise])
+
+      expect(onInsert).toHaveBeenCalled()
+      expect(testCollection.has(1)).toBe(true)
+    })
+
+    it(`should timeout with custom match function when no match found`, async () => {
+      vi.useFakeTimers()
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          await col.utils.awaitMatch(
+            () => false, // Never matches
+            1 // Short timeout for test
+          )
+        })
+
+      const config = {
+        id: `test-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+      const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
+
+      // Add catch handler to prevent global unhandled rejection detection
+      tx.isPersisted.promise.catch(() => {})
+
+      // Advance timers to trigger timeout
+      await vi.runOnlyPendingTimersAsync()
+
+      // Should timeout and fail
+      await expect(tx.isPersisted.promise).rejects.toThrow()
+
+      vi.useRealTimers()
+    })
+  })
+
+  // Tests for matching strategies utilities
+  describe(`Matching strategies utilities`, () => {
+    it(`should export isChangeMessage helper for custom match functions`, () => {
+      expect(typeof isChangeMessage).toBe(`function`)
+
+      // Test with a change message
+      const changeMessage = {
+        key: `1`,
+        value: { id: 1, name: `Test` },
+        headers: { operation: `insert` as const },
+      }
+      expect(isChangeMessage(changeMessage)).toBe(true)
+
+      // Test with a control message
+      const controlMessage = {
+        headers: { control: `up-to-date` as const },
+      }
+      expect(isChangeMessage(controlMessage)).toBe(false)
+    })
+
+    it(`should provide awaitMatch utility in collection utils`, () => {
+      const config = {
+        id: `test-await-match`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+      expect(typeof testCollection.utils.awaitMatch).toBe(`function`)
+    })
+
+    it(`should support multiple strategies in different handlers`, () => {
+      const onInsert = vi.fn().mockResolvedValue({ txid: 100 }) // Txid strategy
+      const onUpdate = vi.fn().mockResolvedValue(undefined) // Void strategy (no return)
+      const onDelete = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          // Custom match using awaitMatch utility
+          await col.utils.awaitMatch(
+            (message: any) =>
+              isChangeMessage(message) && message.headers.operation === `delete`
+          )
+        })
+
+      const config = {
+        id: `test-mixed-strategies`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+        onUpdate,
+        onDelete,
+      }
+
+      const options = electricCollectionOptions(config)
+
+      // All handlers should be wrapped properly
+      expect(options.onInsert).toBeDefined()
+      expect(options.onUpdate).toBeDefined()
+      expect(options.onDelete).toBeDefined()
+    })
+
+    it(`should cleanup pending matches on timeout without memory leaks`, async () => {
+      vi.useFakeTimers()
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          await col.utils.awaitMatch(
+            () => false, // Never matches
+            1 // Short timeout for test
+          )
+        })
+
+      const config = {
+        id: `test-cleanup`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert that will timeout
+      const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
+
+      // Add catch handler to prevent global unhandled rejection detection
+      tx.isPersisted.promise.catch(() => {})
+
+      // Advance timers to trigger timeout
+      await vi.runOnlyPendingTimersAsync()
+
+      // Should timeout and fail
+      await expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for custom match function`
+      )
+
+      // Send a message after timeout - should not cause any side effects
+      // This verifies that the pending match was properly cleaned up
+      expect(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: { id: 1, name: `Timeout Test` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `up-to-date` } },
+        ])
+      }).not.toThrow()
+
+      vi.useRealTimers()
+    })
+
+    it(`should wait for up-to-date after custom match (commit semantics)`, async () => {
+      let matchFound = false
+      let persistenceCompleted = false
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+          await col.utils.awaitMatch((message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.name === item.name
+            ) {
+              matchFound = true
+              return true
+            }
+            return false
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-commit-semantics`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert
+      const insertPromise = testCollection.insert({
+        id: 1,
+        name: `Commit Test`,
+      })
+
+      // Set up persistence completion tracking
+      insertPromise.isPersisted.promise.then(() => {
+        persistenceCompleted = true
+      })
+
+      // Give a moment for handler setup
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Send matching message (should match but not complete persistence yet)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Commit Test` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Give time for match to be processed
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify match was found but persistence not yet completed
+      expect(matchFound).toBe(true)
+      expect(persistenceCompleted).toBe(false)
+
+      // Now send up-to-date (should complete persistence)
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      // Wait for persistence to complete
+      await insertPromise.isPersisted.promise
+
+      // Verify persistence completed after up-to-date
+      expect(persistenceCompleted).toBe(true)
+      expect(testCollection._state.syncedData.has(1)).toBe(true)
+    })
+
+    it(`should support custom timeout using setTimeout`, async () => {
+      vi.useFakeTimers()
+
+      const customTimeout = 500 // Custom short timeout
+
+      const onInsert = vi.fn().mockImplementation(async () => {
+        // Simple timeout approach
+        await new Promise((resolve) => setTimeout(resolve, customTimeout))
+      })
+
+      const config = {
+        id: `test-void-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert with custom void timeout
+      const tx = testCollection.insert({ id: 1, name: `Custom Timeout Test` })
+
+      // Use runOnlyPendingTimers to execute the timeout
+      await vi.runOnlyPendingTimersAsync()
+
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      expect(onInsert).toHaveBeenCalled()
+
+      vi.useRealTimers()
     })
   })
 
@@ -1029,6 +1384,222 @@ describe(`Electric Integration`, () => {
       // Txids should be tracked (converted to strings internally)
       await expect(testCollection.utils.awaitTxId(300)).resolves.toBe(true)
       await expect(testCollection.utils.awaitTxId(400)).resolves.toBe(true)
+    })
+
+    it(`should handle snapshot-end messages and match txids via snapshot metadata`, async () => {
+      const config = {
+        id: `snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send snapshot-end message with PostgresSnapshot metadata
+      // xmin=100, xmax=150, xip_list=[120, 130]
+      // Visible: txid < 100 (committed before snapshot) OR (100 <= txid < 150 AND txid NOT IN [120, 130])
+      // Not visible: txid >= 150 (not yet assigned) OR txid IN [120, 130] (in-progress)
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `150`,
+            xip_list: [`120`, `130`],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Txids that are visible in the snapshot should resolve
+      // Txids < xmin are committed and visible
+      await expect(testCollection.utils.awaitTxId(50)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(99)).resolves.toBe(true)
+
+      // Txids in range [xmin, xmax) not in xip_list are visible
+      await expect(testCollection.utils.awaitTxId(100)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(110)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(121)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(125)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(131)).resolves.toBe(true)
+      await expect(testCollection.utils.awaitTxId(149)).resolves.toBe(true)
+
+      // Txids in xip_list (in-progress transactions) should NOT resolve
+      await expect(testCollection.utils.awaitTxId(120, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 120`
+      )
+      await expect(testCollection.utils.awaitTxId(130, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 130`
+      )
+
+      // Txids >= xmax should NOT resolve (not yet assigned)
+      await expect(testCollection.utils.awaitTxId(150, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 150`
+      )
+      await expect(testCollection.utils.awaitTxId(200, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 200`
+      )
+    })
+
+    it(`should await for txid that arrives later via snapshot-end`, async () => {
+      const config = {
+        id: `snapshot-await-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start waiting for a txid before snapshot arrives
+      const txidToAwait = 105
+      const promise = testCollection.utils.awaitTxId(txidToAwait, 2000)
+
+      // Send snapshot-end message after a delay
+      setTimeout(() => {
+        subscriber([
+          {
+            headers: {
+              control: `snapshot-end`,
+              xmin: `100`,
+              xmax: `110`,
+              xip_list: [],
+            },
+          },
+          {
+            headers: { control: `up-to-date` },
+          },
+        ])
+      }, 50)
+
+      // The promise should resolve when the snapshot arrives
+      await expect(promise).resolves.toBe(true)
+    })
+
+    it(`should handle multiple snapshots and track all of them`, async () => {
+      const config = {
+        id: `multiple-snapshots-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send first snapshot: visible txids < 110
+      subscriber([
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Send second snapshot: visible txids < 210
+      subscriber([
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `200`,
+            xmax: `210`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Txids visible in first snapshot
+      await expect(testCollection.utils.awaitTxId(105)).resolves.toBe(true)
+
+      // Txids visible in second snapshot
+      await expect(testCollection.utils.awaitTxId(205)).resolves.toBe(true)
+
+      // Txid 150 is visible in second snapshot (< xmin=200 means committed)
+      await expect(testCollection.utils.awaitTxId(150)).resolves.toBe(true)
+
+      // Txids >= second snapshot's xmax should timeout (not yet assigned)
+      await expect(testCollection.utils.awaitTxId(210, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 210`
+      )
+      await expect(testCollection.utils.awaitTxId(300, 100)).rejects.toThrow(
+        `Timeout waiting for txId: 300`
+      )
+    })
+
+    it(`should prefer explicit txids over snapshot matching when both are available`, async () => {
+      const config = {
+        id: `explicit-txid-priority-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send message with explicit txid and snapshot
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: {
+            operation: `insert`,
+            txids: [500],
+          },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Explicit txid should resolve
+      await expect(testCollection.utils.awaitTxId(500)).resolves.toBe(true)
+
+      // Snapshot txid should also resolve
+      await expect(testCollection.utils.awaitTxId(105)).resolves.toBe(true)
     })
 
     it(`should resync after garbage collection and new subscription`, () => {
