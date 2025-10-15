@@ -12,7 +12,7 @@ import {
 } from "../src/query/predicate-utils"
 import { Func, PropRef, Value } from "../src/query/ir"
 import type { BasicExpression, OrderBy, OrderByClause } from "../src/query/ir"
-import type { OnLoadMoreOptions } from "../src/types"
+import type { LoadSubsetOptions } from "../src/types"
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -839,12 +839,12 @@ describe(`isLimitSubset`, () => {
 
 describe(`isPredicateSubset`, () => {
   it(`should check all components`, () => {
-    const subset: OnLoadMoreOptions = {
+    const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(20)),
       orderBy: [orderByClause(ref(`age`), `asc`)],
       limit: 10,
     }
-    const superset: OnLoadMoreOptions = {
+    const superset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       orderBy: [
         orderByClause(ref(`age`), `asc`),
@@ -856,11 +856,11 @@ describe(`isPredicateSubset`, () => {
   })
 
   it(`should return false if where is not subset`, () => {
-    const subset: OnLoadMoreOptions = {
+    const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(5)),
       limit: 10,
     }
-    const superset: OnLoadMoreOptions = {
+    const superset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       limit: 20,
     }
@@ -868,11 +868,11 @@ describe(`isPredicateSubset`, () => {
   })
 
   it(`should return false if orderBy is not subset`, () => {
-    const subset: OnLoadMoreOptions = {
+    const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(20)),
       orderBy: [orderByClause(ref(`name`), `desc`)],
     }
-    const superset: OnLoadMoreOptions = {
+    const superset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       orderBy: [orderByClause(ref(`age`), `asc`)],
     }
@@ -880,11 +880,11 @@ describe(`isPredicateSubset`, () => {
   })
 
   it(`should return false if limit is not subset`, () => {
-    const subset: OnLoadMoreOptions = {
+    const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(20)),
       limit: 30,
     }
-    const superset: OnLoadMoreOptions = {
+    const superset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       limit: 20,
     }
@@ -899,7 +899,7 @@ describe(`intersectPredicates`, () => {
   })
 
   it(`should return single predicate as-is`, () => {
-    const pred: OnLoadMoreOptions = {
+    const pred: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       limit: 20,
     }
@@ -908,8 +908,8 @@ describe(`intersectPredicates`, () => {
   })
 
   it(`should produce false literal where clause for contradictory predicates`, () => {
-    const pred1: OnLoadMoreOptions = { where: eq(ref(`age`), val(5)) }
-    const pred2: OnLoadMoreOptions = { where: eq(ref(`age`), val(6)) }
+    const pred1: LoadSubsetOptions = { where: eq(ref(`age`), val(5)) }
+    const pred2: LoadSubsetOptions = { where: eq(ref(`age`), val(6)) }
     const result = intersectPredicates([pred1, pred2])
 
     expect(result.where).toBeDefined()
@@ -918,8 +918,8 @@ describe(`intersectPredicates`, () => {
   })
 
   it(`should intersect where clauses`, () => {
-    const pred1: OnLoadMoreOptions = { where: gt(ref(`age`), val(10)) }
-    const pred2: OnLoadMoreOptions = { where: lt(ref(`age`), val(50)) }
+    const pred1: LoadSubsetOptions = { where: gt(ref(`age`), val(10)) }
+    const pred2: LoadSubsetOptions = { where: lt(ref(`age`), val(50)) }
     const result = intersectPredicates([pred1, pred2])
 
     expect(result.where).toBeDefined()
@@ -929,34 +929,34 @@ describe(`intersectPredicates`, () => {
 
   it(`should use first non-empty orderBy`, () => {
     const orderBy1: OrderBy = [orderByClause(ref(`age`), `asc`)]
-    const pred1: OnLoadMoreOptions = { orderBy: orderBy1 }
-    const pred2: OnLoadMoreOptions = {}
+    const pred1: LoadSubsetOptions = { orderBy: orderBy1 }
+    const pred2: LoadSubsetOptions = {}
     const result = intersectPredicates([pred1, pred2])
 
     expect(result.orderBy).toBe(orderBy1)
   })
 
   it(`should use minimum limit when all have limits (intersection = most restrictive)`, () => {
-    const pred1: OnLoadMoreOptions = { limit: 10 }
-    const pred2: OnLoadMoreOptions = { limit: 20 }
-    const pred3: OnLoadMoreOptions = { limit: 15 }
+    const pred1: LoadSubsetOptions = { limit: 10 }
+    const pred2: LoadSubsetOptions = { limit: 20 }
+    const pred3: LoadSubsetOptions = { limit: 15 }
     const result = intersectPredicates([pred1, pred2, pred3])
 
     expect(result.limit).toBe(10)
   })
 
   it(`should use minimum limit even when some predicates are unlimited`, () => {
-    const pred1: OnLoadMoreOptions = { limit: 10 }
-    const pred2: OnLoadMoreOptions = {} // no limit = unlimited
-    const pred3: OnLoadMoreOptions = { limit: 20 }
+    const pred1: LoadSubsetOptions = { limit: 10 }
+    const pred2: LoadSubsetOptions = {} // no limit = unlimited
+    const pred3: LoadSubsetOptions = { limit: 20 }
     const result = intersectPredicates([pred1, pred2, pred3])
 
     expect(result.limit).toBe(10)
   })
 
   it(`should return undefined limit if all predicates are unlimited`, () => {
-    const pred1: OnLoadMoreOptions = {}
-    const pred2: OnLoadMoreOptions = {}
+    const pred1: LoadSubsetOptions = {}
+    const pred2: LoadSubsetOptions = {}
     const result = intersectPredicates([pred1, pred2])
 
     expect(result.limit).toBeUndefined()
@@ -970,7 +970,7 @@ describe(`unionPredicates`, () => {
   })
 
   it(`should return single predicate as-is`, () => {
-    const pred: OnLoadMoreOptions = {
+    const pred: LoadSubsetOptions = {
       where: gt(ref(`age`), val(10)),
       limit: 20,
     }
@@ -979,8 +979,8 @@ describe(`unionPredicates`, () => {
   })
 
   it(`should union where clauses`, () => {
-    const pred1: OnLoadMoreOptions = { where: gt(ref(`age`), val(10)) }
-    const pred2: OnLoadMoreOptions = { where: gt(ref(`age`), val(20)) }
+    const pred1: LoadSubsetOptions = { where: gt(ref(`age`), val(10)) }
+    const pred2: LoadSubsetOptions = { where: gt(ref(`age`), val(20)) }
     const result = unionPredicates([pred1, pred2])
 
     expect(result.where).toBeDefined()
@@ -992,25 +992,25 @@ describe(`unionPredicates`, () => {
 
   it(`should return undefined orderBy for union`, () => {
     const orderBy1: OrderBy = [orderByClause(ref(`age`), `asc`)]
-    const pred1: OnLoadMoreOptions = { orderBy: orderBy1 }
-    const pred2: OnLoadMoreOptions = {}
+    const pred1: LoadSubsetOptions = { orderBy: orderBy1 }
+    const pred2: LoadSubsetOptions = {}
     const result = unionPredicates([pred1, pred2])
 
     expect(result.orderBy).toBeUndefined()
   })
 
   it(`should use minimum limit when all have limits`, () => {
-    const pred1: OnLoadMoreOptions = { limit: 10 }
-    const pred2: OnLoadMoreOptions = { limit: 20 }
-    const pred3: OnLoadMoreOptions = { limit: 15 }
+    const pred1: LoadSubsetOptions = { limit: 10 }
+    const pred2: LoadSubsetOptions = { limit: 20 }
+    const pred3: LoadSubsetOptions = { limit: 15 }
     const result = unionPredicates([pred1, pred2, pred3])
 
     expect(result.limit).toBe(10)
   })
 
   it(`should return undefined limit if any predicate is unlimited`, () => {
-    const pred1: OnLoadMoreOptions = { limit: 10 }
-    const pred2: OnLoadMoreOptions = {} // no limit = unlimited
+    const pred1: LoadSubsetOptions = { limit: 10 }
+    const pred2: LoadSubsetOptions = {} // no limit = unlimited
     const result = unionPredicates([pred1, pred2])
 
     expect(result.limit).toBeUndefined()

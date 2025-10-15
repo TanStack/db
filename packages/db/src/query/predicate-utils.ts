@@ -1,5 +1,5 @@
 import type { BasicExpression, Func, OrderBy, PropRef } from "./ir.js"
-import type { OnLoadMoreOptions } from "../types.js"
+import type { LoadSubsetOptions } from "../types.js"
 
 /**
  * Check if one where clause is a logical subset of another.
@@ -154,6 +154,84 @@ function isWhereSubsetInternal(
 }
 
 /**
+ * Helper to combine where predicates with common logic for AND/OR operations
+ */
+function combineWherePredicates(
+  predicates: Array<BasicExpression<boolean>>,
+  operation: `and` | `or`,
+  simplifyFn: (
+    preds: Array<BasicExpression<boolean>>
+  ) => BasicExpression<boolean> | null
+): BasicExpression<boolean> {
+  const emptyValue = operation === `and` ? true : false
+  const identityValue = operation === `and` ? true : false
+
+  if (predicates.length === 0) {
+    return { type: `val`, value: emptyValue } as BasicExpression<boolean>
+  }
+
+  if (predicates.length === 1) {
+    return predicates[0]!
+  }
+
+  // Flatten nested expressions of the same operation
+  const flatPredicates: Array<BasicExpression<boolean>> = []
+  for (const pred of predicates) {
+    if (pred.type === `func` && pred.name === operation) {
+      flatPredicates.push(...(pred.args as Array<BasicExpression<boolean>>))
+    } else {
+      flatPredicates.push(pred)
+    }
+  }
+
+  // Group predicates by field for simplification
+  const grouped = groupPredicatesByField(flatPredicates)
+
+  // Simplify each group
+  const simplified: Array<BasicExpression<boolean>> = []
+  for (const [field, preds] of grouped.entries()) {
+    if (field === null) {
+      // Complex predicates that we can't group by field
+      simplified.push(...preds)
+    } else {
+      // Try to simplify same-field predicates
+      const result = simplifyFn(preds)
+
+      // For intersection: check for empty set (contradiction)
+      if (
+        operation === `and` &&
+        result &&
+        result.type === `val` &&
+        result.value === false
+      ) {
+        // Intersection is empty (conflicting constraints) - entire AND is false
+        return { type: `val`, value: false } as BasicExpression<boolean>
+      }
+
+      // For union: result may be null if simplification failed
+      if (result) {
+        simplified.push(result)
+      }
+    }
+  }
+
+  if (simplified.length === 0) {
+    return { type: `val`, value: identityValue } as BasicExpression<boolean>
+  }
+
+  if (simplified.length === 1) {
+    return simplified[0]!
+  }
+
+  // Return combined predicate
+  return {
+    type: `func`,
+    name: operation,
+    args: simplified,
+  } as BasicExpression<boolean>
+}
+
+/**
  * Combine multiple where predicates with AND logic (intersection).
  * Returns a predicate that is satisfied only when all input predicates are satisfied.
  * Simplifies when possible (e.g., age > 10 AND age > 20 → age > 20).
@@ -179,61 +257,7 @@ function isWhereSubsetInternal(
 export function intersectWherePredicates(
   predicates: Array<BasicExpression<boolean>>
 ): BasicExpression<boolean> {
-  if (predicates.length === 0) {
-    // No predicates means no filter (true)
-    return { type: `val`, value: true } as BasicExpression<boolean>
-  }
-
-  if (predicates.length === 1) {
-    return predicates[0]!
-  }
-
-  // Flatten any AND expressions
-  const flatPredicates: Array<BasicExpression<boolean>> = []
-  for (const pred of predicates) {
-    if (pred.type === `func` && pred.name === `and`) {
-      flatPredicates.push(...(pred.args as Array<BasicExpression<boolean>>))
-    } else {
-      flatPredicates.push(pred)
-    }
-  }
-
-  // Group predicates by field for simplification
-  const grouped = groupPredicatesByField(flatPredicates)
-
-  // Simplify each group
-  const simplified: Array<BasicExpression<boolean>> = []
-  for (const [field, preds] of grouped.entries()) {
-    if (field === null) {
-      // Complex predicates that we can't group by field
-      simplified.push(...preds)
-    } else {
-      // Try to simplify same-field predicates with AND logic
-      const result = intersectSameFieldPredicates(preds)
-      // Check if result is a false literal (empty set)
-      if (result.type === `val` && result.value === false) {
-        // Intersection is empty (conflicting constraints) - entire AND is false
-        return { type: `val`, value: false } as BasicExpression<boolean>
-      } else {
-        simplified.push(result)
-      }
-    }
-  }
-
-  if (simplified.length === 0) {
-    return { type: `val`, value: true } as BasicExpression<boolean>
-  }
-
-  if (simplified.length === 1) {
-    return simplified[0]!
-  }
-
-  // Return AND of all simplified predicates
-  return {
-    type: `func`,
-    name: `and`,
-    args: simplified,
-  } as BasicExpression<boolean>
+  return combineWherePredicates(predicates, `and`, intersectSameFieldPredicates)
 }
 
 /**
@@ -255,57 +279,7 @@ export function intersectWherePredicates(
 export function unionWherePredicates(
   predicates: Array<BasicExpression<boolean>>
 ): BasicExpression<boolean> {
-  if (predicates.length === 0) {
-    // No predicates means no data matches (false)
-    return { type: `val`, value: false } as BasicExpression<boolean>
-  }
-
-  if (predicates.length === 1) {
-    return predicates[0]!
-  }
-
-  // Flatten any OR expressions
-  const flatPredicates: Array<BasicExpression<boolean>> = []
-  for (const pred of predicates) {
-    if (pred.type === `func` && pred.name === `or`) {
-      flatPredicates.push(...(pred.args as Array<BasicExpression<boolean>>))
-    } else {
-      flatPredicates.push(pred)
-    }
-  }
-
-  // Group predicates by field for simplification
-  const grouped = groupPredicatesByField(flatPredicates)
-
-  // Simplify each group
-  const simplified: Array<BasicExpression<boolean>> = []
-  for (const [field, preds] of grouped.entries()) {
-    if (field === null) {
-      // Complex predicates that we can't group by field
-      simplified.push(...preds)
-    } else {
-      // Try to simplify same-field predicates with OR logic
-      const result = unionSameFieldPredicates(preds)
-      if (result) {
-        simplified.push(result)
-      }
-    }
-  }
-
-  if (simplified.length === 0) {
-    return { type: `val`, value: false } as BasicExpression<boolean>
-  }
-
-  if (simplified.length === 1) {
-    return simplified[0]!
-  }
-
-  // Return OR of all simplified predicates
-  return {
-    type: `func`,
-    name: `or`,
-    args: simplified,
-  } as BasicExpression<boolean>
+  return combineWherePredicates(predicates, `or`, unionSameFieldPredicates)
 }
 
 /**
@@ -771,14 +745,67 @@ export function isLimitSubset(
  * @returns true if subset is satisfied by superset
  */
 export function isPredicateSubset(
-  subset: OnLoadMoreOptions,
-  superset: OnLoadMoreOptions
+  subset: LoadSubsetOptions,
+  superset: LoadSubsetOptions
 ): boolean {
   return (
     isWhereSubset(subset.where, superset.where) &&
     isOrderBySubset(subset.orderBy, superset.orderBy) &&
     isLimitSubset(subset.limit, superset.limit)
   )
+}
+
+/**
+ * Helper to combine predicates (where + orderBy + limit)
+ */
+function combinePredicates(
+  predicates: Array<LoadSubsetOptions>,
+  operation: `intersect` | `union`,
+  whereFn: (
+    clauses: Array<BasicExpression<boolean>>
+  ) => BasicExpression<boolean>
+): LoadSubsetOptions {
+  if (predicates.length === 0) {
+    return {}
+  }
+
+  if (predicates.length === 1) {
+    return predicates[0]!
+  }
+
+  // Combine where clauses
+  const whereClauses = predicates
+    .map((p) => p.where)
+    .filter((w): w is BasicExpression<boolean> => w !== undefined)
+
+  const mergedWhere =
+    whereClauses.length > 0 ? whereFn(whereClauses) : undefined
+
+  // OrderBy logic differs by operation
+  const mergedOrderBy =
+    operation === `intersect`
+      ? predicates.find((p) => p.orderBy && p.orderBy.length > 0)?.orderBy
+      : undefined // Union: different orderings can't be combined
+
+  // Limit logic
+  const limits = predicates
+    .map((p) => p.limit)
+    .filter((l): l is number => l !== undefined)
+
+  const mergedLimit =
+    operation === `intersect`
+      ? limits.length === 0
+        ? undefined
+        : Math.min(...limits) // All unlimited = unlimited, else min
+      : limits.length === predicates.length && limits.length > 0
+        ? Math.min(...limits)
+        : undefined // Min only if all have limits
+
+  return {
+    where: mergedWhere,
+    orderBy: mergedOrderBy,
+    limit: mergedLimit,
+  }
 }
 
 /**
@@ -790,44 +817,9 @@ export function isPredicateSubset(
  * @returns Combined predicate representing the intersection
  */
 export function intersectPredicates(
-  predicates: Array<OnLoadMoreOptions>
-): OnLoadMoreOptions {
-  if (predicates.length === 0) {
-    return {}
-  }
-
-  if (predicates.length === 1) {
-    return predicates[0]!
-  }
-
-  // Intersect where clauses
-  const whereClauses = predicates
-    .map((p) => p.where)
-    .filter((w): w is BasicExpression<boolean> => w !== undefined)
-
-  const mergedWhere =
-    whereClauses.length > 0 ? intersectWherePredicates(whereClauses) : undefined
-
-  // Use first non-empty orderBy (they should be compatible if predicates are related)
-  const mergedOrderBy = predicates.find(
-    (p) => p.orderBy && p.orderBy.length > 0
-  )?.orderBy
-
-  // Use minimum limit (most restrictive - intersection must satisfy all constraints)
-  // If any predicate is unlimited, the intersection is limited by the others
-  const limits = predicates
-    .map((p) => p.limit)
-    .filter((l): l is number => l !== undefined)
-  const mergedLimit =
-    limits.length === 0
-      ? undefined // All unlimited = result unlimited
-      : Math.min(...limits) // Take most restrictive
-
-  return {
-    where: mergedWhere,
-    orderBy: mergedOrderBy,
-    limit: mergedLimit,
-  }
+  predicates: Array<LoadSubsetOptions>
+): LoadSubsetOptions {
+  return combinePredicates(predicates, `intersect`, intersectWherePredicates)
 }
 
 /**
@@ -837,47 +829,32 @@ export function intersectPredicates(
  * @returns Combined predicate
  */
 export function unionPredicates(
-  predicates: Array<OnLoadMoreOptions>
-): OnLoadMoreOptions {
-  if (predicates.length === 0) {
-    return {}
-  }
-
-  if (predicates.length === 1) {
-    return predicates[0]!
-  }
-
-  // Union where clauses
-  const whereClauses = predicates
-    .map((p) => p.where)
-    .filter((w): w is BasicExpression<boolean> => w !== undefined)
-
-  const mergedWhere =
-    whereClauses.length > 0 ? unionWherePredicates(whereClauses) : undefined
-
-  // For union, orderBy doesn't really make sense (different orderings)
-  // Return undefined
-  const mergedOrderBy = undefined
-
-  // For union, take minimum limit if all have limits
-  const limits = predicates
-    .map((p) => p.limit)
-    .filter((l): l is number => l !== undefined)
-  const mergedLimit =
-    limits.length === predicates.length && limits.length > 0
-      ? Math.min(...limits)
-      : undefined
-
-  return {
-    where: mergedWhere,
-    orderBy: mergedOrderBy,
-    limit: mergedLimit,
-  }
+  predicates: Array<LoadSubsetOptions>
+): LoadSubsetOptions {
+  return combinePredicates(predicates, `union`, unionWherePredicates)
 }
 
 // ============================================================================
 // Helper functions
 // ============================================================================
+
+/**
+ * Find a predicate with a specific operator and value
+ */
+function findPredicateWithOperator(
+  predicates: Array<BasicExpression<boolean>>,
+  operator: string,
+  value: any
+): BasicExpression<boolean> | undefined {
+  return predicates.find((p) => {
+    if (p.type === `func`) {
+      const f = p as Func
+      const field = extractComparisonField(f)
+      return f.name === operator && field && areValuesEqual(field.value, value)
+    }
+    return false
+  })
+}
 
 function areExpressionsEqual(a: BasicExpression, b: BasicExpression): boolean {
   if (a.type !== b.type) {
@@ -1347,96 +1324,32 @@ function intersectSameFieldPredicates(
   // Choose the most restrictive lower bound
   if (minGt !== null && minGte !== null) {
     // If we have both > and >=, use > if it's more restrictive
-    if (minGt >= minGte) {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return f.name === `gt` && extractComparisonField(f)?.value === minGt
-          }
-          return false
-        })!
-      )
-    } else {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return (
-              f.name === `gte` && extractComparisonField(f)?.value === minGte
-            )
-          }
-          return false
-        })!
-      )
-    }
+    const pred =
+      minGt >= minGte
+        ? findPredicateWithOperator(predicates, `gt`, minGt)
+        : findPredicateWithOperator(predicates, `gte`, minGte)
+    if (pred) result.push(pred)
   } else if (minGt !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `gt` && extractComparisonField(f)?.value === minGt
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `gt`, minGt)
+    if (pred) result.push(pred)
   } else if (minGte !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `gte` && extractComparisonField(f)?.value === minGte
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `gte`, minGte)
+    if (pred) result.push(pred)
   }
 
   // Choose the most restrictive upper bound
   if (maxLt !== null && maxLte !== null) {
-    if (maxLt <= maxLte) {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return f.name === `lt` && extractComparisonField(f)?.value === maxLt
-          }
-          return false
-        })!
-      )
-    } else {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return (
-              f.name === `lte` && extractComparisonField(f)?.value === maxLte
-            )
-          }
-          return false
-        })!
-      )
-    }
+    const pred =
+      maxLt <= maxLte
+        ? findPredicateWithOperator(predicates, `lt`, maxLt)
+        : findPredicateWithOperator(predicates, `lte`, maxLte)
+    if (pred) result.push(pred)
   } else if (maxLt !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `lt` && extractComparisonField(f)?.value === maxLt
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `lt`, maxLt)
+    if (pred) result.push(pred)
   } else if (maxLte !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `lte` && extractComparisonField(f)?.value === maxLte
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `lte`, maxLte)
+    if (pred) result.push(pred)
   }
 
   // Add intersected IN values if present
@@ -1565,112 +1478,38 @@ function unionSameFieldPredicates(
   // Choose the least restrictive lower bound
   if (maxGt !== null && maxGte !== null) {
     // Take the smaller one (less restrictive)
-    if (maxGte <= maxGt) {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return (
-              f.name === `gte` && extractComparisonField(f)?.value === maxGte
-            )
-          }
-          return false
-        })!
-      )
-    } else {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return f.name === `gt` && extractComparisonField(f)?.value === maxGt
-          }
-          return false
-        })!
-      )
-    }
+    const pred =
+      maxGte <= maxGt
+        ? findPredicateWithOperator(predicates, `gte`, maxGte)
+        : findPredicateWithOperator(predicates, `gt`, maxGt)
+    if (pred) result.push(pred)
   } else if (maxGt !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `gt` && extractComparisonField(f)?.value === maxGt
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `gt`, maxGt)
+    if (pred) result.push(pred)
   } else if (maxGte !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `gte` && extractComparisonField(f)?.value === maxGte
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `gte`, maxGte)
+    if (pred) result.push(pred)
   }
 
   // Choose the least restrictive upper bound
   if (minLt !== null && minLte !== null) {
-    if (minLte >= minLt) {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return (
-              f.name === `lte` && extractComparisonField(f)?.value === minLte
-            )
-          }
-          return false
-        })!
-      )
-    } else {
-      result.push(
-        predicates.find((p) => {
-          if (p.type === `func`) {
-            const f = p as Func
-            return f.name === `lt` && extractComparisonField(f)?.value === minLt
-          }
-          return false
-        })!
-      )
-    }
+    const pred =
+      minLte >= minLt
+        ? findPredicateWithOperator(predicates, `lte`, minLte)
+        : findPredicateWithOperator(predicates, `lt`, minLt)
+    if (pred) result.push(pred)
   } else if (minLt !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `lt` && extractComparisonField(f)?.value === minLt
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `lt`, minLt)
+    if (pred) result.push(pred)
   } else if (minLte !== null) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return f.name === `lte` && extractComparisonField(f)?.value === minLte
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `lte`, minLte)
+    if (pred) result.push(pred)
   }
 
   // Add single eq value
   if (eqValues.size === 1 && inValues.size === 0) {
-    result.push(
-      predicates.find((p) => {
-        if (p.type === `func`) {
-          const f = p as Func
-          return (
-            f.name === `eq` &&
-            extractComparisonField(f)?.value === [...eqValues][0]
-          )
-        }
-        return false
-      })!
-    )
+    const pred = findPredicateWithOperator(predicates, `eq`, [...eqValues][0])
+    if (pred) result.push(pred)
   }
 
   // Add IN if only IN values
