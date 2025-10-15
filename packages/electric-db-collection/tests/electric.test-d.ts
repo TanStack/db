@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import {
+  and,
   createCollection,
   createLiveQueryCollection,
   eq,
@@ -200,7 +201,7 @@ describe(`Electric collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
+          .where(({ user }) => and(eq(user.active, true), gt(user.age, 18)))
           .select(({ user }) => ({
             id: user.id,
             name: user.name,

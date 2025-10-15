@@ -6,6 +6,7 @@ import {
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
+import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -716,6 +717,21 @@ function createElectricSync<T extends Row<unknown>>(
       const newSnapshots: Array<PostgresSnapshot> = []
       let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
 
+      // Create deduplicated loadSubset wrapper for non-eager modes
+      // This prevents redundant snapshot requests when multiple concurrent
+      // live queries request overlapping or subset predicates
+      const loadSubsetDedupe =
+        syncMode === `eager`
+          ? null
+          : new DeduplicatedLoadSubset(async (opts: LoadSubsetOptions) => {
+              // In progressive mode, stop requesting snapshots once full sync is complete
+              if (syncMode === `progressive` && hasReceivedUpToDate) {
+                return
+              }
+              const snapshotParams = compileSQL<T>(opts)
+              await stream.requestSnapshot(snapshotParams)
+            })
+
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
         let hasSnapshotEnd = false
@@ -799,6 +815,10 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
+            // Reset the loadSubset deduplication state since we're starting fresh
+            // This ensures that previously loaded predicates don't prevent refetching after truncate
+            loadSubsetDedupe?.reset()
+
             // Reset flags so we continue accumulating changes until next up-to-date
             hasUpToDate = false
             hasSnapshotEnd = false
@@ -858,23 +878,10 @@ function createElectricSync<T extends Row<unknown>>(
         }
       })
 
-      // Only set onLoadSubset if the sync mode is not eager, this indicates to the sync
-      // layer that it can load more data on demand via the requestSnapshot method when,
-      // the syncMode = `on-demand` or `progressive`
-      const loadSubset =
-        syncMode === `eager`
-          ? undefined
-          : async (opts: LoadSubsetOptions) => {
-              // In progressive mode, stop requesting snapshots once full sync is complete
-              if (syncMode === `progressive` && hasReceivedUpToDate) {
-                return
-              }
-              const snapshotParams = compileSQL<T>(opts)
-              await stream.requestSnapshot(snapshotParams)
-            }
-
+      // Return the deduplicated loadSubset if available (on-demand or progressive mode)
+      // The loadSubset method is auto-bound, so it can be safely returned directly
       return {
-        loadSubset,
+        loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
