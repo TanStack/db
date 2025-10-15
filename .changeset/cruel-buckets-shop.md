@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+"@tanstack/db": patch
 ---
 
 Added comprehensive loading state tracking and configurable sync modes to collections and live queries:
