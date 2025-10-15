@@ -729,21 +729,23 @@ describe(`Operators`, () => {
 
 describe(`Operators`, () => {
   describe(`TopKWithFractionalIndex operator with array`, () => {
-    it(`should support moving topK window past current window using setMoveFn callback`, () => {
+    it(`should support moving topK window past current window using setWindowFn callback`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
         [number, [{ id: number; value: string }, string]]
       >()
 
-      let moveFn: ((offset: number, limit: number) => void) | undefined
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | undefined
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
           limit: 3,
           offset: 0,
-          setMoveFn: (fn) => {
-            moveFn = fn
+          setWindowFn: (fn) => {
+            windowFn = fn
           },
         }),
         output((message) => {
@@ -777,13 +779,13 @@ describe(`Operators`, () => {
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`])
 
-      // Verify moveFn was set
-      expect(moveFn).toBeDefined()
+      // Verify windowFn was set
+      expect(windowFn).toBeDefined()
 
       const numberOfMessages = tracker.getResult().messageCount
 
       // Move the window to show elements d, e, f (offset: 3, limit: 3)
-      moveFn!(3, 3)
+      windowFn!({ offset: 3, limit: 3 })
       graph.run()
 
       const moveResult = tracker.getResult(compareFractionalIndex)
@@ -800,21 +802,23 @@ describe(`Operators`, () => {
       expect(affectedKeys).toEqual(expect.arrayContaining([1, 2, 3, 4, 5, 6]))
     })
 
-    it(`should support moving topK window before current window using setMoveFn callback`, () => {
+    it(`should support moving topK window before current window using setWindowFn callback`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const tracker = new MessageTracker<
         [number, [{ id: number; value: string }, string]]
       >()
 
-      let moveFn: ((offset: number, limit: number) => void) | undefined
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | undefined
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
           limit: 3,
           offset: 3,
-          setMoveFn: (fn) => {
-            moveFn = fn
+          setWindowFn: (fn) => {
+            windowFn = fn
           },
         }),
         output((message) => {
@@ -848,13 +852,13 @@ describe(`Operators`, () => {
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
 
-      // Verify moveFn was set
-      expect(moveFn).toBeDefined()
+      // Verify windowFn was set
+      expect(windowFn).toBeDefined()
 
       const numberOfMessages = tracker.getResult().messageCount
 
       // Move the window to show elements d, e, f (offset: 3, limit: 3)
-      moveFn!(0, 3)
+      windowFn!({ offset: 0, limit: 3 })
       graph.run()
 
       const moveResult = tracker.getResult(compareFractionalIndex)
@@ -878,14 +882,16 @@ describe(`Operators`, () => {
         [number, [{ id: number; value: string }, string]]
       >()
 
-      let moveFn: ((offset: number, limit: number) => void) | null = null
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
           limit: 2,
           offset: 0,
-          setMoveFn: (fn) => {
-            moveFn = fn
+          setWindowFn: (fn) => {
+            windowFn = fn
           },
         }),
         output((message) => {
@@ -919,7 +925,7 @@ describe(`Operators`, () => {
       // tracker.reset()
 
       // Move offset to 1, keeping limit at 2 (should show b, c)
-      moveFn!(1, 2)
+      windowFn!({ offset: 1, limit: 2 })
       graph.run()
 
       const moveResult = tracker.getResult(compareFractionalIndex)
@@ -932,7 +938,7 @@ describe(`Operators`, () => {
       // tracker.reset()
 
       // Move offset to 2, keeping limit at 2 (should show c, d)
-      moveFn!(2, 2)
+      windowFn!({ offset: 2, limit: 2 })
       graph.run()
 
       const moveResult2 = tracker.getResult(compareFractionalIndex)
@@ -943,7 +949,7 @@ describe(`Operators`, () => {
       expect(moveSortedValues2).toEqual([`c`, `d`])
 
       // Move offset back to 0, keeping limit at 2 (should show a, b)
-      moveFn!(0, 2)
+      windowFn!({ offset: 0, limit: 2 })
       graph.run()
 
       const moveResult3 = tracker.getResult(compareFractionalIndex)
@@ -961,14 +967,16 @@ describe(`Operators`, () => {
         [number, [{ id: number; value: string }, string]]
       >()
 
-      let moveFn: ((offset: number, limit: number) => void) | null = null
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
           limit: 2,
           offset: 1,
-          setMoveFn: (fn) => {
-            moveFn = fn
+          setWindowFn: (fn) => {
+            windowFn = fn
           },
         }),
         output((message) => {
@@ -1001,7 +1009,7 @@ describe(`Operators`, () => {
       expect(initialSortedValues).toEqual([`b`, `c`])
 
       // Increase limit to 3, keeping offset at 1 (should show b, c, d)
-      moveFn!(1, 3)
+      windowFn!({ offset: 1, limit: 3 })
       graph.run()
 
       const moveResult = tracker.getResult(compareFractionalIndex)
@@ -1012,7 +1020,7 @@ describe(`Operators`, () => {
       expect(moveSortedValues).toEqual([`b`, `c`, `d`])
 
       // Decrease limit to 1, keeping offset at 1 (should show just b)
-      moveFn!(1, 1)
+      windowFn!({ offset: 1, limit: 1 })
       graph.run()
 
       const moveResult2 = tracker.getResult(compareFractionalIndex)
@@ -1030,14 +1038,16 @@ describe(`Operators`, () => {
         [number, [{ id: number; value: string }, string]]
       >()
 
-      let moveFn: ((offset: number, limit: number) => void) | null = null
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
           limit: 2,
           offset: 0,
-          setMoveFn: (fn) => {
-            moveFn = fn
+          setWindowFn: (fn) => {
+            windowFn = fn
           },
         }),
         output((message) => {
@@ -1067,7 +1077,7 @@ describe(`Operators`, () => {
       expect(initialSortedValues).toEqual([`a`, `b`])
 
       // Move to offset 2, limit 2 (should show only c, since we only have 3 total elements)
-      moveFn!(2, 2)
+      windowFn!({ offset: 2, limit: 2 })
       graph.run()
 
       const moveResult = tracker.getResult(compareFractionalIndex)
@@ -1078,7 +1088,7 @@ describe(`Operators`, () => {
       expect(moveSortedValues).toEqual([`c`]) // Only 1 element available at offset 2
 
       // Move to offset 5, limit 2 (should show no elements, beyond available data)
-      moveFn!(5, 2)
+      windowFn!({ offset: 5, limit: 2 })
       graph.run()
 
       const moveResult2 = tracker.getResult(compareFractionalIndex)
@@ -1089,7 +1099,7 @@ describe(`Operators`, () => {
       expect(moveSortedValues2).toEqual([]) // No elements available at offset 5
 
       // Move to a negative offset and limit (should show no elements)
-      moveFn!(-5, 2)
+      windowFn!({ offset: -5, limit: 2 })
       graph.run()
 
       const moveResult3 = tracker.getResult(compareFractionalIndex)
@@ -1100,7 +1110,7 @@ describe(`Operators`, () => {
       expect(moveSortedValues3).toEqual([])
 
       // Move back to a valid window
-      moveFn!(0, 2)
+      windowFn!({ offset: 0, limit: 2 })
       graph.run()
 
       const moveResult4 = tracker.getResult(compareFractionalIndex)

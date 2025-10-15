@@ -5,6 +5,7 @@ import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
 import { replaceAggregatesByRefs } from "./group-by.js"
+import type { WindowOptions } from "./types.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
 import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
@@ -38,7 +39,7 @@ export function processOrderBy(
   selectClause: Select,
   collection: Collection,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
@@ -197,15 +198,19 @@ export function processOrderBy(
       offset,
       comparator: compare,
       setSizeCallback,
-      setMoveFn: (moveFn: (offset: number, limit: number) => void) => {
-        setMoveFn(
+      setWindowFn: (
+        windowFn: (options: { offset?: number; limit?: number }) => void
+      ) => {
+        setWindowFn(
           // We wrap the move function such that we update the orderByOptimizationInfo
           // because that is used by the `dataNeeded` callback to determine if we need to load more data
-          (newOffset, newLimit) => {
-            moveFn(newOffset, newLimit)
+          (options) => {
+            windowFn(options)
             if (orderByOptimizationInfo) {
-              orderByOptimizationInfo.offset = newOffset
-              orderByOptimizationInfo.limit = newLimit
+              orderByOptimizationInfo.offset =
+                options.offset ?? orderByOptimizationInfo.offset
+              orderByOptimizationInfo.limit =
+                options.limit ?? orderByOptimizationInfo.limit
             }
           }
         )

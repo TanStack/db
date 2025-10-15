@@ -978,7 +978,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
 
       // Move the window to show users David, Eve, Frank (offset: 3, limit: 3)
-      activeUsers.utils.move(3, 3)
+      activeUsers.utils.setWindow({ offset: 3, limit: 3 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1028,7 +1028,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
 
       // Move the window to show users Alice, Bob, Charlie (offset: 0, limit: 3)
-      activeUsers.utils.move(0, 3)
+      activeUsers.utils.setWindow({ offset: 0, limit: 3 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1073,7 +1073,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
 
       // Move offset to 1, keeping limit at 2 (should show Bob, Charlie)
-      activeUsers.utils.move(1, 2)
+      activeUsers.utils.setWindow({ offset: 1, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1082,7 +1082,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults1.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
 
       // Move offset to 2, keeping limit at 2 (should show Charlie, David)
-      activeUsers.utils.move(2, 2)
+      activeUsers.utils.setWindow({ offset: 2, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1091,7 +1091,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults2.map((r) => r.name)).toEqual([`Charlie`, `David`])
 
       // Move offset back to 0, keeping limit at 2 (should show Alice, Bob)
-      activeUsers.utils.move(0, 2)
+      activeUsers.utils.setWindow({ offset: 0, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1133,7 +1133,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(initialResults.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
 
       // Increase limit to 3, keeping offset at 1 (should show Bob, Charlie, David)
-      activeUsers.utils.move(1, 3)
+      activeUsers.utils.setWindow({ offset: 1, limit: 3 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1146,7 +1146,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
 
       // Decrease limit to 1, keeping offset at 1 (should show just Bob)
-      activeUsers.utils.move(1, 1)
+      activeUsers.utils.setWindow({ offset: 1, limit: 1 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1185,7 +1185,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
 
       // Move to offset 2, limit 2 (should show only Charlie, since we only have 3 total users)
-      activeUsers.utils.move(2, 2)
+      activeUsers.utils.setWindow({ offset: 2, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1194,7 +1194,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults1.map((r) => r.name)).toEqual([`Charlie`]) // Only 1 user available at offset 2
 
       // Move to offset 5, limit 2 (should show no users, beyond available data)
-      activeUsers.utils.move(5, 2)
+      activeUsers.utils.setWindow({ offset: 5, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1203,7 +1203,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults2).toEqual([]) // No users available at offset 5
 
       // Move to a negative offset and limit (should show no users)
-      activeUsers.utils.move(-5, 2)
+      activeUsers.utils.setWindow({ offset: -5, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1212,7 +1212,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults3).toEqual([])
 
       // Move back to a valid window
-      activeUsers.utils.move(0, 2)
+      activeUsers.utils.setWindow({ offset: 0, limit: 2 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1258,7 +1258,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
 
       // Move the window to show next 3 users (Charlie, Bob, Alice)
-      activeUsers.utils.move(3, 3)
+      activeUsers.utils.setWindow({ offset: 3, limit: 3 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1288,7 +1288,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(initialResults.length).toBe(2)
 
       // Move should be a no-op for non-ordered queries
-      activeUsers.utils.move(1, 1)
+      activeUsers.utils.setWindow({ offset: 1, limit: 1 })
 
       // Wait a bit to ensure no changes occur
       await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1349,7 +1349,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
 
       // Move the window to show next 3 posts (Post D, Post E, Post F)
-      userPosts.utils.move(3, 3)
+      userPosts.utils.setWindow({ offset: 3, limit: 3 })
 
       // Wait for the move to take effect
       await new Promise((resolve) => setTimeout(resolve, 10))

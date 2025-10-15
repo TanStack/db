@@ -15,7 +15,9 @@ export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
   setSizeCallback?: (getSize: () => number) => void
-  setMoveFn?: (moveFn: (offset: number, limit: number) => void) => void
+  setWindowFn?: (
+    windowFn: (options: { offset?: number; limit?: number }) => void
+  ) => void
 }
 
 export type TopKChanges<V> = {
@@ -76,11 +78,19 @@ class TopKArray<V> implements TopK<V> {
   /**
    * Moves the topK window
    */
-  move(offset: number, limit: number): TopKMoveChanges<V> {
+  move({
+    offset,
+    limit,
+  }: {
+    offset?: number
+    limit?: number
+  }): TopKMoveChanges<V> {
+    const oldOffset = this.#topKStart
+    const oldLimit = this.#topKEnd - this.#topKStart
     const oldRange: HRange = [this.#topKStart, this.#topKEnd]
 
-    this.#topKStart = offset
-    this.#topKEnd = offset + limit
+    this.#topKStart = offset ?? oldOffset
+    this.#topKEnd = this.#topKStart + (limit ?? oldLimit)
 
     const newRange: HRange = [this.#topKStart, this.#topKEnd]
     const { onlyInA, onlyInB } = diffHalfOpen(oldRange, newRange)
@@ -254,7 +264,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     }
     this.#topK = this.createTopK(offset, limit, compareTaggedValues)
     options.setSizeCallback?.(() => this.#topK.size)
-    options.setMoveFn?.(this.moveTopK.bind(this))
+    options.setWindowFn?.(this.moveTopK.bind(this))
   }
 
   protected createTopK(
@@ -269,7 +279,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
    * Moves the topK window based on the provided offset and limit.
    * Any changes to the topK are sent to the output.
    */
-  moveTopK(offset: number, limit: number) {
+  moveTopK({ offset, limit }: { offset?: number; limit?: number }) {
     if (!(this.#topK instanceof TopKArray)) {
       throw new Error(
         `Cannot move B+-tree implementation of TopK with fractional index`
@@ -278,7 +288,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
 
     const result: Array<[[K, IndexedValue<T>], number]> = []
 
-    const diff = this.#topK.move(offset, limit)
+    const diff = this.#topK.move({ offset, limit })
 
     diff.moveIns.forEach((moveIn) => this.handleMoveIn(moveIn, result))
     diff.moveOuts.forEach((moveOut) => this.handleMoveOut(moveOut, result))

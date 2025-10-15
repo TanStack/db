@@ -31,7 +31,7 @@ import type {
   NamespacedAndKeyedStream,
   NamespacedRow,
 } from "../../types.js"
-import type { QueryCache, QueryMapping } from "./types.js"
+import type { QueryCache, QueryMapping, WindowOptions } from "./types.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 
 /** Function type for loading specific keys into a lazy collection */
@@ -61,7 +61,7 @@ export function processJoins(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
@@ -84,7 +84,7 @@ export function processJoins(
       callbacks,
       lazySources,
       optimizableOrderByCollections,
-      setMoveFn,
+      setWindowFn,
       rawQuery,
       onCompileSubquery,
       aliasToCollectionId,
@@ -113,7 +113,7 @@ function processJoin(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
@@ -134,7 +134,7 @@ function processJoin(
     callbacks,
     lazySources,
     optimizableOrderByCollections,
-    setMoveFn,
+    setWindowFn,
     cache,
     queryMapping,
     onCompileSubquery,
@@ -425,7 +425,7 @@ function processJoinSource(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
   onCompileSubquery: CompileQueryFn,
@@ -458,7 +458,7 @@ function processJoinSource(
         callbacks,
         lazySources,
         optimizableOrderByCollections,
-        setMoveFn,
+        setWindowFn,
         cache,
         queryMapping
       )

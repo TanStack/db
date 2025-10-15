@@ -28,7 +28,9 @@ import type {
   NamespacedAndKeyedStream,
   ResultStream,
 } from "../../types.js"
-import type { QueryCache, QueryMapping } from "./types.js"
+import type { QueryCache, QueryMapping, WindowOptions } from "./types.js"
+
+export type { WindowOptions } from "./types.js"
 
 /**
  * Result of query compilation including both the pipeline and source-specific WHERE clauses
@@ -87,7 +89,7 @@ export function compileQuery(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap()
 ): CompilationResult {
@@ -135,7 +137,7 @@ export function compileQuery(
     callbacks,
     lazySources,
     optimizableOrderByCollections,
-    setMoveFn,
+    setWindowFn,
     cache,
     queryMapping,
     aliasToCollectionId,
@@ -171,7 +173,7 @@ export function compileQuery(
       callbacks,
       lazySources,
       optimizableOrderByCollections,
-      setMoveFn,
+      setWindowFn,
       rawQuery,
       compileQuery,
       aliasToCollectionId,
@@ -314,7 +316,7 @@ export function compileQuery(
       query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
-      setMoveFn,
+      setWindowFn,
       query.limit,
       query.offset
     )
@@ -385,7 +387,7 @@ function processFrom(
   callbacks: Record<string, LazyCollectionCallbacks>,
   lazySources: Set<string>,
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
-  setMoveFn: (moveFn: (offset: number, limit: number) => void) => void,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache,
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
@@ -417,7 +419,7 @@ function processFrom(
         callbacks,
         lazySources,
         optimizableOrderByCollections,
-        setMoveFn,
+        setWindowFn,
         cache,
         queryMapping
       )

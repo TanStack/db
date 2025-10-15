@@ -6,6 +6,7 @@ import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import { getCollectionBuilder } from "./collection-registry.js"
+import type { WindowOptions } from "../compiler/index.js"
 import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
 import type { RootStreamBuilder } from "@tanstack/db-ivm"
@@ -33,10 +34,10 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
   getBuilder: () => CollectionConfigBuilder<any, any>
   /**
-   * Moves the offset and limit of an ordered query.
+   * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
    */
-  move: (offset: number, limit: number) => void
+  setWindow: (options: WindowOptions) => void
 }
 
 type PendingGraphRun = {
@@ -86,7 +87,7 @@ export class CollectionConfigBuilder<
   // Reference to the live query collection for error state transitions
   private liveQueryCollection?: Collection<TResult, any, any>
 
-  private moveFn: ((offset: number, limit: number) => void) | undefined
+  private windowFn: ((options: WindowOptions) => void) | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
 
@@ -180,20 +181,20 @@ export class CollectionConfigBuilder<
       utils: {
         getRunCount: this.getRunCount.bind(this),
         getBuilder: () => this,
-        move: this.move.bind(this),
+        setWindow: this.setWindow.bind(this),
       },
     }
   }
 
-  move(offset: number, limit: number) {
-    if (!this.moveFn) {
+  setWindow(options: WindowOptions) {
+    if (!this.windowFn) {
       console.log(
         `This collection can't be moved because no move function was set`
       )
       return
     }
 
-    this.moveFn(offset, limit)
+    this.windowFn(options)
     this.maybeRunGraphFn?.()
   }
 
@@ -542,8 +543,8 @@ export class CollectionConfigBuilder<
       this.lazySourcesCallbacks,
       this.lazySources,
       this.optimizableOrderByCollections,
-      (moveFn: (offset: number, limit: number) => void) => {
-        this.moveFn = moveFn
+      (windowFn: (options: WindowOptions) => void) => {
+        this.windowFn = windowFn
       }
     )
 
