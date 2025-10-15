@@ -70,3 +70,5 @@ export {
   intersectPredicates,
   unionPredicates,
 } from "./predicate-utils.js"
+
+export { createDeduplicatedLoadSubset } from "./subset-dedupe.js"
