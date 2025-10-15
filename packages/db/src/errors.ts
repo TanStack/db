@@ -41,6 +41,30 @@ export class SchemaValidationError extends TanStackDBError {
   }
 }
 
+// Module Instance Errors
+export class DuplicateDbInstanceError extends TanStackDBError {
+  constructor() {
+    super(
+      `Multiple instances of @tanstack/db detected!\n\n` +
+        `This causes transaction context to be lost because each instance maintains ` +
+        `its own transaction stack.\n\n` +
+        `Common causes:\n` +
+        `1. Different versions of @tanstack/db installed\n` +
+        `2. Incompatible peer dependency versions in packages\n` +
+        `3. Module resolution issues in bundler configuration\n\n` +
+        `To fix:\n` +
+        `1. Check installed versions: npm list @tanstack/db (or pnpm/yarn list)\n` +
+        `2. Force a single version using package manager overrides:\n` +
+        `   - npm: "overrides" in package.json\n` +
+        `   - pnpm: "pnpm.overrides" in package.json\n` +
+        `   - yarn: "resolutions" in package.json\n` +
+        `3. Clear node_modules and lockfile, then reinstall\n\n` +
+        `See: https://tanstack.com/db/latest/docs/troubleshooting#duplicate-instances`
+    )
+    this.name = `DuplicateDbInstanceError`
+  }
+}
+
 // Collection Configuration Errors
 export class CollectionConfigurationError extends TanStackDBError {
   constructor(message: string) {
