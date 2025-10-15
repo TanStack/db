@@ -71,4 +71,4 @@ export {
   unionPredicates,
 } from "./predicate-utils.js"
 
-export { createDeduplicatedLoadSubset } from "./subset-dedupe.js"
+export { DeduplicatedLoadSubset } from "./subset-dedupe.js"
