@@ -1,7 +1,10 @@
 import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
-import { MissingAliasInputsError } from "../../errors.js"
+import {
+  MissingAliasInputsError,
+  SetWindowRequiresOrderByError,
+} from "../../errors.js"
 import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
@@ -188,10 +191,7 @@ export class CollectionConfigBuilder<
 
   setWindow(options: WindowOptions) {
     if (!this.windowFn) {
-      console.log(
-        `This collection can't be moved because no move function was set`
-      )
-      return
+      throw new SetWindowRequiresOrderByError()
     }
 
     this.windowFn(options)

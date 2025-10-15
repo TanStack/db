@@ -1155,6 +1155,112 @@ describe(`createLiveQueryCollection`, () => {
       expect(moveResults2.map((r) => r.name)).toEqual([`Bob`])
     })
 
+    it(`should support changing only offset (keeping limit the same)`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-offset-only`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 2 users (Alice, Bob)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+
+      // Change only offset to 2, limit should remain 2
+      activeUsers.utils.setWindow({ offset: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([`Charlie`, `David`])
+
+      // Change only offset to 1, limit should still be 2
+      activeUsers.utils.setWindow({ offset: 1 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+    })
+
+    it(`should support changing only limit (keeping offset the same)`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-limit-only`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(1)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have 2 users starting from offset 1 (Bob, Charlie)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+
+      // Change only limit to 4, offset should remain 1
+      activeUsers.utils.setWindow({ limit: 4 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([
+        `Bob`,
+        `Charlie`,
+        `David`,
+        `Eve`,
+      ])
+
+      // Change only limit to 1, offset should still be 1
+      activeUsers.utils.setWindow({ limit: 1 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Bob`])
+    })
+
     it(`should handle edge cases when moving beyond available data`, async () => {
       const limitedUsers = createCollection(
         mockSyncCollectionOptions<User>({
@@ -1271,7 +1377,7 @@ describe(`createLiveQueryCollection`, () => {
       ])
     })
 
-    it(`should be a no-op when used on non-ordered queries`, async () => {
+    it(`should throw an error when used on non-ordered queries`, async () => {
       const activeUsers = createLiveQueryCollection(
         (q) =>
           q
@@ -1284,18 +1390,13 @@ describe(`createLiveQueryCollection`, () => {
 
       // Initial result should have all active users
       expect(activeUsers.size).toBe(2)
-      const initialResults = activeUsers.toArray
-      expect(initialResults.length).toBe(2)
 
-      // Move should be a no-op for non-ordered queries
-      activeUsers.utils.setWindow({ offset: 1, limit: 1 })
-
-      // Wait a bit to ensure no changes occur
-      await new Promise((resolve) => setTimeout(resolve, 10))
-
-      const moveResults = activeUsers.toArray
-      expect(moveResults.length).toBe(2) // Should still have the same number of results
-      expect(moveResults).toEqual(initialResults) // Should be the same results
+      // setWindow should throw an error for non-ordered queries
+      expect(() => {
+        activeUsers.utils.setWindow({ offset: 1, limit: 1 })
+      }).toThrow(
+        /setWindow\(\) can only be called on collections with an ORDER BY clause/
+      )
     })
 
     it(`should work with complex queries including joins`, async () => {
