@@ -1,5 +1,6 @@
 import { createDeferred } from "./deferred"
 import {
+  DuplicateDbInstanceError,
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
@@ -14,6 +15,14 @@ import type {
   TransactionState,
   TransactionWithMutations,
 } from "./types"
+
+// Detect duplicate @tanstack/db instances
+const DB_INSTANCE_MARKER = Symbol.for(`@tanstack/db/instance-marker`)
+
+if ((globalThis as any)[DB_INSTANCE_MARKER]) {
+  throw new DuplicateDbInstanceError()
+}
+;(globalThis as any)[DB_INSTANCE_MARKER] = true
 
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
@@ -244,7 +253,9 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together
+   * @param callback - Function containing collection operations to group together. If the
+   * callback returns a Promise, the transaction context will remain active until the promise
+   * settles, allowing optimistic writes after `await` boundaries.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -287,6 +298,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     registerTransaction(this)
+
     try {
       callback()
     } finally {

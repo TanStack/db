@@ -553,4 +553,10 @@ describe(`Transactions`, () => {
     expect(transaction2.state).toBe(`completed`)
     expect(transaction3.state).toBe(`failed`)
   })
+
+  it(`sets a global marker to detect duplicate instances`, () => {
+    // The duplicate instance marker should be set when the module loads
+    const marker = Symbol.for(`@tanstack/db/instance-marker`)
+    expect((globalThis as any)[marker]).toBe(true)
+  })
 })
