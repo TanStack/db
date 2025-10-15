@@ -39,8 +39,10 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
+   *
+   * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
-  setWindow: (options: WindowOptions) => void
+  setWindow: (options: WindowOptions) => true | Promise<void>
 }
 
 type PendingGraphRun = {
@@ -189,13 +191,32 @@ export class CollectionConfigBuilder<
     }
   }
 
-  setWindow(options: WindowOptions) {
+  setWindow(options: WindowOptions): true | Promise<void> {
     if (!this.windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
 
     this.windowFn(options)
     this.maybeRunGraphFn?.()
+
+    // Check if loading a subset was triggered
+    if (this.liveQueryCollection?.isLoadingSubset) {
+      // Loading was triggered, return a promise that resolves when it completes
+      return new Promise<void>((resolve) => {
+        const unsubscribe = this.liveQueryCollection!.on(
+          `loadingSubset:change`,
+          (event) => {
+            if (!event.isLoadingSubset) {
+              unsubscribe()
+              resolve()
+            }
+          }
+        )
+      })
+    }
+
+    // No loading was triggered
+    return true
   }
 
   /**

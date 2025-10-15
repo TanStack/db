@@ -1551,5 +1551,159 @@ describe(`createLiveQueryCollection`, () => {
         `Post F`,
       ])
     })
+
+    it(`setWindow returns true when no subset loading is triggered`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `users-no-loading`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+      )
+
+      await activeUsers.preload()
+
+      // setWindow should return true when no loading is triggered
+      const result = activeUsers.utils.setWindow({ offset: 1, limit: 2 })
+      expect(result).toBe(true)
+    })
+
+    it(`setWindow returns and resolves a Promise when async loading is triggered`, async () => {
+      // This is an integration test that validates the full async flow:
+      // 1. setWindow triggers loading more data
+      // 2. Returns a Promise (not true)
+      // 3. The Promise waits for loading to complete
+      // 4. The Promise resolves once loading is done
+
+      vi.useFakeTimers()
+
+      try {
+        let loadSubsetCallCount = 0
+
+        const sourceCollection = createCollection<{
+          id: number
+          value: number
+        }>({
+          id: `source-async-subset-loading`,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          sync: {
+            sync: ({ markReady, begin, write, commit }) => {
+              // Provide minimal initial data
+              begin()
+              write({ type: `insert`, value: { id: 1, value: 1 } })
+              write({ type: `insert`, value: { id: 2, value: 2 } })
+              write({ type: `insert`, value: { id: 3, value: 3 } })
+              commit()
+              markReady()
+
+              return {
+                loadSubset: () => {
+                  loadSubsetCallCount++
+
+                  // First call is for the initial window request
+                  if (loadSubsetCallCount === 1) {
+                    return true
+                  }
+
+                  // Second call (triggered by setWindow) returns a promise
+                  const loadPromise = new Promise<void>((resolve) => {
+                    // Simulate async data loading with a delay
+                    setTimeout(() => {
+                      begin()
+                      // Load additional items that would be needed for the new window
+                      write({ type: `insert`, value: { id: 4, value: 4 } })
+                      write({ type: `insert`, value: { id: 5, value: 5 } })
+                      write({ type: `insert`, value: { id: 6, value: 6 } })
+                      commit()
+                      resolve()
+                    }, 50)
+                  })
+
+                  return loadPromise
+                },
+              }
+            },
+          },
+        })
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: sourceCollection })
+              .orderBy(({ item }) => item.value, `asc`)
+              .limit(2)
+              .offset(0),
+          startSync: true,
+        })
+
+        await liveQuery.preload()
+
+        // Initial state: should have 2 items (values 1, 2)
+        expect(liveQuery.size).toBe(2)
+        expect(liveQuery.isLoadingSubset).toBe(false)
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Move window to offset 3, which requires loading more data
+        // This should trigger loadSubset and return a Promise
+        const result = liveQuery.utils.setWindow({ offset: 3, limit: 2 })
+
+        // CRITICAL VALIDATION: result should be a Promise, not true
+        expect(result).toBeInstanceOf(Promise)
+        expect(result).not.toBe(true)
+
+        // Advance just a bit to let the scheduler execute and trigger loadSubset
+        await vi.advanceTimersByTimeAsync(1)
+
+        // Verify that loading was triggered and is in progress
+        expect(loadSubsetCallCount).toBeGreaterThan(1)
+        expect(liveQuery.isLoadingSubset).toBe(true)
+
+        // Track when the promise resolves
+        let promiseResolved = false
+        if (result !== true) {
+          result.then(() => {
+            promiseResolved = true
+          })
+        }
+
+        // Promise should NOT be resolved yet because loading is still in progress
+        await vi.advanceTimersByTimeAsync(10)
+        expect(promiseResolved).toBe(false)
+        expect(liveQuery.isLoadingSubset).toBe(true)
+
+        // Now advance time to complete the loading (50ms total from loadSubset call)
+        await vi.advanceTimersByTimeAsync(40)
+
+        // Wait for the promise to resolve
+        if (result !== true) {
+          await result
+        }
+
+        // CRITICAL VALIDATION: Promise has resolved and loading is complete
+        expect(promiseResolved).toBe(true)
+        expect(liveQuery.isLoadingSubset).toBe(false)
+
+        // Verify the window was successfully moved and has the right data
+        expect(liveQuery.size).toBe(2)
+        const items = liveQuery.toArray
+        expect(items.map((i) => i.value)).toEqual([4, 5])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 })
