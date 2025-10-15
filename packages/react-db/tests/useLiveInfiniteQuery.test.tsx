@@ -575,25 +575,12 @@ describe(`useLiveInfiniteQuery`, () => {
     })
 
     expect(result.current.pages[1]).toHaveLength(10)
-    // Should still have next page since lastPage is full
-    // In Phase 1, we can't know if there's more data without trying to fetch it
-    // This is a limitation that will be resolved in Phase 3 with backend integration
-    expect(result.current.hasNextPage).toBe(true)
-
-    // Try to fetch page 3 - should get empty page
-    act(() => {
-      result.current.fetchNextPage()
-    })
-
-    await waitFor(() => {
-      expect(result.current.pages).toHaveLength(3)
-    })
-
-    // Page 3 should be empty
-    expect(result.current.pages[2]).toHaveLength(0)
-
-    // Now hasNextPage should be false because page 3 is empty
+    // With setWindow peek-ahead, we can now detect no more pages immediately
+    // We request 21 items (2 * 10 + 1 peek) but only get 20, so we know there's no more
     expect(result.current.hasNextPage).toBe(false)
+
+    // Verify total data
+    expect(result.current.data).toHaveLength(20)
   })
 
   it(`should not fetch when already fetching`, async () => {
@@ -719,5 +706,91 @@ describe(`useLiveInfiniteQuery`, () => {
     await waitFor(() => {
       expect(result.current.pageParams).toEqual([100, 101])
     })
+  })
+
+  it(`should detect hasNextPage change when new items are synced`, async () => {
+    // Start with exactly 20 items (2 pages)
+    const posts = createMockPosts(20)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `sync-detection-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        }
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Load both pages
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(2)
+    })
+
+    // Should have no next page (exactly 20 items, 2 full pages, peek returns nothing)
+    expect(result.current.hasNextPage).toBe(false)
+    expect(result.current.data).toHaveLength(20)
+
+    // Add 5 more items to the collection
+    act(() => {
+      collection.utils.begin()
+      for (let i = 0; i < 5; i++) {
+        collection.utils.write({
+          type: `insert`,
+          value: {
+            id: `new-${i}`,
+            title: `New Post ${i}`,
+            content: `Content ${i}`,
+            createdAt: Date.now() + i,
+            category: `tech`,
+          },
+        })
+      }
+      collection.utils.commit()
+    })
+
+    // Should now detect that there's a next page available
+    await waitFor(() => {
+      expect(result.current.hasNextPage).toBe(true)
+    })
+
+    // Data should still be 20 items (we haven't fetched the next page yet)
+    expect(result.current.data).toHaveLength(20)
+    expect(result.current.pages).toHaveLength(2)
+
+    // Fetch the next page
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(3)
+    })
+
+    // Third page should have the new items
+    expect(result.current.pages[2]).toHaveLength(5)
+    expect(result.current.data).toHaveLength(25)
+
+    // No more pages available now
+    expect(result.current.hasNextPage).toBe(false)
   })
 })

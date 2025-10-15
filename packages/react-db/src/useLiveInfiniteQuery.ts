@@ -4,8 +4,18 @@ import type {
   Context,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryCollectionUtils,
   QueryBuilder,
 } from "@tanstack/db"
+
+/**
+ * Type guard to check if utils object has setWindow method (LiveQueryCollectionUtils)
+ */
+function isLiveQueryCollectionUtils(
+  utils: unknown
+): utils is LiveQueryCollectionUtils {
+  return typeof (utils as any).setWindow === `function`
+}
 
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
@@ -18,32 +28,25 @@ export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   ) => number | undefined
 }
 
-export type UseLiveInfiniteQueryReturn<TContext extends Context> = {
+export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
+  ReturnType<typeof useLiveQuery<TContext>>,
+  `data`
+> & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
   pageParams: Array<number>
   fetchNextPage: () => void
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  // From useLiveQuery
-  state: ReturnType<typeof useLiveQuery<TContext>>[`state`]
-  collection: ReturnType<typeof useLiveQuery<TContext>>[`collection`]
-  status: ReturnType<typeof useLiveQuery<TContext>>[`status`]
-  isLoading: ReturnType<typeof useLiveQuery<TContext>>[`isLoading`]
-  isReady: ReturnType<typeof useLiveQuery<TContext>>[`isReady`]
-  isIdle: ReturnType<typeof useLiveQuery<TContext>>[`isIdle`]
-  isError: ReturnType<typeof useLiveQuery<TContext>>[`isError`]
-  isCleanedUp: ReturnType<typeof useLiveQuery<TContext>>[`isCleanedUp`]
-  isEnabled: ReturnType<typeof useLiveQuery<TContext>>[`isEnabled`]
 }
 
 /**
  * Create an infinite query using a query function with live updates
  *
- * Phase 1 implementation: Operates within the collection's current dataset.
- * Fetching "next page" loads more data from the collection, not from a backend.
+ * Uses `utils.setWindow()` to dynamically adjust the limit/offset window
+ * without recreating the live query collection on each page change.
  *
- * @param queryFn - Query function that defines what data to fetch
+ * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
  * @param config - Configuration including pageSize and getNextPageParam
  * @param deps - Array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
@@ -104,55 +107,60 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
   }, [depsKey])
 
-  // Create a live query without limit - fetch all matching data
-  // Phase 1: Client-side slicing is acceptable
-  // Phase 2: Will add limit optimization with dynamic adjustment
-  const queryResult = useLiveQuery((q) => queryFn(q), deps)
+  // Create a live query with initial limit and offset
+  // The query function is wrapped to add limit/offset to the query
+  const queryResult = useLiveQuery(
+    (q) => queryFn(q).limit(pageSize).offset(0),
+    deps
+  )
 
-  // Split the flat data array into pages
-  const pages = useMemo(() => {
-    const result: Array<Array<InferResultType<TContext>[number]>> = []
+  // Update the window when loadedPageCount changes
+  // We fetch one extra item to peek if there's a next page
+  useEffect(() => {
+    const newLimit = loadedPageCount * pageSize + 1 // +1 to peek ahead
+    const utils = queryResult.collection.utils
+    // setWindow is available on live query collections with orderBy
+    if (isLiveQueryCollectionUtils(utils)) {
+      utils.setWindow({ offset: 0, limit: newLimit })
+    }
+  }, [loadedPageCount, pageSize, queryResult.collection])
+
+  // Split the data array into pages and determine if there's a next page
+  const { pages, pageParams, hasNextPage, flatData } = useMemo(() => {
     const dataArray = queryResult.data as InferResultType<TContext>
+    const totalItemsRequested = loadedPageCount * pageSize
+
+    // Check if we have more data than requested (the peek ahead item)
+    const hasMore = dataArray.length > totalItemsRequested
+
+    // Build pages array (without the peek ahead item)
+    const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
+    const pageParamsResult: Array<number> = []
 
     for (let i = 0; i < loadedPageCount; i++) {
       const pageData = dataArray.slice(i * pageSize, (i + 1) * pageSize)
-      result.push(pageData)
+      pagesResult.push(pageData)
+      pageParamsResult.push(initialPageParam + i)
     }
 
-    return result
-  }, [queryResult.data, loadedPageCount, pageSize])
+    // Flatten the pages for the data return (without peek ahead item)
+    const flatDataResult = dataArray.slice(
+      0,
+      totalItemsRequested
+    ) as InferResultType<TContext>
 
-  // Track page params used (for TanStack Query API compatibility)
-  const pageParams = useMemo(() => {
-    const params: Array<number> = []
-    for (let i = 0; i < pages.length; i++) {
-      params.push(initialPageParam + i)
+    return {
+      pages: pagesResult,
+      pageParams: pageParamsResult,
+      hasNextPage: hasMore,
+      flatData: flatDataResult,
     }
-    return params
-  }, [pages.length, initialPageParam])
-
-  // Determine if there are more pages available
-  const hasNextPage = useMemo(() => {
-    if (pages.length === 0) return false
-
-    const lastPage = pages[pages.length - 1]
-    const lastPageParam = pageParams[pageParams.length - 1]
-
-    // Ensure lastPage and lastPageParam are defined before calling getNextPageParam
-    if (!lastPage || lastPageParam === undefined) return false
-
-    // Call user's getNextPageParam to determine if there's more
-    const nextParam = config.getNextPageParam(
-      lastPage,
-      pages,
-      lastPageParam,
-      pageParams
-    )
-
-    return nextParam !== undefined
-  }, [pages, pageParams, config])
+  }, [queryResult.data, loadedPageCount, pageSize, initialPageParam])
 
   // Fetch next page
+  // TODO: this should use the `collection.isLoadingSubset` flag in combination with
+  // isFetchingRef to track if it is fetching from subset for this. This needs adding
+  // once https://github.com/TanStack/db/pull/669 is merged
   const fetchNextPage = useCallback(() => {
     if (!hasNextPage || isFetchingRef.current) return
 
@@ -165,31 +173,13 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     })
   }, [hasNextPage])
 
-  // Calculate flattened data from pages
-  const flatData = useMemo(() => {
-    const result: Array<InferResultType<TContext>[number]> = []
-    for (const page of pages) {
-      result.push(...page)
-    }
-    return result as InferResultType<TContext>
-  }, [pages])
-
   return {
+    ...queryResult,
     data: flatData,
     pages,
     pageParams,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage: isFetchingRef.current,
-    // Pass through useLiveQuery properties
-    state: queryResult.state,
-    collection: queryResult.collection,
-    status: queryResult.status,
-    isLoading: queryResult.isLoading,
-    isReady: queryResult.isReady,
-    isIdle: queryResult.isIdle,
-    isError: queryResult.isError,
-    isCleanedUp: queryResult.isCleanedUp,
-    isEnabled: queryResult.isEnabled,
   }
 }

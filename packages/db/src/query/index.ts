@@ -56,3 +56,4 @@ export {
 } from "./live-query-collection.js"
 
 export { type LiveQueryCollectionConfig } from "./live/types.js"
+export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.js"
