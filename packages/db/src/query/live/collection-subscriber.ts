@@ -92,7 +92,7 @@ export class CollectionSubscriber<
           this.subscriptionLoadingPromises.set(subscription, {
             resolve: resolve!,
           })
-          this.collectionConfigBuilder.liveQueryCollection!.trackLoadPromise(
+          this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
             promise
           )
         }

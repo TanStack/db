@@ -372,14 +372,6 @@ export class CollectionImpl<
   }
 
   /**
-   * Tracks a load promise for isLoadingSubset state.
-   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
-   */
-  public trackLoadPromise(promise: Promise<void>): void {
-    this._sync.trackLoadPromise(promise)
-  }
-
-  /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
    */
