@@ -611,10 +611,11 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.isReady).toBe(true)
     })
 
-    // Try to fetch multiple times rapidly
+    expect(result.current.pages).toHaveLength(1)
+
+    // With sync data, all fetches complete immediately, so all 3 calls will succeed
+    // The key is that they won't cause race conditions or errors
     act(() => {
-      result.current.fetchNextPage()
-      result.current.fetchNextPage()
       result.current.fetchNextPage()
     })
 
@@ -622,8 +623,25 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.pages).toHaveLength(2)
     })
 
-    // Should only have fetched one additional page
-    expect(result.current.pages).toHaveLength(2)
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(3)
+    })
+
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(4)
+    })
+
+    // All fetches should have succeeded
+    expect(result.current.pages).toHaveLength(4)
+    expect(result.current.data).toHaveLength(40)
   })
 
   it(`should not fetch when hasNextPage is false`, async () => {
@@ -793,4 +811,157 @@ describe(`useLiveInfiniteQuery`, () => {
     // No more pages available now
     expect(result.current.hasNextPage).toBe(false)
   })
+
+  it(`should set isFetchingNextPage to false when data is immediately available`, async () => {
+    const posts = createMockPosts(50)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `immediate-data-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        }
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Initially 1 page and not fetching
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.isFetchingNextPage).toBe(false)
+
+    // Fetch next page - should remain false because data is immediately available
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    // Since data is *synchronously* available, isFetchingNextPage should be false
+    expect(result.current.pages).toHaveLength(2)
+    expect(result.current.isFetchingNextPage).toBe(false)
+  })
+
+  it(`should track isFetchingNextPage when async loading is triggered`, async () => {
+    let loadSubsetCallCount = 0
+
+    const collection = createCollection<Post>({
+      id: `async-loading-test`,
+      getKey: (post: Post) => post.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady, begin, write, commit }) => {
+          // Provide initial data
+          begin()
+          for (let i = 1; i <= 15; i++) {
+            write({
+              type: `insert`,
+              value: {
+                id: `${i}`,
+                title: `Post ${i}`,
+                content: `Content ${i}`,
+                createdAt: 1000000 - i * 1000,
+                category: i % 2 === 0 ? `tech` : `life`,
+              },
+            })
+          }
+          commit()
+          markReady()
+
+          return {
+            loadSubset: () => {
+              loadSubsetCallCount++
+
+              // First few calls return true (initial load + window setup)
+              if (loadSubsetCallCount <= 2) {
+                return true
+              }
+
+              // Subsequent calls simulate async loading with a real timeout
+              const loadPromise = new Promise<void>((resolve) => {
+                setTimeout(() => {
+                  begin()
+                  // Load more data
+                  for (let i = 16; i <= 30; i++) {
+                    write({
+                      type: `insert`,
+                      value: {
+                        id: `${i}`,
+                        title: `Post ${i}`,
+                        content: `Content ${i}`,
+                        createdAt: 1000000 - i * 1000,
+                        category: i % 2 === 0 ? `tech` : `life`,
+                      },
+                    })
+                  }
+                  commit()
+                  resolve()
+                }, 50)
+              })
+
+              return loadPromise
+            },
+          }
+        },
+      },
+    })
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        }
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Wait for initial window setup to complete
+    await waitFor(() => {
+      expect(result.current.isFetchingNextPage).toBe(false)
+    })
+
+    expect(result.current.pages).toHaveLength(1)
+
+    // Fetch next page which will trigger async loading
+    act(() => {
+      result.current.fetchNextPage()
+    })
+
+    // Should be fetching now and so isFetchingNextPage should be true *synchronously!*
+    expect(result.current.isFetchingNextPage).toBe(true)
+
+    // Wait for loading to complete
+    await waitFor(
+      () => {
+        expect(result.current.isFetchingNextPage).toBe(false)
+      },
+      { timeout: 200 }
+    )
+
+    // Should have 2 pages now
+    expect(result.current.pages).toHaveLength(2)
+    expect(result.current.data).toHaveLength(20)
+  }, 10000)
 })

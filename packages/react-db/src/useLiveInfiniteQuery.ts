@@ -93,7 +93,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   // Track how many pages have been loaded
   const [loadedPageCount, setLoadedPageCount] = useState(1)
-  const isFetchingRef = useRef(false)
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
 
   // Stringify deps for comparison
   const depsKey = JSON.stringify(deps)
@@ -121,7 +121,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     const utils = queryResult.collection.utils
     // setWindow is available on live query collections with orderBy
     if (isLiveQueryCollectionUtils(utils)) {
-      utils.setWindow({ offset: 0, limit: newLimit })
+      const result = utils.setWindow({ offset: 0, limit: newLimit })
+      // setWindow returns true if data is immediately available, or Promise<void> if loading
+      if (result !== true) {
+        setIsFetchingNextPage(true)
+        result.then(() => {
+          setIsFetchingNextPage(false)
+        })
+      } else {
+        setIsFetchingNextPage(false)
+      }
     }
   }, [loadedPageCount, pageSize, queryResult.collection])
 
@@ -158,20 +167,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   }, [queryResult.data, loadedPageCount, pageSize, initialPageParam])
 
   // Fetch next page
-  // TODO: this should use the `collection.isLoadingSubset` flag in combination with
-  // isFetchingRef to track if it is fetching from subset for this. This needs adding
-  // once https://github.com/TanStack/db/pull/669 is merged
   const fetchNextPage = useCallback(() => {
-    if (!hasNextPage || isFetchingRef.current) return
+    if (!hasNextPage || isFetchingNextPage) return
 
-    isFetchingRef.current = true
     setLoadedPageCount((prev) => prev + 1)
-
-    // Reset fetching state synchronously
-    Promise.resolve().then(() => {
-      isFetchingRef.current = false
-    })
-  }, [hasNextPage])
+  }, [hasNextPage, isFetchingNextPage])
 
   return {
     ...queryResult,
@@ -180,6 +180,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     pageParams,
     fetchNextPage,
     hasNextPage,
-    isFetchingNextPage: isFetchingRef.current,
+    isFetchingNextPage,
   }
 }
