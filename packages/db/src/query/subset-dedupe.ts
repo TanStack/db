@@ -94,39 +94,9 @@ export class DeduplicatedLoadSubset {
 
     // Check against in-flight calls using the same subset logic as resolved calls
     // This prevents duplicate requests when concurrent calls have subset relationships
-    const matchingInflight = this.inflightCalls.find((inflight) => {
-      // For unlimited calls, check if the incoming where is a subset of the in-flight where
-      if (inflight.options.limit === undefined && options.limit === undefined) {
-        // Both unlimited - check where subset
-        if (inflight.options.where === undefined) {
-          // In-flight is loading all data, so incoming is covered
-          return true
-        }
-        if (options.where !== undefined) {
-          return isWhereSubset(options.where, inflight.options.where)
-        }
-        return false
-      }
-
-      // For limited calls, use the full predicate subset check (where + orderBy + limit)
-      if (inflight.options.limit !== undefined && options.limit !== undefined) {
-        return isPredicateSubset(options, inflight.options)
-      }
-
-      // Mixed unlimited/limited - limited calls can be covered by unlimited calls
-      if (inflight.options.limit === undefined && options.limit !== undefined) {
-        // In-flight is unlimited, incoming is limited
-        if (inflight.options.where === undefined) {
-          // In-flight is loading all data
-          return true
-        }
-        if (options.where !== undefined) {
-          return isWhereSubset(options.where, inflight.options.where)
-        }
-      }
-
-      return false
-    })
+    const matchingInflight = this.inflightCalls.find((inflight) =>
+      isPredicateSubset(options, inflight.options)
+    )
 
     if (matchingInflight !== undefined) {
       // An in-flight call will load data that covers this request
@@ -211,6 +181,8 @@ export class DeduplicatedLoadSubset {
         // No where clause = all data loaded
         this.hasLoadedAllData = true
         this.unlimitedWhere = undefined
+        this.limitedCalls = []
+        this.inflightCalls = []
       } else if (this.unlimitedWhere === undefined) {
         this.unlimitedWhere = options.where
       } else {
