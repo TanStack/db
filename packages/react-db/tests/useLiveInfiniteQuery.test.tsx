@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { createCollection, eq } from "@tanstack/db"
+import { createCollection, createLiveQueryCollection, eq } from "@tanstack/db"
 import { useLiveInfiniteQuery } from "../src/useLiveInfiniteQuery"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
 
@@ -964,4 +964,411 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.pages).toHaveLength(2)
     expect(result.current.data).toHaveLength(20)
   }, 10000)
+
+  describe(`pre-created collections`, () => {
+    it(`should accept pre-created live query collection`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `pre-created-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(5), // Initial limit
+      })
+
+      await liveQueryCollection.preload()
+
+      const { result } = renderHook(() => {
+        return useLiveInfiniteQuery(liveQueryCollection, {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      // Should have 1 page initially
+      expect(result.current.pages).toHaveLength(1)
+      expect(result.current.pages[0]).toHaveLength(10)
+      expect(result.current.data).toHaveLength(10)
+      expect(result.current.hasNextPage).toBe(true)
+
+      // First item should be Post 1 (most recent by createdAt)
+      expect(result.current.pages[0]![0]).toMatchObject({
+        id: `1`,
+        title: `Post 1`,
+      })
+    })
+
+    it(`should fetch multiple pages with pre-created collection`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `pre-created-multi-page-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(10)
+            .offset(0),
+      })
+
+      await liveQueryCollection.preload()
+
+      const { result } = renderHook(() => {
+        return useLiveInfiniteQuery(liveQueryCollection, {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      expect(result.current.pages).toHaveLength(1)
+      expect(result.current.hasNextPage).toBe(true)
+
+      // Fetch next page
+      act(() => {
+        result.current.fetchNextPage()
+      })
+
+      await waitFor(() => {
+        expect(result.current.pages).toHaveLength(2)
+      })
+
+      expect(result.current.pages[0]).toHaveLength(10)
+      expect(result.current.pages[1]).toHaveLength(10)
+      expect(result.current.data).toHaveLength(20)
+      expect(result.current.hasNextPage).toBe(true)
+    })
+
+    it(`should reset pagination when collection instance changes`, async () => {
+      const posts1 = createMockPosts(30)
+      const collection1 = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `pre-created-reset-1`,
+          getKey: (post: Post) => post.id,
+          initialData: posts1,
+        })
+      )
+
+      const liveQueryCollection1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection1 })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(10)
+            .offset(0),
+      })
+
+      await liveQueryCollection1.preload()
+
+      const posts2 = createMockPosts(40)
+      const collection2 = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `pre-created-reset-2`,
+          getKey: (post: Post) => post.id,
+          initialData: posts2,
+        })
+      )
+
+      const liveQueryCollection2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection2 })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(10)
+            .offset(0),
+      })
+
+      await liveQueryCollection2.preload()
+
+      const { result, rerender } = renderHook(
+        ({ coll }: { coll: any }) => {
+          return useLiveInfiniteQuery(coll, {
+            pageSize: 10,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 10 ? lastPage.length : undefined,
+          })
+        },
+        { initialProps: { coll: liveQueryCollection1 } }
+      )
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      // Fetch 2 pages
+      act(() => {
+        result.current.fetchNextPage()
+      })
+
+      await waitFor(() => {
+        expect(result.current.pages).toHaveLength(2)
+      })
+
+      expect(result.current.data).toHaveLength(20)
+
+      // Switch to second collection
+      act(() => {
+        rerender({ coll: liveQueryCollection2 })
+      })
+
+      await waitFor(() => {
+        // Should reset to 1 page
+        expect(result.current.pages).toHaveLength(1)
+      })
+
+      expect(result.current.data).toHaveLength(10)
+    })
+
+    it(`should throw error if collection lacks orderBy`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `no-orderby-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      // Create collection WITHOUT orderBy
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) => q.from({ posts: collection }),
+      })
+
+      await liveQueryCollection.preload()
+
+      // Should throw error when trying to use it with useLiveInfiniteQuery
+      expect(() => {
+        renderHook(() => {
+          return useLiveInfiniteQuery(liveQueryCollection, {
+            pageSize: 10,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 10 ? lastPage.length : undefined,
+          })
+        })
+      }).toThrow(/ORDER BY/)
+    })
+
+    it(`should throw error if first argument is not a collection or function`, () => {
+      // Should throw error when passing invalid types
+      expect(() => {
+        renderHook(() => {
+          return useLiveInfiniteQuery(`not a collection or function` as any, {
+            pageSize: 10,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 10 ? lastPage.length : undefined,
+          })
+        })
+      }).toThrow(/must be either a pre-created live query collection/)
+
+      expect(() => {
+        renderHook(() => {
+          return useLiveInfiniteQuery(123 as any, {
+            pageSize: 10,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 10 ? lastPage.length : undefined,
+          })
+        })
+      }).toThrow(/must be either a pre-created live query collection/)
+
+      expect(() => {
+        renderHook(() => {
+          return useLiveInfiniteQuery(null as any, {
+            pageSize: 10,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 10 ? lastPage.length : undefined,
+          })
+        })
+      }).toThrow(/must be either a pre-created live query collection/)
+    })
+
+    it(`should work correctly even if pre-created collection has different initial limit`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `mismatched-window-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(5) // Different from pageSize
+            .offset(0),
+      })
+
+      await liveQueryCollection.preload()
+
+      const { result } = renderHook(() => {
+        return useLiveInfiniteQuery(liveQueryCollection, {
+          pageSize: 10, // Different from the initial limit of 5
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      // Should work correctly despite different initial limit
+      // The window will be adjusted to match pageSize
+      expect(result.current.pages).toHaveLength(1)
+      expect(result.current.pages[0]).toHaveLength(10)
+      expect(result.current.data).toHaveLength(10)
+      expect(result.current.hasNextPage).toBe(true)
+    })
+
+    it(`should handle live updates with pre-created collection`, async () => {
+      const posts = createMockPosts(30)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `pre-created-live-updates-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(10)
+            .offset(0),
+      })
+
+      await liveQueryCollection.preload()
+
+      const { result } = renderHook(() => {
+        return useLiveInfiniteQuery(liveQueryCollection, {
+          pageSize: 10,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 10 ? lastPage.length : undefined,
+        })
+      })
+
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      // Fetch 2 pages
+      act(() => {
+        result.current.fetchNextPage()
+      })
+
+      await waitFor(() => {
+        expect(result.current.pages).toHaveLength(2)
+      })
+
+      expect(result.current.data).toHaveLength(20)
+
+      // Insert a new post with most recent timestamp
+      act(() => {
+        collection.utils.begin()
+        collection.utils.write({
+          type: `insert`,
+          value: {
+            id: `new-1`,
+            title: `New Post`,
+            content: `New Content`,
+            createdAt: 1000001, // Most recent
+            category: `tech`,
+          },
+        })
+        collection.utils.commit()
+      })
+
+      await waitFor(() => {
+        // New post should be first
+        expect(result.current.pages[0]![0]).toMatchObject({
+          id: `new-1`,
+          title: `New Post`,
+        })
+      })
+
+      // Still showing 2 pages (20 items), but content has shifted
+      expect(result.current.pages).toHaveLength(2)
+      expect(result.current.data).toHaveLength(20)
+    })
+
+    it(`should work with router loader pattern (preloaded collection)`, async () => {
+      const posts = createMockPosts(50)
+      const collection = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `router-loader-test`,
+          getKey: (post: Post) => post.id,
+          initialData: posts,
+        })
+      )
+
+      // Simulate router loader: create and preload collection
+      const loaderQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`)
+            .limit(20),
+      })
+
+      // Preload in loader
+      await loaderQuery.preload()
+
+      // Simulate component receiving preloaded collection
+      const { result } = renderHook(() => {
+        return useLiveInfiniteQuery(loaderQuery, {
+          pageSize: 20,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        })
+      })
+
+      // Should be immediately ready since it was preloaded
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+      })
+
+      expect(result.current.pages).toHaveLength(1)
+      expect(result.current.pages[0]).toHaveLength(20)
+      expect(result.current.data).toHaveLength(20)
+      expect(result.current.hasNextPage).toBe(true)
+
+      // Can still fetch more pages
+      act(() => {
+        result.current.fetchNextPage()
+      })
+
+      await waitFor(() => {
+        expect(result.current.pages).toHaveLength(2)
+      })
+
+      expect(result.current.data).toHaveLength(40)
+    })
+  })
 })

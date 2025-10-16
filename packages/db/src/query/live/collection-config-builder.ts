@@ -43,6 +43,12 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * @returns `true` if no subset loading was triggered, or `Promise<void>` that resolves when the subset has been loaded
    */
   setWindow: (options: WindowOptions) => true | Promise<void>
+  /**
+   * Gets the current window (offset and limit) for an ordered query.
+   *
+   * @returns The current window settings, or `undefined` if the query is not windowed
+   */
+  getWindow: () => { offset: number; limit: number } | undefined
 }
 
 type PendingGraphRun = {
@@ -93,6 +99,7 @@ export class CollectionConfigBuilder<
   public liveQueryCollection?: Collection<TResult, any, any>
 
   private windowFn: ((options: WindowOptions) => void) | undefined
+  private currentWindow: WindowOptions | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
 
@@ -187,6 +194,7 @@ export class CollectionConfigBuilder<
         getRunCount: this.getRunCount.bind(this),
         getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
+        getWindow: this.getWindow.bind(this),
       },
     }
   }
@@ -196,6 +204,7 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
+    this.currentWindow = options
     this.windowFn(options)
     this.maybeRunGraphFn?.()
 
@@ -217,6 +226,17 @@ export class CollectionConfigBuilder<
 
     // No loading was triggered
     return true
+  }
+
+  getWindow(): { offset: number; limit: number } | undefined {
+    // Only return window if this is a windowed query (has orderBy and windowFn)
+    if (!this.windowFn || !this.currentWindow) {
+      return undefined
+    }
+    return {
+      offset: this.currentWindow.offset ?? 0,
+      limit: this.currentWindow.limit ?? 0,
+    }
   }
 
   /**
