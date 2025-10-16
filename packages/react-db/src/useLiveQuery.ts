@@ -22,6 +22,11 @@ const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
+const serverSnapshot = {
+  collection: null,
+  version: 0,
+}
+
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
@@ -467,7 +472,8 @@ export function useLiveQuery(
   // Use useSyncExternalStore to subscribe to collection changes
   const snapshot = useSyncExternalStore(
     subscribeRef.current,
-    getSnapshotRef.current
+    getSnapshotRef.current,
+    () => serverSnapshot
   )
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
