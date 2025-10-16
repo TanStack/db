@@ -22,10 +22,7 @@ const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
-const serverSnapshot = {
-  collection: null,
-  version: 0,
-}
+const serverSnapshot = { collection: null, version: 0 }
 
 /**
  * Create a live query using a query function
