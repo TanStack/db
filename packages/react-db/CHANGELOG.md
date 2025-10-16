@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.1.33
+
+### Patch Changes
+
+- Add support for pre-created live query collections in useLiveInfiniteQuery, enabling router loader patterns where live queries can be created, preloaded, and passed to components. ([#684](https://github.com/TanStack/db/pull/684))
+
+- Updated dependencies [[`5566b26`](https://github.com/TanStack/db/commit/5566b26100abdae9b4a041f048aeda1dd726e904)]:
+  - @tanstack/db@0.4.11
+
 ## 0.1.32
 
 ### Patch Changes
