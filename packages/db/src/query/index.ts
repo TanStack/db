@@ -61,14 +61,11 @@ export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.
 // Predicate utilities for predicate push-down
 export {
   isWhereSubset,
-  intersectWherePredicates,
   unionWherePredicates,
   minusWherePredicates,
   isOrderBySubset,
   isLimitSubset,
   isPredicateSubset,
-  intersectPredicates,
-  unionPredicates,
 } from "./predicate-utils.js"
 
 export { DeduplicatedLoadSubset } from "./subset-dedupe.js"
