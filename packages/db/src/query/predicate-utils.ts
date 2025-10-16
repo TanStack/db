@@ -302,6 +302,13 @@ export function unionWherePredicates(
  * ) // → status IN ['A', 'D']
  *
  * @example
+ * // Common conditions
+ * minusWherePredicates(
+ *   and(gt(ref('age'), val(10)), eq(ref('status'), val('active'))),  // age > 10 AND status = 'active'
+ *   and(gt(ref('age'), val(20)), eq(ref('status'), val('active')))   // age > 20 AND status = 'active'
+ * ) // → age > 10 AND age <= 20 AND status = 'active'
+ *
+ * @example
  * // Complete overlap - empty result
  * minusWherePredicates(
  *   gt(ref('age'), val(20)),     // age > 20
@@ -324,16 +331,37 @@ export function minusWherePredicates(
     )
   }
 
-  // If from is undefined (all data), we can't simplify NOT(subtract)
-  // Return null to indicate caller should fetch all data
+  // If from is undefined then we are asking for all data
+  // so we need to load all data minus what we already loaded
+  // i.e. we need to load NOT(subtractPredicate)
   if (fromPredicate === undefined) {
-    return null
+    return {
+      type: `func`,
+      name: `not`,
+      args: [subtractPredicate],
+    } as BasicExpression<boolean>
   }
 
   // Check if fromPredicate is entirely contained in subtractPredicate
   // In that case, fromPredicate AND NOT(subtractPredicate) = empty set
   if (isWhereSubset(fromPredicate, subtractPredicate)) {
     return { type: `val`, value: false } as BasicExpression<boolean>
+  }
+
+  // Try to detect and handle common conditions
+  const commonConditions = findCommonConditions(fromPredicate, subtractPredicate)
+  if (commonConditions.length > 0) {
+    // Extract predicates without common conditions
+    const fromWithoutCommon = removeConditions(fromPredicate, commonConditions)
+    const subtractWithoutCommon = removeConditions(subtractPredicate, commonConditions)
+    
+    // Recursively compute difference on simplified predicates
+    const simplifiedDifference = minusWherePredicates(fromWithoutCommon, subtractWithoutCommon)
+    
+    if (simplifiedDifference !== null) {
+      // Combine the simplified difference with common conditions
+      return combineConditions([...commonConditions, simplifiedDifference])
+    }
   }
 
   // Check if they are on the same field - if so, we can try to simplify
@@ -837,6 +865,116 @@ export function unionPredicates(
 // ============================================================================
 // Helper functions
 // ============================================================================
+
+/**
+ * Find common conditions between two predicates.
+ * Returns an array of conditions that appear in both predicates.
+ */
+function findCommonConditions(
+  predicate1: BasicExpression<boolean>,
+  predicate2: BasicExpression<boolean>
+): Array<BasicExpression<boolean>> {
+  const conditions1 = extractAllConditions(predicate1)
+  const conditions2 = extractAllConditions(predicate2)
+  
+  const common: Array<BasicExpression<boolean>> = []
+  
+  for (const cond1 of conditions1) {
+    for (const cond2 of conditions2) {
+      if (areExpressionsEqual(cond1, cond2)) {
+        // Avoid duplicates
+        if (!common.some(c => areExpressionsEqual(c, cond1))) {
+          common.push(cond1)
+        }
+        break
+      }
+    }
+  }
+  
+  return common
+}
+
+/**
+ * Extract all individual conditions from a predicate, flattening AND operations.
+ */
+function extractAllConditions(predicate: BasicExpression<boolean>): Array<BasicExpression<boolean>> {
+  if (predicate.type === `func` && predicate.name === `and`) {
+    const conditions: Array<BasicExpression<boolean>> = []
+    for (const arg of predicate.args) {
+      conditions.push(...extractAllConditions(arg as BasicExpression<boolean>))
+    }
+    return conditions
+  }
+  
+  return [predicate]
+}
+
+/**
+ * Remove specified conditions from a predicate.
+ * Returns the predicate with the specified conditions removed, or undefined if all conditions are removed.
+ */
+function removeConditions(
+  predicate: BasicExpression<boolean>,
+  conditionsToRemove: Array<BasicExpression<boolean>>
+): BasicExpression<boolean> | undefined {
+  if (predicate.type === `func` && predicate.name === `and`) {
+    const remainingArgs = predicate.args.filter(
+      (arg) => !conditionsToRemove.some(cond => areExpressionsEqual(arg as BasicExpression<boolean>, cond))
+    ) as Array<BasicExpression<boolean>>
+    
+    if (remainingArgs.length === 0) {
+      return undefined
+    } else if (remainingArgs.length === 1) {
+      return remainingArgs[0]!
+    } else {
+      return {
+        type: `func`,
+        name: `and`,
+        args: remainingArgs,
+      } as BasicExpression<boolean>
+    }
+  }
+  
+  // For non-AND predicates, don't remove anything
+  return predicate
+}
+
+/**
+ * Combine multiple conditions into a single predicate using AND logic.
+ * Flattens nested AND operations to avoid unnecessary nesting.
+ */
+function combineConditions(conditions: Array<BasicExpression<boolean>>): BasicExpression<boolean> {
+  // Filter out undefined conditions
+  const validConditions = conditions.filter((c): c is BasicExpression<boolean> => c !== undefined)
+  
+  if (validConditions.length === 0) {
+    return { type: `val`, value: true } as BasicExpression<boolean>
+  } else if (validConditions.length === 1) {
+    return validConditions[0]!
+  } else {
+    // Flatten all conditions, including those that are already AND operations
+    const flattenedConditions: Array<BasicExpression<boolean>> = []
+    
+    for (const condition of validConditions) {
+      if (condition.type === `func` && condition.name === `and`) {
+        // Flatten nested AND operations
+        flattenedConditions.push(...(condition.args as Array<BasicExpression<boolean>>))
+      } else {
+        flattenedConditions.push(condition)
+      }
+    }
+    
+    if (flattenedConditions.length === 1) {
+      return flattenedConditions[0]!
+    } else {
+      return {
+        type: `func`,
+        name: `and`,
+        args: flattenedConditions,
+      } as BasicExpression<boolean>
+    }
+  }
+}
 
 /**
  * Find a predicate with a specific operator and value
