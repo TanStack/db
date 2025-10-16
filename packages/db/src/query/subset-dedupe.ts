@@ -1,6 +1,7 @@
 import {
   isPredicateSubset,
   isWhereSubset,
+  minusWherePredicates,
   unionWherePredicates,
 } from "./predicate-utils.js"
 import type { BasicExpression } from "./ir.js"
@@ -105,19 +106,31 @@ export class DeduplicatedLoadSubset {
       return matchingInflight.promise
     }
 
-    // Not covered by existing data - call underlying loadSubset
-    const resultPromise = this._loadSubset(options)
+    // Not fully covered by existing data
+    // Compute the subset of data that is not covered by the existing data
+    // such that we only have to load that subset of missing data
+    const clonedOptions = cloneOptions(options)
+    if (this.unlimitedWhere !== undefined && options.limit === undefined) {
+      // Compute difference to get only the missing data
+      // We can only do this for unlimited queries
+      // and we can only remove data that was loaded from unlimited queries
+      // because with limited queries we have no way to express that we already loaded part of the matching data
+      clonedOptions.where =
+        minusWherePredicates(clonedOptions.where, this.unlimitedWhere) ??
+        clonedOptions.where
+    }
+
+    // Call underlying loadSubset to load the missing data
+    const resultPromise = this._loadSubset(clonedOptions)
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
       // Sync return - update tracking synchronously
       // Clone options before storing to protect against caller mutation
-      this.updateTracking(cloneOptions(options))
+      this.updateTracking(clonedOptions)
       return true
     } else {
       // Async return - track the promise and update tracking after it resolves
-      // Clone options BEFORE entering async context to prevent mutation issues
-      const clonedOptions = cloneOptions(options)
 
       // Capture the current generation - this lets us detect if reset() was called
       // while this request was in-flight, so we can skip updating tracking state
@@ -205,7 +218,7 @@ export class DeduplicatedLoadSubset {
  * properties like limit or where between calls. Without cloning, our stored history
  * would reflect the mutated values rather than what was actually loaded.
  */
-function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
+export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
   return {
     where: options.where,
     orderBy: options.orderBy,
