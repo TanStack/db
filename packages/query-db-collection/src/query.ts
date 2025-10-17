@@ -422,7 +422,7 @@ export function queryCollectionOptions(
   let lastErrorUpdatedAt = 0
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection } = params
+    const { begin, write, commit, markReady, markError, collection } = params
 
     const observerOptions: QueryObserverOptions<
       Array<any>,
@@ -537,15 +537,16 @@ export function queryCollectionOptions(
           lastError = result.error
           errorCount++
           lastErrorUpdatedAt = result.errorUpdatedAt
+
+          // Set collection status to error since TanStack Query has already
+          // exhausted all retry attempts before reaching this point
+          markError()
         }
 
         console.error(
           `[QueryCollection] Error observing query ${String(queryKey)}:`,
           result.error
         )
-
-        // Mark collection as ready even on error to avoid blocking apps
-        markReady()
       }
     }
 

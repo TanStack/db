@@ -162,6 +162,9 @@ export class CollectionSyncManager<
           markReady: () => {
             this.lifecycle.markReady()
           },
+          markError: () => {
+            this.lifecycle.markError()
+          },
           truncate: () => {
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
@@ -239,6 +242,19 @@ export class CollectionSyncManager<
         resolve()
       })
 
+      // Also listen for error status transitions and reject the promise
+      const unsubscribeError = this.collection.events.once(
+        `status:error`,
+        () => {
+          reject(new CollectionIsInErrorStateError())
+        }
+      )
+
+      // Clean up error listener when promise resolves
+      this.lifecycle.onFirstReady(() => {
+        unsubscribeError()
+      })
+
       // Start sync if collection hasn't started yet or was cleaned up
       if (
         this.lifecycle.status === `idle` ||
@@ -247,6 +263,7 @@ export class CollectionSyncManager<
         try {
           this.startSync()
         } catch (error) {
+          unsubscribeError()
           reject(error)
           return
         }

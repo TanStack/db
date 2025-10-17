@@ -2165,9 +2165,9 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Wait for collection to be ready (even with error)
+      // Wait for collection to error after query fails
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError()).toBe(true)
       })
 
@@ -2191,9 +2191,9 @@ describe(`QueryCollection`, () => {
         queryFn
       )
 
-      // Wait for collection to be ready (even with error)
+      // Wait for collection to error after query fails
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError()).toBe(true)
       })
 
@@ -2237,7 +2237,7 @@ describe(`QueryCollection`, () => {
       // Wait for all retry attempts to complete and final failure
       await vi.waitFor(
         () => {
-          expect(collection.status).toBe(`ready`) // Should be ready even with error
+          expect(collection.status).toBe(`error`) // Should be in error state after all retries exhausted
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
           expect(collection.utils.isError()).toBe(true)
         },
