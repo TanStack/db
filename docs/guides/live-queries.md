@@ -162,6 +162,158 @@ export class UserListComponent {
 
 For more details on framework integration, see the [React](../../framework/react/adapter), [Vue](../../framework/vue/adapter), and [Angular](../../framework/angular/adapter) adapter documentation.
 
+### Using with React Suspense
+
+For React applications, you can use the `useLiveSuspenseQuery` hook to integrate with React Suspense boundaries. This hook suspends rendering while data loads initially, then streams updates without re-suspending.
+
+```tsx
+import { useLiveSuspenseQuery } from '@tanstack/react-db'
+import { Suspense } from 'react'
+
+function UserList() {
+  // This will suspend until data is ready
+  const { data } = useLiveSuspenseQuery((q) =>
+    q
+      .from({ user: usersCollection })
+      .where(({ user }) => eq(user.active, true))
+  )
+
+  // data is always defined - no need for optional chaining
+  return (
+    <ul>
+      {data.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  )
+}
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading users...</div>}>
+      <UserList />
+    </Suspense>
+  )
+}
+```
+
+#### Type Safety
+
+The key difference from `useLiveQuery` is that `data` is always defined (never `undefined`). The hook suspends during initial load, so by the time your component renders, data is guaranteed to be available:
+
+```tsx
+function UserStats() {
+  const { data } = useLiveSuspenseQuery((q) =>
+    q.from({ user: usersCollection })
+  )
+
+  // TypeScript knows data is Array<User>, not Array<User> | undefined
+  return <div>Total users: {data.length}</div>
+}
+```
+
+#### Error Handling
+
+Combine with Error Boundaries to handle loading errors:
+
+```tsx
+import { ErrorBoundary } from 'react-error-boundary'
+
+function App() {
+  return (
+    <ErrorBoundary fallback={<div>Failed to load users</div>}>
+      <Suspense fallback={<div>Loading users...</div>}>
+        <UserList />
+      </Suspense>
+    </ErrorBoundary>
+  )
+}
+```
+
+#### Reactive Updates
+
+After the initial load, data updates stream in without re-suspending:
+
+```tsx
+function UserList() {
+  const { data } = useLiveSuspenseQuery((q) =>
+    q.from({ user: usersCollection })
+  )
+
+  // Suspends once during initial load
+  // After that, data updates automatically when users change
+  // UI never re-suspends for live updates
+  return (
+    <ul>
+      {data.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+#### Re-suspending on Dependency Changes
+
+When dependencies change, the hook re-suspends to load new data:
+
+```tsx
+function FilteredUsers({ minAge }: { minAge: number }) {
+  const { data } = useLiveSuspenseQuery(
+    (q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => gt(user.age, minAge)),
+    [minAge] // Re-suspend when minAge changes
+  )
+
+  return (
+    <ul>
+      {data.map(user => (
+        <li key={user.id}>{user.name} - {user.age}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+#### When to Use Which Hook
+
+- **Use `useLiveSuspenseQuery`** when:
+  - You want to use React Suspense for loading states
+  - You prefer declarative loading with `<Suspense>` boundaries
+  - You want guaranteed non-undefined data types
+  - The query always needs to run (not conditional)
+
+- **Use `useLiveQuery`** when:
+  - You need conditional/disabled queries
+  - You prefer imperative loading state handling
+  - You want to show loading states inline without Suspense
+  - You need access to `status` and `isLoading` flags
+
+```tsx
+// useLiveQuery - imperative approach
+function UserList() {
+  const { data, status, isLoading } = useLiveQuery((q) =>
+    q.from({ user: usersCollection })
+  )
+
+  if (isLoading) return <div>Loading...</div>
+  if (status === 'error') return <div>Error loading users</div>
+
+  return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
+}
+
+// useLiveSuspenseQuery - declarative approach
+function UserList() {
+  const { data } = useLiveSuspenseQuery((q) =>
+    q.from({ user: usersCollection })
+  )
+
+  return <ul>{data.map(user => <li key={user.id}>{user.name}</li>)}</ul>
+}
+```
+
 ## From Clause
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
