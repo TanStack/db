@@ -281,19 +281,19 @@ function FilteredUsers({ minAge }: { minAge: number }) {
 
 - **Use `useLiveSuspenseQuery`** when:
   - You want to use React Suspense for loading states
-  - You prefer declarative loading with `<Suspense>` boundaries
+  - You prefer handling loading/error states with `<Suspense>` and `<ErrorBoundary>` components
   - You want guaranteed non-undefined data types
   - The query always needs to run (not conditional)
 
 - **Use `useLiveQuery`** when:
   - You need conditional/disabled queries
-  - You prefer imperative loading state handling
+  - You prefer handling loading/error states within your component
   - You want to show loading states inline without Suspense
   - You need access to `status` and `isLoading` flags
   - **You're using a router with loaders** (React Router, TanStack Router, etc.) - preload in the loader and use `useLiveQuery` in the component
 
 ```tsx
-// useLiveQuery - imperative approach
+// useLiveQuery - handle states in component
 function UserList() {
   const { data, status, isLoading } = useLiveQuery((q) =>
     q.from({ user: usersCollection })
@@ -305,7 +305,7 @@ function UserList() {
   return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
 }
 
-// useLiveSuspenseQuery - declarative approach
+// useLiveSuspenseQuery - handle states with Suspense/ErrorBoundary
 function UserList() {
   const { data } = useLiveSuspenseQuery((q) =>
     q.from({ user: usersCollection })

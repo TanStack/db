@@ -125,7 +125,7 @@ Collection status values:
 
 ### Using Suspense and Error Boundaries (React)
 
-For React applications, you can use a more declarative approach to loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
+For React applications, you can handle loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
 
 ```tsx
 import { useLiveSuspenseQuery } from "@tanstack/react-db"
@@ -151,7 +151,7 @@ const App = () => (
 )
 ```
 
-This approach separates loading states (handled by `<Suspense>`) and error states (handled by `<ErrorBoundary>`) from your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
 
 ## Transaction Error Handling
 
