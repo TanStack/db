@@ -621,8 +621,12 @@ describe(`isOrderBySubset`, () => {
 })
 
 describe(`isLimitSubset`, () => {
-  it(`should return true for undefined subset`, () => {
-    expect(isLimitSubset(undefined, 10)).toBe(true)
+  it(`should return false for undefined subset with limited superset (requesting all data but only have limited)`, () => {
+    expect(isLimitSubset(undefined, 10)).toBe(false)
+  })
+
+  it(`should return true for undefined subset with undefined superset (requesting all data and have all data)`, () => {
+    expect(isLimitSubset(undefined, undefined)).toBe(true)
   })
 
   it(`should return true for undefined superset`, () => {
