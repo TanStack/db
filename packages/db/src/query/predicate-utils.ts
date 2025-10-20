@@ -769,14 +769,15 @@ export function isLimitSubset(
   subset: number | undefined,
   superset: number | undefined
 ): boolean {
-  // No limit requirement is always satisfied
-  if (subset === undefined) {
-    return true
-  }
-
   // Unlimited superset satisfies any limit requirement
   if (superset === undefined) {
     return true
+  }
+
+  // If requesting all data (no limit), we need unlimited data to satisfy it
+  // But we know superset is not unlimited so we return false
+  if (subset === undefined) {
+    return false
   }
 
   // Otherwise, subset must be less than or equal to superset
