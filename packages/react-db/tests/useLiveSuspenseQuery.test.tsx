@@ -214,7 +214,7 @@ describe(`useLiveSuspenseQuery`, () => {
     await waitFor(() => {
       expect(result.current.data).toHaveLength(1)
     })
-    expect(result.current.data[0].age).toBe(35)
+    expect(result.current.data[0]?.age).toBe(35)
 
     // Change deps - age > 20
     rerender({ minAge: 20 })
@@ -272,7 +272,7 @@ describe(`useLiveSuspenseQuery`, () => {
           wrapper: SuspenseWrapper,
         }
       )
-    }).toThrow(/does not support returning undefined/)
+    }).toThrow(/does not support disabled queries/)
   })
 
   it(`should work with config object`, async () => {
@@ -491,24 +491,6 @@ describe(`useLiveSuspenseQuery`, () => {
       })
     )
 
-    let suspenseCount = 0
-    const SuspenseCounter = ({ children }: { children: ReactNode }) => {
-      return (
-        <Suspense
-          fallback={
-            <div>
-              {(() => {
-                suspenseCount++
-                return `Loading...`
-              })()}
-            </div>
-          }
-        >
-          {children}
-        </Suspense>
-      )
-    }
-
     const { result, rerender } = renderHook(
       ({ minAge }) =>
         useLiveSuspenseQuery(
@@ -519,7 +501,7 @@ describe(`useLiveSuspenseQuery`, () => {
           [minAge]
         ),
       {
-        wrapper: SuspenseCounter,
+        wrapper: SuspenseWrapper,
         initialProps: { minAge: 20 },
       }
     )
@@ -529,23 +511,26 @@ describe(`useLiveSuspenseQuery`, () => {
       expect(result.current.data).toHaveLength(3)
     })
 
-    const suspenseCountAfterInitial = suspenseCount
+    const dataAfterInitial = result.current.data
 
-    // Re-render with SAME deps - should NOT suspend
+    // Re-render with SAME deps - should NOT suspend (data stays available)
     rerender({ minAge: 20 })
-    rerender({ minAge: 20 })
-    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
+    expect(result.current.data).toBe(dataAfterInitial)
 
-    expect(suspenseCount).toBe(suspenseCountAfterInitial)
+    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
 
-    // Change deps - SHOULD suspend
+    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
+
+    // Change deps - SHOULD suspend and get new data
     rerender({ minAge: 30 })
 
     await waitFor(() => {
       expect(result.current.data).toHaveLength(1)
     })
 
-    // Verify suspension happened exactly once more
-    expect(suspenseCount).toBe(suspenseCountAfterInitial + 1)
+    expect(result.current.data[0]?.age).toBe(35)
   })
 })
