@@ -164,7 +164,9 @@ describe(`useLiveSuspenseQuery`, () => {
     )
 
     const liveQuery = createLiveQueryCollection((q) =>
-      q.from({ persons: collection }).where(({ persons }) => gt(persons.age, 30))
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => gt(persons.age, 30))
     )
 
     const { result } = renderHook(() => useLiveSuspenseQuery(liveQuery), {
@@ -194,7 +196,10 @@ describe(`useLiveSuspenseQuery`, () => {
     const { result, rerender } = renderHook(
       ({ minAge }) => {
         return useLiveSuspenseQuery(
-          (q) => q.from({ persons: collection }).where(({ persons }) => gt(persons.age, minAge)),
+          (q) =>
+            q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, minAge)),
           [minAge]
         )
       },
@@ -337,9 +342,14 @@ describe(`useLiveSuspenseQuery`, () => {
 
     const { result } = renderHook(
       () => {
-        const persons = useLiveSuspenseQuery((q) => q.from({ persons: personsCollection }))
+        const persons = useLiveSuspenseQuery((q) =>
+          q.from({ persons: personsCollection })
+        )
         const johnDoe = useLiveSuspenseQuery((q) =>
-          q.from({ persons: personsCollection }).where(({ persons }) => eq(persons.id, `1`)).findOne()
+          q
+            .from({ persons: personsCollection })
+            .where(({ persons }) => eq(persons.id, `1`))
+            .findOne()
         )
         return { persons, johnDoe }
       },

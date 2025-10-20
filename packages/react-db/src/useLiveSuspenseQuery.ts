@@ -250,9 +250,9 @@ export function useLiveSuspenseQuery(
   }
 
   // Create stable subscribe function using ref
-  const subscribeRef = useRef<((onStoreChange: () => void) => () => void) | null>(
-    null
-  )
+  const subscribeRef = useRef<
+    ((onStoreChange: () => void) => () => void) | null
+  >(null)
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
       const subscription = collection.subscribeChanges(() => {
