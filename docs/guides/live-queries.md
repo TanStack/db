@@ -290,6 +290,7 @@ function FilteredUsers({ minAge }: { minAge: number }) {
   - You prefer imperative loading state handling
   - You want to show loading states inline without Suspense
   - You need access to `status` and `isLoading` flags
+  - **You're using a router with loaders** (React Router, TanStack Router, etc.) - preload in the loader and use `useLiveQuery` in the component
 
 ```tsx
 // useLiveQuery - imperative approach
@@ -311,6 +312,28 @@ function UserList() {
   )
 
   return <ul>{data.map(user => <li key={user.id}>{user.name}</li>)}</ul>
+}
+
+// useLiveQuery with router loader - recommended pattern
+// In your route configuration:
+const route = {
+  path: '/users',
+  loader: async () => {
+    // Preload the collection in the loader
+    await usersCollection.preload()
+    return null
+  },
+  component: UserList,
+}
+
+// In your component:
+function UserList() {
+  // Collection is already loaded, so data is immediately available
+  const { data } = useLiveQuery((q) =>
+    q.from({ user: usersCollection })
+  )
+
+  return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
 }
 ```
 
