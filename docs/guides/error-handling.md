@@ -123,9 +123,9 @@ Collection status values:
 - `error` - In error state
 - `cleaned-up` - Cleaned up and no longer usable
 
-### Using Suspense and Error Boundaries
+### Using Suspense and Error Boundaries (React)
 
-For a more declarative approach to loading and error states, use `useLiveSuspenseQuery` with React Suspense and Error Boundaries:
+For React applications, you can use a more declarative approach to loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
 
 ```tsx
 import { useLiveSuspenseQuery } from "@tanstack/react-db"
