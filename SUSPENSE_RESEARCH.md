@@ -57,6 +57,42 @@ This document contains research findings on how TanStack DB can support React Su
 
 ---
 
+## React Version Compatibility
+
+### React 18 vs React 19
+
+**React 18** (Current minimum for TanStack Query):
+- Supports Suspense via "throw promise" pattern
+- No `use()` hook (introduced in React 19)
+- Requires manually throwing promises during render
+
+**React 19**:
+- Introduces `use()` hook for cleaner Suspense integration
+- Still supports throw promise pattern for backward compatibility
+
+### Critical Finding: Use Throw Promise Pattern
+
+**TanStack Query requires React 18+ and uses the throw promise pattern**, not React 19's `use()` hook. This means:
+
+```typescript
+// TanStack Query's approach (React 18+)
+function useSuspenseQuery(options) {
+  return useBaseQuery({
+    ...options,
+    suspense: true,  // Enables promise throwing
+  });
+}
+
+// Inside useBaseQuery when suspense: true
+if (shouldSuspend(options, result)) {
+  throw fetchOptimistic(options, observer);  // React catches this
+}
+```
+
+**Our implementation must also use the throw promise pattern to support React 18.**
+
+---
+
 ## TanStack Query's Suspense Pattern
 
 ### useSuspenseQuery API
@@ -84,6 +120,38 @@ const { data } = useSuspenseQuery({
 - No `isLoading` or `isError` states
 - `status` is always `'success'` when rendered
 - Re-suspends on query key changes (can use `startTransition` to prevent fallback)
+
+### How TanStack Query Implements Suspense (React 18+)
+
+**File**: `packages/react-query/src/useSuspenseQuery.ts`
+
+```typescript
+export function useSuspenseQuery(options, queryClient) {
+  return useBaseQuery(
+    {
+      ...options,
+      enabled: true,
+      suspense: true,        // Key flag
+      throwOnError: defaultThrowOnError,
+      placeholderData: undefined,
+    },
+    QueryObserver,
+    queryClient,
+  );
+}
+```
+
+**Inside useBaseQuery** when `suspense: true`:
+
+```typescript
+// Check if should suspend
+if (shouldSuspend(defaultedOptions, result)) {
+  // Throw promise - React Suspense catches it
+  throw fetchOptimistic(defaultedOptions, observer, errorResetBoundary);
+}
+```
+
+This pattern works in **React 18 and React 19**.
 
 ---
 
@@ -236,23 +304,30 @@ function Component() {
 
 ### Root Causes
 
-1. **Promise Never Resolves**: If the sync function doesn't call `markReady()`, the preload promise waits forever
-2. **Wrong Promise Type**: `preload()` returns `Promise<void>`, not the actual data
-3. **Collection Already Created**: Using a pre-created collection means it might be in various states
-4. **No Data Return**: Even if it resolves, it doesn't return the collection data
+1. **React 19 Only**: The `use()` hook doesn't exist in React 18
+2. **Promise Never Resolves**: If the sync function doesn't call `markReady()`, the preload promise waits forever
+3. **Wrong Promise Type**: `preload()` returns `Promise<void>`, not the actual data
+4. **Collection Already Created**: Using a pre-created collection means it might be in various states
+5. **No Data Return**: Even if it resolves, it doesn't return the collection data
+6. **Not the Recommended Pattern**: Even in React 19, TanStack libraries use throw promise pattern for broader compatibility
 
-### What Would Be Needed
+### The Correct Pattern (React 18+)
 
-```jsx
-// Pseudo-code for what's actually needed:
+```typescript
 function useLiveSuspenseQuery(queryFn, deps) {
-  const collection = /* create/get collection */;
-  const promise = useMemo(() => {
-    return collection.preload().then(() => collection.state);
-  }, [collection]);
+  const collection = /* create collection */;
 
-  const data = use(promise);
-  // But this still has issues with re-renders and stability
+  // Check status and throw promise if not ready
+  if (collection.status === 'loading' || collection.status === 'idle') {
+    throw collection.preload(); // React Suspense catches this
+  }
+
+  if (collection.status === 'error') {
+    throw new Error('Failed to load');
+  }
+
+  // Collection is ready - return data
+  return { data: collection.toArray };
 }
 ```
 
@@ -356,16 +431,22 @@ export function useLiveSuspenseQuery<TContext extends Context>(
 }
 ```
 
-#### 2. Implementation Strategy
+#### 2. Implementation Strategy (React 18+ Compatible)
+
+**Key Approach**: Use the "throw promise" pattern like TanStack Query, not React 19's `use()` hook.
 
 ```typescript
-import { use, useRef, useMemo } from 'react';
-import { useLiveQuery } from './useLiveQuery';
+import { useRef, useSyncExternalStore } from 'react';
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+} from '@tanstack/db';
 
 export function useLiveSuspenseQuery(queryFn, deps = []) {
-  // Create stable collection reference (reuse useLiveQuery logic)
+  // Reuse useLiveQuery's collection management logic
   const collectionRef = useRef(null);
   const depsRef = useRef(null);
+  const promiseRef = useRef(null);
 
   // Detect if deps changed
   const needsNewCollection =
@@ -382,61 +463,72 @@ export function useLiveSuspenseQuery(queryFn, deps = []) {
     if (result instanceof BaseQueryBuilder) {
       collectionRef.current = createLiveQueryCollection({
         query: queryFn,
-        startSync: false,  // Don't start yet
+        startSync: true,  // Start sync immediately
         gcTime: 1,
       });
     }
     depsRef.current = [...deps];
+    promiseRef.current = null; // Reset promise for new collection
   }
 
   const collection = collectionRef.current;
 
-  // Create stable promise that resolves when collection is ready
-  const promise = useMemo(() => {
-    if (!collection) return Promise.resolve(null);
-
-    if (collection.status === 'ready') {
-      return Promise.resolve(collection);
-    }
-
-    if (collection.status === 'error') {
-      return Promise.reject(new Error('Collection failed to load'));
-    }
-
-    // Start sync and wait for ready
-    return collection.preload().then(() => collection);
-  }, [collection]);
-
-  // Suspend until ready
-  const readyCollection = use(promise);
-
-  if (!readyCollection) {
-    throw new Error('Collection is null');
+  // Check collection status and suspend if needed
+  if (collection.status === 'error') {
+    // Throw error to Error Boundary
+    throw new Error('Collection failed to load');
   }
+
+  if (collection.status === 'loading' || collection.status === 'idle') {
+    // Create or reuse promise
+    if (!promiseRef.current) {
+      promiseRef.current = collection.preload();
+    }
+    // THROW PROMISE - React Suspense catches this
+    throw promiseRef.current;
+  }
+
+  // Collection is ready - clear promise
+  promiseRef.current = null;
 
   // Subscribe to changes (like useLiveQuery)
   const snapshot = useSyncExternalStore(
     (onStoreChange) => {
-      const subscription = readyCollection.subscribeChanges(() => {
+      const subscription = collection.subscribeChanges(() => {
         onStoreChange();
       });
       return () => subscription.unsubscribe();
     },
-    () => readyCollection.status
+    () => ({
+      collection,
+      version: Math.random(), // Force update on any change
+    })
   );
 
   // Build return object
-  const entries = Array.from(readyCollection.entries());
+  const entries = Array.from(snapshot.collection.entries());
+  const config = snapshot.collection.config;
+  const singleResult = config.singleResult;
   const state = new Map(entries);
-  const data = entries.map(([, value]) => value);
+  const data = singleResult
+    ? entries[0]?.[1]
+    : entries.map(([, value]) => value);
 
   return {
     state,
     data,
-    collection: readyCollection,
+    collection: snapshot.collection,
   };
 }
 ```
+
+**How it works**:
+
+1. **Deps change**: Create new collection, reset promise
+2. **Collection loading**: Throw promise (React Suspense catches)
+3. **Collection error**: Throw error (Error Boundary catches)
+4. **Collection ready**: Return data
+5. **Reactivity**: `useSyncExternalStore` subscribes to changes
 
 #### 3. Challenges to Solve
 
@@ -446,29 +538,38 @@ When deps change, we need to create a new collection. This should trigger a re-s
 
 **Solution**:
 - Create new collection instance when deps change
-- New collection starts in `idle` state
-- `useMemo` creates new promise for new collection
-- `use()` suspends on new promise
+- New collection starts in `idle` or `loading` state
+- Check status and throw new preload promise
+- React Suspense catches thrown promise
 
-**Challenge 2: Promise Stability**
+**Challenge 2: Promise Reuse**
 
-React's `use()` requires promises to be stable across re-renders within the same component lifecycle.
+Same promise must be thrown across re-renders until it resolves.
 
 **Solution**:
-- Use `useMemo` with collection as dependency
-- Collection reference is stable unless deps change
-- When deps change, we want a new promise anyway
+- Store promise in `useRef`
+- Reuse same promise reference until collection becomes ready
+- Reset promise when deps change or collection becomes ready
 
 **Challenge 3: Error Handling**
 
 Errors should be thrown to Error Boundary.
 
 **Solution**:
-- Check collection status before creating promise
-- Reject promise if status is `error`
-- Let `use()` throw the rejection to Error Boundary
+- Check collection status for `'error'`
+- Throw Error directly (not promise)
+- Error Boundary catches it
 
-**Challenge 4: Preventing Fallback on Updates**
+**Challenge 4: Preventing Infinite Render Loops**
+
+When collection updates, we shouldn't re-suspend.
+
+**Solution**:
+- Only throw promise when status is `'loading'` or `'idle'`
+- Once `'ready'`, never suspend again (use `useSyncExternalStore` for updates)
+- New collection from deps change will naturally suspend
+
+**Challenge 5: Preventing Fallback on Updates**
 
 Like TanStack Query, we may want to prevent showing fallback when deps change.
 
@@ -798,12 +899,20 @@ function TodosPage() {
 **TanStack DB can effectively support Suspense** through a new `useLiveSuspenseQuery` hook that:
 
 1. ✅ Leverages existing `preload()` infrastructure
-2. ✅ Follows TanStack Query's established patterns
+2. ✅ Follows TanStack Query's established patterns (throw promise)
 3. ✅ Provides type-safe API with guaranteed data
-4. ✅ Integrates seamlessly with React 19's `use()` hook
+4. ✅ **Works in React 18+** (doesn't require React 19's `use()` hook)
 5. ✅ Works with SSR/streaming via TanStack Router
-6. ✅ Maintains backward compatibility
+6. ✅ Maintains backward compatibility with existing code
 
-The main implementation challenge is ensuring **proper promise lifecycle management** and **stable references** across re-renders, which can be solved with careful use of `useMemo` and `useRef`.
+### Key Implementation Points
 
-**Next Steps**: Proceed with implementation of `useLiveSuspenseQuery` following the recommended approach outlined above.
+- **Use "throw promise" pattern** like TanStack Query (not React 19's `use()` hook)
+- **React 18+ compatible** - same minimum version as TanStack Query
+- **Promise lifecycle**: Store promise in `useRef`, throw when loading, clear when ready
+- **Error handling**: Throw errors directly to Error Boundary
+- **Reactivity**: Use `useSyncExternalStore` for live updates after initial load
+
+The main implementation challenge is ensuring **proper promise reuse** across re-renders to avoid infinite loops, and **clean state management** when deps change.
+
+**Next Steps**: Proceed with implementation of `useLiveSuspenseQuery` following the React 18+ compatible throw promise pattern outlined above.
