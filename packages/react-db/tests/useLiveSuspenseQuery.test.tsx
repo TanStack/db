@@ -403,4 +403,149 @@ describe(`useLiveSuspenseQuery`, () => {
       { timeout: 1000 }
     )
   })
+
+  it(`should NOT re-suspend on live updates after initial load`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-11`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    let suspenseCount = 0
+    const SuspenseCounter = ({ children }: { children: ReactNode }) => {
+      return (
+        <Suspense
+          fallback={
+            <div>
+              {(() => {
+                suspenseCount++
+                return `Loading...`
+              })()}
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      )
+    }
+
+    const { result } = renderHook(
+      () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
+      {
+        wrapper: SuspenseCounter,
+      }
+    )
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(3)
+    })
+
+    const initialSuspenseCount = suspenseCount
+
+    // Make multiple live updates
+    collection.insert({
+      id: `4`,
+      name: `New Person 1`,
+      age: 40,
+      email: `new1@example.com`,
+      isActive: true,
+      team: `team1`,
+    })
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(4)
+    })
+
+    collection.insert({
+      id: `5`,
+      name: `New Person 2`,
+      age: 45,
+      email: `new2@example.com`,
+      isActive: true,
+      team: `team2`,
+    })
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(5)
+    })
+
+    collection.delete(`4`)
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(4)
+    })
+
+    // Verify suspense count hasn't increased (no re-suspension)
+    expect(suspenseCount).toBe(initialSuspenseCount)
+  })
+
+  it(`should only suspend on deps change, not on every re-render`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-12`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    let suspenseCount = 0
+    const SuspenseCounter = ({ children }: { children: ReactNode }) => {
+      return (
+        <Suspense
+          fallback={
+            <div>
+              {(() => {
+                suspenseCount++
+                return `Loading...`
+              })()}
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      )
+    }
+
+    const { result, rerender } = renderHook(
+      ({ minAge }) =>
+        useLiveSuspenseQuery(
+          (q) =>
+            q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, minAge)),
+          [minAge]
+        ),
+      {
+        wrapper: SuspenseCounter,
+        initialProps: { minAge: 20 },
+      }
+    )
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(3)
+    })
+
+    const suspenseCountAfterInitial = suspenseCount
+
+    // Re-render with SAME deps - should NOT suspend
+    rerender({ minAge: 20 })
+    rerender({ minAge: 20 })
+    rerender({ minAge: 20 })
+
+    expect(suspenseCount).toBe(suspenseCountAfterInitial)
+
+    // Change deps - SHOULD suspend
+    rerender({ minAge: 30 })
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(1)
+    })
+
+    // Verify suspension happened exactly once more
+    expect(suspenseCount).toBe(suspenseCountAfterInitial + 1)
+  })
 })

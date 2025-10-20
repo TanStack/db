@@ -124,9 +124,24 @@ export function useLiveSuspenseQuery(
   deps: Array<unknown> = []
 ) {
   const promiseRef = useRef<Promise<void> | null>(null)
+  const collectionRef = useRef<Collection<any, any, any> | null>(null)
+  const hasBeenReadyRef = useRef(false)
 
   // Use useLiveQuery to handle collection management and reactivity
   const result = useLiveQuery(configOrQueryOrCollection, deps)
+
+  // Reset promise and ready state when collection changes (deps changed)
+  if (collectionRef.current !== result.collection) {
+    promiseRef.current = null
+    collectionRef.current = result.collection
+    hasBeenReadyRef.current = false
+  }
+
+  // Track when we reach ready state
+  if (result.status === `ready`) {
+    hasBeenReadyRef.current = true
+    promiseRef.current = null
+  }
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -137,14 +152,15 @@ export function useLiveSuspenseQuery(
     )
   }
 
-  if (result.status === `error`) {
-    // Clear promise and throw error to Error Boundary
+  // Only throw errors during initial load (before first ready)
+  // After success, errors surface as stale data (matches TanStack Query behavior)
+  if (result.status === `error` && !hasBeenReadyRef.current) {
     promiseRef.current = null
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
   if (result.status === `loading` || result.status === `idle`) {
-    // Create or reuse promise
+    // Create or reuse promise for current collection
     if (!promiseRef.current) {
       promiseRef.current = result.collection.preload()
     }
@@ -152,12 +168,8 @@ export function useLiveSuspenseQuery(
     throw promiseRef.current
   }
 
-  // Collection is ready - clear promise
-  if (result.status === `ready`) {
-    promiseRef.current = null
-  }
-
   // Return data without status/loading flags (handled by Suspense/ErrorBoundary)
+  // If error after success, return last known good state (stale data)
   return {
     state: result.state,
     data: result.data,
