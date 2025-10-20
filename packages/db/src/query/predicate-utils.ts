@@ -66,6 +66,13 @@ function isWhereSubsetInternal(
   subset: BasicExpression<boolean>,
   superset: BasicExpression<boolean>
 ): boolean {
+  // If subset is false it is requesting no data,
+  // thus the result set is empty
+  // and the empty set is a subset of any set
+  if (subset.type === `val` && subset.value === false) {
+    return true
+  }
+
   // If expressions are structurally equal, subset relationship holds
   if (areExpressionsEqual(subset, superset)) {
     return true
