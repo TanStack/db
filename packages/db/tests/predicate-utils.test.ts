@@ -891,8 +891,14 @@ describe(`minusWherePredicates`, () => {
 
   describe(`common conditions`, () => {
     it(`should handle common conditions: (age > 10 AND status = 'active') - (age > 20 AND status = 'active') = (age > 10 AND age <= 20 AND status = 'active')`, () => {
-      const from = and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-      const subtract = and(gt(ref(`age`), val(20)), eq(ref(`status`), val(`active`)))
+      const from = and(
+        gt(ref(`age`), val(10)),
+        eq(ref(`status`), val(`active`))
+      )
+      const subtract = and(
+        gt(ref(`age`), val(20)),
+        eq(ref(`status`), val(`active`))
+      )
       const result = minusWherePredicates(from, subtract)
 
       expect(result).toEqual({
@@ -932,8 +938,14 @@ describe(`minusWherePredicates`, () => {
     })
 
     it(`should handle IN with common conditions: (age IN [10,20,30] AND status = 'active') - (age IN [20,30] AND status = 'active') = (age IN [10] AND status = 'active')`, () => {
-      const from = and(inOp(ref(`age`), [10, 20, 30]), eq(ref(`status`), val(`active`)))
-      const subtract = and(inOp(ref(`age`), [20, 30]), eq(ref(`status`), val(`active`)))
+      const from = and(
+        inOp(ref(`age`), [10, 20, 30]),
+        eq(ref(`status`), val(`active`))
+      )
+      const subtract = and(
+        inOp(ref(`age`), [20, 30]),
+        eq(ref(`status`), val(`active`))
+      )
       const result = minusWherePredicates(from, subtract)
 
       expect(result).toEqual({
@@ -951,8 +963,14 @@ describe(`minusWherePredicates`, () => {
     })
 
     it(`should return null when common conditions exist but remaining difference cannot be simplified`, () => {
-      const from = and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-      const subtract = and(gt(ref(`name`), val(`Z`)), eq(ref(`status`), val(`active`)))
+      const from = and(
+        gt(ref(`age`), val(10)),
+        eq(ref(`status`), val(`active`))
+      )
+      const subtract = and(
+        gt(ref(`name`), val(`Z`)),
+        eq(ref(`status`), val(`active`))
+      )
       const result = minusWherePredicates(from, subtract)
 
       // Can't simplify age > 10 - name > 'Z' (different fields), so returns null
