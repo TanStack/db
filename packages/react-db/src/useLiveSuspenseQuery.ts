@@ -129,7 +129,8 @@ export function useLiveSuspenseQuery(
   const result = useLiveQuery(configOrQueryOrCollection, deps)
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
-  if (result.status === `disabled`) {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!result.isEnabled) {
     // Suspense queries cannot be disabled - throw error
     throw new Error(
       `useLiveSuspenseQuery does not support disabled queries. Use useLiveQuery instead for conditional queries.`
