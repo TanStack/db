@@ -1,8 +1,6 @@
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
-  NoStorageAvailableError,
-  NoStorageEventApiError,
   SerializationError,
   StorageKeyRequiredError,
 } from "./errors"
@@ -139,10 +137,56 @@ function generateUuid(): string {
 }
 
 /**
+ * Creates an in-memory storage implementation that mimics the StorageApi interface
+ * Used as a fallback when localStorage is not available (e.g., server-side rendering)
+ * @returns An object implementing the StorageApi interface using an in-memory Map
+ */
+function createInMemoryStorage(): StorageApi {
+  const storage = new Map<string, string>()
+
+  return {
+    getItem(key: string): string | null {
+      return storage.get(key) ?? null
+    },
+    setItem(key: string, value: string): void {
+      storage.set(key, value)
+    },
+    removeItem(key: string): void {
+      storage.delete(key)
+    },
+  }
+}
+
+/**
+ * Creates a no-op storage event API for environments without window (e.g., server-side)
+ * This provides the required interface but doesn't actually listen to any events
+ * since cross-tab synchronization is not possible in server environments
+ * @returns An object implementing the StorageEventApi interface with no-op methods
+ */
+function createNoOpStorageEventApi(): StorageEventApi {
+  return {
+    addEventListener: () => {
+      // No-op: cannot listen to storage events without window
+    },
+    removeEventListener: () => {
+      // No-op: cannot remove listeners without window
+    },
+  }
+}
+
+/**
  * Creates localStorage collection options for use with a standard Collection
  *
  * This function creates a collection that persists data to localStorage/sessionStorage
  * and synchronizes changes across browser tabs using storage events.
+ *
+ * **Fallback Behavior:**
+ *
+ * When localStorage is not available (e.g., in server-side rendering environments),
+ * this function automatically falls back to an in-memory storage implementation.
+ * This prevents errors during module initialization and allows the collection to
+ * work in any environment, though data will not persist across page reloads or
+ * be shared across tabs when using the in-memory fallback.
  *
  * **Using with Manual Transactions:**
  *
@@ -257,21 +301,18 @@ export function localStorageCollectionOptions(
   }
 
   // Default to window.localStorage if no storage is provided
+  // Fall back to in-memory storage if localStorage is not available (e.g., server-side rendering)
   const storage =
     config.storage ||
-    (typeof window !== `undefined` ? window.localStorage : null)
-
-  if (!storage) {
-    throw new NoStorageAvailableError()
-  }
+    (typeof window !== `undefined` ? window.localStorage : null) ||
+    createInMemoryStorage()
 
   // Default to window for storage events if not provided
+  // Fall back to no-op storage event API if window is not available (e.g., server-side rendering)
   const storageEventApi =
-    config.storageEventApi || (typeof window !== `undefined` ? window : null)
-
-  if (!storageEventApi) {
-    throw new NoStorageEventApiError()
-  }
+    config.storageEventApi ||
+    (typeof window !== `undefined` ? window : null) ||
+    createNoOpStorageEventApi()
 
   // Track the last known state to detect changes
   const lastKnownData = new Map<string | number, StoredItem<any>>()
