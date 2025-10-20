@@ -86,6 +86,14 @@ export function createSerializedMutations<
    * The strategy controls when the transaction is actually committed.
    */
   function mutate(callback: () => void): Transaction<T> {
+    // Rollback all pending transactions from previous mutate() calls
+    // This handles cases where the strategy dropped the callback (e.g. trailing: false)
+    // and the previous transaction never got committed
+    for (const pendingTx of pendingTransactions) {
+      pendingTx.rollback()
+    }
+    pendingTransactions.clear()
+
     // Create transaction with autoCommit disabled
     // The strategy will control when commit() is called
     const transaction = createTransaction<T>({
@@ -101,15 +109,9 @@ export function createSerializedMutations<
 
     // Use the strategy to control when to commit
     strategy.execute(() => {
-      // Rollback all other pending transactions that were superseded
-      for (const pendingTx of pendingTransactions) {
-        if (pendingTx !== transaction) {
-          pendingTx.rollback()
-          pendingTransactions.delete(pendingTx)
-        }
-      }
-
       // Remove from pending and mark as executing
+      // Note: There should only be one pending transaction at this point
+      // since we clear all previous ones at the start of each mutate() call
       pendingTransactions.delete(transaction)
       executingTransaction = transaction
 
@@ -149,9 +151,16 @@ export function createSerializedMutations<
     }
     pendingTransactions.clear()
 
-    // Rollback executing transaction if any
+    // Rollback executing transaction if any, but only if it's not already completed
     if (executingTransaction) {
-      executingTransaction.rollback()
+      // Check if transaction is still in a state that can be rolled back
+      // Avoid throwing if the transaction just finished committing
+      if (
+        executingTransaction.state === `pending` ||
+        executingTransaction.state === `persisting`
+      ) {
+        executingTransaction.rollback()
+      }
       executingTransaction = null
     }
   }

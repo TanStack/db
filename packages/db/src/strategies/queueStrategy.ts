@@ -59,11 +59,12 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>
     ) => {
-      // Wrap the callback in an async function that waits for commit
+      // Wrap the callback in an async function that waits for persistence
       queuer.addItem(async () => {
         const transaction = fn()
         // Wait for the transaction to be persisted before processing next item
-        await transaction.commit()
+        // Note: fn() already calls commit(), we just wait for it to complete
+        await transaction.isPersisted.promise
       })
     },
     cleanup: () => {
