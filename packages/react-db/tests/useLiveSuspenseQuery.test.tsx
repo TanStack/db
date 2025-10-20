@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import {
   createCollection,
@@ -6,9 +6,10 @@ import {
   eq,
   gt,
 } from "@tanstack/db"
-import { Suspense, useState, type ReactNode } from "react"
+import { Suspense } from "react"
 import { useLiveSuspenseQuery } from "../src/useLiveSuspenseQuery"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
+import type { ReactNode } from "react"
 
 type Person = {
   id: string
@@ -348,7 +349,7 @@ describe(`useLiveSuspenseQuery`, () => {
         const johnDoe = useLiveSuspenseQuery((q) =>
           q
             .from({ persons: personsCollection })
-            .where(({ persons }) => eq(persons.id, `1`))
+            .where(({ persons: p }) => eq(p.id, `1`))
             .findOne()
         )
         return { persons, johnDoe }
