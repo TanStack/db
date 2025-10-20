@@ -96,6 +96,12 @@ describe(`isWhereSubset`, () => {
         isWhereSubset(gt(ref(`age`), val(10)), gt(ref(`age`), val(10)))
       ).toBe(true)
     })
+
+    it(`should return true when subset is false`, () => {
+      // When subset is false the result will always be the empty set
+      // and the empty set is a subset of any set
+      expect(isWhereSubset(val(false), gt(ref(`age`), val(10)))).toBe(true)
+    })
   })
 
   describe(`comparison operators`, () => {
