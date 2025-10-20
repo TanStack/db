@@ -592,6 +592,9 @@ importers:
       '@tanstack/db-ivm':
         specifier: workspace:*
         version: link:../db-ivm
+      '@tanstack/pacer':
+        specifier: ^0.1.0
+        version: 0.1.0
       typescript:
         specifier: '>=4.7'
         version: 5.9.2
@@ -3126,6 +3129,10 @@ packages:
   '@tanstack/history@1.132.31':
     resolution: {integrity: sha512-UCHM2uS0t/uSszqPEo+SBSSoQVeQ+LlOWAVBl5SA7+AedeAbKafIPjFn8huZCXNLAYb0WKV2+wETr7lDK9uz7g==}
     engines: {node: '>=12'}
+
+  '@tanstack/pacer@0.1.0':
+    resolution: {integrity: sha512-QVzkGO5clvGj/qdX8H2wUj0QCXCLZ/pwPMnfSqhoYfpzDRkRHDj+3D+VzdcehBIVnE+GCd1D/P1tGMzfjmfrzQ==}
+    engines: {node: '>=18'}
 
   '@tanstack/publish-config@0.2.1':
     resolution: {integrity: sha512-URVXmXwlZXL75AFyvyOORef1tv2f16dEaFntwLYnBHoKLQMxyWYRzQrnXooxO1xf+GidJuDSZSC6Rc9UX1aK7g==}
@@ -10784,6 +10791,8 @@ snapshots:
       - typescript
 
   '@tanstack/history@1.132.31': {}
+
+  '@tanstack/pacer@0.1.0': {}
 
   '@tanstack/publish-config@0.2.1':
     dependencies:
