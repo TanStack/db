@@ -6,10 +6,14 @@ import {
   isWhereSubset,
   minusWherePredicates,
   unionWherePredicates,
-} from "../src/query/predicate-utils"
-import { Func, PropRef, Value } from "../src/query/ir"
-import type { BasicExpression, OrderBy, OrderByClause } from "../src/query/ir"
-import type { LoadSubsetOptions } from "../src/types"
+} from "../../src/query/predicate-utils"
+import { Func, PropRef, Value } from "../../src/query/ir"
+import type {
+  BasicExpression,
+  OrderBy,
+  OrderByClause,
+} from "../../src/query/ir"
+import type { LoadSubsetOptions } from "../../src/types"
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
