@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.11
+
+### Patch Changes
+
+- Add support for pre-created live query collections in useLiveInfiniteQuery, enabling router loader patterns where live queries can be created, preloaded, and passed to components. ([#684](https://github.com/TanStack/db/pull/684))
+
 ## 0.4.10
 
 ### Patch Changes

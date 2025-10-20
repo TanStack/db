@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/electric-db-collection",
   "description": "ElectricSQL collection for TanStack DB",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "dependencies": {
     "@electric-sql/client": "^1.0.14",
     "@standard-schema/spec": "^1.0.0",
@@ -32,7 +32,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.18.2",
+  "packageManager": "pnpm@10.18.3",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
