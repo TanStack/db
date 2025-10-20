@@ -1,5 +1,6 @@
 // Re-export all public APIs
 export * from "./useLiveQuery"
+export * from "./useLiveSuspenseQuery"
 export * from "./useLiveInfiniteQuery"
 
 // Re-export everything from @tanstack/db
