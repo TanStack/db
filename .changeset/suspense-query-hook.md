@@ -1,5 +1,5 @@
 ---
-"@tanstack/react-db": minor
+"@tanstack/react-db": patch
 ---
 
 Add `useLiveSuspenseQuery` hook for React Suspense support
