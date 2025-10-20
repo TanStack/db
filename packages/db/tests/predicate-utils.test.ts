@@ -199,6 +199,54 @@ describe(`isWhereSubset`, () => {
         isWhereSubset(inOp(ref(`age`), [5, 20]), inOp(ref(`age`), [5, 10, 15]))
       ).toBe(false)
     })
+
+    it(`should handle empty IN array: age IN [] is subset of age IN []`, () => {
+      expect(isWhereSubset(inOp(ref(`age`), []), inOp(ref(`age`), []))).toBe(
+        true
+      )
+    })
+
+    it(`should handle empty IN array: age IN [] is subset of age IN [5, 10]`, () => {
+      expect(
+        isWhereSubset(inOp(ref(`age`), []), inOp(ref(`age`), [5, 10]))
+      ).toBe(true)
+    })
+
+    it(`should handle empty IN array: age IN [5, 10] is NOT subset of age IN []`, () => {
+      expect(
+        isWhereSubset(inOp(ref(`age`), [5, 10]), inOp(ref(`age`), []))
+      ).toBe(false)
+    })
+
+    it(`should handle singleton IN array: age = 5 is subset of age IN [5]`, () => {
+      expect(isWhereSubset(eq(ref(`age`), val(5)), inOp(ref(`age`), [5]))).toBe(
+        true
+      )
+    })
+
+    it(`should handle singleton IN array: age = 10 is NOT subset of age IN [5]`, () => {
+      expect(
+        isWhereSubset(eq(ref(`age`), val(10)), inOp(ref(`age`), [5]))
+      ).toBe(false)
+    })
+
+    it(`should handle singleton IN array: age IN [5] is subset of age IN [5, 10, 15]`, () => {
+      expect(
+        isWhereSubset(inOp(ref(`age`), [5]), inOp(ref(`age`), [5, 10, 15]))
+      ).toBe(true)
+    })
+
+    it(`should handle singleton IN array: age IN [20] is NOT subset of age IN [5, 10, 15]`, () => {
+      expect(
+        isWhereSubset(inOp(ref(`age`), [20]), inOp(ref(`age`), [5, 10, 15]))
+      ).toBe(false)
+    })
+
+    it(`should handle singleton IN array: age IN [5, 10, 15] is NOT subset of age IN [5]`, () => {
+      expect(
+        isWhereSubset(inOp(ref(`age`), [5, 10, 15]), inOp(ref(`age`), [5]))
+      ).toBe(false)
+    })
   })
 
   describe(`AND combinations`, () => {

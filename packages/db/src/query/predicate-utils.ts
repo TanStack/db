@@ -1,4 +1,5 @@
-import type { BasicExpression, Func, OrderBy, PropRef } from "./ir.js"
+import { Func, Value } from "./ir.js"
+import type { BasicExpression, OrderBy, PropRef } from "./ir.js"
 import type { LoadSubsetOptions } from "../types.js"
 
 /**
@@ -42,6 +43,25 @@ export function isWhereSubset(
   return isWhereSubsetInternal(subset!, superset!)
 }
 
+function makeDisjunction(
+  preds: Array<BasicExpression<boolean>>
+): BasicExpression<boolean> {
+  if (preds.length === 0) {
+    return new Value(false)
+  }
+  if (preds.length === 1) {
+    return preds[0]!
+  }
+  return new Func(`or`, preds)
+}
+
+function convertInToOr(inField: InField) {
+  const equalities = inField.values.map(
+    (value) => new Func(`eq`, [inField.ref, new Value(value)])
+  )
+  return makeDisjunction(equalities)
+}
+
 function isWhereSubsetInternal(
   subset: BasicExpression<boolean>,
   superset: BasicExpression<boolean>
@@ -66,6 +86,22 @@ function isWhereSubsetInternal(
     return subset.args.some((arg) =>
       isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
     )
+  }
+
+  // Turn x IN [A, B, C] into x = A OR x = B OR x = C
+  // for unified handling of IN and OR
+  if (subset.type === `func` && subset.name === `in`) {
+    const inField = extractInField(subset)
+    if (inField) {
+      return isWhereSubsetInternal(convertInToOr(inField), superset)
+    }
+  }
+
+  if (superset.type === `func` && superset.name === `in`) {
+    const inField = extractInField(superset)
+    if (inField) {
+      return isWhereSubsetInternal(subset, convertInToOr(inField))
+    }
   }
 
   // Handle OR in subset: (A OR B) is subset of C only if both A and B are subsets of C
@@ -106,6 +142,7 @@ function isWhereSubsetInternal(
       )
     }
 
+    /*
     // Handle eq vs in
     if (subsetFunc.name === `eq` && supersetFunc.name === `in`) {
       const subsetFieldEq = extractEqualityField(subsetFunc)
@@ -147,6 +184,7 @@ function isWhereSubsetInternal(
         )
       }
     }
+    */
   }
 
   // Conservative: if we can't determine, return false
