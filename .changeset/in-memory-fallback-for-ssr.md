@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+"@tanstack/db": patch
 ---
 
 Add in-memory fallback for localStorage collections in SSR environments
