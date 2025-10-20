@@ -12,8 +12,14 @@ import type { LoadSubsetOptions } from "../types.js"
  * Tracks what data has been loaded and avoids redundant calls by applying
  * subset logic to predicates.
  *
+ * @param loadSubset - The underlying loadSubset function to wrap
+ * @param onDeduplicate - An optional callback function that is invoked when a loadSubset call is deduplicated.
+ *                        If the call is deduplicated because the requested data is being loaded by an inflight request,
+ *                        then this callback is invoked when the inflight request completes successfully and the data is fully loaded.
+ *                        This callback is useful if you need to track rows per query, in which case you can't ignore deduplicated calls
+ *                        because you need to know which rows were loaded for each query.
  * @example
- * const dedupe = new DeduplicatedLoadSubset(myLoadSubset)
+ * const dedupe = new DeduplicatedLoadSubset(myLoadSubset, (opts) => console.log(`Call was deduplicated:`, opts))
  *
  * // First call - fetches data
  * await dedupe.loadSubset({ where: gt(ref('age'), val(10)) })
@@ -29,6 +35,11 @@ export class DeduplicatedLoadSubset {
   private readonly _loadSubset: (
     options: LoadSubsetOptions
   ) => true | Promise<void>
+
+  // An optional callback function that is invoked when a loadSubset call is deduplicated.
+  private readonly onDeduplicate:
+    | ((options: LoadSubsetOptions) => void)
+    | undefined
 
   // Combined where predicate for all unlimited calls (no limit)
   private unlimitedWhere: BasicExpression<boolean> | undefined = undefined
@@ -53,9 +64,11 @@ export class DeduplicatedLoadSubset {
   private generation = 0
 
   constructor(
-    loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
+    loadSubset: (options: LoadSubsetOptions) => true | Promise<void>,
+    onDeduplicate?: (options: LoadSubsetOptions) => void
   ) {
     this._loadSubset = loadSubset
+    this.onDeduplicate = onDeduplicate
   }
 
   /**
@@ -71,6 +84,7 @@ export class DeduplicatedLoadSubset {
   loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
     // If we've loaded all data, everything is covered
     if (this.hasLoadedAllData) {
+      this.onDeduplicate?.(options)
       return true
     }
 
@@ -78,6 +92,7 @@ export class DeduplicatedLoadSubset {
     // If we've loaded all data matching a where clause, we don't need to refetch subsets
     if (this.unlimitedWhere !== undefined && options.where !== undefined) {
       if (isWhereSubset(options.where, this.unlimitedWhere)) {
+        this.onDeduplicate?.(options)
         return true // Data already loaded via unlimited call
       }
     }
@@ -89,6 +104,7 @@ export class DeduplicatedLoadSubset {
       )
 
       if (alreadyLoaded) {
+        this.onDeduplicate?.(options)
         return true // Already loaded
       }
     }
@@ -103,7 +119,10 @@ export class DeduplicatedLoadSubset {
       // An in-flight call will load data that covers this request
       // Return the same promise so this caller waits for the data to load
       // The in-flight promise already handles tracking updates when it completes
-      return matchingInflight.promise
+      const prom = matchingInflight.promise
+      // Call `onDeduplicate` when the inflight request has loaded the data
+      prom.then(() => this.onDeduplicate?.(options)).catch() // ignore errors
+      return prom
     }
 
     // Not fully covered by existing data
