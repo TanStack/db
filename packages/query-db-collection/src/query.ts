@@ -1,4 +1,5 @@
 import { QueryObserver, hashKey } from "@tanstack/query-core"
+import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -6,12 +7,6 @@ import {
   QueryKeyRequiredError,
 } from "./errors"
 import { createWriteUtils } from "./manual-sync"
-import type {
-  QueryClient,
-  QueryFunctionContext,
-  QueryKey,
-  QueryObserverOptions,
-} from "@tanstack/query-core"
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -23,6 +18,12 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+import type {
+  QueryClient,
+  QueryFunctionContext,
+  QueryKey,
+  QueryObserverOptions,
+} from "@tanstack/query-core"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Re-export for external use
@@ -476,7 +477,8 @@ export function queryCollectionOptions(
     let syncStarted = false
 
     const createQueryFromOpts = (
-      opts: LoadSubsetOptions
+      opts: LoadSubsetOptions,
+      queryFunction: typeof queryFn = queryFn
     ): true | Promise<void> => {
       // Push the predicates down to the queryKey and queryFn
       const key = typeof queryKey === `function` ? queryKey(opts) : queryKey
@@ -519,7 +521,7 @@ export function queryCollectionOptions(
         any
       > = {
         queryKey: key,
-        queryFn: queryFn,
+        queryFn: queryFunction,
         meta: extendedMeta,
         enabled: enabled,
         refetchInterval: refetchInterval,
@@ -667,6 +669,21 @@ export function queryCollectionOptions(
       return handleQueryResult
     }
 
+    // This function is called when a loadSubset call is deduplicated
+    // meaning that we have all the data locally available to answer the query
+    // so we execute the query locally
+    const createLocalQuery = (opts: LoadSubsetOptions) => {
+      const queryFn = ({ meta }: QueryFunctionContext<any>) => {
+        const inserts = collection.currentStateAsChanges(
+          meta!.loadSubsetOptions as LoadSubsetOptions
+        )!
+        const data = inserts.map(({ value }) => value)
+        return Promise.resolve(data)
+      }
+
+      createQueryFromOpts(opts, queryFn)
+    }
+
     const isSubscribed = (hashedQueryKey: string) => {
       return unsubscribes.has(hashedQueryKey)
     }
@@ -796,8 +813,20 @@ export function queryCollectionOptions(
       )
     }
 
+    // Create deduplicated loadSubset wrapper for non-eager modes
+    // This prevents redundant snapshot requests when multiple concurrent
+    // live queries request overlapping or subset predicates
+    const loadSubsetDedupe =
+      syncMode === `eager`
+        ? undefined
+        : new DeduplicatedLoadSubset(createQueryFromOpts, createLocalQuery)
+
+    // TODO: run the tests, probably some will fail bc different requests are made now
+    //       so fix the test expectations
+    //       then also add all the new dedup tests that Sam also added to the Electric collection
+
     return {
-      loadSubset: syncMode === `eager` ? undefined : createQueryFromOpts,
+      loadSubset: loadSubsetDedupe?.loadSubset,
       cleanup,
     }
   }
