@@ -8,7 +8,7 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
-    "arktype": "^2.1.22",
+    "arktype": "^2.1.23",
     "temporal-polyfill": "^0.3.0"
   },
   "exports": {
@@ -30,7 +30,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.18.2",
+  "packageManager": "pnpm@10.18.3",
   "peerDependencies": {
     "typescript": ">=4.7"
   },

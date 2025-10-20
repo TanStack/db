@@ -10,7 +10,7 @@
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@vitest/coverage-istanbul": "^3.2.4",
     "publint": "^0.3.14",
-    "svelte": "^5.39.11",
+    "svelte": "^5.41.0",
     "svelte-check": "^4.3.3"
   },
   "exports": {

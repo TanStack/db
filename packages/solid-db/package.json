@@ -15,7 +15,7 @@
     "solid",
     "typescript"
   ],
-  "packageManager": "pnpm@10.18.2",
+  "packageManager": "pnpm@10.18.3",
   "dependencies": {
     "@solid-primitives/map": "^0.7.2",
     "@tanstack/db": "workspace:*"
@@ -24,7 +24,7 @@
     "@electric-sql/client": "1.0.14",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "jsdom": "^27.0.0",
+    "jsdom": "^27.0.1",
     "solid-js": "^1.9.9",
     "vite-plugin-solid": "^2.11.9",
     "vitest": "^3.2.4"
