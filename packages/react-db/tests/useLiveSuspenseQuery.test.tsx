@@ -6,7 +6,7 @@ import {
   eq,
   gt,
 } from "@tanstack/db"
-import { Suspense } from "react"
+import { StrictMode, Suspense } from "react"
 import { useLiveSuspenseQuery } from "../src/useLiveSuspenseQuery"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import type { ReactNode } from "react"
@@ -532,5 +532,74 @@ describe(`useLiveSuspenseQuery`, () => {
     })
 
     expect(result.current.data[0]?.age).toBe(35)
+  })
+
+  it(`should work with pre-created SingleResult collection`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-single`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Pre-create a SingleResult live query collection
+    const singlePersonQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => eq(persons.id, `1`))
+        .findOne()
+    )
+
+    const { result } = renderHook(
+      () => useLiveSuspenseQuery(singlePersonQuery),
+      {
+        wrapper: SuspenseWrapper,
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.data).toBeDefined()
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `1`,
+      name: `John Doe`,
+      age: 30,
+    })
+  })
+
+  it(`should handle StrictMode double-invocation correctly`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-strict`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const StrictModeWrapper = ({ children }: { children: ReactNode }) => (
+      <StrictMode>
+        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+      </StrictMode>
+    )
+
+    const { result } = renderHook(
+      () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
+      {
+        wrapper: StrictModeWrapper,
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(3)
+    })
+
+    // Verify data is correct despite double-invocation
+    expect(result.current.data).toHaveLength(3)
+    expect(result.current.data[0]).toMatchObject({
+      id: `1`,
+      name: `John Doe`,
+    })
   })
 })
