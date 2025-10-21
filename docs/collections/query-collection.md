@@ -240,19 +240,16 @@ const todosCollection = createCollection(
       // Send to server and get back items with server-computed fields
       const serverItems = await api.createTodos(newItems)
 
-      // Update the optimistic items with server-computed fields
-      // (like server-generated IDs, timestamps, etc.)
+      // Sync server-computed fields (like server-generated IDs, timestamps, etc.)
+      // to the collection's synced data store
       todosCollection.utils.writeBatch(() => {
-        transaction.mutations.forEach((mutation, index) => {
-          const serverItem = serverItems[index]
-          // Remove temporary optimistic item
-          todosCollection.utils.writeDelete(mutation.key)
-          // Insert with server data
+        serverItems.forEach(serverItem => {
           todosCollection.utils.writeInsert(serverItem)
         })
       })
 
       // Skip automatic refetch since we've already synced the server response
+      // (optimistic state is automatically replaced when handler completes)
       return { refetch: false }
     },
 
