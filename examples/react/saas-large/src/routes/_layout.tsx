@@ -20,7 +20,7 @@ import {
 import { Search } from "lucide-react"
 import { zodValidator } from "@tanstack/zod-adapter"
 import { z } from "zod"
-import { buildProductsQuery } from "../db/queries"
+import { getProductsInfiniteQuery } from "../db/queries"
 
 const searchSchema = z.object({
   q: z.string().default(``),
@@ -32,6 +32,15 @@ const searchSchema = z.object({
 export const Route = createFileRoute(`/_layout`)({
   component: App,
   validateSearch: zodValidator(searchSchema),
+  loader: async ({ deps: { search } }) => {
+    await getProductsInfiniteQuery({
+      q: search.q,
+      categories: search.categories,
+      ratings: search.ratings,
+      inStockOnly: search.inStockOnly,
+    }).preload()
+  },
+  loaderDeps: ({ search }) => ({ search }),
 })
 
 function App() {
@@ -48,18 +57,17 @@ function App() {
     fetchNextPage,
     hasNextPage,
   } = useLiveInfiniteQuery(
-    (q) =>
-      buildProductsQuery(q, {
-        q: search.q,
-        categories: search.categories,
-        ratings: search.ratings,
-        inStockOnly: search.inStockOnly,
-      }),
+    getProductsInfiniteQuery({
+      q: search.q,
+      categories: search.categories,
+      ratings: search.ratings,
+      inStockOnly: search.inStockOnly,
+    }),
     {
       pageSize: 50,
-      getNextPageParam: (_lastPage) => 5,
-    },
-    [search.q, search.categories, search.ratings, search.inStockOnly]
+      getNextPageParam: (lastPage, _allPages, lastPageParam) =>
+        lastPage.length === 50 ? lastPageParam + 50 : undefined,
+    }
   )
 
   const parentRef = useRef<HTMLDivElement>(null)

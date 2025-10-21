@@ -27,7 +27,7 @@
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
     "@tanstack/config": "^0.22.0",
     "@testing-library/jest-dom": "^6.9.1",
-    "@types/node": "^24.6.2",
+    "@types/node": "^24.8.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/use-sync-external-store": "^1.5.0",
@@ -40,8 +40,16 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
+<<<<<<< HEAD
     "jsdom": "^27.0.1",
     "knip": "^5.66.1",
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+    "jsdom": "^27.0.0",
+    "knip": "^5.64.3",
+=======
+    "jsdom": "^27.0.0",
+    "knip": "^5.65.0",
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.2",
     "mitt": "^3.0.1",
@@ -50,8 +58,16 @@
     "sherif": "^1.6.1",
     "shx": "^0.4.0",
     "tinyglobby": "^0.2.15",
+<<<<<<< HEAD
     "typescript": "^5.9.2",
     "vite": "^7.1.10",
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+    "typescript": "^5.9.2",
+    "vite": "^7.1.9",
+=======
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
   },

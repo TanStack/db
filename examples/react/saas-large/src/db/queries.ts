@@ -65,6 +65,34 @@ export function buildProductByIdQuery(
     .where(({ product }) => eq(product.id, productId))
 }
 
+// Factory pattern with caching for products infinite query
+const productsInfiniteCache = new Map<
+  string,
+  ReturnType<typeof createCollection>
+>()
+
+export function getProductsInfiniteQuery(search: ProductsSearchParams) {
+  const cacheKey = JSON.stringify(search)
+
+  if (!productsInfiniteCache.has(cacheKey)) {
+    const collection = createCollection(
+      liveQueryCollectionOptions({
+        query: (q) => buildProductsQuery(q, search),
+      })
+    )
+
+    collection.on(`status:change`, ({ status }) => {
+      if (status === `cleaned-up`) {
+        productsInfiniteCache.delete(cacheKey)
+      }
+    })
+
+    productsInfiniteCache.set(cacheKey, collection)
+  }
+
+  return productsInfiniteCache.get(cacheKey)!
+}
+
 // Factory pattern with caching for product by ID live queries
 const productByIdCache = new Map<string, ReturnType<typeof createCollection>>()
 

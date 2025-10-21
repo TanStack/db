@@ -16,19 +16,41 @@ importers:
         version: 9.38.0
       '@stylistic/eslint-plugin':
         specifier: ^4.4.1
+<<<<<<< HEAD
         version: 4.4.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 4.4.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+        version: 4.4.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@svitejs/changesets-changelog-github-compact':
         specifier: ^1.2.0
         version: 1.2.0(encoding@0.1.13)
       '@tanstack/config':
+<<<<<<< HEAD
         specifier: ^0.22.0
         version: 0.22.0(@types/node@24.8.0)(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^0.21.0
+        version: 0.21.0(@types/node@24.7.0)(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        specifier: ^0.21.0
+        version: 0.21.0(@types/node@24.8.0)(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
       '@types/node':
+<<<<<<< HEAD
         specifier: ^24.6.2
         version: 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^24.6.2
+        version: 24.7.0
+=======
+        specifier: ^24.8.0
+        version: 24.8.0
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@types/react':
         specifier: ^19.2.2
         version: 19.2.2
@@ -39,11 +61,27 @@ importers:
         specifier: ^1.5.0
         version: 1.5.0
       '@typescript-eslint/eslint-plugin':
+<<<<<<< HEAD
         specifier: ^8.46.1
         version: 8.46.1(@typescript-eslint/parser@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^8.46.0
+        version: 8.46.0(@typescript-eslint/parser@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+        specifier: ^8.46.1
+        version: 8.46.1(@typescript-eslint/parser@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@typescript-eslint/parser':
+<<<<<<< HEAD
         specifier: ^8.46.1
         version: 8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^8.46.0
+        version: 8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+        specifier: ^8.46.1
+        version: 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@vitejs/plugin-react':
         specifier: ^5.0.4
         version: 5.0.4(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
@@ -55,7 +93,13 @@ importers:
         version: 10.1.8(eslint@9.38.0(jiti@2.6.1))
       eslint-import-resolver-typescript:
         specifier: ^4.4.4
+<<<<<<< HEAD
         version: 4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1)))(eslint@9.38.0(jiti@2.6.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1)))(eslint@9.37.0(jiti@2.6.1))
+=======
+        version: 4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1)))(eslint@9.37.0(jiti@2.6.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       eslint-plugin-prettier:
         specifier: ^5.5.4
         version: 5.5.4(eslint-config-prettier@10.1.8(eslint@9.38.0(jiti@2.6.1)))(eslint@9.38.0(jiti@2.6.1))(prettier@3.6.2)
@@ -69,8 +113,16 @@ importers:
         specifier: ^27.0.1
         version: 27.0.1(postcss@8.5.6)
       knip:
+<<<<<<< HEAD
         specifier: ^5.66.1
         version: 5.66.2(@types/node@24.8.0)(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^5.64.3
+        version: 5.64.3(@types/node@24.7.0)(typescript@5.9.2)
+=======
+        specifier: ^5.65.0
+        version: 5.65.0(@types/node@24.8.0)(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       lint-staged:
         specifier: ^15.5.2
         version: 15.5.2
@@ -96,14 +148,28 @@ importers:
         specifier: ^0.2.15
         version: 0.2.15
       typescript:
+<<<<<<< HEAD
         specifier: ^5.9.2
         version: 5.9.3
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^5.9.2
+        version: 5.9.2
+=======
+        specifier: ^5.9.3
+        version: 5.9.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       vite:
         specifier: ^7.1.10
         version: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
       vitest:
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -145,11 +211,27 @@ importers:
         version: 0.15.1
     devDependencies:
       '@angular/build':
+<<<<<<< HEAD
         specifier: ^20.3.6
         version: 20.3.6(@angular/compiler-cli@20.3.6(@angular/compiler@20.3.6)(typescript@5.8.3))(@angular/compiler@20.3.6)(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.6(@angular/common@20.3.6(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.8.0)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^20.3.5
+        version: 20.3.5(@angular/compiler-cli@20.3.4(@angular/compiler@20.3.4)(typescript@5.8.3))(@angular/compiler@20.3.4)(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.4(@angular/common@20.3.4(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.7.2)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)
+=======
+        specifier: ^20.3.5
+        version: 20.3.5(@angular/compiler-cli@20.3.4(@angular/compiler@20.3.4)(typescript@5.8.3))(@angular/compiler@20.3.4)(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.4(@angular/common@20.3.4(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.8.0)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@angular/cli':
+<<<<<<< HEAD
         specifier: ^20.3.6
         version: 20.3.6(@types/node@24.8.0)(chokidar@4.0.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^20.3.5
+        version: 20.3.5(@types/node@24.7.2)(chokidar@4.0.3)
+=======
+        specifier: ^20.3.5
+        version: 20.3.5(@types/node@24.8.0)(chokidar@4.0.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@angular/compiler-cli':
         specifier: ^20.3.6
         version: 20.3.6(@angular/compiler@20.3.6)(typescript@5.8.3)
@@ -191,7 +273,13 @@ importers:
     dependencies:
       '@tailwindcss/vite':
         specifier: ^4.1.14
+<<<<<<< HEAD
         version: 4.1.14(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 4.1.14(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 4.1.14(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/query-core':
         specifier: ^5.90.5
         version: 5.90.5
@@ -205,17 +293,41 @@ importers:
         specifier: ^1.133.15
         version: 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-router-devtools':
+<<<<<<< HEAD
         specifier: ^1.133.15
         version: 1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^1.132.51
+        version: 1.132.51(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(@types/node@24.7.2)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+=======
+        specifier: ^1.132.51
+        version: 1.132.51(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/react-router-with-query':
         specifier: ^1.130.17
         version: 1.130.17(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-start':
+<<<<<<< HEAD
         specifier: ^1.133.15
         version: 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^1.132.56
+        version: 1.132.56(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        specifier: ^1.132.56
+        version: 1.132.56(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/router-plugin':
+<<<<<<< HEAD
         specifier: ^1.133.15
         version: 1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^1.132.56
+        version: 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        specifier: ^1.132.56
+        version: 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@trpc/client':
         specifier: ^11.6.0
         version: 11.6.0(@trpc/server@11.6.0(typescript@5.9.2))(typescript@5.9.2)
@@ -247,11 +359,25 @@ importers:
         specifier: ^4.1.14
         version: 4.1.14
       vite:
+<<<<<<< HEAD
         specifier: ^6.3.5
         version: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^7.1.7
+        version: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+        specifier: ^7.1.7
+        version: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       vite-tsconfig-paths:
         specifier: ^5.1.4
+<<<<<<< HEAD
         version: 5.1.4(typescript@5.9.2)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 5.1.4(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 5.1.4(typescript@5.9.2)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       zod:
         specifier: ^4.1.11
         version: 4.1.11
@@ -285,7 +411,13 @@ importers:
         version: 8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.2)
       '@vitejs/plugin-react':
         specifier: ^5.0.4
+<<<<<<< HEAD
         version: 5.0.4(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 5.0.4(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 5.0.4(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       concurrently:
         specifier: ^9.2.1
         version: 9.2.1
@@ -350,8 +482,16 @@ importers:
         specifier: ^1.132.31
         version: 1.133.3(drizzle-orm@0.44.6(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(encoding@0.1.13)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/query-core':
+<<<<<<< HEAD
         specifier: ^5.90.3
         version: 5.90.5
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^5.90.3
+        version: 5.90.3
+=======
+        specifier: ^5.90.5
+        version: 5.90.5
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/query-db-collection':
         specifier: https://pkg.pr.new/@tanstack/query-db-collection@681
         version: https://pkg.pr.new/@tanstack/query-db-collection@681(@tanstack/query-core@5.90.5)(typescript@5.9.3)
@@ -369,16 +509,38 @@ importers:
         version: 1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(@types/node@22.18.10)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
       '@tanstack/react-router-ssr-query':
         specifier: ^1.131.7
+<<<<<<< HEAD
         version: 1.133.3(@tanstack/query-core@5.90.5)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 1.133.3(@tanstack/query-core@5.90.3)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+=======
+        version: 1.133.3(@tanstack/query-core@5.90.5)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/react-start':
+<<<<<<< HEAD
         specifier: ^1.133.3
         version: 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^1.133.3
+        version: 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        specifier: ^1.133.4
+        version: 1.133.4(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/react-virtual':
         specifier: ^3.13.12
         version: 3.13.12(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/router-plugin':
+<<<<<<< HEAD
         specifier: ^1.133.3
         version: 1.133.20(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        specifier: ^1.133.3
+        version: 1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        specifier: ^1.133.4
+        version: 1.133.4(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/zod-adapter':
         specifier: ^1.132.47
         version: 1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(zod@4.1.12)
@@ -694,7 +856,13 @@ importers:
         version: 19.2.15(@angular/common@19.2.15(@angular/core@19.2.15(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/compiler@19.2.15)(@angular/core@19.2.15(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@19.2.15(@angular/common@19.2.15(@angular/core@19.2.15(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@19.2.15(rxjs@7.8.2)(zone.js@0.15.1)))
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -716,7 +884,13 @@ importers:
     devDependencies:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       arktype:
         specifier: ^2.1.23
         version: 2.1.23
@@ -741,7 +915,13 @@ importers:
         version: 4.1.12
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/electric-db-collection:
     dependencies:
@@ -766,7 +946,13 @@ importers:
         version: 4.1.12
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/query-db-collection:
     dependencies:
@@ -785,7 +971,13 @@ importers:
         version: 5.90.5
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/react-db:
     dependencies:
@@ -813,7 +1005,13 @@ importers:
         version: 1.5.0
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       react:
         specifier: ^19.2.0
         version: 19.2.0
@@ -850,7 +1048,13 @@ importers:
         version: 4.1.12
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/solid-db:
     dependencies:
@@ -869,7 +1073,13 @@ importers:
         version: 0.8.10(solid-js@1.9.9)
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       jsdom:
         specifier: ^27.0.1
         version: 27.0.1(postcss@8.5.6)
@@ -881,7 +1091,13 @@ importers:
         version: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       vitest:
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/svelte-db:
     dependencies:
@@ -894,10 +1110,22 @@ importers:
         version: 2.5.4(svelte@5.41.1)(typescript@5.9.3)
       '@sveltejs/vite-plugin-svelte':
         specifier: ^6.2.1
+<<<<<<< HEAD
         version: 6.2.1(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       publint:
         specifier: ^0.3.14
         version: 0.3.14
@@ -934,7 +1162,13 @@ importers:
         version: 4.1.12
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   packages/vue-db:
     dependencies:
@@ -950,7 +1184,13 @@ importers:
         version: 6.0.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vue@3.5.22(typescript@5.9.3))
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
+<<<<<<< HEAD
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       vue:
         specifier: ^3.5.22
         version: 3.5.22(typescript@5.9.3)
@@ -4406,8 +4646,22 @@ packages:
   '@tanstack/query-core@5.83.0':
     resolution: {integrity: sha512-0M8dA+amXUkyz5cVUm/B+zSk3xkQAcuXuz5/Q/LveT4ots2rBpPTZOzd7yJa2Utsf8D2Upl5KyjhHRY+9lB/XA==}
 
+<<<<<<< HEAD
   '@tanstack/query-core@5.90.5':
     resolution: {integrity: sha512-wLamYp7FaDq6ZnNehypKI5fNvxHPfTYylE0m/ZpuuzJfJqhR5Pxg9gvGBHZx4n7J+V5Rg5mZxHHTlv25Zt5u+w==}
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/query-core@5.90.2':
+    resolution: {integrity: sha512-k/TcR3YalnzibscALLwxeiLUub6jN5EDLwKDiO7q5f4ICEoptJ+n9+7vcEFy5/x/i6Q+Lb/tXrsKCggf5uQJXQ==}
+
+  '@tanstack/query-core@5.90.3':
+    resolution: {integrity: sha512-HtPOnCwmx4dd35PfXU8jjkhwYrsHfuqgC8RCJIwWglmhIUIlzPP0ZcEkDAc+UtAWCiLm7T8rxeEfHZlz3hYMCA==}
+=======
+  '@tanstack/query-core@5.90.2':
+    resolution: {integrity: sha512-k/TcR3YalnzibscALLwxeiLUub6jN5EDLwKDiO7q5f4ICEoptJ+n9+7vcEFy5/x/i6Q+Lb/tXrsKCggf5uQJXQ==}
+
+  '@tanstack/query-core@5.90.5':
+    resolution: {integrity: sha512-wLamYp7FaDq6ZnNehypKI5fNvxHPfTYylE0m/ZpuuzJfJqhR5Pxg9gvGBHZx4n7J+V5Rg5mZxHHTlv25Zt5u+w==}
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@tanstack/query-db-collection@https://pkg.pr.new/@tanstack/query-db-collection@681':
     resolution: {tarball: https://pkg.pr.new/@tanstack/query-db-collection@681}
@@ -4494,8 +4748,60 @@ packages:
       react: '>=18.0.0 || >=19.0.0'
       react-dom: '>=18.0.0 || >=19.0.0'
 
+<<<<<<< HEAD
   '@tanstack/react-start@1.133.20':
     resolution: {integrity: sha512-IeKjTDjq10wKVN1pizZErwKeiUXijPiBDGDt5LnMdoTdWL26CgyHYZQMLBZF5i5Mxb5BUB/8Bg94iSt+2cq8DQ==}
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/react-start-server@1.132.54':
+    resolution: {integrity: sha512-Kec2BtXsqbeIpaeqk29b7nm2TGgwGKUIxyZleO1SkvnXWDWLlU2Ok/wFJz/7rz5Qe2SYtIhOX7K/t5DTrVBnpQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+
+  '@tanstack/react-start-server@1.133.3':
+    resolution: {integrity: sha512-FUsP/XFB4n8taGwlWCmkB8FjuClaYseQJIOZ3YzbLWkq5kZmNwIH8f/zPsq+C0W9i9Up05D+TgaKGC+o0vCIuA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+
+  '@tanstack/react-start@1.132.56':
+    resolution: {integrity: sha512-Lu0/FrjdYHCeDQpQ1UuuCaZsslwBmHy0eiahwSE0TgqS1YfT6IN2Iu4AkpuEOvV0Fv5aYASmukTkGShOfpCZrA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+      vite: '>=7.0.0'
+
+  '@tanstack/react-start@1.133.3':
+    resolution: {integrity: sha512-C+y5VwjsTDXVpaw1X94yh/S5z4ltEGyQnqQxjSeoc6FSv8em/86swo3Yw9wDRkLssOL7WJu1DhDGsF50sfUuDQ==}
+=======
+  '@tanstack/react-start-server@1.132.54':
+    resolution: {integrity: sha512-Kec2BtXsqbeIpaeqk29b7nm2TGgwGKUIxyZleO1SkvnXWDWLlU2Ok/wFJz/7rz5Qe2SYtIhOX7K/t5DTrVBnpQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+
+  '@tanstack/react-start-server@1.133.3':
+    resolution: {integrity: sha512-FUsP/XFB4n8taGwlWCmkB8FjuClaYseQJIOZ3YzbLWkq5kZmNwIH8f/zPsq+C0W9i9Up05D+TgaKGC+o0vCIuA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+
+  '@tanstack/react-start@1.132.56':
+    resolution: {integrity: sha512-Lu0/FrjdYHCeDQpQ1UuuCaZsslwBmHy0eiahwSE0TgqS1YfT6IN2Iu4AkpuEOvV0Fv5aYASmukTkGShOfpCZrA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      react: '>=18.0.0 || >=19.0.0'
+      react-dom: '>=18.0.0 || >=19.0.0'
+      vite: '>=7.0.0'
+
+  '@tanstack/react-start@1.133.4':
+    resolution: {integrity: sha512-6+p/8k/mxJgugMIanD8Q0f0tzAsZdcW6F987k4ilwx8HC9lyg8Mk01IZLlRyj8VgPWuq52CiFMCrnys6fR6AVw==}
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     engines: {node: '>=22.12.0'}
     peerDependencies:
       react: '>=18.0.0 || >=19.0.0'
@@ -4550,12 +4856,76 @@ packages:
     resolution: {integrity: sha512-63lhmNNoVfqTgnSx5MUnEl/QBKSN6hA1sWLhZSQhCjLp9lrWbCXM8l9QpG3Tgzq/LdX7jjDMf783sUL4p4NbYw==}
     engines: {node: '>=12'}
 
+<<<<<<< HEAD
   '@tanstack/router-plugin@1.133.20':
     resolution: {integrity: sha512-mJ+tiSucbagMWkq672pNlmMarA4F5kqVqaDRMj79MPIvkg0h8bKT4X1wBkZm/u7K98h7s3S9gkorCxyB80xwWg==}
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/router-generator@1.133.3':
+    resolution: {integrity: sha512-McE6YfwIErLPCeWEfvtsDAOZfDOIyhZ+xPL4G+dKz8xW3K/ofnb/iXUWc93/pYLas5fd03tSFtb02ve4G6bZNw==}
+    engines: {node: '>=12'}
+
+  '@tanstack/router-plugin@1.132.56':
+    resolution: {integrity: sha512-kwW2NWMoxMMOoxbRPAxYoEjB+iy4vnYTS9VctKMcwYDtIGK1pQuLR3XtpdhNt0S5reKXfqJG2hEj6yTHUcJs7g==}
+=======
+  '@tanstack/router-generator@1.133.4':
+    resolution: {integrity: sha512-OmafLkRMm21L/yZsx0FmRQeg0GZ1suQAW8/n0KvaJZcN8XP/WRfNtNkilDucWByWxAXC/Lxy8bKP2DW/omJuAw==}
+    engines: {node: '>=12'}
+
+  '@tanstack/router-plugin@1.132.56':
+    resolution: {integrity: sha512-kwW2NWMoxMMOoxbRPAxYoEjB+iy4vnYTS9VctKMcwYDtIGK1pQuLR3XtpdhNt0S5reKXfqJG2hEj6yTHUcJs7g==}
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     engines: {node: '>=12'}
     peerDependencies:
       '@rsbuild/core': '>=1.0.2'
+<<<<<<< HEAD
       '@tanstack/react-router': ^1.133.20
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/react-router': ^1.132.47
+      vite: '>=5.0.0 || >=6.0.0 || >=7.0.0'
+      vite-plugin-solid: ^2.11.8
+      webpack: '>=5.92.0'
+    peerDependenciesMeta:
+      '@rsbuild/core':
+        optional: true
+      '@tanstack/react-router':
+        optional: true
+      vite:
+        optional: true
+      vite-plugin-solid:
+        optional: true
+      webpack:
+        optional: true
+
+  '@tanstack/router-plugin@1.133.3':
+    resolution: {integrity: sha512-AESS2RadL16HbLuQWQT1AInXC+w7x/jEWFqcENXwBpcxR4twzK328TmhnL24C91RQu5Tw+lFRR7mBykc/7nOHA==}
+    engines: {node: '>=12'}
+    peerDependencies:
+      '@rsbuild/core': '>=1.0.2'
+      '@tanstack/react-router': ^1.133.3
+=======
+      '@tanstack/react-router': ^1.132.47
+      vite: '>=5.0.0 || >=6.0.0 || >=7.0.0'
+      vite-plugin-solid: ^2.11.8
+      webpack: '>=5.92.0'
+    peerDependenciesMeta:
+      '@rsbuild/core':
+        optional: true
+      '@tanstack/react-router':
+        optional: true
+      vite:
+        optional: true
+      vite-plugin-solid:
+        optional: true
+      webpack:
+        optional: true
+
+  '@tanstack/router-plugin@1.133.4':
+    resolution: {integrity: sha512-jyYIoHMIEWepYdH213s9+35V9aevO4Mp5BnHszbpL7pDQx17UDy+F7Eky/jzCCf+YiGo0NbWXRYVNBb8q4D7Hw==}
+    engines: {node: '>=12'}
+    peerDependencies:
+      '@rsbuild/core': '>=1.0.2'
+      '@tanstack/react-router': ^1.133.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       vite: '>=5.0.0 || >=6.0.0 || >=7.0.0'
       vite-plugin-solid: ^2.11.8
       webpack: '>=5.92.0'
@@ -4626,8 +4996,28 @@ packages:
     peerDependencies:
       vite: '>=7.0.0'
 
+<<<<<<< HEAD
   '@tanstack/start-server-core@1.133.20':
     resolution: {integrity: sha512-dCYaE77auxIpdNgw/8bkrV4QXE3DG4q+U6ijiDSy7LvxjSNvADKyHbcmC7/hnj+eptw4VUL+n8olUtu7o9jAhQ==}
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/start-plugin-core@1.133.3':
+    resolution: {integrity: sha512-g9UcRdqnzJtEM4KlHadsGI49vqhaGMUhNlW7L32j/RAM140Vq8nEj0ASt9pminYFoIyIMeZ0sHxI5m4Gwb6GyQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      vite: '>=7.0.0'
+
+  '@tanstack/start-server-core@1.132.54':
+    resolution: {integrity: sha512-wBr9lrODxWmjGzyb59ERfjjNpWTmSTtiENoSpOANdy5GSQ7q79Wrf2BAhfBP8Y/zrj+AarAuslxC6hE3JGnyFA==}
+=======
+  '@tanstack/start-plugin-core@1.133.4':
+    resolution: {integrity: sha512-tcJfXkdpRG/dwp8B4Z93bNkdwr7djZha/MAEhwktN/q3y16h1V8+qoVBpD7ZNHsUl5vj+hcUMT2npPQmLpt/YA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      vite: '>=7.0.0'
+
+  '@tanstack/start-server-core@1.132.54':
+    resolution: {integrity: sha512-wBr9lrODxWmjGzyb59ERfjjNpWTmSTtiENoSpOANdy5GSQ7q79Wrf2BAhfBP8Y/zrj+AarAuslxC6hE3JGnyFA==}
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     engines: {node: '>=22.12.0'}
 
   '@tanstack/start-storage-context@1.133.20':
@@ -4872,8 +5262,23 @@ packages:
       eslint: ^8.57.0 || ^9.0.0
       typescript: '>=4.8.4 <6.0.0'
 
+  '@typescript-eslint/eslint-plugin@8.46.1':
+    resolution: {integrity: sha512-rUsLh8PXmBjdiPY+Emjz9NX2yHvhS11v0SR6xNJkm5GM1MO9ea/1GoDKlHHZGrOJclL/cZ2i/vRUYVtjRhrHVQ==}
+    engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    peerDependencies:
+      '@typescript-eslint/parser': ^8.46.1
+      eslint: ^8.57.0 || ^9.0.0
+      typescript: '>=4.8.4 <6.0.0'
+
   '@typescript-eslint/parser@8.44.1':
     resolution: {integrity: sha512-EHrrEsyhOhxYt8MTg4zTF+DJMuNBzWwgvvOYNj/zm1vnaD/IC5zCXFehZv94Piqa2cRFfXrTFxIvO95L7Qc/cw==}
+    engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    peerDependencies:
+      eslint: ^8.57.0 || ^9.0.0
+      typescript: '>=4.8.4 <6.0.0'
+
+  '@typescript-eslint/parser@8.46.1':
+    resolution: {integrity: sha512-6JSSaBZmsKvEkbRUkf7Zj7dru/8ZCrJxAqArcLaVMee5907JdtEbKGsZ7zNiIm/UAkpGUkaSMZEXShnN2D1HZA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
       eslint: ^8.57.0 || ^9.0.0
@@ -4936,6 +5341,13 @@ packages:
 
   '@typescript-eslint/type-utils@8.44.1':
     resolution: {integrity: sha512-KdEerZqHWXsRNKjF9NYswNISnFzXfXNDfPxoTh7tqohU/PRIbwTmsjGK6V9/RTYWau7NZvfo52lgVk+sJh0K3g==}
+    engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    peerDependencies:
+      eslint: ^8.57.0 || ^9.0.0
+      typescript: '>=4.8.4 <6.0.0'
+
+  '@typescript-eslint/type-utils@8.46.1':
+    resolution: {integrity: sha512-+BlmiHIiqufBxkVnOtFwjah/vrkF4MtKKvpXrKSPLCkCtAp8H01/VV43sfqA98Od7nJpDcFnkwgyfQbOG0AMvw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
       eslint: ^8.57.0 || ^9.0.0
@@ -7561,8 +7973,16 @@ packages:
     resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
     engines: {node: '>= 8'}
 
+<<<<<<< HEAD
   knip@5.66.2:
     resolution: {integrity: sha512-5wvsdc17C5bMxjuGfN9KVS/tW5KIvzP1RClfpTMdLYm8IXIsfWsiHlFkTvZIca9skwoVDyTyXmbRq4w1Poim+A==}
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  knip@5.64.3:
+    resolution: {integrity: sha512-P9dZetEZfSBwNBFwj55CAnPAMdzVLTTscWx6rdB8eBmPqXPji8F3L+hhWi+Xp+u9O6Xp2ClRDq2JENSK8Z04Qg==}
+=======
+  knip@5.65.0:
+    resolution: {integrity: sha512-wMSca3O1JGs/JgEQx7uZUZYMnZvGqhNjL4b2w8LJGxFzEckNWcvyHopsCwkC7M6aeWgIASCT9vCFDXklvvey3g==}
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     engines: {node: '>=18.18.0'}
     hasBin: true
     peerDependencies:
@@ -10563,7 +10983,13 @@ snapshots:
     transitivePeerDependencies:
       - chokidar
 
+<<<<<<< HEAD
   '@angular/build@20.3.6(@angular/compiler-cli@20.3.6(@angular/compiler@20.3.6)(typescript@5.8.3))(@angular/compiler@20.3.6)(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.6(@angular/common@20.3.6(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.6(@angular/compiler@20.3.6)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.8.0)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@angular/build@20.3.5(@angular/compiler-cli@20.3.4(@angular/compiler@20.3.4)(typescript@5.8.3))(@angular/compiler@20.3.4)(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.4(@angular/common@20.3.4(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.7.2)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)':
+=======
+  '@angular/build@20.3.5(@angular/compiler-cli@20.3.4(@angular/compiler@20.3.4)(typescript@5.8.3))(@angular/compiler@20.3.4)(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.4(@angular/common@20.3.4(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.4(@angular/compiler@20.3.4)(rxjs@7.8.2)(zone.js@0.15.1)))(@types/node@24.8.0)(chokidar@4.0.3)(jiti@2.6.1)(karma@6.4.4)(lightningcss@1.30.1)(postcss@8.5.6)(tailwindcss@3.4.18)(terser@5.44.0)(tslib@2.8.1)(tsx@4.20.6)(typescript@5.8.3)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(yaml@2.8.1)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@angular-devkit/architect': 0.2003.6(chokidar@4.0.3)
@@ -10602,7 +11028,13 @@ snapshots:
       lmdb: 3.4.2
       postcss: 8.5.6
       tailwindcss: 3.4.18
+<<<<<<< HEAD
       vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@types/node'
       - chokidar
@@ -10616,13 +11048,33 @@ snapshots:
       - tsx
       - yaml
 
+<<<<<<< HEAD
   '@angular/cli@20.3.6(@types/node@24.8.0)(chokidar@4.0.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@angular/cli@20.3.5(@types/node@24.7.2)(chokidar@4.0.3)':
+=======
+  '@angular/cli@20.3.5(@types/node@24.8.0)(chokidar@4.0.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@angular-devkit/architect': 0.2003.6(chokidar@4.0.3)
       '@angular-devkit/core': 20.3.6(chokidar@4.0.3)
       '@angular-devkit/schematics': 20.3.6(chokidar@4.0.3)
       '@inquirer/prompts': 7.8.2(@types/node@24.8.0)
       '@listr2/prompt-adapter-inquirer': 3.0.1(@inquirer/prompts@7.8.2(@types/node@24.8.0))(@types/node@24.8.0)(listr2@9.0.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@angular-devkit/architect': 0.2003.5(chokidar@4.0.3)
+      '@angular-devkit/core': 20.3.5(chokidar@4.0.3)
+      '@angular-devkit/schematics': 20.3.5(chokidar@4.0.3)
+      '@inquirer/prompts': 7.8.2(@types/node@24.7.2)
+      '@listr2/prompt-adapter-inquirer': 3.0.1(@inquirer/prompts@7.8.2(@types/node@24.7.2))(@types/node@24.7.2)(listr2@9.0.1)
+=======
+      '@angular-devkit/architect': 0.2003.5(chokidar@4.0.3)
+      '@angular-devkit/core': 20.3.5(chokidar@4.0.3)
+      '@angular-devkit/schematics': 20.3.5(chokidar@4.0.3)
+      '@inquirer/prompts': 7.8.2(@types/node@24.8.0)
+      '@listr2/prompt-adapter-inquirer': 3.0.1(@inquirer/prompts@7.8.2(@types/node@24.8.0))(@types/node@24.8.0)(listr2@9.0.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@modelcontextprotocol/sdk': 1.17.3
       '@schematics/angular': 20.3.6(chokidar@4.0.3)
       '@yarnpkg/lockfile': 1.1.0
@@ -11875,7 +12327,13 @@ snapshots:
   '@grpc/grpc-js@1.9.15':
     dependencies:
       '@grpc/proto-loader': 0.7.15
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@grpc/proto-loader@0.7.15':
     dependencies:
@@ -13796,10 +14254,24 @@ snapshots:
 
   '@standard-schema/spec@1.0.0': {}
 
+<<<<<<< HEAD
   '@stylistic/eslint-plugin@4.4.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@stylistic/eslint-plugin@4.4.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
+  '@stylistic/eslint-plugin@4.4.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@typescript-eslint/utils': 8.46.0(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.38.0(jiti@2.6.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/utils': 8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      eslint: 9.37.0(jiti@2.6.1)
+=======
+      '@typescript-eslint/utils': 8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      eslint: 9.37.0(jiti@2.6.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       eslint-visitor-keys: 4.2.1
       espree: 10.4.0
       estraverse: 5.3.0
@@ -13833,24 +14305,66 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
+<<<<<<< HEAD
   '@sveltejs/vite-plugin-svelte-inspector@5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@sveltejs/vite-plugin-svelte-inspector@5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@sveltejs/vite-plugin-svelte-inspector@5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       debug: 4.4.3
+<<<<<<< HEAD
       svelte: 5.41.1
       vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      svelte: 5.39.11
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      svelte: 5.39.11
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@sveltejs/vite-plugin-svelte-inspector': 5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.41.1)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@sveltejs/vite-plugin-svelte-inspector': 5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.39.11)(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      '@sveltejs/vite-plugin-svelte-inspector': 5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.39.11)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       debug: 4.4.3
       deepmerge: 4.3.1
       magic-string: 0.30.19
+<<<<<<< HEAD
       svelte: 5.41.1
       vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
       vitefu: 1.1.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      svelte: 5.39.11
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      svelte: 5.39.11
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -13955,10 +14469,52 @@ snapshots:
 
   '@tanstack/config@0.22.0(@types/node@24.8.0)(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
+<<<<<<< HEAD
       '@tanstack/eslint-config': 0.3.2(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tailwindcss/node': 4.1.14
+      '@tailwindcss/oxide': 4.1.14
+      tailwindcss: 4.1.14
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  '@tailwindcss/vite@4.1.14(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@tailwindcss/node': 4.1.14
+      '@tailwindcss/oxide': 4.1.14
+      tailwindcss: 4.1.14
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  '@tanstack/config@0.21.0(@types/node@24.7.0)(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@tanstack/eslint-config': 0.3.2(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@tailwindcss/node': 4.1.14
+      '@tailwindcss/oxide': 4.1.14
+      tailwindcss: 4.1.14
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  '@tailwindcss/vite@4.1.14(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@tailwindcss/node': 4.1.14
+      '@tailwindcss/oxide': 4.1.14
+      tailwindcss: 4.1.14
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  '@tanstack/config@0.21.0(@types/node@24.8.0)(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@tanstack/eslint-config': 0.3.2(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@tanstack/publish-config': 0.2.1
+<<<<<<< HEAD
       '@tanstack/typedoc-config': 0.3.0(typescript@5.9.3)
       '@tanstack/vite-config': 0.4.0(@types/node@24.8.0)(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/typedoc-config': 0.2.1(typescript@5.9.2)
+      '@tanstack/vite-config': 0.4.0(@types/node@24.7.0)(rollup@4.52.4)(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      '@tanstack/typedoc-config': 0.2.1(typescript@5.9.3)
+      '@tanstack/vite-config': 0.4.0(@types/node@24.8.0)(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@types/node'
       - '@typescript-eslint/utils'
@@ -14037,7 +14593,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@tanstack/directive-functions-plugin@1.133.19(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/directive-functions-plugin@1.132.53(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/directive-functions-plugin@1.132.53(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@babel/code-frame': 7.27.1
       '@babel/core': 7.28.4
@@ -14047,7 +14609,13 @@ snapshots:
       babel-dead-code-elimination: 1.0.10
       pathe: 2.0.3
       tiny-invariant: 1.3.3
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -14065,15 +14633,41 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@tanstack/eslint-config@0.3.2(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/eslint-config@0.3.2(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
+  '@tanstack/eslint-config@0.3.2(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@eslint/js': 9.38.0
       '@stylistic/eslint-plugin': 5.4.0(eslint@9.38.0(jiti@2.6.1))
       eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))
       eslint-plugin-n: 17.23.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@eslint/js': 9.37.0
+      '@stylistic/eslint-plugin': 5.4.0(eslint@9.37.0(jiti@2.6.1))
+      eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))
+      eslint-plugin-n: 17.23.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@eslint/js': 9.37.0
+      '@stylistic/eslint-plugin': 5.4.0(eslint@9.37.0(jiti@2.6.1))
+      eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))
+      eslint-plugin-n: 17.23.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       globals: 16.4.0
+<<<<<<< HEAD
       typescript-eslint: 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       vue-eslint-parser: 10.2.0(eslint@9.38.0(jiti@2.6.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      typescript-eslint: 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      vue-eslint-parser: 10.2.0(eslint@9.37.0(jiti@2.6.1))
+=======
+      typescript-eslint: 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      vue-eslint-parser: 10.2.0(eslint@9.37.0(jiti@2.6.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@typescript-eslint/utils'
       - eslint
@@ -14134,7 +14728,17 @@ snapshots:
 
   '@tanstack/query-core@5.90.5': {}
 
+<<<<<<< HEAD
   '@tanstack/query-db-collection@https://pkg.pr.new/@tanstack/query-db-collection@681(@tanstack/query-core@5.90.5)(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/query-core@5.90.3': {}
+
+  '@tanstack/query-db-collection@https://pkg.pr.new/@tanstack/query-db-collection@681(@tanstack/query-core@5.90.3)(typescript@5.9.3)':
+=======
+  '@tanstack/query-core@5.90.5': {}
+
+  '@tanstack/query-db-collection@https://pkg.pr.new/@tanstack/query-db-collection@681(@tanstack/query-core@5.90.5)(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@standard-schema/spec': 1.0.0
       '@tanstack/db': https://pkg.pr.new/TanStack/db/@tanstack/db@1db4f71(typescript@5.9.3)
@@ -14159,13 +14763,33 @@ snapshots:
       '@tanstack/query-core': 5.83.0
       react: 19.2.0
 
+<<<<<<< HEAD
   '@tanstack/react-router-devtools@1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/react-router-devtools@1.132.51(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(@types/node@24.7.2)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+=======
+  '@tanstack/react-router-devtools@1.132.51(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@tanstack/react-router': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/router-devtools-core': 1.133.20(@tanstack/router-core@1.133.20)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-devtools-core': 1.132.51(@tanstack/router-core@1.133.3)(@types/node@24.7.2)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-devtools-core': 1.132.51(@tanstack/router-core@1.133.3)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
+<<<<<<< HEAD
       vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@tanstack/router-core'
       - '@types/node'
@@ -14207,12 +14831,24 @@ snapshots:
       - tsx
       - yaml
 
+<<<<<<< HEAD
   '@tanstack/react-router-ssr-query@1.133.3(@tanstack/query-core@5.90.5)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.20)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/react-router-ssr-query@1.133.3(@tanstack/query-core@5.90.3)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+=======
+  '@tanstack/react-router-ssr-query@1.133.3(@tanstack/query-core@5.90.5)(@tanstack/react-query@5.83.0(react@19.2.0))(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@tanstack/router-core@1.133.3)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@tanstack/query-core': 5.90.5
       '@tanstack/react-query': 5.83.0(react@19.2.0)
       '@tanstack/react-router': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+<<<<<<< HEAD
       '@tanstack/router-ssr-query-core': 1.133.3(@tanstack/query-core@5.90.5)(@tanstack/router-core@1.133.20)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/router-ssr-query-core': 1.133.3(@tanstack/query-core@5.90.3)(@tanstack/router-core@1.133.3)
+=======
+      '@tanstack/router-ssr-query-core': 1.133.3(@tanstack/query-core@5.90.5)(@tanstack/router-core@1.133.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
     transitivePeerDependencies:
@@ -14290,8 +14926,15 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
+<<<<<<< HEAD
   '@tanstack/react-start@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/react-start@1.132.56(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/react-start@1.132.56(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@tanstack/react-router': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-start-client': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-start-server': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -14299,10 +14942,33 @@ snapshots:
       '@tanstack/start-client-core': 1.133.20
       '@tanstack/start-plugin-core': 1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/start-server-core': 1.133.20
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-client': 1.132.54(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-server': 1.132.54(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-plugin-core': 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-server-core': 1.132.54
+=======
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-client': 1.132.54(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-server': 1.132.54(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-plugin-core': 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-server-core': 1.132.54
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       pathe: 2.0.3
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@rsbuild/core'
       - crossws
@@ -14310,8 +14976,15 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
+<<<<<<< HEAD
   '@tanstack/react-start@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/react-start@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/react-start@1.133.4(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@tanstack/react-router': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-start-client': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@tanstack/react-start-server': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -14319,6 +14992,23 @@ snapshots:
       '@tanstack/start-client-core': 1.133.20
       '@tanstack/start-plugin-core': 1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/start-server-core': 1.133.20
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/react-router': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-client': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-server': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/start-client-core': 1.133.3
+      '@tanstack/start-plugin-core': 1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-server-core': 1.133.3
+=======
+      '@tanstack/react-router': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-client': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/react-start-server': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/start-client-core': 1.133.3
+      '@tanstack/start-plugin-core': 1.133.4(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-server-core': 1.133.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       pathe: 2.0.3
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
@@ -14363,7 +15053,13 @@ snapshots:
       tiny-invariant: 1.3.3
       tiny-warning: 1.0.3
 
+<<<<<<< HEAD
   '@tanstack/router-devtools-core@1.133.20(@tanstack/router-core@1.133.20)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/router-devtools-core@1.132.51(@tanstack/router-core@1.133.3)(@types/node@24.7.2)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+=======
+  '@tanstack/router-devtools-core@1.132.51(@tanstack/router-core@1.133.3)(@types/node@24.8.0)(csstype@3.1.3)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(solid-js@1.9.9)(terser@5.44.0)(tiny-invariant@1.3.3)(tsx@4.20.6)(yaml@2.8.1)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@tanstack/router-core': 1.133.20
       clsx: 2.1.1
@@ -14422,7 +15118,39 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@tanstack/router-plugin@1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/router-generator@1.133.3':
+    dependencies:
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/virtual-file-routes': 1.133.3
+      prettier: 3.6.2
+      recast: 0.23.11
+      source-map: 0.7.6
+      tsx: 4.20.6
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/router-generator@1.133.4':
+    dependencies:
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/virtual-file-routes': 1.133.3
+      prettier: 3.6.2
+      recast: 0.23.11
+      source-map: 0.7.6
+      tsx: 4.20.6
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@babel/core': 7.28.4
       '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
@@ -14439,13 +15167,16 @@ snapshots:
       unplugin: 2.3.10
       zod: 3.25.76
     optionalDependencies:
+<<<<<<< HEAD
       '@tanstack/react-router': 1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      vite: 6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
-      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
     transitivePeerDependencies:
       - supports-color
 
-  '@tanstack/router-plugin@1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@babel/core': 7.28.4
       '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
@@ -14453,6 +15184,108 @@ snapshots:
       '@babel/template': 7.27.2
       '@babel/traverse': 7.28.4
       '@babel/types': 7.28.4
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/virtual-file-routes': 1.132.31
+      babel-dead-code-elimination: 1.0.10
+      chokidar: 3.6.0
+      unplugin: 2.3.10
+      zod: 3.25.76
+    optionalDependencies:
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-syntax-typescript': 7.27.1(@babel/core@7.28.4)
+      '@babel/template': 7.27.2
+      '@babel/traverse': 7.28.4
+      '@babel/types': 7.28.4
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/virtual-file-routes': 1.132.31
+      babel-dead-code-elimination: 1.0.10
+      chokidar: 3.6.0
+      unplugin: 2.3.10
+      zod: 3.25.76
+    optionalDependencies:
+      '@tanstack/react-router': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+=======
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-syntax-typescript': 7.27.1(@babel/core@7.28.4)
+      '@babel/template': 7.27.2
+      '@babel/traverse': 7.28.4
+      '@babel/types': 7.28.4
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/virtual-file-routes': 1.132.31
+      babel-dead-code-elimination: 1.0.10
+      chokidar: 3.6.0
+      unplugin: 2.3.10
+      zod: 3.25.76
+    optionalDependencies:
+      '@tanstack/react-router': 1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    transitivePeerDependencies:
+      - supports-color
+
+  '@tanstack/router-plugin@1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-syntax-typescript': 7.27.1(@babel/core@7.28.4)
+      '@babel/template': 7.27.2
+      '@babel/traverse': 7.28.4
+      '@babel/types': 7.28.4
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/virtual-file-routes': 1.132.31
+      babel-dead-code-elimination: 1.0.10
+      chokidar: 3.6.0
+      unplugin: 2.3.10
+      zod: 3.25.76
+    optionalDependencies:
+      '@tanstack/react-router': 1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-solid: 2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    transitivePeerDependencies:
+      - supports-color
+
+<<<<<<< HEAD
+  '@tanstack/router-plugin@1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/router-plugin@1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/router-plugin@1.133.4(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-syntax-jsx': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-syntax-typescript': 7.27.1(@babel/core@7.28.4)
+      '@babel/template': 7.27.2
+      '@babel/traverse': 7.28.4
+      '@babel/types': 7.28.4
+<<<<<<< HEAD
       '@tanstack/router-core': 1.133.20
       '@tanstack/router-generator': 1.133.20
       '@tanstack/router-utils': 1.133.19
@@ -14526,6 +15359,17 @@ snapshots:
       '@tanstack/router-generator': 1.133.20
       '@tanstack/router-utils': 1.133.19
       '@tanstack/virtual-file-routes': 1.133.19
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-generator': 1.133.3
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/virtual-file-routes': 1.133.3
+=======
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-generator': 1.133.4
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/virtual-file-routes': 1.133.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       babel-dead-code-elimination: 1.0.10
       chokidar: 3.6.0
       unplugin: 2.3.10
@@ -14537,10 +15381,24 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@tanstack/router-ssr-query-core@1.133.3(@tanstack/query-core@5.90.5)(@tanstack/router-core@1.133.20)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/router-ssr-query-core@1.133.3(@tanstack/query-core@5.90.3)(@tanstack/router-core@1.133.3)':
+=======
+  '@tanstack/router-ssr-query-core@1.133.3(@tanstack/query-core@5.90.5)(@tanstack/router-core@1.133.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@tanstack/query-core': 5.90.5
       '@tanstack/router-core': 1.133.20
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/query-core': 5.90.3
+      '@tanstack/router-core': 1.133.3
+=======
+      '@tanstack/query-core': 5.90.5
+      '@tanstack/router-core': 1.133.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@tanstack/router-utils@1.133.19':
     dependencies:
@@ -14587,7 +15445,13 @@ snapshots:
       - supports-color
       - vite
 
+<<<<<<< HEAD
   '@tanstack/server-functions-plugin@1.133.19(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/server-functions-plugin@1.132.53(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/server-functions-plugin@1.132.53(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@babel/code-frame': 7.27.1
       '@babel/core': 7.28.4
@@ -14596,7 +15460,13 @@ snapshots:
       '@babel/template': 7.27.2
       '@babel/traverse': 7.28.4
       '@babel/types': 7.28.4
+<<<<<<< HEAD
       '@tanstack/directive-functions-plugin': 1.133.19(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/directive-functions-plugin': 1.132.53(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      '@tanstack/directive-functions-plugin': 1.132.53(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       babel-dead-code-elimination: 1.0.10
       tiny-invariant: 1.3.3
     transitivePeerDependencies:
@@ -14702,7 +15572,141 @@ snapshots:
       cheerio: 1.1.2
       exsolve: 1.0.7
       pathe: 2.0.3
+<<<<<<< HEAD
       srvx: 0.8.16
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      srvx: 0.8.7
+      tinyglobby: 0.2.15
+      ufo: 1.6.1
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      xmlbuilder2: 3.1.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@rsbuild/core'
+      - '@tanstack/react-router'
+      - crossws
+      - supports-color
+      - vite-plugin-solid
+      - webpack
+
+  '@tanstack/start-plugin-core@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/code-frame': 7.26.2
+      '@babel/core': 7.28.4
+      '@babel/types': 7.28.4
+      '@rolldown/pluginutils': 1.0.0-beta.40
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-plugin': 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/server-functions-plugin': 1.132.53(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-server-core': 1.132.54
+      babel-dead-code-elimination: 1.0.10
+      cheerio: 1.1.2
+      exsolve: 1.0.7
+      pathe: 2.0.3
+      srvx: 0.8.7
+      tinyglobby: 0.2.15
+      ufo: 1.6.1
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      xmlbuilder2: 3.1.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@rsbuild/core'
+      - '@tanstack/react-router'
+      - crossws
+      - supports-color
+      - vite-plugin-solid
+      - webpack
+
+  '@tanstack/start-plugin-core@1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/code-frame': 7.26.2
+      '@babel/core': 7.28.4
+      '@babel/types': 7.28.4
+      '@rolldown/pluginutils': 1.0.0-beta.40
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-plugin': 1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/server-functions-plugin': 1.132.53(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-server-core': 1.132.54
+      babel-dead-code-elimination: 1.0.10
+      cheerio: 1.1.2
+      exsolve: 1.0.7
+      pathe: 2.0.3
+      srvx: 0.8.7
+=======
+      srvx: 0.8.7
+      tinyglobby: 0.2.15
+      ufo: 1.6.1
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      xmlbuilder2: 3.1.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@rsbuild/core'
+      - '@tanstack/react-router'
+      - crossws
+      - supports-color
+      - vite-plugin-solid
+      - webpack
+
+  '@tanstack/start-plugin-core@1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/code-frame': 7.26.2
+      '@babel/core': 7.28.4
+      '@babel/types': 7.28.4
+      '@rolldown/pluginutils': 1.0.0-beta.40
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-plugin': 1.132.56(@tanstack/react-router@1.132.47(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/server-functions-plugin': 1.132.53(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-server-core': 1.132.54
+      babel-dead-code-elimination: 1.0.10
+      cheerio: 1.1.2
+      exsolve: 1.0.7
+      pathe: 2.0.3
+      srvx: 0.8.7
+      tinyglobby: 0.2.15
+      ufo: 1.6.1
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      xmlbuilder2: 3.1.1
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@rsbuild/core'
+      - '@tanstack/react-router'
+      - crossws
+      - supports-color
+      - vite-plugin-solid
+      - webpack
+
+  '@tanstack/start-plugin-core@1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/code-frame': 7.26.2
+      '@babel/core': 7.28.4
+      '@babel/types': 7.28.4
+      '@rolldown/pluginutils': 1.0.0-beta.40
+      '@tanstack/router-core': 1.132.47
+      '@tanstack/router-generator': 1.132.51
+      '@tanstack/router-plugin': 1.132.56(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.132.51
+      '@tanstack/server-functions-plugin': 1.132.53(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.132.54
+      '@tanstack/start-server-core': 1.132.54
+      babel-dead-code-elimination: 1.0.10
+      cheerio: 1.1.2
+      exsolve: 1.0.7
+      pathe: 2.0.3
+      srvx: 0.8.7
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       tinyglobby: 0.2.15
       ufo: 1.6.1
       vite: 6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -14717,12 +15721,19 @@ snapshots:
       - vite-plugin-solid
       - webpack
 
+<<<<<<< HEAD
   '@tanstack/start-plugin-core@1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/start-plugin-core@1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/start-plugin-core@1.133.4(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@babel/code-frame': 7.26.2
       '@babel/core': 7.28.4
       '@babel/types': 7.28.4
       '@rolldown/pluginutils': 1.0.0-beta.40
+<<<<<<< HEAD
       '@tanstack/router-core': 1.133.20
       '@tanstack/router-generator': 1.133.20
       '@tanstack/router-plugin': 1.133.20(@tanstack/react-router@1.133.20(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
@@ -14794,6 +15805,23 @@ snapshots:
       '@tanstack/server-functions-plugin': 1.133.19(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/start-client-core': 1.133.20
       '@tanstack/start-server-core': 1.133.20
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-generator': 1.133.3
+      '@tanstack/router-plugin': 1.133.3(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/server-functions-plugin': 1.133.3(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.133.3
+      '@tanstack/start-server-core': 1.133.3
+=======
+      '@tanstack/router-core': 1.133.3
+      '@tanstack/router-generator': 1.133.4
+      '@tanstack/router-plugin': 1.133.4(@tanstack/react-router@1.133.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/router-utils': 1.133.3
+      '@tanstack/server-functions-plugin': 1.133.3(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@tanstack/start-client-core': 1.133.3
+      '@tanstack/start-server-core': 1.133.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       babel-dead-code-elimination: 1.0.10
       cheerio: 1.1.2
       exsolve: 1.0.7
@@ -14837,11 +15865,27 @@ snapshots:
 
   '@tanstack/store@0.8.0': {}
 
+<<<<<<< HEAD
   '@tanstack/typedoc-config@0.3.0(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/typedoc-config@0.2.1(typescript@5.9.2)':
+=======
+  '@tanstack/typedoc-config@0.2.1(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       typedoc: 0.28.14(typescript@5.9.3)
       typedoc-plugin-frontmatter: 1.3.0(typedoc-plugin-markdown@4.9.0(typedoc@0.28.14(typescript@5.9.3)))
       typedoc-plugin-markdown: 4.9.0(typedoc@0.28.14(typescript@5.9.3))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      typedoc: 0.27.9(typescript@5.9.2)
+      typedoc-plugin-frontmatter: 1.2.1(typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.2)))
+      typedoc-plugin-markdown: 4.4.2(typedoc@0.27.9(typescript@5.9.2))
+=======
+      typedoc: 0.27.9(typescript@5.9.3)
+      typedoc-plugin-frontmatter: 1.2.1(typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.3)))
+      typedoc-plugin-markdown: 4.4.2(typedoc@0.27.9(typescript@5.9.3))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - typescript
 
@@ -14849,7 +15893,17 @@ snapshots:
 
   '@tanstack/virtual-file-routes@1.133.19': {}
 
+<<<<<<< HEAD
   '@tanstack/vite-config@0.4.0(@types/node@24.8.0)(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@tanstack/virtual-file-routes@1.133.3': {}
+
+  '@tanstack/vite-config@0.4.0(@types/node@24.7.0)(rollup@4.52.4)(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@tanstack/virtual-file-routes@1.133.3': {}
+
+  '@tanstack/vite-config@0.4.0(@types/node@24.8.0)(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       rollup-plugin-preserve-directives: 0.4.0(rollup@4.52.4)
       vite-plugin-dts: 4.2.3(@types/node@24.8.0)(rollup@4.52.4)(typescript@5.9.3)(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
@@ -14946,7 +16000,13 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@types/chai@5.2.2':
     dependencies:
@@ -14958,7 +16018,13 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@types/conventional-commits-parser@5.0.1':
     dependencies:
@@ -14978,14 +16044,26 @@ snapshots:
 
   '@types/express-serve-static-core@4.19.6':
     dependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 0.17.5
 
   '@types/express-serve-static-core@5.0.7':
     dependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 0.17.5
@@ -15064,17 +16142,35 @@ snapshots:
   '@types/send@0.17.5':
     dependencies:
       '@types/mime': 1.3.5
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@types/serve-static@1.15.8':
     dependencies:
       '@types/http-errors': 2.0.5
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@types/send': 0.17.5
 
   '@types/simple-peer@9.11.8':
     dependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@types/unist@3.0.3': {}
 
@@ -15088,15 +16184,41 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
+<<<<<<< HEAD
   '@typescript-eslint/eslint-plugin@8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@typescript-eslint/eslint-plugin@8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
+  '@typescript-eslint/eslint-plugin@8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@eslint-community/regexpp': 4.12.1
+<<<<<<< HEAD
       '@typescript-eslint/parser': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/parser': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@typescript-eslint/parser': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@typescript-eslint/scope-manager': 8.44.1
+<<<<<<< HEAD
       '@typescript-eslint/type-utils': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/utils': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/type-utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@typescript-eslint/type-utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@typescript-eslint/visitor-keys': 8.44.1
       eslint: 9.38.0(jiti@2.6.1)
       graphemer: 1.4.0
@@ -15124,6 +16246,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@typescript-eslint/eslint-plugin@8.46.1(@typescript-eslint/parser@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.1
@@ -15142,12 +16265,35 @@ snapshots:
       - supports-color
 
   '@typescript-eslint/parser@8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
+  '@typescript-eslint/eslint-plugin@8.46.1(@typescript-eslint/parser@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+    dependencies:
+      '@eslint-community/regexpp': 4.12.1
+      '@typescript-eslint/parser': 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/scope-manager': 8.46.1
+      '@typescript-eslint/type-utils': 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/visitor-keys': 8.46.1
+      eslint: 9.37.0(jiti@2.6.1)
+      graphemer: 1.4.0
+      ignore: 7.0.5
+      natural-compare: 1.4.0
+      ts-api-utils: 2.1.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@typescript-eslint/scope-manager': 8.44.1
       '@typescript-eslint/types': 8.44.1
       '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
       '@typescript-eslint/visitor-keys': 8.44.1
       debug: 4.4.3
+<<<<<<< HEAD
       eslint: 9.38.0(jiti@2.6.1)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -15162,6 +16308,13 @@ snapshots:
       debug: 4.4.3
       eslint: 9.38.0(jiti@2.6.1)
       typescript: 5.9.2
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.2
+=======
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -15177,10 +16330,36 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@typescript-eslint/project-service@8.44.1(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@typescript-eslint/project-service@8.44.1(typescript@5.9.2)':
+=======
+  '@typescript-eslint/parser@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@typescript-eslint/tsconfig-utils': 8.46.1(typescript@5.9.3)
       '@typescript-eslint/types': 8.46.1
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/tsconfig-utils': 8.46.0(typescript@5.9.2)
+      '@typescript-eslint/types': 8.46.0
+=======
+      '@typescript-eslint/scope-manager': 8.46.1
+      '@typescript-eslint/types': 8.46.1
+      '@typescript-eslint/typescript-estree': 8.46.1(typescript@5.9.3)
+      '@typescript-eslint/visitor-keys': 8.46.1
+      debug: 4.4.3
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/project-service@8.44.1(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/tsconfig-utils': 8.46.0(typescript@5.9.3)
+      '@typescript-eslint/types': 8.46.0
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       debug: 4.4.3
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -15195,6 +16374,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@typescript-eslint/project-service@8.46.0(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/tsconfig-utils': 8.46.1(typescript@5.9.3)
@@ -15222,6 +16402,27 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+=======
+  '@typescript-eslint/project-service@8.46.0(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/tsconfig-utils': 8.46.0(typescript@5.9.3)
+      '@typescript-eslint/types': 8.46.0
+      debug: 4.4.3
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/project-service@8.46.1(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/tsconfig-utils': 8.46.1(typescript@5.9.3)
+      '@typescript-eslint/types': 8.46.1
+      debug: 4.4.3
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
   '@typescript-eslint/scope-manager@8.44.1':
     dependencies:
       '@typescript-eslint/types': 8.44.1
@@ -15245,6 +16446,7 @@ snapshots:
     dependencies:
       typescript: 5.9.2
 
+<<<<<<< HEAD
   '@typescript-eslint/tsconfig-utils@8.46.0(typescript@5.9.3)':
     dependencies:
       typescript: 5.9.3
@@ -15258,11 +16460,33 @@ snapshots:
       typescript: 5.9.3
 
   '@typescript-eslint/type-utils@8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@typescript-eslint/type-utils@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
+  '@typescript-eslint/tsconfig-utils@8.46.0(typescript@5.9.3)':
+    dependencies:
+      typescript: 5.9.3
+
+  '@typescript-eslint/tsconfig-utils@8.46.1(typescript@5.9.3)':
+    dependencies:
+      typescript: 5.9.3
+
+  '@typescript-eslint/type-utils@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@typescript-eslint/types': 8.44.1
+<<<<<<< HEAD
       '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
       '@typescript-eslint/utils': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.2)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       debug: 4.4.3
+<<<<<<< HEAD
       eslint: 9.38.0(jiti@2.6.1)
       ts-api-utils: 2.1.0(typescript@5.9.3)
       typescript: 5.9.3
@@ -15278,6 +16502,15 @@ snapshots:
       eslint: 9.38.0(jiti@2.6.1)
       ts-api-utils: 2.1.0(typescript@5.9.2)
       typescript: 5.9.2
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      eslint: 9.37.0(jiti@2.6.1)
+      ts-api-utils: 2.1.0(typescript@5.9.2)
+      typescript: 5.9.2
+=======
+      eslint: 9.37.0(jiti@2.6.1)
+      ts-api-utils: 2.1.0(typescript@5.9.3)
+      typescript: 5.9.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -15288,6 +16521,18 @@ snapshots:
       '@typescript-eslint/utils': 8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       debug: 4.4.3
       eslint: 9.38.0(jiti@2.6.1)
+      ts-api-utils: 2.1.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/type-utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/types': 8.46.1
+      '@typescript-eslint/typescript-estree': 8.46.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      debug: 4.4.3
+      eslint: 9.37.0(jiti@2.6.1)
       ts-api-utils: 2.1.0(typescript@5.9.3)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -15331,8 +16576,47 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
+  '@typescript-eslint/typescript-estree@8.46.0(typescript@5.9.3)':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@typescript-eslint/utils@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)':
+=======
   '@typescript-eslint/typescript-estree@8.46.0(typescript@5.9.3)':
     dependencies:
+      '@typescript-eslint/project-service': 8.46.0(typescript@5.9.3)
+      '@typescript-eslint/tsconfig-utils': 8.46.0(typescript@5.9.3)
+      '@typescript-eslint/types': 8.46.0
+      '@typescript-eslint/visitor-keys': 8.46.0
+      debug: 4.4.3
+      fast-glob: 3.3.3
+      is-glob: 4.0.3
+      minimatch: 9.0.5
+      semver: 7.7.2
+      ts-api-utils: 2.1.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/typescript-estree@8.46.1(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/project-service': 8.46.1(typescript@5.9.3)
+      '@typescript-eslint/tsconfig-utils': 8.46.1(typescript@5.9.3)
+      '@typescript-eslint/types': 8.46.1
+      '@typescript-eslint/visitor-keys': 8.46.1
+      debug: 4.4.3
+      fast-glob: 3.3.3
+      is-glob: 4.0.3
+      minimatch: 9.0.5
+      semver: 7.7.3
+      ts-api-utils: 2.1.0(typescript@5.9.3)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/utils@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+    dependencies:
+<<<<<<< HEAD
       '@typescript-eslint/project-service': 8.46.0(typescript@5.9.3)
       '@typescript-eslint/tsconfig-utils': 8.46.0(typescript@5.9.3)
       '@typescript-eslint/types': 8.46.0
@@ -15360,6 +16644,21 @@ snapshots:
       semver: 7.7.3
       ts-api-utils: 2.1.0(typescript@5.9.2)
       typescript: 5.9.2
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@eslint-community/eslint-utils': 4.9.0(eslint@9.37.0(jiti@2.6.1))
+      '@typescript-eslint/scope-manager': 8.44.1
+      '@typescript-eslint/types': 8.44.1
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.2)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.2
+=======
+      '@eslint-community/eslint-utils': 4.9.0(eslint@9.37.0(jiti@2.6.1))
+      '@typescript-eslint/scope-manager': 8.44.1
+      '@typescript-eslint/types': 8.44.1
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -15401,6 +16700,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   '@typescript-eslint/utils@8.46.0(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@eslint-community/eslint-utils': 4.9.0(eslint@9.38.0(jiti@2.6.1))
@@ -15434,6 +16734,31 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+=======
+  '@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+    dependencies:
+      '@eslint-community/eslint-utils': 4.9.0(eslint@9.37.0(jiti@2.6.1))
+      '@typescript-eslint/scope-manager': 8.46.0
+      '@typescript-eslint/types': 8.46.0
+      '@typescript-eslint/typescript-estree': 8.46.0(typescript@5.9.3)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)':
+    dependencies:
+      '@eslint-community/eslint-utils': 4.9.0(eslint@9.37.0(jiti@2.6.1))
+      '@typescript-eslint/scope-manager': 8.46.1
+      '@typescript-eslint/types': 8.46.1
+      '@typescript-eslint/typescript-estree': 8.46.1(typescript@5.9.3)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
   '@typescript-eslint/visitor-keys@8.44.1':
     dependencies:
       '@typescript-eslint/types': 8.44.1
@@ -15531,6 +16856,7 @@ snapshots:
 
   '@vitejs/plugin-basic-ssl@2.1.0(vite@7.1.5(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
+<<<<<<< HEAD
       vite: 7.1.5(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
   '@vitejs/plugin-react@5.0.4(vite@6.3.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
@@ -15556,6 +16882,11 @@ snapshots:
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
     transitivePeerDependencies:
       - supports-color
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.5(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.5(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@vitejs/plugin-react@5.0.4(vite@7.1.10(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
@@ -15569,6 +16900,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
+  '@vitejs/plugin-react@5.0.4(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@vitejs/plugin-react@5.0.4(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
   '@vitejs/plugin-react@5.0.4(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@babel/core': 7.28.4
@@ -15581,13 +16917,62 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@vitejs/plugin-react@5.0.4(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-transform-react-jsx-source': 7.27.1(@babel/core@7.28.4)
+      '@rolldown/pluginutils': 1.0.0-beta.38
+      '@types/babel__core': 7.20.5
+      react-refresh: 0.17.0
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+    transitivePeerDependencies:
+      - supports-color
+
+<<<<<<< HEAD
   '@vitejs/plugin-vue@6.0.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vue@3.5.22(typescript@5.9.3))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@vitejs/plugin-react@5.0.4(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-transform-react-jsx-source': 7.27.1(@babel/core@7.28.4)
+      '@rolldown/pluginutils': 1.0.0-beta.38
+      '@types/babel__core': 7.20.5
+      react-refresh: 0.17.0
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@vitejs/plugin-vue@6.0.1(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vue@3.5.22(typescript@5.9.3))':
+=======
+  '@vitejs/plugin-react@5.0.4(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@babel/core': 7.28.4
+      '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.28.4)
+      '@babel/plugin-transform-react-jsx-source': 7.27.1(@babel/core@7.28.4)
+      '@rolldown/pluginutils': 1.0.0-beta.38
+      '@types/babel__core': 7.20.5
+      react-refresh: 0.17.0
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+    transitivePeerDependencies:
+      - supports-color
+
+  '@vitejs/plugin-vue@6.0.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))(vue@3.5.22(typescript@5.9.3))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@rolldown/pluginutils': 1.0.0-beta.29
       vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
       vue: 3.5.22(typescript@5.9.3)
 
+<<<<<<< HEAD
   '@vitest/coverage-istanbul@3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@vitest/coverage-istanbul@3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@vitest/coverage-istanbul@3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@istanbuljs/schema': 0.1.3
       debug: 4.4.3
@@ -15599,7 +16984,13 @@ snapshots:
       magicast: 0.3.5
       test-exclude: 7.0.1
       tinyrainbow: 2.0.0
+<<<<<<< HEAD
       vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.8.0)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -15619,13 +17010,33 @@ snapshots:
     optionalDependencies:
       vite: 6.3.6(@types/node@22.18.10)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
+<<<<<<< HEAD
   '@vitest/mocker@3.2.4(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  '@vitest/mocker@3.2.4(vite@7.1.10(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+=======
+  '@vitest/mocker@3.2.4(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@vitest/spy': 3.2.4
       estree-walker: 3.0.3
       magic-string: 0.30.19
     optionalDependencies:
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.10(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  '@vitest/mocker@3.2.4(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
+    dependencies:
+      '@vitest/spy': 3.2.4
+      estree-walker: 3.0.3
+      magic-string: 0.30.19
+    optionalDependencies:
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   '@vitest/pretty-format@3.2.4':
     dependencies:
@@ -16746,7 +18157,13 @@ snapshots:
   engine.io@6.6.4:
     dependencies:
       '@types/cors': 2.8.19
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       accepts: 1.3.8
       base64id: 2.0.0
       cookie: 0.7.2
@@ -16996,8 +18413,16 @@ snapshots:
 
   eslint-compat-utils@0.5.1(eslint@9.38.0(jiti@2.6.1)):
     dependencies:
+<<<<<<< HEAD
       eslint: 9.38.0(jiti@2.6.1)
       semver: 7.7.3
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      eslint: 9.37.0(jiti@2.6.1)
+      semver: 7.7.2
+=======
+      eslint: 9.37.0(jiti@2.6.1)
+      semver: 7.7.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   eslint-config-prettier@10.1.8(eslint@9.38.0(jiti@2.6.1)):
     dependencies:
@@ -17010,7 +18435,13 @@ snapshots:
     optionalDependencies:
       unrs-resolver: 1.11.1
 
+<<<<<<< HEAD
   eslint-import-resolver-typescript@4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1)))(eslint@9.38.0(jiti@2.6.1)):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  eslint-import-resolver-typescript@4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1)))(eslint@9.37.0(jiti@2.6.1)):
+=======
+  eslint-import-resolver-typescript@4.4.4(eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1)))(eslint@9.37.0(jiti@2.6.1)):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       debug: 4.4.3
       eslint: 9.38.0(jiti@2.6.1)
@@ -17021,7 +18452,13 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
+<<<<<<< HEAD
       eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))
+=======
+      eslint-plugin-import-x: 4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -17032,7 +18469,13 @@ snapshots:
       eslint: 9.38.0(jiti@2.6.1)
       eslint-compat-utils: 0.5.1(eslint@9.38.0(jiti@2.6.1))
 
+<<<<<<< HEAD
   eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1)):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1)):
+=======
+  eslint-plugin-import-x@4.16.1(@typescript-eslint/utils@8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1)):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@typescript-eslint/types': 8.46.1
       comment-parser: 1.4.1
@@ -17045,11 +18488,23 @@ snapshots:
       stable-hash-x: 0.2.0
       unrs-resolver: 1.11.1
     optionalDependencies:
+<<<<<<< HEAD
       '@typescript-eslint/utils': 8.46.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/utils': 8.46.0(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+=======
+      '@typescript-eslint/utils': 8.46.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
   eslint-plugin-n@17.23.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  eslint-plugin-n@17.23.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2):
+=======
+  eslint-plugin-n@17.23.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@eslint-community/eslint-utils': 4.9.0(eslint@9.38.0(jiti@2.6.1))
       enhanced-resolve: 5.18.3
@@ -17059,8 +18514,16 @@ snapshots:
       globals: 15.15.0
       globrex: 0.1.2
       ignore: 5.3.2
+<<<<<<< HEAD
       semver: 7.7.3
       ts-declaration-location: 1.0.7(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      semver: 7.7.2
+      ts-declaration-location: 1.0.7(typescript@5.9.2)
+=======
+      semver: 7.7.2
+      ts-declaration-location: 1.0.7(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - typescript
 
@@ -18364,7 +19827,13 @@ snapshots:
 
   klona@2.0.6: {}
 
+<<<<<<< HEAD
   knip@5.66.2(@types/node@24.8.0)(typescript@5.9.3):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  knip@5.64.3(@types/node@24.7.0)(typescript@5.9.2):
+=======
+  knip@5.65.0(@types/node@24.8.0)(typescript@5.9.3):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@nodelib/fs.walk': 1.2.8
       '@types/node': 24.8.0
@@ -19540,7 +21009,13 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.0
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+=======
+      '@types/node': 22.18.10
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       long: 5.3.2
 
   proxy-addr@2.0.7:
@@ -20849,16 +22324,46 @@ snapshots:
       possible-typed-array-names: 1.1.0
       reflect.getprototypeof: 1.0.10
 
+<<<<<<< HEAD
   typedoc-plugin-frontmatter@1.3.0(typedoc-plugin-markdown@4.9.0(typedoc@0.28.14(typescript@5.9.3))):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  typedoc-plugin-frontmatter@1.2.1(typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.2))):
+=======
+  typedoc-plugin-frontmatter@1.2.1(typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.3))):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       typedoc-plugin-markdown: 4.9.0(typedoc@0.28.14(typescript@5.9.3))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      typedoc-plugin-markdown: 4.4.2(typedoc@0.27.9(typescript@5.9.2))
+=======
+      typedoc-plugin-markdown: 4.4.2(typedoc@0.27.9(typescript@5.9.3))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       yaml: 2.8.1
 
+<<<<<<< HEAD
   typedoc-plugin-markdown@4.9.0(typedoc@0.28.14(typescript@5.9.3)):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.2)):
+=======
+  typedoc-plugin-markdown@4.4.2(typedoc@0.27.9(typescript@5.9.3)):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       typedoc: 0.28.14(typescript@5.9.3)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      typedoc: 0.27.9(typescript@5.9.2)
+=======
+      typedoc: 0.27.9(typescript@5.9.3)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
+<<<<<<< HEAD
   typedoc@0.28.14(typescript@5.9.3):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  typedoc@0.27.9(typescript@5.9.2):
+=======
+  typedoc@0.27.9(typescript@5.9.3):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       '@gerrit0/mini-shiki': 3.13.1
       lunr: 2.3.9
@@ -20867,14 +22372,36 @@ snapshots:
       typescript: 5.9.3
       yaml: 2.8.1
 
+<<<<<<< HEAD
   typescript-eslint@8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  typescript-eslint@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2):
+=======
+  typescript-eslint@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
+<<<<<<< HEAD
       '@typescript-eslint/eslint-plugin': 8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/parser': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
       '@typescript-eslint/utils': 8.44.1(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.38.0(jiti@2.6.1)
       typescript: 5.9.3
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@typescript-eslint/eslint-plugin': 8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      '@typescript-eslint/parser': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.2)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.2)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.2
+=======
+      '@typescript-eslint/eslint-plugin': 8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.44.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.44.1(eslint@9.37.0(jiti@2.6.1))(typescript@5.9.3)
+      eslint: 9.37.0(jiti@2.6.1)
+      typescript: 5.9.3
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
 
@@ -21117,7 +22644,34 @@ snapshots:
       debug: 4.4.3
       es-module-lexer: 1.7.0
       pathe: 2.0.3
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.10(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+    transitivePeerDependencies:
+      - '@types/node'
+      - jiti
+      - less
+      - lightningcss
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+      - tsx
+      - yaml
+
+  vite-node@3.2.4(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      cac: 6.7.14
+      debug: 4.4.3
+      es-module-lexer: 1.7.0
+      pathe: 2.0.3
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - '@types/node'
       - jiti
@@ -21239,6 +22793,74 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+<<<<<<< HEAD
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    dependencies:
+      '@babel/core': 7.28.4
+      '@types/babel__core': 7.20.5
+      babel-preset-solid: 1.9.9(@babel/core@7.28.4)(solid-js@1.9.9)
+      merge-anything: 5.1.7
+      solid-js: 1.9.9
+      solid-refresh: 0.6.3(solid-js@1.9.9)
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    optionalDependencies:
+      '@testing-library/jest-dom': 6.9.1
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+  vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    dependencies:
+      '@babel/core': 7.28.4
+      '@types/babel__core': 7.20.5
+      babel-preset-solid: 1.9.9(@babel/core@7.28.4)(solid-js@1.9.9)
+      merge-anything: 5.1.7
+      solid-js: 1.9.9
+      solid-refresh: 0.6.3(solid-js@1.9.9)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    optionalDependencies:
+      '@testing-library/jest-dom': 6.9.1
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+=======
+  vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    dependencies:
+      '@babel/core': 7.28.4
+      '@types/babel__core': 7.20.5
+      babel-preset-solid: 1.9.9(@babel/core@7.28.4)(solid-js@1.9.9)
+      merge-anything: 5.1.7
+      solid-js: 1.9.9
+      solid-refresh: 0.6.3(solid-js@1.9.9)
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    optionalDependencies:
+      '@testing-library/jest-dom': 6.9.1
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+  vite-plugin-solid@2.11.9(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    dependencies:
+      '@babel/core': 7.28.4
+      '@types/babel__core': 7.20.5
+      babel-preset-solid: 1.9.9(@babel/core@7.28.4)(solid-js@1.9.9)
+      merge-anything: 5.1.7
+      solid-js: 1.9.9
+      solid-refresh: 0.6.3(solid-js@1.9.9)
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitefu: 1.1.1(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+    optionalDependencies:
+      '@testing-library/jest-dom': 6.9.1
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
   vite-tsconfig-paths@5.1.4(typescript@5.9.2)(vite@6.3.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
     dependencies:
       debug: 4.4.3
@@ -21261,13 +22883,25 @@ snapshots:
       - supports-color
       - typescript
 
+<<<<<<< HEAD
   vite-tsconfig-paths@5.1.4(typescript@5.9.2)(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+  vite-tsconfig-paths@5.1.4(typescript@5.9.2)(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+=======
+  vite-tsconfig-paths@5.1.4(typescript@5.9.2)(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     dependencies:
       debug: 4.4.3
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@5.9.2)
     optionalDependencies:
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -21411,7 +23045,103 @@ snapshots:
       rollup: 4.52.4
       tinyglobby: 0.2.15
     optionalDependencies:
+<<<<<<< HEAD
       '@types/node': 24.8.0
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.2
+      fsevents: 2.3.3
+      jiti: 2.6.1
+      lightningcss: 1.30.1
+      sass: 1.90.0
+      terser: 5.44.0
+      tsx: 4.20.6
+      yaml: 2.8.1
+
+  vite@7.1.5(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.25.9
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.52.3
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 24.7.2
+      fsevents: 2.3.3
+      jiti: 2.6.1
+      lightningcss: 1.30.1
+      sass: 1.90.0
+      terser: 5.44.0
+      tsx: 4.20.6
+      yaml: 2.8.1
+
+  vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.25.9
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.52.3
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 24.7.0
+      fsevents: 2.3.3
+      jiti: 2.6.1
+      lightningcss: 1.30.1
+      sass: 1.90.0
+      terser: 5.44.0
+      tsx: 4.20.6
+      yaml: 2.8.1
+
+  vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.25.9
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.52.3
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 24.7.2
+=======
+      '@types/node': 24.8.0
+      fsevents: 2.3.3
+      jiti: 2.6.1
+      lightningcss: 1.30.1
+      sass: 1.90.0
+      terser: 5.44.0
+      tsx: 4.20.6
+      yaml: 2.8.1
+
+  vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.25.9
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.52.3
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 24.7.0
+      fsevents: 2.3.3
+      jiti: 2.6.1
+      lightningcss: 1.30.1
+      sass: 1.90.0
+      terser: 5.44.0
+      tsx: 4.20.6
+      yaml: 2.8.1
+
+  vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      esbuild: 0.25.9
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.52.3
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 24.8.0
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       fsevents: 2.3.3
       jiti: 2.6.1
       lightningcss: 1.30.1
@@ -21438,7 +23168,29 @@ snapshots:
 
   vitefu@1.1.1(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
     optionalDependencies:
+<<<<<<< HEAD
       vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  vitefu@1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    optionalDependencies:
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  vitefu@1.1.1(vite@7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    optionalDependencies:
+      vite: 7.1.9(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  vitefu@1.1.1(vite@7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    optionalDependencies:
+      vite: 7.1.9(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  vitefu@1.1.1(vite@7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)):
+    optionalDependencies:
+      vite: 7.1.9(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
 
   vitest@3.2.4(@types/debug@4.1.12)(@types/node@22.18.10)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
@@ -21487,7 +23239,13 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.2
       '@vitest/expect': 3.2.4
+<<<<<<< HEAD
       '@vitest/mocker': 3.2.4(vite@6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@vitest/mocker': 3.2.4(vite@7.1.10(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+=======
+      '@vitest/mocker': 3.2.4(vite@7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4
@@ -21505,11 +23263,20 @@ snapshots:
       tinyglobby: 0.2.15
       tinypool: 1.1.1
       tinyrainbow: 2.0.0
+<<<<<<< HEAD
       vite: 6.3.6(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
       vite-node: 3.2.4(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      vite: 7.1.10(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-node: 3.2.4(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+=======
+      vite: 7.1.10(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-node: 3.2.4(@types/node@24.8.0)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/debug': 4.1.12
+<<<<<<< HEAD
       '@types/node': 24.8.0
       jsdom: 27.0.0(postcss@8.5.6)
     transitivePeerDependencies:
@@ -21555,6 +23322,56 @@ snapshots:
       '@types/debug': 4.1.12
       '@types/node': 24.8.0
       jsdom: 27.0.1(postcss@8.5.6)
+||||||| parent of cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
+      '@types/node': 24.7.0
+      jsdom: 27.0.0(postcss@8.5.6)
+    transitivePeerDependencies:
+      - jiti
+      - less
+      - lightningcss
+      - msw
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+      - tsx
+      - yaml
+
+  vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.2)(jiti@2.6.1)(jsdom@27.0.0(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1):
+    dependencies:
+      '@types/chai': 5.2.2
+      '@vitest/expect': 3.2.4
+      '@vitest/mocker': 3.2.4(vite@7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+      '@vitest/pretty-format': 3.2.4
+      '@vitest/runner': 3.2.4
+      '@vitest/snapshot': 3.2.4
+      '@vitest/spy': 3.2.4
+      '@vitest/utils': 3.2.4
+      chai: 5.3.3
+      debug: 4.4.3
+      expect-type: 1.2.2
+      magic-string: 0.30.19
+      pathe: 2.0.3
+      picomatch: 4.0.3
+      std-env: 3.9.0
+      tinybench: 2.9.0
+      tinyexec: 0.3.2
+      tinyglobby: 0.2.15
+      tinypool: 1.1.1
+      tinyrainbow: 2.0.0
+      vite: 7.1.10(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vite-node: 3.2.4(@types/node@24.7.2)(jiti@2.6.1)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/debug': 4.1.12
+      '@types/node': 24.7.2
+      jsdom: 27.0.0(postcss@8.5.6)
+=======
+      '@types/node': 24.8.0
+      jsdom: 27.0.0(postcss@8.5.6)
+>>>>>>> cc2a8d13 (use pre-created collection for useLiveInfiniteQuery)
     transitivePeerDependencies:
       - jiti
       - less

@@ -43,6 +43,7 @@ export const productsCollection = createCollection(
       return [`products`, { page, orderBy, where }]
     },
     queryFn: async (ctx) => {
+      console.trace()
       const loadSubsetOptions = ctx.meta?.loadSubsetOptions
       if (!loadSubsetOptions) {
         throw new Error(`loadSubsetOptions is required`)
