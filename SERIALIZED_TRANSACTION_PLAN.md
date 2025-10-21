@@ -30,11 +30,13 @@ injectSerializedTransaction(config) // Uses Angular DI, follows injectLiveQuery 
 ## Available Strategies (Based on Pacer Utilities)
 
 ### 1. **debounceStrategy({ wait, leading?, trailing? })**
+
 - Uses Pacer's `Debouncer` class
 - Waits for pause in activity before committing
 - **Best for:** Search inputs, auto-save fields
 
 ### 2. **queueStrategy({ wait?, maxSize?, addItemsTo?, getItemsFrom? })**
+
 - Uses Pacer's `Queuer` class
 - Processes all transactions in order (FIFO/LIFO)
 - FIFO: `{ addItemsTo: 'back', getItemsFrom: 'front' }`
@@ -42,11 +44,13 @@ injectSerializedTransaction(config) // Uses Angular DI, follows injectLiveQuery 
 - **Best for:** Sequential operations that must all complete
 
 ### 3. **throttleStrategy({ wait, leading?, trailing? })**
+
 - Uses Pacer's `Throttler` class
 - Evenly spaces transaction executions over time
 - **Best for:** Sliders, scroll handlers, progress bars
 
 ### 4. **batchStrategy({ maxSize?, wait?, getShouldExecute? })**
+
 - Uses Pacer's `Batcher` class
 - Groups multiple mutations into batches
 - Triggers on size or time threshold
@@ -121,7 +125,7 @@ cleanup()
 
 ```typescript
 // packages/react-db
-import { debounceStrategy } from '@tanstack/react-db'
+import { debounceStrategy } from "@tanstack/react-db"
 
 const mutate = useSerializedTransaction({
   mutationFn: async ({ transaction }) => {
@@ -133,14 +137,16 @@ const mutate = useSerializedTransaction({
 // Usage in component
 const handleChange = async (value) => {
   const tx = mutate(() => {
-    collection.update(id, draft => { draft.value = value })
+    collection.update(id, (draft) => {
+      draft.value = value
+    })
   })
 
   // Optional: await persistence or handle errors
   try {
     await tx.isPersisted.promise
   } catch (error) {
-    console.error('Update failed:', error)
+    console.error("Update failed:", error)
   }
 }
 ```
@@ -179,8 +185,8 @@ const mutate = useSerializedTransaction({
   },
   strategy: queueStrategy({
     wait: 200,
-    addItemsTo: 'back',
-    getItemsFrom: 'front'
+    addItemsTo: "back",
+    getItemsFrom: "front",
   }),
 })
 ```
@@ -188,6 +194,7 @@ const mutate = useSerializedTransaction({
 ## Implementation Steps
 
 ### Phase 1: Core Package (@tanstack/db)
+
 1. Add `@tanstack/pacer` dependency to packages/db/package.json
 2. Create strategy type definitions in strategies/types.ts
 3. Implement strategy factories:
@@ -199,6 +206,7 @@ const mutate = useSerializedTransaction({
 5. Export strategies + core function from packages/db/src/index.ts
 
 ### Phase 2: Framework Wrappers
+
 6. **React** - Create `useSerializedTransaction` using useRef/useEffect/useCallback
 7. **Solid** - Create `useSerializedTransaction` using createSignal/onCleanup (matches `useLiveQuery` pattern)
 8. **Svelte** - Create `useSerializedTransaction` using Svelte stores
@@ -206,6 +214,7 @@ const mutate = useSerializedTransaction({
 10. **Angular** - Create `injectSerializedTransaction` using inject/DestroyRef (matches `injectLiveQuery` pattern)
 
 ### Phase 3: Testing & Documentation
+
 11. Write tests for core logic in packages/db
 12. Write tests for each framework wrapper
 13. Update README with examples
@@ -235,8 +244,8 @@ export function debounceStrategy(opts: {
 export function queueStrategy(opts?: {
   wait?: number
   maxSize?: number
-  addItemsTo?: 'front' | 'back'
-  getItemsFrom?: 'front' | 'back'
+  addItemsTo?: "front" | "back"
+  getItemsFrom?: "front" | "back"
 }): QueueStrategy
 
 export function throttleStrategy(opts: {
@@ -257,6 +266,7 @@ export function batchStrategy(opts?: {
 ### Core createSerializedTransaction
 
 The core function will:
+
 1. Accept a strategy and mutationFn
 2. Create a wrapper around `createTransaction` from existing code
 3. Use the strategy's `execute()` method to control when transactions are committed
@@ -265,6 +275,7 @@ The core function will:
    - `cleanup()` - cleans up strategy resources
 
 **Important:** The `mutate()` function returns a `Transaction` object so callers can:
+
 - Await `transaction.isPersisted.promise` to know when persistence completes
 - Handle errors via try/catch or `.catch()`
 - Access transaction state and metadata
@@ -272,14 +283,16 @@ The core function will:
 ### Strategy Factories
 
 Each strategy factory returns an object with:
+
 - `execute(fn)` - wraps the function with Pacer's utility
 - `cleanup()` - cleans up the Pacer instance
 
 Example for debounceStrategy:
+
 ```typescript
 // NOTE: Import path needs validation - Pacer may export from main entry point
 // Likely: import { Debouncer } from '@tanstack/pacer' or similar
-import { Debouncer } from '@tanstack/pacer' // TODO: Validate actual export path
+import { Debouncer } from "@tanstack/pacer" // TODO: Validate actual export path
 
 export function debounceStrategy(opts: {
   wait: number
@@ -289,13 +302,13 @@ export function debounceStrategy(opts: {
   const debouncer = new Debouncer(opts)
 
   return {
-    _type: 'debounce' as const,
+    _type: "debounce" as const,
     execute: (fn: () => void) => {
       debouncer.execute(fn)
     },
     cleanup: () => {
       debouncer.cancel()
-    }
+    },
   }
 }
 ```
@@ -322,6 +335,7 @@ export function useSerializedTransaction(config) {
 ```
 
 **Key fixes:**
+
 - Include `config.strategy` in `useMemo` dependencies to handle strategy changes
 - Properly cleanup when strategy changes (via useEffect cleanup)
 - Return stable callback reference via `useCallback`
