@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { createSerializedMutations } from "@tanstack/db"
 import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
 
@@ -98,16 +98,11 @@ export function useSerializedMutations<
   config: SerializedMutationsConfig<T>
 ): (callback: () => void) => Transaction<T> {
   // Create serialized mutations instance with proper dependency tracking
-  const { mutate, cleanup } = useMemo(() => {
+  const { mutate } = useMemo(() => {
     return createSerializedMutations<T>(config)
     // Include all config properties in dependencies
     // Strategy changes will recreate the instance
   }, [config.mutationFn, config.metadata, config.strategy, config.id])
-
-  // Cleanup on unmount or when dependencies change
-  useEffect(() => {
-    return () => cleanup()
-  }, [cleanup])
 
   // Return stable mutate callback
   const stableMutate = useCallback(mutate, [mutate])

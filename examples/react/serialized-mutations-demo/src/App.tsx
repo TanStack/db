@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import mitt from "mitt"
 import {
   createCollection,
   debounceStrategy,
@@ -6,7 +7,7 @@ import {
   throttleStrategy,
   useSerializedMutations,
 } from "@tanstack/react-db"
-import type { Transaction } from "@tanstack/react-db"
+import type { PendingMutation, Transaction } from "@tanstack/react-db"
 
 interface Item {
   id: number
@@ -14,9 +15,47 @@ interface Item {
   timestamp: number
 }
 
-// Create a simple in-memory collection
+// Create event emitter for fake server communication
+const serverEmitter = mitt()
+
+// Fake server store - initialize with a single item
+const fakeServer = new Map<number, Item>([
+  [1, { id: 1, value: 0, timestamp: Date.now() }],
+])
+
+// Create a collection with fake sync
 const itemCollection = createCollection<Item>({
+  id: `items`,
   getKey: (item) => item.id,
+  startSync: true,
+  sync: {
+    sync: ({ begin, write, commit, markReady }) => {
+      // Initial sync - load the initial item from fake server
+      begin()
+      fakeServer.forEach((item) => {
+        write({
+          type: `insert`,
+          value: item,
+        })
+      })
+      commit()
+      markReady()
+
+      // Listen for server updates and sync them back
+      // @ts-expect-error mitt typing
+      serverEmitter.on(`*`, (_, changes: Array<PendingMutation<Item>>) => {
+        begin()
+        changes.forEach((change) => {
+          write({
+            type: change.type,
+            // @ts-expect-error pending mutation type
+            value: change.changes,
+          })
+        })
+        commit()
+      })
+    },
+  },
 })
 
 // Track transaction state for visualization
@@ -24,8 +63,9 @@ interface TrackedTransaction {
   id: string
   transaction: Transaction
   state: `pending` | `executing` | `completed` | `failed`
-  mutations: Array<{ type: string; value: string }>
+  mutations: Array<PendingMutation<Item>>
   createdAt: number
+  executingAt?: number
   completedAt?: number
 }
 
@@ -40,10 +80,19 @@ export function App() {
   const [transactions, setTransactions] = useState<Array<TrackedTransaction>>(
     []
   )
-  const [mutationCounter, setMutationCounter] = useState(0)
+  const [optimisticState, setOptimisticState] = useState<Item | null>(null)
+  const [syncedState, setSyncedState] = useState<Item>(fakeServer.get(1)!)
+
+  // Initialize optimistic state from collection when ready
+  useEffect(() => {
+    itemCollection.stateWhenReady().then(() => {
+      setOptimisticState(itemCollection.get(1))
+    })
+  }, [])
 
   // Create the strategy based on current settings
-  const getStrategy = () => {
+  // Memoize to prevent recreation on every render
+  const strategy = useMemo(() => {
     if (strategyType === `debounce`) {
       return debounceStrategy({ wait, leading, trailing })
     } else if (strategyType === `queue`) {
@@ -51,56 +100,87 @@ export function App() {
     } else {
       return throttleStrategy({ wait, leading, trailing })
     }
-  }
-  const strategy = getStrategy()
+  }, [strategyType, wait, leading, trailing])
 
-  // Create the serialized mutations hook
-  const mutate = useSerializedMutations({
-    mutationFn: async ({ transaction }) => {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500))
+  // Memoize mutationFn to prevent recreation on every render
+  const mutationFn = useCallback(
+    async ({ transaction }: { transaction: Transaction }) => {
+      console.log(`mutationFn called with transaction:`, transaction)
 
       // Update transaction state to executing when commit starts
+      const executingAt = Date.now()
       setTransactions((prev) =>
         prev.map((t) => {
           if (t.id === transaction.id) {
-            return { ...t, state: `executing` as const }
+            return { ...t, state: `executing` as const, executingAt }
           }
           return t
         })
       )
+
+      // Simulate network delay to fake server (random 100-600ms)
+      const delay = Math.random() * 500 + 100
+      await new Promise((resolve) => setTimeout(resolve, delay))
+
+      // Write mutations to fake server
+      transaction.mutations.forEach((mutation) => {
+        console.log(`Processing mutation:`, mutation)
+        if (mutation.type === `insert`) {
+          const item = mutation.changes as Item
+          fakeServer.set(item.id, item)
+        } else if (mutation.type === `update`) {
+          const item = mutation.changes as Item
+          fakeServer.set(item.id, item)
+        } else {
+          // delete
+          fakeServer.delete(mutation.key as number)
+        }
+      })
+
+      // Update synced state
+      setSyncedState(fakeServer.get(1)!)
+
+      console.log(`Emitting sync event`)
+      // Sync back from server
+      serverEmitter.emit(`sync`, transaction.mutations)
     },
+    []
+  )
+
+  // Create the serialized mutations hook
+  const mutate = useSerializedMutations({
+    mutationFn,
     strategy,
   })
 
   // Trigger a mutation
   const triggerMutation = () => {
-    const mutationId = ++mutationCounter
-    setMutationCounter(mutationId)
-
     const tx = mutate(() => {
-      itemCollection.insert({
-        id: mutationId,
-        value: `Mutation ${mutationId}`,
-        timestamp: Date.now(),
+      itemCollection.update(1, (draft) => {
+        draft.value += 1
+        draft.timestamp = Date.now()
       })
     })
+
+    // Update optimistic state
+    setOptimisticState(itemCollection.get(1))
 
     // Track this transaction
     const tracked: TrackedTransaction = {
       id: tx.id,
       transaction: tx,
       state: `pending`,
-      mutations: [
-        {
-          type: `insert`,
-          value: `Mutation ${mutationId}`,
-        },
-      ],
+      mutations: tx.mutations,
       createdAt: Date.now(),
     }
 
-    setTransactions((prev) => [...prev, tracked])
+    setTransactions((prev) => {
+      // Only add if this transaction ID isn't already tracked
+      if (prev.some((t) => t.id === tx.id)) {
+        return prev
+      }
+      return [...prev, tracked]
+    })
 
     // Listen for completion
     tx.isPersisted.promise
@@ -117,8 +197,11 @@ export function App() {
             return t
           })
         )
+        // Update optimistic state after completion
+        setOptimisticState(itemCollection.get(1))
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error(`Transaction failed:`, error)
         setTransactions((prev) =>
           prev.map((t) => {
             if (t.id === tx.id) {
@@ -127,12 +210,21 @@ export function App() {
             return t
           })
         )
+        // Update optimistic state after failure
+        setOptimisticState(itemCollection.get(1))
       })
   }
 
   const clearHistory = () => {
     setTransactions([])
-    setMutationCounter(0)
+    // Reset the item value to 0
+    itemCollection.update(1, (draft) => {
+      draft.value = 0
+      draft.timestamp = Date.now()
+    })
+    fakeServer.set(1, { id: 1, value: 0, timestamp: Date.now() })
+    setOptimisticState(itemCollection.get(1))
+    setSyncedState(fakeServer.get(1)!)
   }
 
   const pending = transactions.filter((t) => t.state === `pending`)
@@ -146,6 +238,23 @@ export function App() {
         Test different strategies and see how mutations are queued, executed,
         and persisted
       </p>
+
+      <div className="stats">
+        <div className="stat-card">
+          <div className="stat-value">{optimisticState?.value ?? 0}</div>
+          <div className="stat-label">Optimistic Value</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{syncedState.value}</div>
+          <div className="stat-label">Synced Value</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">
+            {(optimisticState?.value ?? 0) - syncedState.value}
+          </div>
+          <div className="stat-label">Delta</div>
+        </div>
+      </div>
 
       <div className="stats">
         <div className="stat-card">
@@ -284,21 +393,60 @@ export function App() {
                     </span>
                   </div>
                   <div className="transaction-details">
-                    Created: {new Date(tracked.createdAt).toLocaleTimeString()}
+                    <div>
+                      Created:{` `}
+                      {new Date(tracked.createdAt).toLocaleTimeString()}
+                    </div>
+                    {tracked.executingAt && (
+                      <div>
+                        Started Executing:{` `}
+                        {new Date(tracked.executingAt).toLocaleTimeString()}
+                        {` `}(pending: {tracked.executingAt - tracked.createdAt}
+                        ms)
+                      </div>
+                    )}
                     {tracked.completedAt && (
-                      <>
-                        {` `}• Duration:{` `}
+                      <div>
+                        Completed:{` `}
+                        {new Date(tracked.completedAt).toLocaleTimeString()}
+                        {tracked.executingAt && (
+                          <>
+                            {` `}(persisting:{` `}
+                            {tracked.completedAt - tracked.executingAt}ms)
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {tracked.completedAt && (
+                      <div style={{ fontWeight: `bold`, marginTop: `4px` }}>
+                        Total Duration:{` `}
                         {tracked.completedAt - tracked.createdAt}ms
-                      </>
+                      </div>
                     )}
                   </div>
                   <div className="transaction-mutations">
-                    {tracked.mutations.map((mut, idx) => (
-                      <div key={idx} className="mutation">
-                        <span className="mutation-type">{mut.type}</span>:{` `}
-                        {mut.value}
-                      </div>
-                    ))}
+                    <div style={{ fontWeight: `bold`, marginBottom: `4px` }}>
+                      Mutations ({tracked.mutations.length}):
+                    </div>
+                    {tracked.mutations.map((mut, idx) => {
+                      if (mut.type === `update`) {
+                        const item = mut.modified
+                        return (
+                          <div key={idx} className="mutation">
+                            <span className="mutation-type">{mut.type}</span>
+                            <>
+                              : value {item.value - 1} →{` `}
+                              {item.value}
+                            </>
+                          </div>
+                        )
+                      }
+                      return (
+                        <div key={idx} className="mutation">
+                          <span className="mutation-type">{mut.type}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))}
