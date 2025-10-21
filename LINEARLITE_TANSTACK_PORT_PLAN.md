@@ -1508,7 +1508,7 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
 
 **Implementation approach:**
 - Create a PostgreSQL GIN index on `tsvector` for issues
-- Add tRPC endpoint for search
+- Add server function for search
 - Create search route with live query
 
 ### 8.2 Optimistic Updates Indicator
