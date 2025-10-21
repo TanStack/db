@@ -2,7 +2,13 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { QueryClient } from '@tanstack/query-core'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
-import { issuesAPI, commentsAPI } from '@/lib/api-client'
+import {
+  getAllIssues,
+  createIssue,
+  updateIssue,
+  deleteIssue,
+} from '@/server/functions/issues'
+import { createComment, deleteComment } from '@/server/functions/comments'
 
 export const queryClient = new QueryClient()
 
@@ -14,8 +20,8 @@ export const issuesQueryCollection = createCollection(
     queryClient,
 
     queryFn: async () => {
-      const issues = await issuesAPI.getAll()
-      return issues.map((issue: any) => ({
+      const issues = await getAllIssues()
+      return issues.map((issue) => ({
         ...issue,
         created_at: new Date(issue.created_at),
         modified: new Date(issue.modified),
@@ -27,21 +33,25 @@ export const issuesQueryCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newIssue = transaction.mutations[0].modified
-      await issuesAPI.create({
-        title: newIssue.title,
-        description: newIssue.description,
-        priority: newIssue.priority,
-        status: newIssue.status,
-        kanbanorder: newIssue.kanbanorder,
+      await createIssue({
+        data: {
+          title: newIssue.title,
+          description: newIssue.description,
+          priority: newIssue.priority,
+          status: newIssue.status,
+          kanbanorder: newIssue.kanbanorder,
+        },
       })
     },
 
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          issuesAPI.update({
-            id: mutation.original.id,
-            ...mutation.changes,
+          updateIssue({
+            data: {
+              id: mutation.original.id,
+              ...mutation.changes,
+            },
           })
         )
       )
@@ -50,7 +60,7 @@ export const issuesQueryCollection = createCollection(
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          issuesAPI.delete(mutation.original.id)
+          deleteIssue({ data: { id: mutation.original.id } })
         )
       )
     },
@@ -75,16 +85,18 @@ export const commentsQueryCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newComment = transaction.mutations[0].modified
-      await commentsAPI.create({
-        body: newComment.body,
-        issue_id: newComment.issue_id,
+      await createComment({
+        data: {
+          body: newComment.body,
+          issue_id: newComment.issue_id,
+        },
       })
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          commentsAPI.delete(mutation.original.id)
+          deleteComment({ data: { id: mutation.original.id } })
         )
       )
     },
