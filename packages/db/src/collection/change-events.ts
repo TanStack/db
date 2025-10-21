@@ -3,7 +3,10 @@ import {
   toExpression,
 } from "../query/builder/ref-proxy"
 import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
-import { optimizeExpressionWithIndexes, findIndexForField } from "../utils/index-optimization.js"
+import {
+  findIndexForField,
+  optimizeExpressionWithIndexes,
+} from "../utils/index-optimization.js"
 import { ensureIndexForField } from "../indexes/auto-index.js"
 import { makeComparator } from "../utils/comparison.js"
 import type {
@@ -13,7 +16,7 @@ import type {
 } from "../types"
 import type { Collection, CollectionImpl } from "./index.js"
 import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { BasicExpression, OrderBy, PropRef } from "../query/ir.js"
+import type { BasicExpression, OrderBy } from "../query/ir.js"
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -40,7 +43,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
   orderBy: OrderBy,
   limit?: number,
   whereFilter?: (item: T) => boolean,
-  optimizedOnly?: boolean,
+  optimizedOnly?: boolean
 ): Array<TKey> | undefined {
   // For single-column orderBy on a ref expression, try index optimization
   if (orderBy.length === 1) {
@@ -48,7 +51,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
     const orderByExpression = clause.expression
 
     if (orderByExpression.type === `ref`) {
-      const propRef = orderByExpression as PropRef
+      const propRef = orderByExpression
       const fieldPath = propRef.path
 
       // Ensure index exists for this field
@@ -79,11 +82,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.take(
-          limit ?? index.keyCount,
-          undefined,
-          filterFn
-        ) as Array<TKey>
+        return index.take(limit ?? index.keyCount, undefined, filterFn)
       }
     }
   }
@@ -134,7 +133,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
  */
 function extractValueFromItem(item: any, expression: BasicExpression): any {
   if (expression.type === `ref`) {
-    const propRef = expression as PropRef
+    const propRef = expression
     let value = item
     for (const pathPart of propRef.path) {
       value = value?.[pathPart]
@@ -223,7 +222,7 @@ export function currentStateAsChanges<
       options.orderBy,
       options.limit,
       whereFilter,
-      options.optimizedOnly,
+      options.optimizedOnly
     )
 
     if (orderedKeys === undefined) {

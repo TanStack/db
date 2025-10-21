@@ -374,7 +374,7 @@ describe(`currentStateAsChanges`, () => {
     })
 
     describe(`edge cases`, () => {
-      it(`should handle empty collection`, async () => {
+      it(`should handle empty collection`, () => {
         const collection = createCollection<TestUser>({
           id: `test-collection-empty-${autoIndex}`,
           getKey: (user) => user.id,
