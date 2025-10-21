@@ -1060,30 +1060,6 @@ const userEmail = createLiveQueryCollection((q) =>
 // Result type: { id: number, email: string } | undefined
 ```
 
-### Live Updates
-
-Like other live queries, results from `findOne` update automatically when the underlying data changes:
-
-```ts
-const currentUser = createLiveQueryCollection((q) =>
-  q
-    .from({ users: usersCollection })
-    .where(({ users }) => eq(users.id, currentUserId))
-    .findOne()
-)
-
-// Subscribe to changes
-currentUser.subscribeChanges(() => {
-  const user = currentUser.toArray()[0]
-  console.log('User updated:', user)
-})
-
-// When the user record changes, subscribers are notified
-usersCollection.update(currentUserId, (user) => {
-  user.name = 'Updated Name'
-})
-```
-
 ### Return Type Behavior
 
 The return type changes based on whether `findOne` is used:
@@ -1112,27 +1088,6 @@ const user = createLiveQueryCollection((q) =>
 **Avoid when:**
 - You might have multiple matching records (use regular queries instead)
 - You need to iterate over results
-
-**Handling missing results:**
-
-```tsx
-const { data: user } = useLiveQuery((q) =>
-  q
-    .from({ users: usersCollection })
-    .where(({ users }) => eq(users.id, userId))
-    .findOne()
-)
-
-// Always check for undefined
-if (user) {
-  console.log(user.name) // Safe to access
-} else {
-  console.log('User not found')
-}
-
-// Or use optional chaining
-console.log(user?.name)
-```
 
 ## Distinct
 
