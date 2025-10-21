@@ -337,6 +337,102 @@ function UserList() {
 }
 ```
 
+### Conditional Queries
+
+In React, you can conditionally disable a query by returning `undefined` or `null` from the `useLiveQuery` callback. When disabled, the hook returns a special state indicating the query is not active.
+
+```tsx
+import { useLiveQuery } from '@tanstack/react-db'
+
+function TodoList({ userId }: { userId?: string }) {
+  const { data, isEnabled, status } = useLiveQuery((q) => {
+    // Disable the query when userId is not available
+    if (!userId) return undefined
+
+    return q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.userId, userId))
+  }, [userId])
+
+  if (!isEnabled) {
+    return <div>Please select a user</div>
+  }
+
+  return (
+    <ul>
+      {data?.map(todo => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+When the query is disabled (callback returns `undefined` or `null`):
+- `status` is `'disabled'`
+- `data`, `state`, and `collection` are `undefined`
+- `isEnabled` is `false`
+- `isLoading`, `isReady`, `isIdle`, and `isError` are all `false`
+
+This pattern is useful for "wait until inputs exist" flows without needing to conditionally render the hook itself or manage an external enabled flag.
+
+### Alternative Callback Return Types
+
+The `useLiveQuery` callback can return different types depending on your use case:
+
+#### Returning a Query Builder (Standard)
+
+The most common pattern is to return a query builder:
+
+```tsx
+const { data } = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.completed, false))
+)
+```
+
+#### Returning a Pre-created Collection
+
+You can return an existing collection directly:
+
+```tsx
+const activeUsersCollection = createLiveQueryCollection((q) =>
+  q.from({ users: usersCollection })
+   .where(({ users }) => eq(users.active, true))
+)
+
+function UserList({ usePrebuilt }: { usePrebuilt: boolean }) {
+  const { data } = useLiveQuery((q) => {
+    // Toggle between pre-created collection and ad-hoc query
+    if (usePrebuilt) return activeUsersCollection
+
+    return q.from({ users: usersCollection })
+  }, [usePrebuilt])
+
+  return <ul>{data?.map(user => <li key={user.id}>{user.name}</li>)}</ul>
+}
+```
+
+#### Returning a LiveQueryCollectionConfig
+
+You can return a configuration object to specify additional options like a custom ID:
+
+```tsx
+const { data } = useLiveQuery((q) => {
+  return {
+    query: q.from({ items: itemsCollection })
+             .select(({ items }) => ({ id: items.id })),
+    id: 'items-view', // Custom ID for debugging
+    gcTime: 10000 // Custom garbage collection time
+  }
+})
+```
+
+This is particularly useful when you need to:
+- Attach a stable ID for debugging or logging
+- Configure collection-specific options like `gcTime` or `getKey`
+- Conditionally switch between different collection configurations
+
 ## From Clause
 
 The foundation of every query is the `from` method, which specifies the source collection or subquery. You can alias the source using object syntax.
@@ -1395,6 +1491,41 @@ String pattern matching:
 ```ts
 like(user.name, 'John%')    // Case-sensitive
 ilike(user.email, '%@gmail.com')  // Case-insensitive
+```
+
+#### `isUndefined(value)`, `isNull(value)`
+Check for missing vs null values:
+```ts
+// Check if a property is missing/undefined
+isUndefined(user.profile)
+
+// Check if a value is explicitly null
+isNull(user.profile)
+```
+
+These functions are particularly important when working with joins and optional properties, as they distinguish between:
+- `undefined`: The property is absent or not present
+- `null`: The property exists but is explicitly set to null
+
+**Example with joins:**
+```ts
+// Find users without a matching profile (left join resulted in undefined)
+const usersWithoutProfiles = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .leftJoin(
+      { profile: profilesCollection },
+      ({ user, profile }) => eq(user.id, profile.userId)
+    )
+    .where(({ profile }) => isUndefined(profile))
+)
+
+// Find users with explicitly null bio field
+const usersWithNullBio = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => isNull(user.bio))
+)
 ```
 
 ### Logical Operators
