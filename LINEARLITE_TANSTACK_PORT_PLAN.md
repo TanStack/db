@@ -27,7 +27,7 @@ This document outlines a comprehensive plan to port the [LinearLite example](htt
 - **Virtualization:** @tanstack/react-virtual (modern alternative to react-window)
 
 #### **Backend**
-- **Server Framework:** TanStack Start server functions + tRPC
+- **Server Framework:** TanStack Start server functions
 - **Database:** PostgreSQL
 - **ORM:** Drizzle ORM
 - **Schema Validation:** Zod
@@ -57,8 +57,8 @@ This document outlines a comprehensive plan to port the [LinearLite example](htt
 │  └───────────┼─────────────────────┼────────────────────┘  │
 │              │                     │                        │
 │  ┌───────────▼─────────┐  ┌────────▼──────────┐           │
-│  │   tRPC API Routes   │  │ Electric Proxy    │           │
-│  │   (Server Fns)      │  │   Route           │           │
+│  │  Server Functions   │  │ Electric Proxy    │           │
+│  │  (createServerFn)   │  │   Route           │           │
 │  └───────────┬─────────┘  └────────┬──────────┘           │
 │              │                     │                        │
 └──────────────┼─────────────────────┼────────────────────────┘
@@ -103,7 +103,6 @@ pnpm add @tanstack/query-db-collection
 pnpm add @tanstack/electric-db-collection
 pnpm add @tanstack/react-router
 pnpm add @tanstack/react-query
-pnpm add @trpc/server @trpc/client @trpc/react-query
 
 # Database & ORM
 pnpm add drizzle-orm postgres
@@ -421,79 +420,64 @@ export const authClient = createAuthClient({
 export const { useSession, signIn, signOut, signUp } = authClient
 ```
 
-### 3.2 Auth Middleware
-
-**src/middleware/auth.ts:**
-```typescript
-import { auth } from '@/lib/auth'
-import type { NextFunction, Request, Response } from 'express'
-
-export async function requireAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  const session = await auth.api.getSession({ headers: req.headers })
-
-  if (!session) {
-    return res.status(401).json({ error: 'Unauthorized' })
-  }
-
-  req.session = session
-  next()
-}
-```
-
 ---
 
-## Phase 4: tRPC API Setup
+## Phase 4: Server Functions Setup
 
-### 4.1 tRPC Router Configuration
+### 4.1 Server Function Utilities
 
-**src/server/trpc/index.ts:**
+**src/server/utils.ts:**
 ```typescript
-import { initTRPC } from '@trpc/server'
 import { db } from '@/db/connection'
-import type { Session } from '@/lib/auth'
+import { auth } from '@/lib/auth'
 
-interface Context {
-  db: typeof db
-  session: Session | null
+export async function getServerContext(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers })
+
+  return {
+    db,
+    session,
+    user: session?.user,
+  }
 }
 
-const t = initTRPC.context<Context>().create()
+export function requireAuth<T>(
+  handler: (context: { db: typeof db; user: NonNullable<typeof session.user>; session: NonNullable<typeof session> }) => Promise<T>
+) {
+  return async (request: Request) => {
+    const context = await getServerContext(request)
 
-export const router = t.router
-export const publicProcedure = t.procedure
-export const protectedProcedure = t.procedure.use((opts) => {
-  if (!opts.ctx.session) {
-    throw new Error('Unauthorized')
+    if (!context.session || !context.user) {
+      throw new Error('Unauthorized')
+    }
+
+    return handler({
+      db: context.db,
+      user: context.user,
+      session: context.session,
+    })
   }
-  return opts.next({
-    ctx: {
-      ...opts.ctx,
-      session: opts.ctx.session,
-    },
-  })
-})
+}
 ```
 
-### 4.2 Issues Router
+### 4.2 Issues Server Functions
 
-**src/server/trpc/routers/issues.ts:**
+**src/server/functions/issues.ts:**
 ```typescript
+import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-import { router, protectedProcedure } from '../index'
 import { issuesTable } from '@/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
+import { requireAuth } from '../utils'
 
-export const issuesRouter = router({
-  getAll: protectedProcedure.query(async ({ ctx }) => {
+// Get all issues for the current user
+export const getAllIssues = createServerFn({ method: 'GET' })
+  .handler(requireAuth(async ({ db, user }) => {
     // Return only issues created by the user or pre-seeded demo data
-    const issues = await ctx.db.query.issuesTable.findMany({
+    const issues = await db.query.issuesTable.findMany({
       where: (issues, { eq, or }) =>
         or(
-          eq(issues.user_id, ctx.session.user.id),
+          eq(issues.user_id, user.id),
           // Allow access to demo user's issues for all users
           eq(issues.user_id, 'demo-user-id-here')
         ),
@@ -501,238 +485,183 @@ export const issuesRouter = router({
     })
 
     return issues
-  }),
+  }))
 
-  create: protectedProcedure
-    .input(
-      z.object({
-        title: z.string().min(1),
-        description: z.string().default(''),
-        priority: z.enum(['none', 'urgent', 'high', 'medium', 'low']),
-        status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled']),
-        kanbanorder: z.string(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [issue] = await ctx.db
-        .insert(issuesTable)
-        .values({
-          ...input,
-          user_id: ctx.session.user.id,
-        })
-        .returning()
-
-      return issue
-    }),
-
-  update: protectedProcedure
-    .input(
-      z.object({
-        id: z.string().uuid(),
-        title: z.string().optional(),
-        description: z.string().optional(),
-        priority: z.enum(['none', 'urgent', 'high', 'medium', 'low']).optional(),
-        status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled']).optional(),
-        kanbanorder: z.string().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const { id, ...updates } = input
-
-      // Verify ownership
-      const existing = await ctx.db.query.issuesTable.findFirst({
-        where: eq(issuesTable.id, id),
-      })
-
-      if (!existing || existing.user_id !== ctx.session.user.id) {
-        throw new Error('Unauthorized')
-      }
-
-      const [updated] = await ctx.db
-        .update(issuesTable)
-        .set({
-          ...updates,
-          modified: new Date(),
-        })
-        .where(eq(issuesTable.id, id))
-        .returning()
-
-      return updated
-    }),
-
-  delete: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      // Verify ownership
-      const existing = await ctx.db.query.issuesTable.findFirst({
-        where: eq(issuesTable.id, input.id),
-      })
-
-      if (!existing || existing.user_id !== ctx.session.user.id) {
-        throw new Error('Unauthorized')
-      }
-
-      await ctx.db.delete(issuesTable).where(eq(issuesTable.id, input.id))
-
-      return { success: true }
-    }),
+// Create issue input schema
+const createIssueSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().default(''),
+  priority: z.enum(['none', 'urgent', 'high', 'medium', 'low']),
+  status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled']),
+  kanbanorder: z.string(),
 })
+
+export const createIssue = createServerFn({ method: 'POST' })
+  .validator(createIssueSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    const [issue] = await db
+      .insert(issuesTable)
+      .values({
+        ...input,
+        user_id: user.id,
+      })
+      .returning()
+
+    return issue
+  }))
+
+// Update issue input schema
+const updateIssueSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  priority: z.enum(['none', 'urgent', 'high', 'medium', 'low']).optional(),
+  status: z.enum(['backlog', 'todo', 'in_progress', 'done', 'canceled']).optional(),
+  kanbanorder: z.string().optional(),
+})
+
+export const updateIssue = createServerFn({ method: 'POST' })
+  .validator(updateIssueSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    const { id, ...updates } = input
+
+    // Verify ownership
+    const existing = await db.query.issuesTable.findFirst({
+      where: eq(issuesTable.id, id),
+    })
+
+    if (!existing || existing.user_id !== user.id) {
+      throw new Error('Unauthorized')
+    }
+
+    const [updated] = await db
+      .update(issuesTable)
+      .set({
+        ...updates,
+        modified: new Date(),
+      })
+      .where(eq(issuesTable.id, id))
+      .returning()
+
+    return updated
+  }))
+
+// Delete issue input schema
+const deleteIssueSchema = z.object({ id: z.string().uuid() })
+
+export const deleteIssue = createServerFn({ method: 'POST' })
+  .validator(deleteIssueSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    // Verify ownership
+    const existing = await db.query.issuesTable.findFirst({
+      where: eq(issuesTable.id, input.id),
+    })
+
+    if (!existing || existing.user_id !== user.id) {
+      throw new Error('Unauthorized')
+    }
+
+    await db.delete(issuesTable).where(eq(issuesTable.id, input.id))
+
+    return { success: true }
+  }))
 ```
 
-### 4.3 Comments Router
+### 4.3 Comments Server Functions
 
-**src/server/trpc/routers/comments.ts:**
+**src/server/functions/comments.ts:**
 ```typescript
+import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-import { router, protectedProcedure } from '../index'
 import { commentsTable, issuesTable } from '@/db/schema'
 import { eq } from 'drizzle-orm'
+import { requireAuth } from '../utils'
 
-export const commentsRouter = router({
-  getByIssueId: protectedProcedure
-    .input(z.object({ issueId: z.string().uuid() }))
-    .query(async ({ ctx, input }) => {
-      // Verify user has access to this issue
-      const issue = await ctx.db.query.issuesTable.findFirst({
-        where: eq(issuesTable.id, input.issueId),
-      })
+// Get comments by issue ID input schema
+const getCommentsByIssueIdSchema = z.object({ issueId: z.string().uuid() })
 
-      if (!issue) {
-        throw new Error('Issue not found')
-      }
+export const getCommentsByIssueId = createServerFn({ method: 'GET' })
+  .validator(getCommentsByIssueIdSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    // Verify user has access to this issue
+    const issue = await db.query.issuesTable.findFirst({
+      where: eq(issuesTable.id, input.issueId),
+    })
 
-      // User can see comments if they can see the issue
-      if (issue.user_id !== ctx.session.user.id) {
-        // Check if it's a demo issue
-        const isDemoIssue = issue.user_id === 'demo-user-id'
-        if (!isDemoIssue) {
-          throw new Error('Unauthorized')
-        }
-      }
+    if (!issue) {
+      throw new Error('Issue not found')
+    }
 
-      return ctx.db.query.commentsTable.findMany({
-        where: eq(commentsTable.issue_id, input.issueId),
-        orderBy: (comments, { asc }) => [asc(comments.created_at)],
-      })
-    }),
-
-  create: protectedProcedure
-    .input(
-      z.object({
-        body: z.string().min(1),
-        issue_id: z.string().uuid(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      // Verify user has access to this issue
-      const issue = await ctx.db.query.issuesTable.findFirst({
-        where: eq(issuesTable.id, input.issue_id),
-      })
-
-      if (!issue || issue.user_id !== ctx.session.user.id) {
+    // User can see comments if they can see the issue
+    if (issue.user_id !== user.id) {
+      // Check if it's a demo issue
+      const isDemoIssue = issue.user_id === 'demo-user-id'
+      if (!isDemoIssue) {
         throw new Error('Unauthorized')
       }
+    }
 
-      const [comment] = await ctx.db
-        .insert(commentsTable)
-        .values({
-          ...input,
-          user_id: ctx.session.user.id,
-        })
-        .returning()
+    return db.query.commentsTable.findMany({
+      where: eq(commentsTable.issue_id, input.issueId),
+      orderBy: (comments, { asc }) => [asc(comments.created_at)],
+    })
+  }))
 
-      return comment
-    }),
+// Create comment input schema
+const createCommentSchema = z.object({
+  body: z.string().min(1),
+  issue_id: z.string().uuid(),
+})
 
-  delete: protectedProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      // Verify ownership
-      const existing = await ctx.db.query.commentsTable.findFirst({
-        where: eq(commentsTable.id, input.id),
+export const createComment = createServerFn({ method: 'POST' })
+  .validator(createCommentSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    // Verify user has access to this issue
+    const issue = await db.query.issuesTable.findFirst({
+      where: eq(issuesTable.id, input.issue_id),
+    })
+
+    if (!issue || issue.user_id !== user.id) {
+      throw new Error('Unauthorized')
+    }
+
+    const [comment] = await db
+      .insert(commentsTable)
+      .values({
+        ...input,
+        user_id: user.id,
       })
+      .returning()
 
-      if (!existing || existing.user_id !== ctx.session.user.id) {
-        throw new Error('Unauthorized')
-      }
+    return comment
+  }))
 
-      await ctx.db.delete(commentsTable).where(eq(commentsTable.id, input.id))
+// Delete comment input schema
+const deleteCommentSchema = z.object({ id: z.string().uuid() })
 
-      return { success: true }
-    }),
-})
-```
+export const deleteComment = createServerFn({ method: 'POST' })
+  .validator(deleteCommentSchema)
+  .handler(requireAuth(async ({ db, user }, input) => {
+    // Verify ownership
+    const existing = await db.query.commentsTable.findFirst({
+      where: eq(commentsTable.id, input.id),
+    })
 
-### 4.4 App Router
+    if (!existing || existing.user_id !== user.id) {
+      throw new Error('Unauthorized')
+    }
 
-**src/server/trpc/router.ts:**
-```typescript
-import { router } from './index'
-import { issuesRouter } from './routers/issues'
-import { commentsRouter } from './routers/comments'
+    await db.delete(commentsTable).where(eq(commentsTable.id, input.id))
 
-export const appRouter = router({
-  issues: issuesRouter,
-  comments: commentsRouter,
-})
-
-export type AppRouter = typeof appRouter
-```
-
-### 4.5 tRPC API Route Handler
-
-**src/routes/api/trpc/$.ts:**
-```typescript
-import { createFileRoute } from '@tanstack/react-router'
-import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
-import { appRouter } from '@/server/trpc/router'
-import { db } from '@/db/connection'
-import { auth } from '@/lib/auth'
-
-const serve = async ({ request }: { request: Request }) => {
-  return fetchRequestHandler({
-    endpoint: '/api/trpc',
-    req: request,
-    router: appRouter,
-    createContext: async () => ({
-      db,
-      session: await auth.api.getSession({ headers: request.headers }),
-    }),
-  })
-}
-
-export const ServerRoute = createFileRoute('/api/trpc/$').methods({
-  GET: serve,
-  POST: serve,
-})
+    return { success: true }
+  }))
 ```
 
 ---
 
 ## Phase 5: TanStack DB Collections Setup
 
-### 5.1 Create tRPC Client
-
-**src/lib/trpc.ts:**
-```typescript
-import { createTRPCClient, httpBatchLink } from '@trpc/client'
-import type { AppRouter } from '@/server/trpc/router'
-
-export const trpc = createTRPCClient<AppRouter>({
-  links: [
-    httpBatchLink({
-      url: '/api/trpc',
-      headers: () => {
-        return {
-          'content-type': 'application/json',
-        }
-      },
-    }),
-  ],
-})
-```
-
-### 5.2 Query Collection Configuration
+### 5.1 Query Collection Configuration
 
 **src/lib/collections/query-mode.ts:**
 ```typescript
@@ -740,7 +669,8 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { QueryClient } from '@tanstack/query-core'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
-import { trpc } from '@/lib/trpc'
+import { getAllIssues, createIssue, updateIssue, deleteIssue } from '@/server/functions/issues'
+import { createComment, deleteComment } from '@/server/functions/comments'
 
 export const queryClient = new QueryClient()
 
@@ -752,7 +682,7 @@ export const issuesQueryCollection = createCollection(
     queryClient,
 
     queryFn: async () => {
-      const issues = await trpc.issues.getAll.query()
+      const issues = await getAllIssues()
       return issues.map((issue) => ({
         ...issue,
         created_at: new Date(issue.created_at),
@@ -765,21 +695,25 @@ export const issuesQueryCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newIssue = transaction.mutations[0].modified
-      await trpc.issues.create.mutate({
-        title: newIssue.title,
-        description: newIssue.description,
-        priority: newIssue.priority,
-        status: newIssue.status,
-        kanbanorder: newIssue.kanbanorder,
+      await createIssue({
+        data: {
+          title: newIssue.title,
+          description: newIssue.description,
+          priority: newIssue.priority,
+          status: newIssue.status,
+          kanbanorder: newIssue.kanbanorder,
+        },
       })
     },
 
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          trpc.issues.update.mutate({
-            id: mutation.original.id,
-            ...mutation.changes,
+          updateIssue({
+            data: {
+              id: mutation.original.id,
+              ...mutation.changes,
+            },
           })
         )
       )
@@ -788,7 +722,7 @@ export const issuesQueryCollection = createCollection(
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          trpc.issues.delete.mutate({ id: mutation.original.id })
+          deleteIssue({ data: { id: mutation.original.id } })
         )
       )
     },
@@ -813,16 +747,18 @@ export const commentsQueryCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newComment = transaction.mutations[0].modified
-      await trpc.comments.create.mutate({
-        body: newComment.body,
-        issue_id: newComment.issue_id,
+      await createComment({
+        data: {
+          body: newComment.body,
+          issue_id: newComment.issue_id,
+        },
       })
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((mutation) =>
-          trpc.comments.delete.mutate({ id: mutation.original.id })
+          deleteComment({ data: { id: mutation.original.id } })
         )
       )
     },
@@ -830,14 +766,15 @@ export const commentsQueryCollection = createCollection(
 )
 ```
 
-### 5.3 Electric Collection Configuration
+### 5.2 Electric Collection Configuration
 
 **src/lib/collections/electric-mode.ts:**
 ```typescript
 import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
-import { trpc } from '@/lib/trpc'
+import { createIssue, updateIssue, deleteIssue } from '@/server/functions/issues'
+import { createComment, deleteComment } from '@/server/functions/comments'
 
 const ELECTRIC_URL = import.meta.env.VITE_ELECTRIC_URL || 'http://localhost:3000'
 
@@ -862,41 +799,40 @@ export const issuesElectricCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newIssue = transaction.mutations[0].modified
-      const response = await trpc.issues.create.mutate({
-        title: newIssue.title,
-        description: newIssue.description,
-        priority: newIssue.priority,
-        status: newIssue.status,
-        kanbanorder: newIssue.kanbanorder,
+      await createIssue({
+        data: {
+          title: newIssue.title,
+          description: newIssue.description,
+          priority: newIssue.priority,
+          status: newIssue.status,
+          kanbanorder: newIssue.kanbanorder,
+        },
       })
 
-      // Return transaction ID for Electric to wait for sync
-      return { txid: response.txid }
+      // Note: For Electric sync with txid, you'd need to return the transaction ID
+      // from your server function and pass it here
+      // return { txid: response.txid }
     },
 
     onUpdate: async ({ transaction }) => {
-      const txids = await Promise.all(
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          const response = await trpc.issues.update.mutate({
-            id: mutation.original.id,
-            ...mutation.changes,
+          await updateIssue({
+            data: {
+              id: mutation.original.id,
+              ...mutation.changes,
+            },
           })
-          return response.txid
         })
       )
-      return { txid: txids }
     },
 
     onDelete: async ({ transaction }) => {
-      const txids = await Promise.all(
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          const response = await trpc.issues.delete.mutate({
-            id: mutation.original.id,
-          })
-          return response.txid
+          await deleteIssue({ data: { id: mutation.original.id } })
         })
       )
-      return { txid: txids }
     },
   })
 )
@@ -920,29 +856,26 @@ export const commentsElectricCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newComment = transaction.mutations[0].modified
-      const response = await trpc.comments.create.mutate({
-        body: newComment.body,
-        issue_id: newComment.issue_id,
+      await createComment({
+        data: {
+          body: newComment.body,
+          issue_id: newComment.issue_id,
+        },
       })
-      return { txid: response.txid }
     },
 
     onDelete: async ({ transaction }) => {
-      const txids = await Promise.all(
+      await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          const response = await trpc.comments.delete.mutate({
-            id: mutation.original.id,
-          })
-          return response.txid
+          await deleteComment({ data: { id: mutation.original.id } })
         })
       )
-      return { txid: txids }
     },
   })
 )
 ```
 
-### 5.4 Mode Switcher Context
+### 5.3 Mode Switcher Context
 
 **src/lib/mode-context.tsx:**
 ```typescript
@@ -1654,8 +1587,8 @@ export const ServerRoute = createFileRoute('/api/electric/$').methods({
 
 ### 9.2 Integration Tests
 
-- Test tRPC endpoints with mock database
-- Test auth middleware
+- Test server functions with mock database
+- Test auth requirements
 - Test Electric proxy filtering
 
 ### 9.3 E2E Tests (Playwright)
@@ -1723,7 +1656,7 @@ export default defineConfig({
 - [ ] Basic routing structure
 
 ### Week 2: Core Features
-- [ ] tRPC API implementation
+- [ ] Server functions implementation
 - [ ] Collection setup (Query + Electric modes)
 - [ ] Issue list view
 - [ ] Basic CRUD operations
@@ -1757,7 +1690,7 @@ export default defineConfig({
 ### What's Different
 🔄 **Framework**: TanStack Start instead of vanilla React + React Router
 🔄 **Data Layer**: TanStack DB instead of PGlite
-🔄 **Backend**: tRPC + Drizzle instead of Hono write server
+🔄 **Backend**: TanStack Start server functions + Drizzle instead of Hono write server
 🔄 **Sync**: Dual-mode (Query polling + Electric real-time)
 🔄 **Auth**: Better Auth instead of hardcoded username
 🔄 **Virtualization**: @tanstack/react-virtual instead of react-window
@@ -1767,7 +1700,7 @@ export default defineConfig({
 ✨ Mode switcher (Query vs Electric)
 ✨ Multi-user support with authentication
 ✨ User isolation (see only your data + demo data)
-✨ Full-stack type safety with tRPC
+✨ Full-stack type safety with server functions
 ✨ Modern TanStack ecosystem integration
 
 ---
@@ -1791,7 +1724,7 @@ export default defineConfig({
 - [TanStack DB Docs](https://tanstack.com/db)
 - [ElectricSQL Docs](https://electric-sql.com)
 - [Drizzle ORM Docs](https://orm.drizzle.team)
-- [tRPC Docs](https://trpc.io)
+- [Better Auth Docs](https://better-auth.com)
 
 ### Example Code
 - [Original LinearLite](https://github.com/electric-sql/electric/tree/main/examples/linearlite)
