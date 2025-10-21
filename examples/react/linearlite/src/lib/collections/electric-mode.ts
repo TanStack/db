@@ -1,12 +1,7 @@
 import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
-import {
-  createIssue,
-  updateIssue,
-  deleteIssue,
-} from '@/server/functions/issues'
-import { createComment, deleteComment } from '@/server/functions/comments'
+import { issuesAPI, commentsAPI } from '@/lib/api-client'
 
 const ELECTRIC_URL =
   import.meta.env.VITE_ELECTRIC_URL || 'http://localhost:3000'
@@ -32,14 +27,12 @@ export const issuesElectricCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newIssue = transaction.mutations[0].modified
-      await createIssue({
-        data: {
-          title: newIssue.title,
-          description: newIssue.description,
-          priority: newIssue.priority,
-          status: newIssue.status,
-          kanbanorder: newIssue.kanbanorder,
-        },
+      await issuesAPI.create({
+        title: newIssue.title,
+        description: newIssue.description,
+        priority: newIssue.priority,
+        status: newIssue.status,
+        kanbanorder: newIssue.kanbanorder,
       })
 
       // Note: For Electric sync with txid, you'd need to return the transaction ID
@@ -50,11 +43,9 @@ export const issuesElectricCollection = createCollection(
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          await updateIssue({
-            data: {
-              id: mutation.original.id,
-              ...mutation.changes,
-            },
+          await issuesAPI.update({
+            id: mutation.original.id,
+            ...mutation.changes,
           })
         })
       )
@@ -63,7 +54,7 @@ export const issuesElectricCollection = createCollection(
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          await deleteIssue({ data: { id: mutation.original.id } })
+          await issuesAPI.delete(mutation.original.id)
         })
       )
     },
@@ -89,18 +80,16 @@ export const commentsElectricCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       const newComment = transaction.mutations[0].modified
-      await createComment({
-        data: {
-          body: newComment.body,
-          issue_id: newComment.issue_id,
-        },
+      await commentsAPI.create({
+        body: newComment.body,
+        issue_id: newComment.issue_id,
       })
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map(async (mutation) => {
-          await deleteComment({ data: { id: mutation.original.id } })
+          await commentsAPI.delete(mutation.original.id)
         })
       )
     },
