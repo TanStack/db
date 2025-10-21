@@ -1,0 +1,53 @@
+{
+  "name": "examples/react/saas-large",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "serve": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@capsizecss/metrics": "^3.5.0",
+    "@faker-js/faker": "^10.0.0",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@radix-ui/themes": "^3.2.1",
+    "@tailwindcss/vite": "^4.0.6",
+    "@tanstack/nitro-v2-vite-plugin": "^1.132.31",
+    "@tanstack/query-core": "^5.90.3",
+    "@tanstack/query-db-collection": "https://pkg.pr.new/@tanstack/query-db-collection@681",
+    "@tanstack/react-db": "workspace:^",
+    "@tanstack/react-devtools": "^0.7.0",
+    "@tanstack/react-router": "^1.133.3",
+    "@tanstack/react-router-devtools": "^1.133.3",
+    "@tanstack/react-router-ssr-query": "^1.131.7",
+    "@tanstack/react-start": "^1.133.3",
+    "@tanstack/react-virtual": "^3.13.12",
+    "@tanstack/router-plugin": "^1.133.3",
+    "@tanstack/zod-adapter": "^1.132.47",
+    "i": "^0.3.7",
+    "lucide-react": "^0.544.0",
+    "npm": "^11.6.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.6",
+    "vite-plugin-capsize-radix": "^0.1.1",
+    "vite-tsconfig-paths": "^5.1.4",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.2.0",
+    "@types/node": "^22.18.10",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^27.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vitest": "^3.0.5",
+    "web-vitals": "^5.1.0"
+  }
+}
