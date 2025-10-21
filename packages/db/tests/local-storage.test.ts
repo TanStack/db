@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import { createTransaction } from "../src/transactions"
-import {
-  NoStorageAvailableError,
-  NoStorageEventApiError,
-  StorageKeyRequiredError,
-} from "../src/errors"
+import { StorageKeyRequiredError } from "../src/errors"
 import type { StorageEventApi } from "../src/local-storage"
 
 // Mock storage implementation for testing that properly implements Storage interface
@@ -138,37 +134,43 @@ describe(`localStorage collection`, () => {
       ).toThrow(StorageKeyRequiredError)
     })
 
-    it(`should throw error when no storage is available`, () => {
+    it(`should fall back to in-memory storage when no storage is available`, () => {
       // Mock window to be undefined globally
       const originalWindow = globalThis.window
       // @ts-ignore - Temporarily delete window to test error condition
       delete globalThis.window
 
-      expect(() =>
-        localStorageCollectionOptions({
-          storageKey: `test`,
-          storageEventApi: mockStorageEventApi,
-          getKey: (item: any) => item.id,
-        })
-      ).toThrow(NoStorageAvailableError)
+      // Should not throw - instead falls back to in-memory storage
+      const collectionOptions = localStorageCollectionOptions({
+        storageKey: `test`,
+        storageEventApi: mockStorageEventApi,
+        getKey: (item: any) => item.id,
+      })
+
+      // Verify collection was created successfully
+      expect(collectionOptions).toBeDefined()
+      expect(collectionOptions.id).toBe(`local-collection:test`)
 
       // Restore window
       globalThis.window = originalWindow
     })
 
-    it(`should throw error when no storage event API is available`, () => {
+    it(`should fall back to no-op event API when no storage event API is available`, () => {
       // Mock window to be undefined globally
       const originalWindow = globalThis.window
       // @ts-ignore - Temporarily delete window to test error condition
       delete globalThis.window
 
-      expect(() =>
-        localStorageCollectionOptions({
-          storageKey: `test`,
-          storage: mockStorage,
-          getKey: (item: any) => item.id,
-        })
-      ).toThrow(NoStorageEventApiError)
+      // Should not throw - instead falls back to no-op storage event API
+      const collectionOptions = localStorageCollectionOptions({
+        storageKey: `test`,
+        storage: mockStorage,
+        getKey: (item: any) => item.id,
+      })
+
+      // Verify collection was created successfully
+      expect(collectionOptions).toBeDefined()
+      expect(collectionOptions.id).toBe(`local-collection:test`)
 
       // Restore window
       globalThis.window = originalWindow

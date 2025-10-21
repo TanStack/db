@@ -13,6 +13,9 @@ export interface OrderByOptions<Ve> {
 
 type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
   setSizeCallback?: (getSize: () => number) => void
+  setWindowFn?: (
+    windowFn: (options: { offset?: number; limit?: number }) => void
+  ) => void
 }
 
 /**
@@ -147,6 +150,7 @@ export function orderByWithFractionalIndexBase<
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
   const setSizeCallback = options?.setSizeCallback
+  const setWindowFn = options?.setWindowFn
   const comparator =
     options?.comparator ??
     ((a, b) => {
@@ -167,6 +171,7 @@ export function orderByWithFractionalIndexBase<
           limit,
           offset,
           setSizeCallback,
+          setWindowFn,
         }
       ),
       consolidate()

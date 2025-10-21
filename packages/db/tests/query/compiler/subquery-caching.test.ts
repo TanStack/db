@@ -68,6 +68,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache1,
       queryMapping1
     )
@@ -87,6 +88,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2,
       queryMapping2
     )
@@ -107,6 +109,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2,
       new WeakMap()
     )
@@ -127,6 +130,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2,
       new WeakMap()
     )
@@ -138,6 +142,7 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
+      () => {},
       cache2,
       new WeakMap()
     )
@@ -173,7 +178,9 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
-      sharedCache
+      () => {},
+      sharedCache,
+      new WeakMap()
     )
     expect(sharedCache.has(subquery)).toBe(true)
 
@@ -186,7 +193,9 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
-      sharedCache
+      () => {},
+      sharedCache,
+      new WeakMap()
     )
     expect(result1).toBe(result2) // Should be the exact same object reference
   })
@@ -229,7 +238,9 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
-      sharedCache
+      () => {},
+      sharedCache,
+      new WeakMap()
     )
     const result2 = compileQuery(
       subquery,
@@ -239,7 +250,9 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
-      sharedCache
+      () => {},
+      sharedCache,
+      new WeakMap()
     )
 
     // Should have different results since they are different objects
@@ -300,7 +313,9 @@ describe(`Subquery Caching`, () => {
       {},
       new Set(),
       {},
-      sharedCache
+      () => {},
+      sharedCache,
+      new WeakMap()
     )
     expect(result).toBeDefined()
 

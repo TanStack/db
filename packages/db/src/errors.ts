@@ -521,22 +521,6 @@ export class StorageKeyRequiredError extends LocalStorageCollectionError {
   }
 }
 
-export class NoStorageAvailableError extends LocalStorageCollectionError {
-  constructor() {
-    super(
-      `[LocalStorageCollection] No storage available. Please provide a storage option or ensure window.localStorage is available.`
-    )
-  }
-}
-
-export class NoStorageEventApiError extends LocalStorageCollectionError {
-  constructor() {
-    super(
-      `[LocalStorageCollection] No storage event API available. Please provide a storageEventApi option or ensure window is available.`
-    )
-  }
-}
-
 export class InvalidStorageDataFormatError extends LocalStorageCollectionError {
   constructor(storageKey: string, key: string) {
     super(
@@ -626,6 +610,18 @@ export class MissingAliasInputsError extends QueryCompilationError {
     super(
       `Internal error: compiler returned aliases without inputs: ${missingAliases.join(`, `)}. ` +
         `This indicates a bug in query compilation. Please report this issue.`
+    )
+  }
+}
+
+/**
+ * Error thrown when setWindow is called on a collection without an ORDER BY clause.
+ */
+export class SetWindowRequiresOrderByError extends QueryCompilationError {
+  constructor() {
+    super(
+      `setWindow() can only be called on collections with an ORDER BY clause. ` +
+        `Add .orderBy() to your query to enable window movement.`
     )
   }
 }

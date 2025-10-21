@@ -24,6 +24,12 @@ export class CollectionSubscriber<
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
+  // Track deferred promises for subscription loading states
+  private subscriptionLoadingPromises = new Map<
+    CollectionSubscription,
+    { resolve: () => void }
+  >()
+
   constructor(
     private alias: string,
     private collectionId: string,
@@ -66,7 +72,51 @@ export class CollectionSubscriber<
         includeInitialState
       )
     }
+
+    // Subscribe to subscription status changes to propagate loading state
+    const statusUnsubscribe = subscription.on(`status:change`, (event) => {
+      // TODO: For now we are setting this loading state whenever the subscription
+      // status changes to 'loadingSubset'. But we have discussed it only happening
+      // when the the live query has it's offset/limit changed, and that triggers the
+      // subscription to request a snapshot. This will require more work to implement,
+      // and builds on https://github.com/TanStack/db/pull/663 which this PR
+      // does not yet depend on.
+      if (event.status === `loadingSubset`) {
+        // Guard against duplicate transitions
+        if (!this.subscriptionLoadingPromises.has(subscription)) {
+          let resolve: () => void
+          const promise = new Promise<void>((res) => {
+            resolve = res
+          })
+
+          this.subscriptionLoadingPromises.set(subscription, {
+            resolve: resolve!,
+          })
+          this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
+            promise
+          )
+        }
+      } else {
+        // status is 'ready'
+        const deferred = this.subscriptionLoadingPromises.get(subscription)
+        if (deferred) {
+          // Clear the map entry FIRST (before resolving)
+          this.subscriptionLoadingPromises.delete(subscription)
+          deferred.resolve()
+        }
+      }
+    })
+
     const unsubscribe = () => {
+      // If subscription has a pending promise, resolve it before unsubscribing
+      const deferred = this.subscriptionLoadingPromises.get(subscription)
+      if (deferred) {
+        // Clear the map entry FIRST (before resolving)
+        this.subscriptionLoadingPromises.delete(subscription)
+        deferred.resolve()
+      }
+
+      statusUnsubscribe()
       subscription.unsubscribe()
     }
     // currentSyncState is always defined when subscribe() is called

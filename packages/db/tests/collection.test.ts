@@ -1356,3 +1356,239 @@ describe(`Collection`, () => {
     expect(state.size).toBe(3)
   })
 })
+
+describe(`Collection isLoadingSubset property`, () => {
+  it(`isLoadingSubset is false initially`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset becomes true when loadSubset returns a promise`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset becomes false when promise resolves`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`concurrent loadSubset calls keep isLoadingSubset true until all resolve`, async () => {
+    let resolveLoadSubset1: () => void
+    let resolveLoadSubset2: () => void
+    let callCount = 0
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              callCount++
+              if (callCount === 1) {
+                return new Promise<void>((resolve) => {
+                  resolveLoadSubset1 = resolve
+                })
+              } else {
+                return new Promise<void>((resolve) => {
+                  resolveLoadSubset2 = resolve
+                })
+              }
+            },
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    collection._sync.loadSubset({})
+
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset1!()
+    await flushPromises()
+
+    // Should still be loading because second promise is pending
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset2!()
+    await flushPromises()
+
+    // Now should be false
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`emits loadingSubset:change event`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    const loadingChanges: Array<{
+      isLoadingSubset: boolean
+      previousIsLoadingSubset: boolean
+    }> = []
+
+    collection.on(`loadingSubset:change`, (event) => {
+      loadingChanges.push({
+        isLoadingSubset: event.isLoadingSubset,
+        previousIsLoadingSubset: event.previousIsLoadingSubset,
+      })
+    })
+
+    collection._sync.loadSubset({})
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(1)
+    expect(loadingChanges[0]).toEqual({
+      isLoadingSubset: true,
+      previousIsLoadingSubset: false,
+    })
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(2)
+    expect(loadingChanges[1]).toEqual({
+      isLoadingSubset: false,
+      previousIsLoadingSubset: true,
+    })
+  })
+
+  it(`rejected promises still clean up`, async () => {
+    let rejectLoadSubset: (error: Error) => void
+    const loadSubsetPromise = new Promise<void>((_, reject) => {
+      rejectLoadSubset = reject
+    })
+    // Attach catch handler before rejecting to avoid unhandled rejection
+    const handledPromise = loadSubsetPromise.catch(() => {})
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => handledPromise,
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    // Reject the promise
+    rejectLoadSubset!(new Error(`Load failed`))
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset stays false when loadSubset returns true (no work to do)`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true, // No work to do
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+
+    // Call loadSubset - it should return true and not track any promise
+    const result = collection._sync.loadSubset({})
+    expect(result).toBe(true)
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+})

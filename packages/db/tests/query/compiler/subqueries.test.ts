@@ -177,7 +177,8 @@ describe(`Query2 Subqueries`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []
@@ -295,7 +296,8 @@ describe(`Query2 Subqueries`, () => {
         subscriptions,
         { issue: dummyCallbacks, user: dummyCallbacks },
         lazySources,
-        {}
+        {},
+        () => {}
       )
       const { pipeline } = compilation
 
@@ -395,7 +397,8 @@ describe(`Query2 Subqueries`, () => {
         subscriptions,
         { issue: dummyCallbacks, user: dummyCallbacks },
         lazyCollections,
-        {}
+        {},
+        () => {}
       )
 
       // Verify that alias metadata includes aliases from the query
@@ -439,7 +442,8 @@ describe(`Query2 Subqueries`, () => {
         {},
         {},
         new Set(),
-        {}
+        {},
+        () => {}
       )
 
       const messages: Array<MultiSet<any>> = []

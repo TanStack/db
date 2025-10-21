@@ -1,13 +1,20 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
 import { and, gt, lt } from "../query/builder/functions.js"
 import { Value } from "../query/ir.js"
+import { EventEmitter } from "../event-emitter.js"
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from "./change-events.js"
 import type { BasicExpression, OrderBy } from "../query/ir.js"
 import type { IndexInterface } from "../indexes/base-index.js"
-import type { ChangeMessage } from "../types.js"
+import type {
+  ChangeMessage,
+  Subscription,
+  SubscriptionEvents,
+  SubscriptionStatus,
+  SubscriptionUnsubscribedEvent,
+} from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
 type RequestSnapshotOptions = {
@@ -22,13 +29,17 @@ type RequestLimitedSnapshotOptions = {
 }
 
 type CollectionSubscriptionOptions = {
+  includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
-  onUnsubscribe?: () => void
+  onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
 }
 
-export class CollectionSubscription {
+export class CollectionSubscription
+  extends EventEmitter<SubscriptionEvents>
+  implements Subscription
+{
   private loadedInitialState = false
 
   // Flag to indicate that we have sent at least 1 snapshot.
@@ -42,11 +53,24 @@ export class CollectionSubscription {
 
   private orderByIndex: IndexInterface<string | number> | undefined
 
+  // Status tracking
+  private _status: SubscriptionStatus = `ready`
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+
+  public get status(): SubscriptionStatus {
+    return this._status
+  }
+
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
     private options: CollectionSubscriptionOptions
   ) {
+    super()
+    if (options.onUnsubscribe) {
+      this.on(`unsubscribed`, (event) => options.onUnsubscribe!(event))
+    }
+
     // Auto-index for where expressions if enabled
     if (options.whereExpression) {
       ensureIndexForExpression(options.whereExpression, this.collection)
@@ -69,6 +93,53 @@ export class CollectionSubscription {
 
   setOrderByIndex(index: IndexInterface<any>) {
     this.orderByIndex = index
+  }
+
+  /**
+   * Set subscription status and emit events if changed
+   */
+  private setStatus(newStatus: SubscriptionStatus) {
+    if (this._status === newStatus) {
+      return // No change
+    }
+
+    const previousStatus = this._status
+    this._status = newStatus
+
+    // Emit status:change event
+    this.emitInner(`status:change`, {
+      type: `status:change`,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    })
+
+    // Emit specific status event
+    const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
+    this.emitInner(eventKey, {
+      type: eventKey,
+      subscription: this,
+      previousStatus,
+      status: newStatus,
+    } as SubscriptionEvents[typeof eventKey])
+  }
+
+  /**
+   * Track a loadSubset promise and manage loading status
+   */
+  private trackLoadSubsetPromise(syncResult: Promise<void> | true) {
+    // Track the promise if it's actually a promise (async work)
+    if (syncResult instanceof Promise) {
+      this.pendingLoadSubsetPromises.add(syncResult)
+      this.setStatus(`loadingSubset`)
+
+      syncResult.finally(() => {
+        this.pendingLoadSubsetPromises.delete(syncResult)
+        if (this.pendingLoadSubsetPromises.size === 0) {
+          this.setStatus(`ready`)
+        }
+      })
+    }
   }
 
   hasLoadedInitialState() {
@@ -121,9 +192,12 @@ export class CollectionSubscription {
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    this.collection.syncMore({
+    const syncResult = this.collection._sync.loadSubset({
       where: stateOpts.where,
+      subscription: this,
     })
+
+    this.trackLoadSubsetPromise(syncResult)
 
     // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
@@ -215,11 +289,14 @@ export class CollectionSubscription {
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    this.collection.syncMore({
+    const syncResult = this.collection._sync.loadSubset({
       where: whereWithValueFilter,
       limit,
       orderBy,
+      subscription: this,
     })
+
+    this.trackLoadSubsetPromise(syncResult)
   }
 
   /**
@@ -264,6 +341,11 @@ export class CollectionSubscription {
   }
 
   unsubscribe() {
-    this.options.onUnsubscribe?.()
+    this.emitInner(`unsubscribed`, {
+      type: `unsubscribed`,
+      subscription: this,
+    })
+    // Clear all event listeners to prevent memory leaks
+    this.clearListeners()
   }
 }

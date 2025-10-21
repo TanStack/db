@@ -25,7 +25,6 @@ import type {
   InferSchemaOutput,
   InsertConfig,
   NonSingleResult,
-  OnLoadMoreOptions,
   OperationConfig,
   SingleResult,
   SubscribeChangesOptions,
@@ -48,7 +47,7 @@ import type { IndexProxy } from "../indexes/lazy-index.js"
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInsertInput extends object = T,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
@@ -131,7 +130,7 @@ export interface Collection<
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
@@ -144,7 +143,7 @@ export function createCollection<
 export function createCollection<
   T extends StandardSchemaV1,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
     schema: T
@@ -158,7 +157,7 @@ export function createCollection<
 export function createCollection<
   T extends object,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
@@ -171,7 +170,7 @@ export function createCollection<
 export function createCollection<
   T extends object,
   TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = {},
+  TUtils extends UtilsRecord = UtilsRecord,
 >(
   options: CollectionConfig<T, TKey, never> & {
     schema?: never // prohibit schema if an explicit type is provided
@@ -218,7 +217,7 @@ export class CollectionImpl<
   private _events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
-  private _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
+  public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private _mutations: CollectionMutationsManager<
     TOutput,
@@ -303,6 +302,7 @@ export class CollectionImpl<
       collection: this, // Required for passing to config.sync callback
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
 
     // Only start sync immediately if explicitly enabled
@@ -356,23 +356,19 @@ export class CollectionImpl<
   }
 
   /**
+   * Check if the collection is currently loading more data
+   * @returns true if the collection has pending load more operations, false otherwise
+   */
+  public get isLoadingSubset(): boolean {
+    return this._sync.isLoadingSubset
+  }
+
+  /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
-  }
-
-  /**
-   * Requests the sync layer to load more data.
-   * @param options Options to control what data is being loaded
-   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
-   *          If data loading is synchronous, the data is loaded when the method returns.
-   */
-  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
-    if (this._sync.syncOnLoadMoreFn) {
-      return this._sync.syncOnLoadMoreFn(options)
-    }
   }
 
   /**

@@ -2,7 +2,12 @@ import { generateKeyBetween } from "fractional-indexing"
 import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
 import { StreamBuilder } from "../d2.js"
 import { MultiSet } from "../multiset.js"
-import { binarySearch, globalObjectIdGenerator } from "../utils.js"
+import {
+  binarySearch,
+  diffHalfOpen,
+  globalObjectIdGenerator,
+} from "../utils.js"
+import type { HRange } from "../utils.js"
 import type { DifferenceStreamReader } from "../graph.js"
 import type { IStreamBuilder, PipedOperator } from "../types.js"
 
@@ -10,6 +15,9 @@ export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
   setSizeCallback?: (getSize: () => number) => void
+  setWindowFn?: (
+    windowFn: (options: { offset?: number; limit?: number }) => void
+  ) => void
 }
 
 export type TopKChanges<V> = {
@@ -17,6 +25,15 @@ export type TopKChanges<V> = {
   moveIn: IndexedValue<V> | null
   /** Indicates which element moves out of the topK (if any) */
   moveOut: IndexedValue<V> | null
+}
+
+export type TopKMoveChanges<V> = {
+  /** Flag that marks whether there were any changes to the topK */
+  changes: boolean
+  /** Indicates which elements move into the topK (if any) */
+  moveIns: Array<IndexedValue<V>>
+  /** Indicates which elements move out of the topK (if any) */
+  moveOuts: Array<IndexedValue<V>>
 }
 
 /**
@@ -56,6 +73,49 @@ class TopKArray<V> implements TopK<V> {
     const limit = this.#topKEnd - this.#topKStart
     const available = this.#sortedValues.length - offset
     return Math.max(0, Math.min(limit, available))
+  }
+
+  /**
+   * Moves the topK window
+   */
+  move({
+    offset,
+    limit,
+  }: {
+    offset?: number
+    limit?: number
+  }): TopKMoveChanges<V> {
+    const oldOffset = this.#topKStart
+    const oldLimit = this.#topKEnd - this.#topKStart
+    const oldRange: HRange = [this.#topKStart, this.#topKEnd]
+
+    this.#topKStart = offset ?? oldOffset
+    this.#topKEnd = this.#topKStart + (limit ?? oldLimit)
+
+    const newRange: HRange = [this.#topKStart, this.#topKEnd]
+    const { onlyInA, onlyInB } = diffHalfOpen(oldRange, newRange)
+
+    const moveIns: Array<IndexedValue<V>> = []
+    onlyInB.forEach((index) => {
+      const value = this.#sortedValues[index]
+      if (value) {
+        moveIns.push(value)
+      }
+    })
+
+    const moveOuts: Array<IndexedValue<V>> = []
+    onlyInA.forEach((index) => {
+      const value = this.#sortedValues[index]
+      if (value) {
+        moveOuts.push(value)
+      }
+    })
+
+    // It could be that there are changes (i.e. moveIns or moveOuts)
+    // but that the collection is lazy so we don't have the data yet that needs to move in/out
+    // so `moveIns` and `moveOuts` will be empty but `changes` will be true
+    // this will tell the caller that it needs to run the graph to load more data
+    return { moveIns, moveOuts, changes: onlyInA.length + onlyInB.length > 0 }
   }
 
   insert(value: V): TopKChanges<V> {
@@ -178,8 +238,6 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
    */
   #topK: TopK<TaggedValue<K, T>>
 
-  #limit: number
-
   constructor(
     id: number,
     inputA: DifferenceStreamReader<[K, T]>,
@@ -188,7 +246,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     options: TopKWithFractionalIndexOptions
   ) {
     super(id, inputA, output)
-    this.#limit = options.limit ?? Infinity
+    const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
     const compareTaggedValues = (
       a: TaggedValue<K, T>,
@@ -204,8 +262,9 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
       const tieBreakerB = getTag(b)
       return tieBreakerA - tieBreakerB
     }
-    this.#topK = this.createTopK(offset, this.#limit, compareTaggedValues)
+    this.#topK = this.createTopK(offset, limit, compareTaggedValues)
     options.setSizeCallback?.(() => this.#topK.size)
+    options.setWindowFn?.(this.moveTopK.bind(this))
   }
 
   protected createTopK(
@@ -214,6 +273,32 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number
   ): TopK<TaggedValue<K, T>> {
     return new TopKArray(offset, limit, comparator)
+  }
+
+  /**
+   * Moves the topK window based on the provided offset and limit.
+   * Any changes to the topK are sent to the output.
+   */
+  moveTopK({ offset, limit }: { offset?: number; limit?: number }) {
+    if (!(this.#topK instanceof TopKArray)) {
+      throw new Error(
+        `Cannot move B+-tree implementation of TopK with fractional index`
+      )
+    }
+
+    const result: Array<[[K, IndexedValue<T>], number]> = []
+
+    const diff = this.#topK.move({ offset, limit })
+
+    diff.moveIns.forEach((moveIn) => this.handleMoveIn(moveIn, result))
+    diff.moveOuts.forEach((moveOut) => this.handleMoveOut(moveOut, result))
+
+    if (diff.changes) {
+      // There are changes to the topK
+      // it could be that moveIns and moveOuts are empty
+      // because the collection is lazy, so we will run the graph again to load the data
+      this.output.sendData(new MultiSet(result))
+    }
   }
 
   run(): void {
@@ -258,23 +343,36 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
       // so it doesn't affect the topK
     }
 
-    if (res.moveIn) {
-      const index = getIndex(res.moveIn)
-      const taggedValue = getValue(res.moveIn)
+    this.handleMoveIn(res.moveIn, result)
+    this.handleMoveOut(res.moveOut, result)
+
+    return
+  }
+
+  private handleMoveIn(
+    moveIn: IndexedValue<TaggedValue<K, T>> | null,
+    result: Array<[[K, IndexedValue<T>], number]>
+  ) {
+    if (moveIn) {
+      const index = getIndex(moveIn)
+      const taggedValue = getValue(moveIn)
       const k = getKey(taggedValue)
       const val = getVal(taggedValue)
       result.push([[k, [val, index]], 1])
     }
+  }
 
-    if (res.moveOut) {
-      const index = getIndex(res.moveOut)
-      const taggedValue = getValue(res.moveOut)
+  private handleMoveOut(
+    moveOut: IndexedValue<TaggedValue<K, T>> | null,
+    result: Array<[[K, IndexedValue<T>], number]>
+  ) {
+    if (moveOut) {
+      const index = getIndex(moveOut)
+      const taggedValue = getValue(moveOut)
       const k = getKey(taggedValue)
       const val = getVal(taggedValue)
       result.push([[k, [val, index]], -1])
     }
-
-    return
   }
 
   private getMultiplicity(key: K): number {

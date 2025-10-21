@@ -1,5 +1,44 @@
 # @tanstack/db
 
+## 0.4.11
+
+### Patch Changes
+
+- Add support for pre-created live query collections in useLiveInfiniteQuery, enabling router loader patterns where live queries can be created, preloaded, and passed to components. ([#684](https://github.com/TanStack/db/pull/684))
+
+## 0.4.10
+
+### Patch Changes
+
+- Add `utils.setWindow()` method to live query collections to dynamically change limit and offset on ordered queries. ([#663](https://github.com/TanStack/db/pull/663))
+
+  You can now change the pagination window of an ordered live query without recreating the collection:
+
+  ```ts
+  const users = createLiveQueryCollection((q) =>
+    q
+      .from({ user: usersCollection })
+      .orderBy(({ user }) => user.name, "asc")
+      .limit(10)
+      .offset(0)
+  )
+
+  users.utils.setWindow({ offset: 10, limit: 10 })
+  ```
+
+- Added comprehensive loading state tracking and configurable sync modes to collections and live queries: ([#669](https://github.com/TanStack/db/pull/669))
+  - Added `isLoadingSubset` property and `loadingSubset:change` events to all collections for tracking when data is being loaded
+  - Added `syncMode` configuration option to collections:
+    - `'eager'` (default): Loads all data immediately during initial sync
+    - `'on-demand'`: Only loads data as requested via `loadSubset` calls
+  - Added comprehensive status tracking to collection subscriptions with `status` property (`'ready'` | `'loadingSubset'`) and events (`status:change`, `status:ready`, `status:loadingSubset`, `unsubscribed`)
+  - Live queries automatically reflect loading state from their source collection subscriptions, with each query maintaining isolated loading state to prevent status "bleed" between independent queries
+  - Enhanced `setWindow` utility to return `Promise<void>` when loading is triggered, allowing callers to await data loading completion
+  - Added `subscription` parameter to `loadSubset` handler for advanced sync implementations that need to track subscription lifecycle
+
+- Updated dependencies [[`63aa8ef`](https://github.com/TanStack/db/commit/63aa8ef8b09960ce0f93e068d41b37fb0503a21a)]:
+  - @tanstack/db-ivm@0.1.11
+
 ## 0.4.9
 
 ### Patch Changes

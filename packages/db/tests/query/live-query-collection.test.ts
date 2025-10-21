@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection/index.js"
 import {
+  and,
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
@@ -935,6 +936,774 @@ describe(`createLiveQueryCollection`, () => {
 
         expect(liveTodo?.completed).toBe(true)
       })
+    })
+  })
+
+  describe(`isLoadingSubset integration`, () => {
+    it(`live query result collection has isLoadingSubset property`, async () => {
+      const sourceCollection = createCollection<{ id: string; value: string }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q.from({ item: sourceCollection })
+      )
+
+      await liveQuery.preload()
+
+      expect(liveQuery.isLoadingSubset).toBeDefined()
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`isLoadingSubset property exists and starts as false`, async () => {
+      const sourceCollection = createCollection<{ id: string; value: string }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`source collection isLoadingSubset is independent`, async () => {
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const sourceCollection = createCollection<{ id: string; value: number }>({
+        id: `source`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, value: 1 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: () => loadSubsetPromise,
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      // Calling loadSubset directly on source collection sets its own isLoadingSubset
+      sourceCollection._sync.loadSubset({})
+      expect(sourceCollection.isLoadingSubset).toBe(true)
+
+      // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
+      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      resolveLoadSubset!()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+  })
+
+  describe(`move functionality`, () => {
+    it(`should support moving orderBy window past current window using move function`, async () => {
+      // Create a collection with more users for testing window movement
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `desc`)
+          .limit(3)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 3 users (Alice, Bob, Charlie)
+      expect(activeUsers.size).toBe(3)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([
+        `Frank`,
+        `Eve`,
+        `David`,
+      ])
+
+      // Move the window to show users David, Eve, Frank (offset: 3, limit: 3)
+      activeUsers.utils.setWindow({ offset: 3, limit: 3 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults = activeUsers.toArray
+      expect(moveResults.map((r) => r.name)).toEqual([
+        `Charlie`,
+        `Bob`,
+        `Alice`,
+      ])
+    })
+
+    it(`should support moving orderBy window before current window using move function`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-before`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(3)
+          .offset(3)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have users David, Eve, Frank
+      expect(activeUsers.size).toBe(3)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([
+        `David`,
+        `Eve`,
+        `Frank`,
+      ])
+
+      // Move the window to show users Alice, Bob, Charlie (offset: 0, limit: 3)
+      activeUsers.utils.setWindow({ offset: 0, limit: 3 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults = activeUsers.toArray
+      expect(moveResults.map((r) => r.name)).toEqual([
+        `Alice`,
+        `Bob`,
+        `Charlie`,
+      ])
+    })
+
+    it(`should support moving offset while keeping limit constant`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-offset`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 2 users (Alice, Bob)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+
+      // Move offset to 1, keeping limit at 2 (should show Bob, Charlie)
+      activeUsers.utils.setWindow({ offset: 1, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+
+      // Move offset to 2, keeping limit at 2 (should show Charlie, David)
+      activeUsers.utils.setWindow({ offset: 2, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Charlie`, `David`])
+
+      // Move offset back to 0, keeping limit at 2 (should show Alice, Bob)
+      activeUsers.utils.setWindow({ offset: 0, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults3 = activeUsers.toArray
+      expect(moveResults3.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+    })
+
+    it(`should support moving limit while keeping offset constant`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-limit`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(1)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have 2 users starting from offset 1 (Bob, Charlie)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+
+      // Increase limit to 3, keeping offset at 1 (should show Bob, Charlie, David)
+      activeUsers.utils.setWindow({ offset: 1, limit: 3 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([
+        `Bob`,
+        `Charlie`,
+        `David`,
+      ])
+
+      // Decrease limit to 1, keeping offset at 1 (should show just Bob)
+      activeUsers.utils.setWindow({ offset: 1, limit: 1 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Bob`])
+    })
+
+    it(`should support changing only offset (keeping limit the same)`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-offset-only`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 2 users (Alice, Bob)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+
+      // Change only offset to 2, limit should remain 2
+      activeUsers.utils.setWindow({ offset: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([`Charlie`, `David`])
+
+      // Change only offset to 1, limit should still be 2
+      activeUsers.utils.setWindow({ offset: 1 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+    })
+
+    it(`should support changing only limit (keeping offset the same)`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-limit-only`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(1)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have 2 users starting from offset 1 (Bob, Charlie)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Bob`, `Charlie`])
+
+      // Change only limit to 4, offset should remain 1
+      activeUsers.utils.setWindow({ limit: 4 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([
+        `Bob`,
+        `Charlie`,
+        `David`,
+        `Eve`,
+      ])
+
+      // Change only limit to 1, offset should still be 1
+      activeUsers.utils.setWindow({ limit: 1 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2.map((r) => r.name)).toEqual([`Bob`])
+    })
+
+    it(`should handle edge cases when moving beyond available data`, async () => {
+      const limitedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `limited-users`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: limitedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 2 users (Alice, Bob)
+      expect(activeUsers.size).toBe(2)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+
+      // Move to offset 2, limit 2 (should show only Charlie, since we only have 3 total users)
+      activeUsers.utils.setWindow({ offset: 2, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults1 = activeUsers.toArray
+      expect(moveResults1.map((r) => r.name)).toEqual([`Charlie`]) // Only 1 user available at offset 2
+
+      // Move to offset 5, limit 2 (should show no users, beyond available data)
+      activeUsers.utils.setWindow({ offset: 5, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults2 = activeUsers.toArray
+      expect(moveResults2).toEqual([]) // No users available at offset 5
+
+      // Move to a negative offset and limit (should show no users)
+      activeUsers.utils.setWindow({ offset: -5, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults3 = activeUsers.toArray
+      expect(moveResults3).toEqual([])
+
+      // Move back to a valid window
+      activeUsers.utils.setWindow({ offset: 0, limit: 2 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults4 = activeUsers.toArray
+      expect(moveResults4.map((r) => r.name)).toEqual([`Alice`, `Bob`])
+    })
+
+    it(`should work with descending order`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `extended-users-desc`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+            { id: 4, name: `David`, active: true },
+            { id: 5, name: `Eve`, active: true },
+            { id: 6, name: `Frank`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `desc`)
+          .limit(3)
+          .offset(0)
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have first 3 users in descending order (Frank, Eve, David)
+      expect(activeUsers.size).toBe(3)
+      const initialResults = activeUsers.toArray
+      expect(initialResults.map((r) => r.name)).toEqual([
+        `Frank`,
+        `Eve`,
+        `David`,
+      ])
+
+      // Move the window to show next 3 users (Charlie, Bob, Alice)
+      activeUsers.utils.setWindow({ offset: 3, limit: 3 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults = activeUsers.toArray
+      expect(moveResults.map((r) => r.name)).toEqual([
+        `Charlie`,
+        `Bob`,
+        `Alice`,
+      ])
+    })
+
+    it(`should throw an error when used on non-ordered queries`, async () => {
+      const activeUsers = createLiveQueryCollection(
+        (q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.active, true))
+        // No orderBy clause
+      )
+
+      await activeUsers.preload()
+
+      // Initial result should have all active users
+      expect(activeUsers.size).toBe(2)
+
+      // setWindow should throw an error for non-ordered queries
+      expect(() => {
+        activeUsers.utils.setWindow({ offset: 1, limit: 1 })
+      }).toThrow(
+        /setWindow\(\) can only be called on collections with an ORDER BY clause/
+      )
+    })
+
+    it(`should work with complex queries including joins`, async () => {
+      type Post = {
+        id: number
+        title: string
+        authorId: number
+        published: boolean
+      }
+
+      const posts = createCollection(
+        mockSyncCollectionOptions<Post>({
+          id: `posts-for-move-test`,
+          getKey: (post) => post.id,
+          initialData: [
+            { id: 1, title: `Post A`, authorId: 1, published: true },
+            { id: 2, title: `Post B`, authorId: 2, published: true },
+            { id: 3, title: `Post C`, authorId: 1, published: true },
+            { id: 4, title: `Post D`, authorId: 2, published: true },
+            { id: 5, title: `Post E`, authorId: 1, published: true },
+            { id: 6, title: `Post F`, authorId: 2, published: true },
+          ],
+        })
+      )
+
+      const userPosts = createLiveQueryCollection((q) =>
+        q
+          .from({ user: usersCollection })
+          .join(
+            { post: posts },
+            ({ user, post }) => eq(user.id, post.authorId),
+            `inner`
+          )
+          .where(({ user, post }) =>
+            and(eq(user.active, true), eq(post.published, true))
+          )
+          .orderBy(({ post }) => post.title, `asc`)
+          .limit(3)
+          .offset(0)
+      )
+
+      await userPosts.preload()
+
+      // Initial result should have first 3 posts (Post A, Post B, Post C)
+      expect(userPosts.size).toBe(3)
+      const initialResults = userPosts.toArray
+      expect(initialResults.map((r) => r.post.title)).toEqual([
+        `Post A`,
+        `Post B`,
+        `Post C`,
+      ])
+
+      // Move the window to show next 3 posts (Post D, Post E, Post F)
+      userPosts.utils.setWindow({ offset: 3, limit: 3 })
+
+      // Wait for the move to take effect
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      const moveResults = userPosts.toArray
+      expect(moveResults.map((r) => r.post.title)).toEqual([
+        `Post D`,
+        `Post E`,
+        `Post F`,
+      ])
+    })
+
+    it(`setWindow returns true when no subset loading is triggered`, async () => {
+      const extendedUsers = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `users-no-loading`,
+          getKey: (user) => user.id,
+          initialData: [
+            { id: 1, name: `Alice`, active: true },
+            { id: 2, name: `Bob`, active: true },
+            { id: 3, name: `Charlie`, active: true },
+          ],
+        })
+      )
+
+      const activeUsers = createLiveQueryCollection((q) =>
+        q
+          .from({ user: extendedUsers })
+          .where(({ user }) => eq(user.active, true))
+          .orderBy(({ user }) => user.name, `asc`)
+          .limit(2)
+      )
+
+      await activeUsers.preload()
+
+      // setWindow should return true when no loading is triggered
+      const result = activeUsers.utils.setWindow({ offset: 1, limit: 2 })
+      expect(result).toBe(true)
+    })
+
+    it(`setWindow returns and resolves a Promise when async loading is triggered`, async () => {
+      // This is an integration test that validates the full async flow:
+      // 1. setWindow triggers loading more data
+      // 2. Returns a Promise (not true)
+      // 3. The Promise waits for loading to complete
+      // 4. The Promise resolves once loading is done
+
+      vi.useFakeTimers()
+
+      try {
+        let loadSubsetCallCount = 0
+
+        const sourceCollection = createCollection<{
+          id: number
+          value: number
+        }>({
+          id: `source-async-subset-loading`,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          sync: {
+            sync: ({ markReady, begin, write, commit }) => {
+              // Provide minimal initial data
+              begin()
+              write({ type: `insert`, value: { id: 1, value: 1 } })
+              write({ type: `insert`, value: { id: 2, value: 2 } })
+              write({ type: `insert`, value: { id: 3, value: 3 } })
+              commit()
+              markReady()
+
+              return {
+                loadSubset: () => {
+                  loadSubsetCallCount++
+
+                  // First call is for the initial window request
+                  if (loadSubsetCallCount === 1) {
+                    return true
+                  }
+
+                  // Second call (triggered by setWindow) returns a promise
+                  const loadPromise = new Promise<void>((resolve) => {
+                    // Simulate async data loading with a delay
+                    setTimeout(() => {
+                      begin()
+                      // Load additional items that would be needed for the new window
+                      write({ type: `insert`, value: { id: 4, value: 4 } })
+                      write({ type: `insert`, value: { id: 5, value: 5 } })
+                      write({ type: `insert`, value: { id: 6, value: 6 } })
+                      commit()
+                      resolve()
+                    }, 50)
+                  })
+
+                  return loadPromise
+                },
+              }
+            },
+          },
+        })
+
+        const liveQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: sourceCollection })
+              .orderBy(({ item }) => item.value, `asc`)
+              .limit(2)
+              .offset(0),
+          startSync: true,
+        })
+
+        await liveQuery.preload()
+
+        // Initial state: should have 2 items (values 1, 2)
+        expect(liveQuery.size).toBe(2)
+        expect(liveQuery.isLoadingSubset).toBe(false)
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Move window to offset 3, which requires loading more data
+        // This should trigger loadSubset and return a Promise
+        const result = liveQuery.utils.setWindow({ offset: 3, limit: 2 })
+
+        // CRITICAL VALIDATION: result should be a Promise, not true
+        expect(result).toBeInstanceOf(Promise)
+        expect(result).not.toBe(true)
+
+        // Advance just a bit to let the scheduler execute and trigger loadSubset
+        await vi.advanceTimersByTimeAsync(1)
+
+        // Verify that loading was triggered and is in progress
+        expect(loadSubsetCallCount).toBeGreaterThan(1)
+        expect(liveQuery.isLoadingSubset).toBe(true)
+
+        // Track when the promise resolves
+        let promiseResolved = false
+        if (result !== true) {
+          result.then(() => {
+            promiseResolved = true
+          })
+        }
+
+        // Promise should NOT be resolved yet because loading is still in progress
+        await vi.advanceTimersByTimeAsync(10)
+        expect(promiseResolved).toBe(false)
+        expect(liveQuery.isLoadingSubset).toBe(true)
+
+        // Now advance time to complete the loading (50ms total from loadSubset call)
+        await vi.advanceTimersByTimeAsync(40)
+
+        // Wait for the promise to resolve
+        if (result !== true) {
+          await result
+        }
+
+        // CRITICAL VALIDATION: Promise has resolved and loading is complete
+        expect(promiseResolved).toBe(true)
+        expect(liveQuery.isLoadingSubset).toBe(false)
+
+        // Verify the window was successfully moved and has the right data
+        expect(liveQuery.size).toBe(2)
+        const items = liveQuery.toArray
+        expect(items.map((i) => i.value)).toEqual([4, 5])
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

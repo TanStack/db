@@ -1,4 +1,5 @@
 import {
+  CollectionConfigurationError,
   CollectionIsInErrorStateError,
   DuplicateKeySyncError,
   NoPendingSyncTransactionCommitError,
@@ -13,12 +14,13 @@ import type {
   ChangeMessage,
   CleanupFn,
   CollectionConfig,
-  OnLoadMoreOptions,
+  LoadSubsetOptions,
   SyncConfigRes,
 } from "../types"
 import type { CollectionImpl } from "./index.js"
 import type { CollectionStateManager } from "./state"
 import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionEventsManager } from "./events.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -29,14 +31,18 @@ export class CollectionSyncManager<
   private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private _events!: CollectionEventsManager
   private config!: CollectionConfig<TOutput, TKey, TSchema>
   private id: string
+  private syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
-  public syncOnLoadMoreFn:
-    | ((options: OnLoadMoreOptions) => void | Promise<void>)
+  public syncLoadSubsetFn:
+    | ((options: LoadSubsetOptions) => true | Promise<void>)
     | null = null
+
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -44,16 +50,19 @@ export class CollectionSyncManager<
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
     this.config = config
     this.id = id
+    this.syncMode = config.syncMode ?? `eager`
   }
 
   setDeps(deps: {
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
   }) {
     this.collection = deps.collection
     this.state = deps.state
     this.lifecycle = deps.lifecycle
+    this._events = deps.events
   }
 
   /**
@@ -189,8 +198,16 @@ export class CollectionSyncManager<
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
 
-      // Store onLoadMore function if provided
-      this.syncOnLoadMoreFn = syncRes?.onLoadMore ?? null
+      // Store loadSubset function if provided
+      this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
+
+      // Validate: on-demand mode requires a loadSubset function
+      if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
+        throw new CollectionConfigurationError(
+          `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
+            `Either provide a loadSubset handler or use syncMode "eager".`
+        )
+      }
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
@@ -240,15 +257,70 @@ export class CollectionSyncManager<
   }
 
   /**
+   * Gets whether the collection is currently loading more data
+   */
+  public get isLoadingSubset(): boolean {
+    return this.pendingLoadSubsetPromises.size > 0
+  }
+
+  /**
+   * Tracks a load promise for isLoadingSubset state.
+   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
+   */
+  public trackLoadPromise(promise: Promise<void>): void {
+    const loadingStarting = !this.isLoadingSubset
+    this.pendingLoadSubsetPromises.add(promise)
+
+    if (loadingStarting) {
+      this._events.emit(`loadingSubset:change`, {
+        type: `loadingSubset:change`,
+        collection: this.collection,
+        isLoadingSubset: true,
+        previousIsLoadingSubset: false,
+        loadingSubsetTransition: `start`,
+      })
+    }
+
+    promise.finally(() => {
+      const loadingEnding =
+        this.pendingLoadSubsetPromises.size === 1 &&
+        this.pendingLoadSubsetPromises.has(promise)
+      this.pendingLoadSubsetPromises.delete(promise)
+
+      if (loadingEnding) {
+        this._events.emit(`loadingSubset:change`, {
+          type: `loadingSubset:change`,
+          collection: this.collection,
+          isLoadingSubset: false,
+          previousIsLoadingSubset: true,
+          loadingSubsetTransition: `end`,
+        })
+      }
+    })
+  }
+
+  /**
    * Requests the sync layer to load more data.
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
-   *          If data loading is synchronous, the data is loaded when the method returns.
+   *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
    */
-  public syncMore(options: OnLoadMoreOptions): void | Promise<void> {
-    if (this.syncOnLoadMoreFn) {
-      return this.syncOnLoadMoreFn(options)
+  public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+    // Bypass loadSubset when syncMode is 'eager'
+    if (this.syncMode === `eager`) {
+      return true
     }
+
+    if (this.syncLoadSubsetFn) {
+      const result = this.syncLoadSubsetFn(options)
+      // If the result is a promise, track it
+      if (result instanceof Promise) {
+        this.trackLoadPromise(result)
+        return result
+      }
+    }
+
+    return true
   }
 
   public cleanup(): void {

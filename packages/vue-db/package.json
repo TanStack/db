@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/vue-db",
   "description": "Vue integration for @tanstack/db",
-  "version": "0.0.64",
+  "version": "0.0.66",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,7 @@
     "vue",
     "typescript"
   ],
-  "packageManager": "pnpm@10.18.2",
+  "packageManager": "pnpm@10.18.3",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
