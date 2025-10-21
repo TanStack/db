@@ -3376,5 +3376,153 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(false)
       expect(collection.has(`4`)).toBe(false)
     })
+
+    it(`should deduplicate queries and handle GC correctly when queries are ordered and have a LIMIT`, async () => {
+      const baseQueryKey = [`deduplication-gc-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
+        const { where, limit } = loadSubsetOptions
+
+        // Query 1: all items with category A (no limit)
+        if (
+          where?.name === `eq` &&
+          where?.args[0].path?.[0] === `category` &&
+          where?.args[1].value === `A` &&
+          !limit
+        ) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1`, category: `A` },
+            { id: `2`, name: `Item 2`, category: `A` },
+            { id: `3`, name: `Item 3`, category: `A` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `deduplication-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          const key = [...baseQueryKey]
+          if (ctx.where) {
+            key.push(`where`, JSON.stringify(ctx.where))
+          }
+          if (ctx.limit) {
+            key.push(`limit`, ctx.limit.toString())
+          }
+          if (ctx.orderBy) {
+            key.push(`orderBy`, JSON.stringify(ctx.orderBy))
+          }
+          return key
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Execute first query: load all rows that belong to category A (returns 3 rows)
+      const whereClause1 = new Func(`eq`, [
+        new PropRef([`category`]),
+        new Value(`A`),
+      ])
+      await collection._sync.loadSubset({
+        where: whereClause1,
+      })
+
+      // Wait for first query data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      // Verify all 3 items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // Execute second query: load rows with category A, limit 2, ordered by ID
+      // This should be deduplicated since we already have all category A data
+      // So it will load the data from the local collection
+      const whereClause2 = new Func(`eq`, [
+        new PropRef([`category`]),
+        new Value(`A`),
+      ])
+      await collection._sync.loadSubset({
+        where: whereClause2,
+        limit: 2,
+        orderBy: [
+          {
+            expression: new PropRef([`id`]),
+            compareOptions: {
+              direction: `asc`,
+              nulls: `last`,
+              stringSort: `lexical`,
+            },
+          },
+        ],
+      })
+
+      // Second query should still only have been called once
+      // since query2 is deduplicated so it is executed against the local collection
+      // and not via queryFn
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Collection should still have all 3 items (deduplication doesn't remove data)
+      expect(collection.size).toBe(3)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC the first query (all category A without limit)
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({ where: whereClause1 }),
+        exact: true,
+      })
+
+      // Wait for GC to process
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+      })
+
+      // Verify that only row 3 is removed (it was only referenced by query 1)
+      expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
+      expect(collection.has(`2`)).toBe(true) // Still present (referenced by query 2)
+      expect(collection.has(`3`)).toBe(false) // Removed (only referenced by query 1)
+
+      // GC the second query (category A with limit 2)
+      queryClient.removeQueries({
+        queryKey: (config.queryKey as any)({
+          where: whereClause2,
+          limit: 2,
+          orderBy: [
+            {
+              expression: new PropRef([`id`]),
+              compareOptions: {
+                direction: `asc`,
+                nulls: `last`,
+                stringSort: `lexical`,
+              },
+            },
+          ],
+        }),
+        exact: true,
+      })
+
+      // Wait for final GC to process
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+    })
   })
 })
