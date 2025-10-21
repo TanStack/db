@@ -13,7 +13,14 @@ const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url))
 export default [
   includeIgnoreFile(gitignorePath, "Imported .gitignore patterns"),
   {
-    ignores: ["*.config.{js,ts,mjs}", "drizzle.config.ts", "vite.config.ts"],
+    ignores: [
+      "*.config.js",
+      "*.config.ts",
+      "*.config.mjs",
+      "drizzle.config.ts",
+      "vite.config.ts",
+      "eslint.config.mjs",
+    ],
   },
   {
     files: ["src/**/*.{js,jsx,ts,tsx,mjs}"],

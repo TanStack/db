@@ -11,10 +11,9 @@ import { cn } from '@/lib/utils'
 interface EditorProps {
   content: string
   onChange: (content: string) => void
-  placeholder?: string
 }
 
-export function Editor({ content, onChange, _placeholder }: EditorProps) {
+export function Editor({ content, onChange }: EditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,

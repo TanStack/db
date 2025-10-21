@@ -1,7 +1,11 @@
 import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
-import { createIssue, updateIssue, deleteIssue } from '@/server/functions/issues'
+import {
+  createIssue,
+  updateIssue,
+  deleteIssue,
+} from '@/server/functions/issues'
 import { createComment, deleteComment } from '@/server/functions/comments'
 
 const ELECTRIC_URL =

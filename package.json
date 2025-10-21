@@ -57,7 +57,7 @@
   },
   "lint-staged": {
     "*.{ts,tsx}": [
-      "eslint --fix"
+      "bash -c 'if [[ $0 != *.config.* ]] && [[ $0 != *drizzle.config.ts ]]; then eslint --fix \"$0\"; fi'"
     ]
   }
 }

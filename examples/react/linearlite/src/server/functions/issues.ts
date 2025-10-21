@@ -1,8 +1,8 @@
 import { createServerFn } from '@tanstack/start/server'
 import { z } from 'zod'
 import { issuesTable } from '@/db/schema'
-import { eq, or } from 'drizzle-orm'
-import { getServerContext, requireAuth } from '../utils'
+import { eq } from 'drizzle-orm'
+import { getServerContext } from '../utils'
 
 // Get all issues for the current user
 export const getAllIssues = createServerFn({ method: 'GET' }).handler(
@@ -15,13 +15,13 @@ export const getAllIssues = createServerFn({ method: 'GET' }).handler(
 
     // Return only issues created by the user or pre-seeded demo data
     const issues = await context.db.query.issuesTable.findMany({
-      where: (issues, { eq, or }) =>
+      where: (issue, { eq: eqOp, or }) =>
         or(
-          eq(issues.user_id, context.user.id),
+          eqOp(issue.user_id, context.user.id),
           // Allow access to demo user's issues for all users
-          eq(issues.username, 'demo')
+          eqOp(issue.username, 'demo')
         ),
-      orderBy: (issues, { asc }) => [asc(issues.created_at)],
+      orderBy: (issue, { asc }) => [asc(issue.created_at)],
     })
 
     return issues
