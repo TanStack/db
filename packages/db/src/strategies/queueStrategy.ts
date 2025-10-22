@@ -16,7 +16,7 @@ import type { Transaction } from "../transactions"
  * @example
  * ```ts
  * // FIFO queue - process in order received
- * const mutate = useSerializedMutations({
+ * const mutate = usePacedMutations({
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
@@ -31,7 +31,7 @@ import type { Transaction } from "../transactions"
  * @example
  * ```ts
  * // LIFO queue - process most recent first
- * const mutate = useSerializedMutations({
+ * const mutate = usePacedMutations({
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },

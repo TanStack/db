@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { debounceStrategy, useSerializedMutations } from "@tanstack/react-db"
+import { debounceStrategy, usePacedMutations } from "@tanstack/react-db"
 import type { FormEvent } from "react"
 import type { Collection, Transaction } from "@tanstack/react-db"
 
@@ -26,10 +26,10 @@ export function TodoApp({
 }: TodoAppProps) {
   const [newTodo, setNewTodo] = useState(``)
 
-  // Use serialized mutations with debounce strategy for color picker if mutationFn provided
+  // Use paced mutations with debounce strategy for color picker if mutationFn provided
   // Waits for 2500ms of inactivity before persisting - only the final value is saved
   const mutateConfig = configMutationFn
-    ? useSerializedMutations({
+    ? usePacedMutations({
         mutationFn: configMutationFn,
         strategy: debounceStrategy({ wait: 2500 }),
       })
@@ -48,7 +48,7 @@ export function TodoApp({
   // Define a helper function to update config values
   const setConfigValue = (key: string, value: string): void => {
     if (mutateConfig) {
-      // Use serialized mutations for updates (optimistic + batched persistence)
+      // Use paced mutations for updates (optimistic + batched persistence)
       mutateConfig(() => {
         for (const config of configData) {
           if (config.key === key) {
