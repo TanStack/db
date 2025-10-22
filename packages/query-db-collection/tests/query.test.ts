@@ -2341,36 +2341,23 @@ describe(`QueryCollection`, () => {
     })
 
     it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
-      const queryKey = [`writeDelete-error-test`]
+      const queryKey = [`writeDelete-in-onDelete-test`]
       const items: Array<TestItem> = [
         { id: `1`, name: `Item 1` },
         { id: `2`, name: `Item 2` },
       ]
 
       const queryFn = vi.fn().mockResolvedValue(items)
-      const executionLog: Array<string> = []
 
       const onDelete = vi.fn(async ({ transaction, collection }) => {
-        executionLog.push(`onDelete started`)
         const deletedItem = transaction.mutations[0]?.original
-
-        // Log the collection state
-        executionLog.push(`collection.has('1'): ${collection.has(`1`)}`)
-        executionLog.push(`collection.size: ${collection.size}`)
-
-        // This is the bug from issue #706:
-        // If the optimistic delete has been applied, collection.has('1') returns false
-        // writeDelete('1') will throw DeleteOperationItemNotFoundError
-        // But the error is silently caught by .catch(() => undefined) in mutations.ts:531
+        // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
-        executionLog.push(`writeDelete succeeded`)
-
-        executionLog.push(`onDelete completed`)
         return { refetch: false }
       })
 
       const config: QueryCollectionConfig<TestItem> = {
-        id: `writeDelete-error-test`,
+        id: `writeDelete-in-onDelete-test`,
         queryClient,
         queryKey,
         queryFn,
@@ -2387,52 +2374,12 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Delete item - this triggers onDelete handler
       const transaction = collection.delete(`1`)
-
-      // Wait for transaction
       await transaction.isPersisted.promise
 
-      executionLog.push(`transaction.state: ${transaction.state}`)
-      executionLog.push(`final collection.has('1'): ${collection.has(`1`)}`)
-      executionLog.push(`final collection.size: ${collection.size}`)
-
-      console.log(`\n=== Execution Log ===`)
-      executionLog.forEach((log) => console.log(log))
-
-      // ============================================================================
-      // FIX FOR Issue #706
-      // ============================================================================
-      // The fix: writeDelete() now checks only the synced store, not the combined
-      // view (synced + optimistic). This allows writeDelete to work correctly even
-      // when called inside handlers where optimistic updates are active.
-      //
-      // Previous bug: writeDelete validated using collection.has() which checks the
-      // combined view. When optimistic delete was applied, collection.has() returned
-      // false, causing writeDelete to throw DeleteOperationItemNotFoundError.
-      //
-      // The fix in manual-sync.ts:
-      // - Changed validation from: ctx.collection.has(op.key)
-      // - To: ctx.collection._state.syncedData.has(op.key)
-      // - This checks only the synced store, ignoring optimistic state
-      //
-      // Now the flow works correctly:
-      // 1. collection.delete('1') creates optimistic delete
-      // 2. Item appears deleted in UI (collection.has('1') = false due to optimistic)
-      // 3. onDelete handler runs
-      // 4. Handler calls writeDelete('1')
-      // 5. writeDelete validates: syncedData.has('1') = true ✓
-      // 6. Synced delete is written successfully
-      // 7. Handler completes with { refetch: false }
-      // 8. Transaction completes successfully
-      // 9. Item stays deleted (both optimistic and synced deletes applied)
-      // ============================================================================
-
-      // Verify the fix works: transaction should complete successfully
+      // Verify the fix: writeDelete should work, transaction completes, item is deleted
       expect(transaction.state).toBe(`completed`)
-      expect(executionLog).toContain(`onDelete started`)
-      expect(executionLog).toContain(`writeDelete succeeded`)
-      expect(executionLog).toContain(`onDelete completed`)
+      expect(onDelete).toHaveBeenCalledTimes(1)
       expect(collection.has(`1`)).toBe(false)
       expect(collection.size).toBe(1)
     })
