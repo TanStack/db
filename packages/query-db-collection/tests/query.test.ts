@@ -2352,11 +2352,12 @@ describe(`QueryCollection`, () => {
       // Track whether execution continues after writeDelete
       const executionLog: Array<string> = []
 
-      const onDelete = vi.fn(async ({ transaction }) => {
+      const onDelete = vi.fn(({ transaction, collection }) => {
         executionLog.push(`onDelete started`)
         const deletedItem = transaction.mutations[0]?.original
 
         // Debug: Check collection state when handler runs
+        executionLog.push(`transaction.state: ${transaction.state}`)
         executionLog.push(`has('1'): ${collection.has(`1`)}`)
         executionLog.push(
           `syncedData.has('1'): ${collection._state.syncedData.has(`1`)}`
@@ -2364,12 +2365,39 @@ describe(`QueryCollection`, () => {
         executionLog.push(
           `optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
         )
-        executionLog.push(`collection.size: ${collection.size}`)
+        executionLog.push(
+          `pendingSyncedTransactions.length (before): ${collection._state.pendingSyncedTransactions.length}`
+        )
 
         // This is the problematic pattern from the issue:
         // User tries to call writeDelete on an already-deleted item
-        collection.utils.writeDelete(deletedItem.id)
-        executionLog.push(`writeDelete succeeded`)
+
+        // Check if sync context exists
+        const hasUtils = !!collection.utils
+        executionLog.push(`hasUtils: ${hasUtils}`)
+
+        // Count persisting transactions
+        const persisting = Array.from(
+          collection._state.transactions.values()
+        ).filter((tx: any) => tx.state === `persisting`).length
+        executionLog.push(`persisting transactions: ${persisting}`)
+
+        try {
+          collection.utils.writeDelete(deletedItem.id)
+          executionLog.push(`writeDelete succeeded`)
+        } catch (error) {
+          executionLog.push(`writeDelete failed: ${error}`)
+        }
+
+        executionLog.push(
+          `pendingSyncedTransactions.length (after): ${collection._state.pendingSyncedTransactions.length}`
+        )
+
+        // Check if any synced transactions were added and removed
+        const allTxs = collection._state.pendingSyncedTransactions
+        executionLog.push(
+          `all pending synced txs: ${JSON.stringify(allTxs.map((t: any) => ({ committed: t.committed, ops: t.operations.length })))}`
+        )
 
         executionLog.push(`onDelete completed`)
       })
@@ -2421,45 +2449,82 @@ describe(`QueryCollection`, () => {
       }))
 
       executionLog.push(
-        `AFTER HANDLER: optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+        `AFTER TX COMPLETE: optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER TX COMPLETE: syncedData.has('1'): ${collection._state.syncedData.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER TX COMPLETE: collection.has('1'): ${collection.has(`1`)}`
       )
 
-      // The bug is that the error is silently caught and execution stops
-      // Expected behavior: The error should be propagated or at least logged
+      // Wait a bit for any async operations to complete
+      await flushPromises()
+      await flushPromises()
+
+      executionLog.push(
+        `AFTER FLUSH: optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER FLUSH: syncedData.has('1'): ${collection._state.syncedData.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER FLUSH: collection.has('1'): ${collection.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER FLUSH: pendingSyncedTransactions.length: ${collection._state.pendingSyncedTransactions.length}`
+      )
+      executionLog.push(
+        `AFTER FLUSH: queryFn call count: ${queryFn.mock.calls.length}`
+      )
 
       // ============================================================================
       // BUG REPRODUCTION: Issue #706
       // ============================================================================
-      // When onDelete runs, the optimistic delete should ALREADY be applied
-      // so that any operations in the handler see the correct collection state.
+      // The bug: writeDelete() is called inside onDelete handler, but the item
+      // reappears after the transaction completes!
       //
-      // However, the current implementation calls commit() BEFORE calling
-      // recomputeOptimisticState(), which means:
-      // 1. commit() starts executing immediately (even though it's async)
-      // 2. The onDelete handler runs BEFORE recomputeOptimisticState()
-      // 3. So optimisticDeletes doesn't contain the deleted item yet
-      // 4. writeDelete('1') succeeds instead of throwing an error
+      // Root cause: The automatic refetch in wrappedOnDelete undoes the synced write
       //
-      // Expected: optimisticDeletes.has('1') should be TRUE when handler runs
-      // Actual: optimisticDeletes.has('1') is FALSE (BUG!)
+      // 1. collection.delete('1') creates transaction and calls commit()
+      // 2. Transaction isn't added to state.transactions yet (line 533 runs after commit)
+      // 3. onDelete handler runs, calls writeDelete('1')
+      // 4. writeDelete sees no persisting transactions, commits synced delete immediately
+      // 5. Item is removed from syncedData ✓
+      // 6. Handler completes
+      // 7. wrappedOnDelete automatically calls refetch() (query.ts line 681)
+      // 8. Refetch restores data from server, overwriting the synced delete ✗
+      // 9. Final result: Item reappears even though writeDelete was called!
+      //
+      // Expected: After transaction completes, item should stay deleted
+      // Actual: Item is restored by automatic refetch (BUG!)
+      //
+      // Related code:
+      // - query.ts:674-686 (wrappedOnDelete with automatic refetch)
+      // - mutations.ts:529-537 (transaction added to state.transactions too late)
+      // - state.ts:462 (commitPendingTransactions checks for persisting transactions)
       // ============================================================================
 
-      // Verify the handler ran
+      // Debug output
+      console.log(`\n=== Execution Log ===`)
+      executionLog.forEach((log) => console.log(log))
+
+      // Verify the handler ran successfully
       expect(executionLog).toContain(`onDelete started`)
+      expect(executionLog).toContain(`onDelete completed`)
 
-      // BUG: The optimistic delete is NOT applied when the handler runs
-      // This assertion will FAIL until the bug is fixed
-      const optimisticDeletesWhenHandlerRan = executionLog.find((log) =>
-        log.includes(`onDelete started`)
-      )
-      const optimisticDeletesCheck =
-        executionLog[executionLog.indexOf(optimisticDeletesWhenHandlerRan!) + 3]
-
-      // THIS IS THE BUG: optimisticDeletes should have '1' but it doesn't!
-      expect(optimisticDeletesCheck).toBe(`optimisticDeletes.has('1'): true`)
-
-      // As a result, writeDelete succeeds when it should throw an error
+      // Verify writeDelete was called
       expect(executionLog).toContain(`writeDelete succeeded`)
+      expect(executionLog).toContain(`transaction.state: persisting`)
+
+      // Verify transaction wasn't in state.transactions when handler ran
+      expect(executionLog).toContain(`persisting transactions: 0`)
+
+      // THIS IS THE BUG: After everything completes, the item should be
+      // deleted from the synced state (because writeDelete was called),
+      // but it's not! The item reappears.
+      expect(collection._state.syncedData.has(`1`)).toBe(false)
+      expect(collection.has(`1`)).toBe(false)
     })
   })
 })
