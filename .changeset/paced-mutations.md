@@ -3,16 +3,16 @@
 "@tanstack/react-db": minor
 ---
 
-Add serialized mutations with pluggable timing strategies
+Add paced mutations with pluggable timing strategies
 
-Introduces a new serialized mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend.
+Introduces a new paced mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend.
 
 **Core Features:**
 
 - **Pluggable Strategy System**: Choose from debounce, queue, or throttle strategies to control mutation timing
 - **Auto-merging Mutations**: Multiple rapid mutations on the same item automatically merge for efficiency
 - **Transaction Management**: Full transaction lifecycle tracking (pending → persisting → completed/failed)
-- **React Hook**: `useSerializedMutations` for easy integration in React applications
+- **React Hook**: `usePacedMutations` for easy integration in React applications
 
 **Available Strategies:**
 
@@ -23,9 +23,9 @@ Introduces a new serialized mutations system that enables optimistic mutations w
 **Example Usage:**
 
 ```ts
-import { useSerializedMutations, debounceStrategy } from "@tanstack/react-db"
+import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
 
-const mutate = useSerializedMutations({
+const mutate = usePacedMutations({
   mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },

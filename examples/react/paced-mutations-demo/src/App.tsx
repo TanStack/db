@@ -5,7 +5,7 @@ import {
   debounceStrategy,
   queueStrategy,
   throttleStrategy,
-  useSerializedMutations,
+  usePacedMutations,
 } from "@tanstack/react-db"
 import type { PendingMutation, Transaction } from "@tanstack/react-db"
 
@@ -155,8 +155,8 @@ export function App() {
     []
   )
 
-  // Create the serialized mutations hook
-  const mutate = useSerializedMutations({
+  // Create the paced mutations hook
+  const mutate = usePacedMutations({
     mutationFn,
     strategy,
   })
@@ -229,7 +229,7 @@ export function App() {
 
   return (
     <div className="app">
-      <h1>Serialized Mutations Demo</h1>
+      <h1>Paced Mutations Demo</h1>
       <p className="subtitle">
         Drag the slider to trigger mutations and see how different strategies
         batch, queue, and persist changes

@@ -6,7 +6,7 @@ import {
   queueStrategy,
   throttleStrategy,
 } from "@tanstack/db"
-import { useSerializedMutations } from "../src/useSerializedMutations"
+import { usePacedMutations } from "../src/usePacedMutations"
 import { mockSyncCollectionOptionsNoInitialState } from "../../db/tests/utils"
 
 type Item = {
@@ -14,12 +14,12 @@ type Item = {
   value: number
 }
 
-describe(`useSerializedMutations with debounce strategy`, () => {
+describe(`usePacedMutations with debounce strategy`, () => {
   it(`should batch multiple rapid mutations into a single transaction`, async () => {
     const mutationFn = vi.fn(async () => {})
 
     const { result } = renderHook(() =>
-      useSerializedMutations({
+      usePacedMutations({
         mutationFn,
         strategy: debounceStrategy({ wait: 50 }),
       })
@@ -102,7 +102,7 @@ describe(`useSerializedMutations with debounce strategy`, () => {
     const mutationFn = vi.fn(async () => {})
 
     const { result } = renderHook(() =>
-      useSerializedMutations({
+      usePacedMutations({
         mutationFn,
         strategy: debounceStrategy({ wait: 50 }),
       })
@@ -161,7 +161,7 @@ describe(`useSerializedMutations with debounce strategy`, () => {
   })
 })
 
-describe(`useSerializedMutations with queue strategy`, () => {
+describe(`usePacedMutations with queue strategy`, () => {
   it(`should accumulate mutations then process sequentially`, async () => {
     const mutationFn = vi.fn(async () => {
       // Quick execution
@@ -169,7 +169,7 @@ describe(`useSerializedMutations with queue strategy`, () => {
     })
 
     const { result } = renderHook(() =>
-      useSerializedMutations({
+      usePacedMutations({
         mutationFn,
         strategy: queueStrategy({ wait: 10 }),
       })
@@ -213,12 +213,12 @@ describe(`useSerializedMutations with queue strategy`, () => {
   })
 })
 
-describe(`useSerializedMutations with throttle strategy`, () => {
+describe(`usePacedMutations with throttle strategy`, () => {
   it(`should throttle mutations with leading and trailing execution`, async () => {
     const mutationFn = vi.fn(async () => {})
 
     const { result } = renderHook(() =>
-      useSerializedMutations({
+      usePacedMutations({
         mutationFn,
         strategy: throttleStrategy({
           wait: 100,
@@ -293,7 +293,7 @@ describe(`useSerializedMutations with throttle strategy`, () => {
     const mutationFn = vi.fn(async () => {})
 
     const { result } = renderHook(() =>
-      useSerializedMutations({
+      usePacedMutations({
         mutationFn,
         strategy: throttleStrategy({
           wait: 50,

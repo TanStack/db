@@ -3,9 +3,9 @@ import type { Transaction, TransactionConfig } from "./types"
 import type { Strategy } from "./strategies/types"
 
 /**
- * Configuration for creating a serialized mutations manager
+ * Configuration for creating a paced mutations manager
  */
-export interface SerializedMutationsConfig<
+export interface PacedMutationsConfig<
   T extends object = Record<string, unknown>,
 > extends Omit<TransactionConfig<T>, `autoCommit`> {
   /**
@@ -16,7 +16,7 @@ export interface SerializedMutationsConfig<
 }
 
 /**
- * Creates a serialized mutations manager with pluggable timing strategies.
+ * Creates a paced mutations manager with pluggable timing strategies.
  *
  * This function provides a way to control when and how optimistic mutations
  * are persisted to the backend, using strategies like debouncing, queuing,
@@ -32,7 +32,7 @@ export interface SerializedMutationsConfig<
  * @example
  * ```ts
  * // Debounced mutations for auto-save
- * const { mutate, cleanup } = createSerializedMutations({
+ * const { mutate, cleanup } = createPacedMutations({
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
@@ -54,7 +54,7 @@ export interface SerializedMutationsConfig<
  * @example
  * ```ts
  * // Queue strategy for sequential processing
- * const { mutate } = createSerializedMutations({
+ * const { mutate } = createPacedMutations({
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
@@ -66,10 +66,10 @@ export interface SerializedMutationsConfig<
  * })
  * ```
  */
-export function createSerializedMutations<
+export function createPacedMutations<
   T extends object = Record<string, unknown>,
 >(
-  config: SerializedMutationsConfig<T>
+  config: PacedMutationsConfig<T>
 ): {
   mutate: (callback: () => void) => Transaction<T>
 } {

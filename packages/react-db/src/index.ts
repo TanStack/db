@@ -1,6 +1,6 @@
 // Re-export all public APIs
 export * from "./useLiveQuery"
-export * from "./useSerializedMutations"
+export * from "./usePacedMutations"
 export * from "./useLiveInfiniteQuery"
 
 // Re-export everything from @tanstack/db

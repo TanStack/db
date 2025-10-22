@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from "react"
-import { createSerializedMutations } from "@tanstack/db"
-import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
+import { createPacedMutations } from "@tanstack/db"
+import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
 
 /**
- * React hook for managing serialized mutations with timing strategies.
+ * React hook for managing paced mutations with timing strategies.
  *
  * Provides optimistic mutations with pluggable strategies like debouncing,
  * queuing, or throttling. Each call to `mutate` creates mutations that are
@@ -16,7 +16,7 @@ import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
  * ```tsx
  * // Debounced auto-save
  * function AutoSaveForm() {
- *   const mutate = useSerializedMutations({
+ *   const mutate = usePacedMutations({
  *     mutationFn: async ({ transaction }) => {
  *       await api.save(transaction.mutations)
  *     },
@@ -47,7 +47,7 @@ import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
  * ```tsx
  * // Throttled slider updates
  * function VolumeSlider() {
- *   const mutate = useSerializedMutations({
+ *   const mutate = usePacedMutations({
  *     mutationFn: async ({ transaction }) => {
  *       await api.updateVolume(transaction.mutations)
  *     },
@@ -70,7 +70,7 @@ import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
  * ```tsx
  * // Debounce with leading/trailing for color picker (persist first + final only)
  * function ColorPicker() {
- *   const mutate = useSerializedMutations({
+ *   const mutate = usePacedMutations({
  *     mutationFn: async ({ transaction }) => {
  *       await api.updateTheme(transaction.mutations)
  *     },
@@ -92,14 +92,12 @@ import type { SerializedMutationsConfig, Transaction } from "@tanstack/db"
  * }
  * ```
  */
-export function useSerializedMutations<
-  T extends object = Record<string, unknown>,
->(
-  config: SerializedMutationsConfig<T>
+export function usePacedMutations<T extends object = Record<string, unknown>>(
+  config: PacedMutationsConfig<T>
 ): (callback: () => void) => Transaction<T> {
-  // Create serialized mutations instance with proper dependency tracking
+  // Create paced mutations instance with proper dependency tracking
   const { mutate } = useMemo(() => {
-    return createSerializedMutations<T>(config)
+    return createPacedMutations<T>(config)
     // Include all config properties in dependencies
     // Strategy changes will recreate the instance
   }, [config.mutationFn, config.metadata, config.strategy, config.id])
