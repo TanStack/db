@@ -554,22 +554,6 @@ export class StorageKeyRequiredError extends LocalStorageCollectionError {
   }
 }
 
-export class NoStorageAvailableError extends LocalStorageCollectionError {
-  constructor() {
-    super(
-      `[LocalStorageCollection] No storage available. Please provide a storage option or ensure window.localStorage is available.`
-    )
-  }
-}
-
-export class NoStorageEventApiError extends LocalStorageCollectionError {
-  constructor() {
-    super(
-      `[LocalStorageCollection] No storage event API available. Please provide a storageEventApi option or ensure window is available.`
-    )
-  }
-}
-
 export class InvalidStorageDataFormatError extends LocalStorageCollectionError {
   constructor(storageKey: string, key: string) {
     super(

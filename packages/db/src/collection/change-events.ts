@@ -3,15 +3,20 @@ import {
   toExpression,
 } from "../query/builder/ref-proxy"
 import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
-import { optimizeExpressionWithIndexes } from "../utils/index-optimization.js"
+import {
+  findIndexForField,
+  optimizeExpressionWithIndexes,
+} from "../utils/index-optimization.js"
+import { ensureIndexForField } from "../indexes/auto-index.js"
+import { makeComparator } from "../utils/comparison.js"
 import type {
   ChangeMessage,
   CurrentStateAsChangesOptions,
   SubscribeChangesOptions,
 } from "../types"
-import type { Collection } from "./index.js"
+import type { Collection, CollectionImpl } from "./index.js"
 import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { BasicExpression } from "../query/ir.js"
+import type { BasicExpression, OrderBy } from "../query/ir.js"
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -28,7 +33,7 @@ export interface CollectionLike<
 /**
  * Returns the current state of the collection as an array of changes
  * @param collection - The collection to get changes from
- * @param options - Options including optional where filter
+ * @param options - Options including optional where filter, orderBy, and limit
  * @returns An array of changes
  * @example
  * // Get all items as changes
@@ -41,7 +46,19 @@ export interface CollectionLike<
  *
  * // Get only items using a pre-compiled expression
  * const activeChanges = currentStateAsChanges(collection, {
- *   whereExpression: eq(row.status, 'active')
+ *   where: eq(row.status, 'active')
+ * })
+ *
+ * // Get items ordered by name with limit
+ * const topUsers = currentStateAsChanges(collection, {
+ *   orderBy: [{ expression: row.name, compareOptions: { direction: 'asc' } }],
+ *   limit: 10
+ * })
+ *
+ * // Get active users ordered by score (highest score first)
+ * const topActiveUsers = currentStateAsChanges(collection, {
+ *   where: eq(row.status, 'active'),
+ *   orderBy: [{ expression: row.score, compareOptions: { direction: 'desc' } }],
  * })
  */
 export function currentStateAsChanges<
@@ -69,9 +86,48 @@ export function currentStateAsChanges<
     return result
   }
 
-  // TODO: handle orderBy and limit options
-  //       by calling optimizeOrderedLimit
+  // Validate that limit without orderBy doesn't happen
+  if (options.limit !== undefined && !options.orderBy) {
+    throw new Error(`limit cannot be used without orderBy`)
+  }
 
+  // First check if orderBy is present (optionally with limit)
+  if (options.orderBy) {
+    // Create where filter function if present
+    const whereFilter = options.where
+      ? createFilterFunctionFromExpression(options.where)
+      : undefined
+
+    // Get ordered keys using index optimization when possible
+    const orderedKeys = getOrderedKeys(
+      collection,
+      options.orderBy,
+      options.limit,
+      whereFilter,
+      options.optimizedOnly
+    )
+
+    if (orderedKeys === undefined) {
+      // `getOrderedKeys` returned undefined because we asked for `optimizedOnly` and there was no index to use
+      return
+    }
+
+    // Convert keys to change messages
+    const result: Array<ChangeMessage<T>> = []
+    for (const key of orderedKeys) {
+      const value = collection.get(key)
+      if (value !== undefined) {
+        result.push({
+          type: `insert`,
+          key,
+          value,
+        })
+      }
+    }
+    return result
+  }
+
+  // If no orderBy OR orderBy optimization failed, use where clause optimization
   if (!options.where) {
     // No filtering, return all items
     return collectFilteredResults()
@@ -244,5 +300,123 @@ export function createFilteredCallback<T extends object>(
     if (filteredChanges.length > 0 || changes.length === 0) {
       originalCallback(filteredChanges)
     }
+  }
+}
+
+/**
+ * Gets ordered keys from a collection using index optimization when possible
+ * @param collection - The collection to get keys from
+ * @param orderBy - The order by clause
+ * @param limit - Optional limit on number of keys to return
+ * @param whereFilter - Optional filter function to apply while traversing
+ * @returns Array of keys in sorted order
+ */
+function getOrderedKeys<T extends object, TKey extends string | number>(
+  collection: CollectionLike<T, TKey>,
+  orderBy: OrderBy,
+  limit?: number,
+  whereFilter?: (item: T) => boolean,
+  optimizedOnly?: boolean
+): Array<TKey> | undefined {
+  // For single-column orderBy on a ref expression, try index optimization
+  if (orderBy.length === 1) {
+    const clause = orderBy[0]!
+    const orderByExpression = clause.expression
+
+    if (orderByExpression.type === `ref`) {
+      const propRef = orderByExpression
+      const fieldPath = propRef.path
+
+      // Ensure index exists for this field
+      ensureIndexForField(
+        fieldPath[0]!,
+        fieldPath,
+        collection as CollectionImpl<T, TKey>,
+        clause.compareOptions
+      )
+
+      // Find the index
+      const index = findIndexForField(
+        collection.indexes,
+        fieldPath,
+        clause.compareOptions
+      )
+
+      if (index && index.supports(`gt`)) {
+        // Use index optimization
+        const filterFn = (key: TKey): boolean => {
+          const value = collection.get(key)
+          if (value === undefined) {
+            return false
+          }
+          return whereFilter?.(value) ?? true
+        }
+
+        // Take the keys that match the filter and limit
+        // if no limit is provided `index.keyCount` is used,
+        // i.e. we will take all keys that match the filter
+        return index.take(limit ?? index.keyCount, undefined, filterFn)
+      }
+    }
+  }
+
+  if (optimizedOnly) {
+    return
+  }
+
+  // Fallback: collect all items and sort in memory
+  const allItems: Array<{ key: TKey; value: T }> = []
+  for (const [key, value] of collection.entries()) {
+    if (whereFilter?.(value) ?? true) {
+      allItems.push({ key, value })
+    }
+  }
+
+  // Sort using makeComparator
+  const compare = (a: { key: TKey; value: T }, b: { key: TKey; value: T }) => {
+    for (const clause of orderBy) {
+      const compareFn = makeComparator(clause.compareOptions)
+
+      // Extract values for comparison
+      const aValue = extractValueFromItem(a.value, clause.expression)
+      const bValue = extractValueFromItem(b.value, clause.expression)
+
+      const result = compareFn(aValue, bValue)
+      if (result !== 0) {
+        return result
+      }
+    }
+    return 0
+  }
+
+  allItems.sort(compare)
+  const sortedKeys = allItems.map((item) => item.key)
+
+  // Apply limit if provided
+  if (limit !== undefined) {
+    return sortedKeys.slice(0, limit)
+  }
+
+  // if no limit is provided, we will return all keys
+  return sortedKeys
+}
+
+/**
+ * Helper function to extract a value from an item based on an expression
+ */
+function extractValueFromItem(item: any, expression: BasicExpression): any {
+  if (expression.type === `ref`) {
+    const propRef = expression
+    let value = item
+    for (const pathPart of propRef.path) {
+      value = value?.[pathPart]
+    }
+    return value
+  } else if (expression.type === `val`) {
+    return expression.value
+  } else {
+    // It must be a function
+    const evaluator = compileSingleRowExpression(expression)
+    return evaluator(item as Record<string, unknown>)
   }
 }
