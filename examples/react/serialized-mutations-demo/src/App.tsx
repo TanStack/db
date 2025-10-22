@@ -46,11 +46,19 @@ const itemCollection = createCollection<Item>({
       serverEmitter.on(`*`, (_, changes: Array<PendingMutation<Item>>) => {
         begin()
         changes.forEach((change) => {
-          write({
-            type: change.type,
-            // @ts-expect-error pending mutation type
-            value: change.changes,
-          })
+          if (change.type === `update`) {
+            write({
+              type: change.type,
+              // @ts-expect-error pending mutation type
+              value: change.modified,
+            })
+          } else {
+            write({
+              type: change.type,
+              // @ts-expect-error pending mutation type
+              value: change.changes,
+            })
+          }
         })
         commit()
       })
@@ -129,7 +137,7 @@ export function App() {
           const item = mutation.changes as Item
           fakeServer.set(item.id, item)
         } else if (mutation.type === `update`) {
-          const item = mutation.changes as Item
+          const item = mutation.modified as Item
           fakeServer.set(item.id, item)
         } else {
           // delete
@@ -247,12 +255,6 @@ export function App() {
         <div className="stat-card">
           <div className="stat-value">{syncedState.value}</div>
           <div className="stat-label">Synced Value</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-value">
-            {(optimisticState?.value ?? 0) - syncedState.value}
-          </div>
-          <div className="stat-label">Delta</div>
         </div>
       </div>
 
@@ -390,7 +392,7 @@ export function App() {
             </div>
           ) : (
             <div className="transaction-list">
-              {transactions.map((tracked) => (
+              {[...transactions].reverse().map((tracked) => (
                 <div
                   key={tracked.id}
                   className={`transaction-card ${tracked.state}`}
