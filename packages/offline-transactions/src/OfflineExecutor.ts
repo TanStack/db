@@ -38,6 +38,7 @@ import type { Transaction } from "@tanstack/db"
 export class OfflineExecutor {
   private config: OfflineConfig
 
+  // @ts-expect-error - Set during async initialization in initialize()
   private storage: StorageAdapter | null
   private outbox: OutboxManager | null
   private scheduler: KeyScheduler
