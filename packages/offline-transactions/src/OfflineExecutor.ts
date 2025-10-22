@@ -28,22 +28,29 @@ import type {
   CreateOfflineTransactionOptions,
   LeaderElection,
   OfflineConfig,
+  OfflineMode,
   OfflineTransaction,
   StorageAdapter,
+  StorageDiagnostic,
 } from "./types"
 import type { Transaction } from "@tanstack/db"
 
 export class OfflineExecutor {
   private config: OfflineConfig
-  private storage: StorageAdapter
-  private outbox: OutboxManager
+
+  private storage: StorageAdapter | null
+  private outbox: OutboxManager | null
   private scheduler: KeyScheduler
-  private executor: TransactionExecutor
-  private leaderElection: LeaderElection
+  private executor: TransactionExecutor | null
+  private leaderElection: LeaderElection | null
   private onlineDetector: DefaultOnlineDetector
   private isLeaderState = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
+
+  // Public diagnostic properties
+  public readonly mode: OfflineMode
+  public readonly storageDiagnostic: StorageDiagnostic
 
   // Coordination mechanism for blocking transactions
   private pendingTransactionPromises: Map<
@@ -57,35 +64,103 @@ export class OfflineExecutor {
 
   constructor(config: OfflineConfig) {
     this.config = config
-    this.storage = this.createStorage()
-    this.outbox = new OutboxManager(this.storage, this.config.collections)
     this.scheduler = new KeyScheduler()
-    this.executor = new TransactionExecutor(
-      this.scheduler,
-      this.outbox,
-      this.config,
-      this
-    )
-    this.leaderElection = this.createLeaderElection()
     this.onlineDetector = new DefaultOnlineDetector()
 
-    this.setupEventListeners()
+    // Initialize as pending - will be set by async initialization
+    this.storage = null
+    this.outbox = null
+    this.executor = null
+    this.leaderElection = null
+
+    // Temporary diagnostic - will be updated by async initialization
+    this.mode = `offline`
+    this.storageDiagnostic = {
+      code: `STORAGE_AVAILABLE`,
+      mode: `offline`,
+      message: `Initializing storage...`,
+    }
+
     this.initialize()
   }
 
-  private createStorage(): StorageAdapter {
+  /**
+   * Probe storage availability and create appropriate adapter.
+   * Returns null if no storage is available (online-only mode).
+   */
+  private async createStorage(): Promise<{
+    storage: StorageAdapter | null
+    diagnostic: StorageDiagnostic
+  }> {
+    // If user provided custom storage, use it without probing
     if (this.config.storage) {
-      return this.config.storage
+      return {
+        storage: this.config.storage,
+        diagnostic: {
+          code: `STORAGE_AVAILABLE`,
+          mode: `offline`,
+          message: `Using custom storage adapter`,
+        },
+      }
     }
 
-    try {
-      return new IndexedDBAdapter()
-    } catch (error) {
-      console.warn(
-        `IndexedDB not available, falling back to localStorage:`,
-        error
-      )
-      return new LocalStorageAdapter()
+    // Probe IndexedDB first
+    const idbProbe = await IndexedDBAdapter.probe()
+    if (idbProbe.available) {
+      return {
+        storage: new IndexedDBAdapter(),
+        diagnostic: {
+          code: `STORAGE_AVAILABLE`,
+          mode: `offline`,
+          message: `Using IndexedDB for offline storage`,
+        },
+      }
+    }
+
+    // IndexedDB failed, try localStorage
+    const lsProbe = LocalStorageAdapter.probe()
+    if (lsProbe.available) {
+      return {
+        storage: new LocalStorageAdapter(),
+        diagnostic: {
+          code: `INDEXEDDB_UNAVAILABLE`,
+          mode: `offline`,
+          message: `IndexedDB unavailable, using localStorage fallback`,
+          error: idbProbe.error,
+        },
+      }
+    }
+
+    // Both failed - determine the diagnostic code
+    const isSecurityError =
+      idbProbe.error?.name === `SecurityError` ||
+      lsProbe.error?.name === `SecurityError`
+    const isQuotaError =
+      idbProbe.error?.name === `QuotaExceededError` ||
+      lsProbe.error?.name === `QuotaExceededError`
+
+    let code: StorageDiagnostic[`code`]
+    let message: string
+
+    if (isSecurityError) {
+      code = `STORAGE_BLOCKED`
+      message = `Storage blocked (private mode or security restrictions). Running in online-only mode.`
+    } else if (isQuotaError) {
+      code = `QUOTA_EXCEEDED`
+      message = `Storage quota exceeded. Running in online-only mode.`
+    } else {
+      code = `UNKNOWN_ERROR`
+      message = `Storage unavailable due to unknown error. Running in online-only mode.`
+    }
+
+    return {
+      storage: null,
+      diagnostic: {
+        code,
+        mode: `online-only`,
+        message,
+        error: idbProbe.error || lsProbe.error,
+      },
     }
   }
 
@@ -110,22 +185,25 @@ export class OfflineExecutor {
   }
 
   private setupEventListeners(): void {
-    this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
-      (isLeader) => {
-        this.isLeaderState = isLeader
+    // Only set up leader election listeners if we have storage
+    if (this.leaderElection) {
+      this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
+        (isLeader) => {
+          this.isLeaderState = isLeader
 
-        if (this.config.onLeadershipChange) {
-          this.config.onLeadershipChange(isLeader)
-        }
+          if (this.config.onLeadershipChange) {
+            this.config.onLeadershipChange(isLeader)
+          }
 
-        if (isLeader) {
-          this.loadAndReplayTransactions()
+          if (isLeader) {
+            this.loadAndReplayTransactions()
+          }
         }
-      }
-    )
+      )
+    }
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
-      if (this.isOfflineEnabled) {
+      if (this.isOfflineEnabled && this.executor) {
         // Reset retry delays so transactions can execute immediately when back online
         this.executor.resetRetryDelays()
         this.executor.executeAll().catch((error) => {
@@ -141,19 +219,59 @@ export class OfflineExecutor {
   private async initialize(): Promise<void> {
     return withSpan(`executor.initialize`, {}, async (span) => {
       try {
+        // Probe storage and create adapter
+        const { storage, diagnostic } = await this.createStorage()
+
+        // Cast to writable to set readonly properties
+        ;(this as any).storage = storage
+        ;(this as any).storageDiagnostic = diagnostic
+        ;(this as any).mode = diagnostic.mode
+
+        span.setAttribute(`storage.mode`, diagnostic.mode)
+        span.setAttribute(`storage.code`, diagnostic.code)
+
+        if (!storage) {
+          // Online-only mode - notify callback and skip offline setup
+          if (this.config.onStorageFailure) {
+            this.config.onStorageFailure(diagnostic)
+          }
+          span.setAttribute(`result`, `online-only`)
+          return
+        }
+
+        // Storage available - set up offline components
+        this.outbox = new OutboxManager(storage, this.config.collections)
+        this.executor = new TransactionExecutor(
+          this.scheduler,
+          this.outbox,
+          this.config,
+          this
+        )
+        this.leaderElection = this.createLeaderElection()
+
+        // Set up event listeners now that components are ready
+        this.setupEventListeners()
+
+        // Request leadership and replay transactions if leader
         const isLeader = await this.leaderElection.requestLeadership()
         span.setAttribute(`isLeader`, isLeader)
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
         }
+        span.setAttribute(`result`, `offline-enabled`)
       } catch (error) {
         console.warn(`Failed to initialize offline executor:`, error)
+        span.setAttribute(`result`, `failed`)
       }
     })
   }
 
   private async loadAndReplayTransactions(): Promise<void> {
+    if (!this.executor) {
+      return
+    }
+
     try {
       await this.executor.loadPendingTransactions()
       await this.executor.executeAll()
@@ -163,7 +281,7 @@ export class OfflineExecutor {
   }
 
   get isOfflineEnabled(): boolean {
-    return this.isLeaderState
+    return this.mode === `offline` && this.isLeaderState
   }
 
   createOfflineTransaction(
@@ -244,7 +362,7 @@ export class OfflineExecutor {
         "transaction.mutationFnName": transaction.mutationFnName,
       },
       async (span) => {
-        if (!this.isOfflineEnabled) {
+        if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
           span.setAttribute(`result`, `skipped_not_leader`)
           this.resolveTransaction(transaction.id, undefined)
           return
@@ -307,14 +425,23 @@ export class OfflineExecutor {
   }
 
   async removeFromOutbox(id: string): Promise<void> {
+    if (!this.outbox) {
+      return
+    }
     await this.outbox.remove(id)
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {
+    if (!this.outbox) {
+      return []
+    }
     return this.outbox.getAll()
   }
 
   async clearOutbox(): Promise<void> {
+    if (!this.outbox || !this.executor) {
+      return
+    }
     await this.outbox.clear()
     this.executor.clear()
   }
@@ -324,10 +451,16 @@ export class OfflineExecutor {
   }
 
   getPendingCount(): number {
+    if (!this.executor) {
+      return 0
+    }
     return this.executor.getPendingCount()
   }
 
   getRunningCount(): number {
+    if (!this.executor) {
+      return 0
+    }
     return this.executor.getRunningCount()
   }
 
@@ -346,12 +479,15 @@ export class OfflineExecutor {
       this.unsubscribeLeadership = null
     }
 
-    this.leaderElection.releaseLeadership()
-    this.onlineDetector.dispose()
+    if (this.leaderElection) {
+      this.leaderElection.releaseLeadership()
 
-    if (`dispose` in this.leaderElection) {
-      ;(this.leaderElection as any).dispose()
+      if (`dispose` in this.leaderElection) {
+        ;(this.leaderElection as any).dispose()
+      }
     }
+
+    this.onlineDetector.dispose()
   }
 }
 

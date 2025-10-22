@@ -69,6 +69,24 @@ export interface SerializedOfflineTransaction {
   version: 1
 }
 
+// Storage diagnostics and mode
+export type OfflineMode = `offline` | `online-only`
+
+export type StorageDiagnosticCode =
+  | `STORAGE_AVAILABLE`
+  | `INDEXEDDB_UNAVAILABLE`
+  | `LOCALSTORAGE_UNAVAILABLE`
+  | `STORAGE_BLOCKED`
+  | `QUOTA_EXCEEDED`
+  | `UNKNOWN_ERROR`
+
+export interface StorageDiagnostic {
+  code: StorageDiagnosticCode
+  mode: OfflineMode
+  message: string
+  error?: Error
+}
+
 export interface OfflineConfig {
   collections: Record<string, Collection>
   mutationFns: Record<string, OfflineMutationFn>
@@ -80,6 +98,7 @@ export interface OfflineConfig {
   ) => Array<OfflineTransaction>
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
+  onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
   otel?: {
     endpoint: string

@@ -8,6 +8,44 @@ export class LocalStorageAdapter extends BaseStorageAdapter {
     this.prefix = prefix
   }
 
+  /**
+   * Probe localStorage availability by attempting a test write.
+   * This catches private mode and other restrictions that block localStorage.
+   */
+  static probe(): { available: boolean; error?: Error } {
+    // Check if localStorage exists
+    if (typeof localStorage === `undefined`) {
+      return {
+        available: false,
+        error: new Error(`localStorage is not available in this environment`),
+      }
+    }
+
+    // Try to actually write/read/delete to verify it works
+    try {
+      const testKey = `__offline-tx-probe__`
+      const testValue = `test`
+
+      localStorage.setItem(testKey, testValue)
+      const retrieved = localStorage.getItem(testKey)
+      localStorage.removeItem(testKey)
+
+      if (retrieved !== testValue) {
+        return {
+          available: false,
+          error: new Error(`localStorage read/write verification failed`),
+        }
+      }
+
+      return { available: true }
+    } catch (error) {
+      return {
+        available: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      }
+    }
+  }
+
   private getKey(key: string): string {
     return `${this.prefix}${key}`
   }

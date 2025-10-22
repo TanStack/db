@@ -261,8 +261,22 @@ export async function createIndexedDBOfflineExecutor(otel?: {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
     },
+    onStorageFailure: (diagnostic) => {
+      console.warn(
+        `Storage initialization failed - running in online-only mode:`,
+        {
+          code: diagnostic.code,
+          message: diagnostic.message,
+          error: diagnostic.error,
+        }
+      )
+    },
     otel,
   })
+
+  // Log diagnostic information
+  console.log(`Offline executor mode:`, executor.mode)
+  console.log(`Storage diagnostic:`, executor.storageDiagnostic)
 
   // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
   if (otel?.endpoint) {
@@ -295,8 +309,22 @@ export async function createLocalStorageOfflineExecutor(otel?: {
         console.warn(`Running in online-only mode (another tab is the leader)`)
       }
     },
+    onStorageFailure: (diagnostic) => {
+      console.warn(
+        `Storage initialization failed - running in online-only mode:`,
+        {
+          code: diagnostic.code,
+          message: diagnostic.message,
+          error: diagnostic.error,
+        }
+      )
+    },
     otel,
   })
+
+  // Log diagnostic information
+  console.log(`Offline executor mode:`, executor.mode)
+  console.log(`Storage diagnostic:`, executor.storageDiagnostic)
 
   // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
   if (otel?.endpoint) {

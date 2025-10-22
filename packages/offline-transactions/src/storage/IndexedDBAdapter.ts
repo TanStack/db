@@ -11,6 +11,53 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
     this.storeName = storeName
   }
 
+  /**
+   * Probe IndexedDB availability by attempting to open a test database.
+   * This catches private mode and other restrictions that block IndexedDB.
+   */
+  static async probe(): Promise<{ available: boolean; error?: Error }> {
+    // Check if IndexedDB exists
+    if (typeof indexedDB === `undefined`) {
+      return {
+        available: false,
+        error: new Error(`IndexedDB is not available in this environment`),
+      }
+    }
+
+    // Try to actually open a test database to verify it works
+    try {
+      const testDbName = `__offline-tx-probe__`
+      const request = indexedDB.open(testDbName, 1)
+
+      return new Promise((resolve) => {
+        request.onerror = () => {
+          const error = request.error || new Error(`IndexedDB open failed`)
+          resolve({ available: false, error })
+        }
+
+        request.onsuccess = () => {
+          // Clean up test database
+          const db = request.result
+          db.close()
+          indexedDB.deleteDatabase(testDbName)
+          resolve({ available: true })
+        }
+
+        request.onblocked = () => {
+          resolve({
+            available: false,
+            error: new Error(`IndexedDB is blocked`),
+          })
+        }
+      })
+    } catch (error) {
+      return {
+        available: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      }
+    }
+  }
+
   private async openDB(): Promise<IDBDatabase> {
     if (this.db) {
       return this.db
