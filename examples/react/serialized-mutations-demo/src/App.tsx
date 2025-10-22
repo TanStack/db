@@ -11,7 +11,7 @@ import type { PendingMutation, Transaction } from "@tanstack/react-db"
 
 interface Item {
   id: number
-  value: string
+  value: number
   timestamp: number
 }
 
@@ -73,7 +73,7 @@ type StrategyType = `debounce` | `queue` | `throttle`
 
 export function App() {
   const [strategyType, setStrategyType] = useState<StrategyType>(`debounce`)
-  const [wait, setWait] = useState(1000)
+  const [wait, setWait] = useState(300)
   const [leading, setLeading] = useState(false)
   const [trailing, setTrailing] = useState(true)
 
@@ -153,11 +153,11 @@ export function App() {
     strategy,
   })
 
-  // Trigger a mutation
-  const triggerMutation = () => {
+  // Trigger a mutation with a specific value
+  const triggerMutation = (newValue: number) => {
     const tx = mutate(() => {
       itemCollection.update(1, (draft) => {
-        draft.value += 1
+        draft.value = newValue
         draft.timestamp = Date.now()
       })
     })
@@ -235,8 +235,8 @@ export function App() {
     <div className="app">
       <h1>Serialized Mutations Demo</h1>
       <p className="subtitle">
-        Test different strategies and see how mutations are queued, executed,
-        and persisted
+        Drag the slider to trigger mutations and see how different strategies
+        batch, queue, and persist changes
       </p>
 
       <div className="stats">
@@ -322,22 +322,33 @@ export function App() {
             </>
           )}
 
-          <div className="action-buttons">
-            <button className="btn-primary" onClick={triggerMutation}>
-              Trigger Mutation
-            </button>
-            <button
-              className="btn-secondary"
-              onClick={() => {
-                for (let i = 0; i < 5; i++) {
-                  setTimeout(triggerMutation, i * 100)
-                }
+          <div className="control-group">
+            <label>Slider Value: {optimisticState?.value ?? 0}</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={optimisticState?.value ?? 0}
+              onChange={(e) => triggerMutation(Number(e.target.value))}
+              style={{ width: `100%` }}
+            />
+            <div
+              style={{
+                display: `flex`,
+                justifyContent: `space-between`,
+                fontSize: `12px`,
+                color: `#999`,
               }}
             >
-              Trigger 5 Rapid Mutations
-            </button>
+              <span>0</span>
+              <span>50</span>
+              <span>100</span>
+            </div>
+          </div>
+
+          <div className="action-buttons">
             <button className="btn-danger" onClick={clearHistory}>
-              Clear History
+              Reset to 0
             </button>
           </div>
 
@@ -375,7 +386,7 @@ export function App() {
 
           {transactions.length === 0 ? (
             <div className="empty-state">
-              No mutations yet. Click "Trigger Mutation" to start!
+              No mutations yet. Drag the slider to start!
             </div>
           ) : (
             <div className="transaction-list">
@@ -434,10 +445,7 @@ export function App() {
                         return (
                           <div key={idx} className="mutation">
                             <span className="mutation-type">{mut.type}</span>
-                            <>
-                              : value {item.value - 1} →{` `}
-                              {item.value}
-                            </>
+                            <>: value = {item.value}</>
                           </div>
                         )
                       }
