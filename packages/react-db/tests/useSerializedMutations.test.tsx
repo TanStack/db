@@ -69,8 +69,8 @@ describe(`useSerializedMutations with debounce strategy`, () => {
     expect(tx2).toBe(tx3)
 
     // Mutations get auto-merged (insert + updates on same key = single insert with final value)
-    expect(tx1.mutations).toHaveLength(1)
-    expect(tx1.mutations[0]).toMatchObject({
+    expect(tx1!.mutations).toHaveLength(1)
+    expect(tx1!.mutations[0]).toMatchObject({
       type: `insert`,
       changes: { id: 1, value: 3 }, // Final merged value
     })
@@ -95,7 +95,7 @@ describe(`useSerializedMutations with debounce strategy`, () => {
     })
 
     // Transaction should be completed
-    expect(tx1.state).toBe(`completed`)
+    expect(tx1!.state).toBe(`completed`)
   })
 
   it(`should reset debounce timer on each new mutation`, async () => {
@@ -154,7 +154,10 @@ describe(`useSerializedMutations with debounce strategy`, () => {
 
     // NOW mutationFn should have been called
     expect(mutationFn).toHaveBeenCalledTimes(1)
-    expect(mutationFn.mock.calls[0][0].transaction.mutations).toHaveLength(1) // Merged to 1 mutation
+    const firstCall = mutationFn.mock.calls[0] as unknown as [
+      { transaction: { mutations: Array<unknown> } },
+    ]
+    expect(firstCall[0].transaction.mutations).toHaveLength(1) // Merged to 1 mutation
   })
 })
 
@@ -202,11 +205,11 @@ describe(`useSerializedMutations with queue strategy`, () => {
     expect(mutationFn).toHaveBeenCalledTimes(1)
 
     // Wait for transaction to complete
-    await tx1.isPersisted.promise
-    expect(tx1.state).toBe(`completed`)
+    await tx1!.isPersisted.promise
+    expect(tx1!.state).toBe(`completed`)
 
     // All 3 mutations should be in the same transaction
-    expect(tx1.mutations).toHaveLength(3)
+    expect(tx1!.mutations).toHaveLength(3)
   })
 })
 
@@ -251,7 +254,7 @@ describe(`useSerializedMutations with throttle strategy`, () => {
     // Leading edge should execute immediately
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(mutationFn).toHaveBeenCalledTimes(1)
-    expect(tx1.state).toBe(`completed`)
+    expect(tx1!.state).toBe(`completed`)
 
     // Second mutation at t=20 (during throttle period, should batch)
     act(() => {
@@ -279,11 +282,11 @@ describe(`useSerializedMutations with throttle strategy`, () => {
 
     // Trailing edge should have executed
     expect(mutationFn).toHaveBeenCalledTimes(2)
-    expect(tx2.state).toBe(`completed`)
-    expect(tx3.state).toBe(`completed`)
+    expect(tx2!.state).toBe(`completed`)
+    expect(tx3!.state).toBe(`completed`)
 
     // Verify the batched transaction has 2 inserts
-    expect(tx2.mutations).toHaveLength(2)
+    expect(tx2!.mutations).toHaveLength(2)
   })
 
   it(`should respect trailing: true with leading: false option`, async () => {
@@ -338,7 +341,7 @@ describe(`useSerializedMutations with throttle strategy`, () => {
 
     // Now trailing edge should have executed
     expect(mutationFn).toHaveBeenCalledTimes(1)
-    await tx1.isPersisted.promise
-    expect(tx1.state).toBe(`completed`)
+    await tx1!.isPersisted.promise
+    expect(tx1!.state).toBe(`completed`)
   })
 })
