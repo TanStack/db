@@ -4,7 +4,7 @@ import {
   CollectionImpl,
   createLiveQueryCollection,
 } from "@tanstack/db"
-import { HydrationContext } from "./hydration"
+import { HydrationContext, getHydratedQuery } from "./hydration"
 import type {
   Collection,
   CollectionConfigSingleRowOption,
@@ -57,17 +57,8 @@ function useHydratedData<T = any>(id: string | undefined): T | undefined {
     }
 
     // Fall back to global state (when using hydrate() directly)
-    if (typeof window !== `undefined`) {
-      const state = (window as any).__TANSTACK_DB_HYDRATED_STATE__ as
-        | { queries: Array<{ id: string; data: any }> }
-        | undefined
-      if (state) {
-        const query = state.queries.find((q) => q.id === id)
-        if (query) return query.data as T
-      }
-    }
-
-    return undefined
+    // Use getHydratedQuery to reuse the Symbol-based logic
+    return getHydratedQuery<T>(id)
   }, [id, hydrationState])
 }
 

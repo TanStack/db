@@ -5,6 +5,15 @@ import type { ReactNode } from "react"
 import type { DehydratedState } from "./server"
 
 /**
+ * Symbol for storing hydrated state globally, avoiding collisions across bundles
+ * @internal
+ */
+const HYDRATED_SYMBOL =
+  typeof Symbol !== `undefined`
+    ? Symbol.for(`tanstack.db.hydrated`)
+    : `__TANSTACK_DB_HYDRATED_STATE__`
+
+/**
  * React context for providing hydrated state to client components
  * @internal
  */
@@ -81,17 +90,47 @@ export function HydrationBoundary({
  * This is useful for manual hydration in non-React contexts or for
  * integrating with other frameworks.
  *
+ * @param dehydratedState - The dehydrated state to hydrate
+ * @param options - Hydration options
+ * @param options.oneShot - If true, the hydrated state will be cleared after the first read
+ *
  * @example
  * ```tsx
  * // Store in global state for access by useLiveQuery
  * hydrate(dehydratedState)
+ *
+ * // One-shot hydration (cleared after first read)
+ * hydrate(dehydratedState, { oneShot: true })
  * ```
  */
-export function hydrate(dehydratedState: DehydratedState): void {
+export function hydrate(
+  dehydratedState: DehydratedState,
+  { oneShot = false }: { oneShot?: boolean } = {}
+): void {
   // Store in a global that useLiveQuery can access
   if (typeof window !== `undefined`) {
-    ;(window as any).__TANSTACK_DB_HYDRATED_STATE__ = dehydratedState
+    ;(window as any)[HYDRATED_SYMBOL] = { state: dehydratedState, oneShot }
   }
+}
+
+/**
+ * Internal helper to read hydrated data and handle one-shot consumption
+ * @internal
+ */
+function readHydrated(id: string) {
+  if (typeof window === `undefined`) return undefined
+
+  const w = (window as any)[HYDRATED_SYMBOL]
+  if (!w?.state) return undefined
+
+  const q = w.state.queries.find((query: any) => query.id === id)?.data
+
+  // If one-shot is enabled, clear the global state after reading
+  if (q && w.oneShot) {
+    ;(window as any)[HYDRATED_SYMBOL] = undefined
+  }
+
+  return q
 }
 
 /**
@@ -99,13 +138,5 @@ export function hydrate(dehydratedState: DehydratedState): void {
  * @internal
  */
 export function getHydratedQuery<T = any>(id: string): T | undefined {
-  if (typeof window === `undefined`) return undefined
-
-  const state = (window as any).__TANSTACK_DB_HYDRATED_STATE__ as
-    | DehydratedState
-    | undefined
-  if (!state) return undefined
-
-  const query = state.queries.find((q) => q.id === id)
-  return query?.data as T | undefined
+  return readHydrated(id) as T | undefined
 }

@@ -45,6 +45,20 @@ export interface PrefetchLiveQueryOptions<TContext extends Context> {
   query:
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
     | QueryBuilder<TContext>
+
+  /**
+   * Optional transform function to apply to the query results before dehydration.
+   * Useful for serialization (e.g., converting Date objects to ISO strings).
+   *
+   * @example
+   * ```tsx
+   * transform: (rows) => rows.map(row => ({
+   *   ...row,
+   *   createdAt: row.createdAt.toISOString()
+   * }))
+   * ```
+   */
+  transform?: (rows: Array<any>) => any
 }
 
 /**
@@ -75,7 +89,7 @@ export async function prefetchLiveQuery<TContext extends Context>(
   serverContext: ServerContext,
   options: PrefetchLiveQueryOptions<TContext>
 ): Promise<void> {
-  const { id, query } = options
+  const { id, query, transform } = options
 
   // Create a temporary collection for this query
   const config: LiveQueryCollectionConfig<TContext> = {
@@ -87,11 +101,11 @@ export async function prefetchLiveQuery<TContext extends Context>(
   const collection = createLiveQueryCollection(config)
 
   try {
-    // Preload the collection data
-    await collection.preload()
+    // Wait for the collection to be ready with data
+    const base = await collection.toArrayWhenReady()
 
-    // Extract the data
-    const data = collection.toArray
+    // Apply optional transform (e.g., for serialization)
+    const data = transform ? transform(base as Array<any>) : base
 
     // Store in server context
     serverContext.queries.set(id, {

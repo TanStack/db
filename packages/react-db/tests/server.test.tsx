@@ -139,9 +139,16 @@ describe(`SSR/RSC Hydration`, () => {
 
     hydrate(dehydratedState)
 
-    expect((window as any).__TANSTACK_DB_HYDRATED_STATE__).toEqual(
-      dehydratedState
-    )
+    // Check that the hydrated state is stored correctly
+    const HYDRATED_SYMBOL =
+      typeof Symbol !== `undefined`
+        ? Symbol.for(`tanstack.db.hydrated`)
+        : `__TANSTACK_DB_HYDRATED_STATE__`
+
+    const storedData = (window as any)[HYDRATED_SYMBOL]
+    expect(storedData).toBeDefined()
+    expect(storedData.state).toEqual(dehydratedState)
+    expect(storedData.oneShot).toBe(false)
   })
 
   it(`should use hydrated data in useLiveQuery`, () => {
@@ -420,5 +427,143 @@ describe(`SSR/RSC Hydration`, () => {
     expect((result.current.data as Person | undefined)?.name).toBe(
       `Single Person`
     )
+  })
+
+  it(`should handle nested HydrationBoundary (inner shadows outer)`, async () => {
+    const outerPerson = {
+      id: `1`,
+      name: `Outer Person`,
+      age: 40,
+      email: `outer@example.com`,
+    }
+    const innerPerson = {
+      id: `2`,
+      name: `Inner Person`,
+      age: 25,
+      email: `inner@example.com`,
+    }
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-nested-boundary`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      })
+    )
+
+    const outerState = {
+      queries: [
+        {
+          id: `person-query`,
+          data: [outerPerson],
+          timestamp: Date.now(),
+        },
+      ],
+    }
+
+    const innerState = {
+      queries: [
+        {
+          id: `person-query`,
+          data: [innerPerson],
+          timestamp: Date.now(),
+        },
+      ],
+    }
+
+    const { result: outerResult } = renderHook(
+      () => {
+        return useLiveQuery({
+          id: `person-query`,
+          query: (q) => q.from({ persons: collection }).findOne(),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={outerState}>{children}</HydrationBoundary>
+        ),
+      }
+    )
+
+    const { result: innerResult } = renderHook(
+      () => {
+        return useLiveQuery({
+          id: `person-query`,
+          query: (q) => q.from({ persons: collection }).findOne(),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={outerState}>
+            <HydrationBoundary state={innerState}>{children}</HydrationBoundary>
+          </HydrationBoundary>
+        ),
+      }
+    )
+
+    // Outer boundary should use outer data
+    expect((outerResult.current.data as Person | undefined)?.name).toBe(
+      `Outer Person`
+    )
+
+    // Inner boundary should shadow outer and use inner data
+    expect((innerResult.current.data as Person | undefined)?.name).toBe(
+      `Inner Person`
+    )
+  })
+
+  it(`should support one-shot hydration`, async () => {
+    const testPerson = {
+      id: `1`,
+      name: `Test Person`,
+      age: 30,
+      email: `test@example.com`,
+    }
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-oneshot`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      })
+    )
+
+    const dehydratedState = {
+      queries: [
+        {
+          id: `oneshot-query`,
+          data: [testPerson],
+          timestamp: Date.now(),
+        },
+      ],
+    }
+
+    // Hydrate with oneShot enabled
+    hydrate(dehydratedState, { oneShot: true })
+
+    // First read should succeed
+    const { result: firstResult } = renderHook(() => {
+      return useLiveQuery({
+        id: `oneshot-query`,
+        query: (q) => q.from({ persons: collection }).findOne(),
+      })
+    })
+
+    expect(firstResult.current.isReady).toBe(true)
+    expect((firstResult.current.data as Person | undefined)?.name).toBe(
+      `Test Person`
+    )
+
+    // After first read, global state should be cleared
+    // Second hook should not find hydrated data (would be loading/idle)
+    const { result: secondResult } = renderHook(() => {
+      return useLiveQuery({
+        id: `oneshot-query`,
+        query: (q) => q.from({ persons: collection }).findOne(),
+      })
+    })
+
+    // Second result should not have hydrated data (collection is empty)
+    expect(secondResult.current.data).toBeUndefined()
   })
 })

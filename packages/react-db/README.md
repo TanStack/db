@@ -74,17 +74,15 @@ For SSR/RSC to work correctly, all query data **must be JSON-serializable**. Non
 **Example of handling Date objects:**
 
 ```tsx
-// Server-side prefetch
+// Server-side prefetch with transform
 await prefetchLiveQuery(serverContext, {
   id: 'events',
-  query: async (q) => {
-    const results = await q.from({ events: eventsCollection }).toArray()
-    // Convert Date objects to ISO strings
-    return results.map(event => ({
-      ...event,
-      createdAt: event.createdAt.toISOString()
-    }))
-  }
+  query: (q) => q.from({ events: eventsCollection }),
+  // Transform the results before dehydration
+  transform: (rows) => rows.map(event => ({
+    ...event,
+    createdAt: event.createdAt.toISOString()
+  }))
 })
 
 // Client-side usage
