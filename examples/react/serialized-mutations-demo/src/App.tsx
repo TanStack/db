@@ -223,18 +223,6 @@ export function App() {
       })
   }
 
-  const clearHistory = () => {
-    setTransactions([])
-    // Reset the item value to 0
-    itemCollection.update(1, (draft) => {
-      draft.value = 0
-      draft.timestamp = Date.now()
-    })
-    fakeServer.set(1, { id: 1, value: 0, timestamp: Date.now() })
-    setOptimisticState(itemCollection.get(1))
-    setSyncedState(fakeServer.get(1)!)
-  }
-
   const pending = transactions.filter((t) => t.state === `pending`)
   const executing = transactions.filter((t) => t.state === `executing`)
   const completed = transactions.filter((t) => t.state === `completed`)
@@ -346,12 +334,6 @@ export function App() {
               <span>50</span>
               <span>100</span>
             </div>
-          </div>
-
-          <div className="action-buttons">
-            <button className="btn-danger" onClick={clearHistory}>
-              Reset to 0
-            </button>
           </div>
 
           <div style={{ marginTop: `20px`, fontSize: `13px`, color: `#666` }}>

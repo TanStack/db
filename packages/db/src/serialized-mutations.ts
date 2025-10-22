@@ -123,12 +123,24 @@ export function createSerializedMutations<
     // Execute the mutation callback to add mutations to the active transaction
     activeTransaction.mutate(callback)
 
-    // Save reference before calling strategy.execute, as some strategies (like queue)
-    // might call commitCallback synchronously, which sets activeTransaction = null
+    // Save reference before calling strategy.execute
     const txToReturn = activeTransaction
 
-    // Tell the strategy about this mutation (for debouncing, this resets the timer)
-    strategy.execute(commitCallback)
+    // For queue strategy, pass a function that commits the captured transaction
+    // This prevents the error when commitCallback tries to access the cleared activeTransaction
+    if (strategy._type === `queue`) {
+      const capturedTx = activeTransaction
+      activeTransaction = null // Clear so next mutation creates a new transaction
+      strategy.execute(() => {
+        capturedTx.commit().catch(() => {
+          // Errors are handled via transaction.isPersisted.promise
+        })
+        return capturedTx
+      })
+    } else {
+      // For debounce/throttle, use commitCallback which manages activeTransaction
+      strategy.execute(commitCallback)
+    }
 
     return txToReturn
   }
