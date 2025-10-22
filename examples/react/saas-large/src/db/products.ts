@@ -51,14 +51,14 @@ export const productsCollection = createCollection(
       const { subscription: _subscription, ...rest } = loadSubsetOptions
       console.log(JSON.stringify(rest))
       const page = computePageNumber(loadSubsetOptions.limit)
-      const limit = loadSubsetOptions.limit + 1
+      const limit = loadSubsetOptions.limit
       const orderBy = loadSubsetOptions.orderBy
       const where = loadSubsetOptions.where
 
       const result = await getProducts({
         data: {
           page,
-          limit,
+          limit: limit ? limit + 1 : undefined,
           orderBy: orderBy ? JSON.stringify(orderBy) : undefined,
           where: where ? JSON.stringify(where) : undefined,
         },

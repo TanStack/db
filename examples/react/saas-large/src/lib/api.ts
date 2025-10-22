@@ -160,8 +160,9 @@ export const getProducts = createServerFn({ method: `GET` })
       })
     }
 
-    const startIndex = page * limit
-    const endIndex = startIndex + limit
+    const itemsPerPage = 50
+    const startIndex = page * itemsPerPage
+    const endIndex = limit
     const paginatedProducts = filteredProducts.slice(startIndex, endIndex)
 
     return paginatedProducts
