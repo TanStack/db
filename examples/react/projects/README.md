@@ -270,6 +270,94 @@ This pattern provides blazing fast, cross-collection live queries and local opti
 
 You can learn more about TanStack DB in the [TanStack DB documentation](https://tanstack.com/db/latest/docs/overview).
 
+#### Server-Side Rendering (SSR) & React Server Components (RSC)
+
+This example demonstrates SSR/RSC support for live queries, enabling optimal initial page loads with server-rendered data that seamlessly transitions to live reactive updates.
+
+**How it works:**
+
+1. **Server-side prefetching**: The route loader executes live queries on the server
+2. **Dehydration**: Query results are serialized and sent to the client
+3. **Hydration**: Client components immediately render with server data
+4. **Live updates**: After hydration, queries automatically transition to reactive mode
+
+**Example implementation** (see `src/routes/_authenticated/project/$projectId.tsx`):
+
+```tsx
+// Route configuration with SSR enabled
+export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
+  component: ProjectPageWithHydration,
+  ssr: true, // Enable SSR
+
+  loader: async ({ params }) => {
+    // Create server context
+    const serverContext = createServerContext()
+
+    // Prefetch queries (same queries used in component)
+    await prefetchLiveQuery(serverContext, {
+      id: `project-${params.projectId}`,
+      query: (q) =>
+        q
+          .from({ p: projectCollection })
+          .where(({ p }) => eq(p.id, parseInt(params.projectId, 10))),
+    })
+
+    await prefetchLiveQuery(serverContext, {
+      id: `project-todos-${params.projectId}`,
+      query: (q) =>
+        q
+          .from({ todo: todoCollection })
+          .where(({ todo }) => eq(todo.project_id, parseInt(params.projectId, 10)))
+          .orderBy(({ todo }) => todo.created_at),
+    })
+
+    // Dehydrate for client
+    return { dehydratedState: dehydrate(serverContext) }
+  },
+})
+
+// Wrapper provides hydrated data to child components
+function ProjectPageWithHydration() {
+  const loaderData = Route.useLoaderData()
+
+  return (
+    <HydrationBoundary state={loaderData.dehydratedState}>
+      <ProjectPage />
+    </HydrationBoundary>
+  )
+}
+
+// Client component uses live queries normally
+function ProjectPage() {
+  // useLiveQuery with matching `id` will use hydrated data on initial render
+  const { data: todos } = useLiveQuery({
+    id: `project-todos-${projectId}`, // Must match server prefetch id
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.project_id, parseInt(projectId, 10)))
+        .orderBy(({ todo }) => todo.created_at),
+  })
+
+  // Component renders immediately with server data, then gets live updates
+  return <ul>{todos.map(todo => <li key={todo.id}>{todo.text}</li>)}</ul>
+}
+```
+
+**Benefits:**
+
+- **Instant rendering**: No loading states on initial page load
+- **SEO friendly**: Search engines receive fully populated content
+- **Optimal performance**: Reduced Time to Interactive (TTI)
+- **Seamless UX**: Server data smoothly transitions to live updates
+
+**Key points:**
+
+- Query IDs must match between server prefetch and client `useLiveQuery`
+- Only the query results are transferred (minimal payload)
+- After hydration, queries automatically become reactive
+- Works with all TanStack DB features (joins, filters, aggregates)
+
 # Learn More
 
 You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
