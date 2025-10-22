@@ -350,8 +350,8 @@ export function App() {
             )}
             {strategyType === `queue` && (
               <p>
-                <strong>Queue:</strong> Processes all mutations sequentially
-                with {wait}ms between each.
+                <strong>Queue:</strong> Processes mutations sequentially in
+                order received (FIFO) with {wait}ms between each.
               </p>
             )}
             {strategyType === `throttle` && (

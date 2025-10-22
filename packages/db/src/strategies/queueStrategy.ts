@@ -48,8 +48,8 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     concurrency: 1, // Process one at a time to ensure serialization
     wait: options?.wait,
     maxSize: options?.maxSize,
-    addItemsTo: options?.addItemsTo,
-    getItemsFrom: options?.getItemsFrom,
+    addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
+    getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
     started: true, // Start processing immediately
   })
 
