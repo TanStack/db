@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   DeduplicatedLoadSubset,
   cloneOptions,
-} from "../src/query/subset-dedupe"
-import { Func, PropRef, Value } from "../src/query/ir"
-import { minusWherePredicates } from "../src/query/predicate-utils"
-import type { BasicExpression, OrderBy } from "../src/query/ir"
-import type { LoadSubsetOptions } from "../src/types"
+} from "../../src/query/subset-dedupe"
+import { Func, PropRef, Value } from "../../src/query/ir"
+import { minusWherePredicates } from "../../src/query/predicate-utils"
+import type { BasicExpression, OrderBy } from "../../src/query/ir"
+import type { LoadSubsetOptions } from "../../src/types"
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -557,6 +557,154 @@ describe(`createDeduplicatedLoadSubset`, () => {
         where: and(gte(ref(`age`), val(10)), lte(ref(`age`), val(20))),
       })
       */
+    })
+  })
+
+  describe(`onDeduplicate callback`, () => {
+    it(`should call onDeduplicate when all data already loaded`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const onDeduplicate = vi.fn()
+      const deduplicated = new DeduplicatedLoadSubset(
+        mockLoadSubset,
+        onDeduplicate
+      )
+
+      // Load all data
+      await deduplicated.loadSubset({})
+      expect(callCount).toBe(1)
+
+      // Any subsequent request should be deduplicated
+      const subsetOptions = { where: gt(ref(`age`), val(10)) }
+      const result = await deduplicated.loadSubset(subsetOptions)
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
+      expect(onDeduplicate).toHaveBeenCalledTimes(1)
+      expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
+    })
+
+    it(`should call onDeduplicate when unlimited superset already loaded`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const onDeduplicate = vi.fn()
+      const deduplicated = new DeduplicatedLoadSubset(
+        mockLoadSubset,
+        onDeduplicate
+      )
+
+      // First call loads a broader set
+      await deduplicated.loadSubset({ where: gt(ref(`age`), val(10)) })
+      expect(callCount).toBe(1)
+
+      // Second call is a subset of the first; should dedupe and call callback
+      const subsetOptions = { where: gt(ref(`age`), val(20)) }
+      const result = await deduplicated.loadSubset(subsetOptions)
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
+      expect(onDeduplicate).toHaveBeenCalledTimes(1)
+      expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
+    })
+
+    it(`should call onDeduplicate for limited subset requests`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const onDeduplicate = vi.fn()
+      const deduplicated = new DeduplicatedLoadSubset(
+        mockLoadSubset,
+        onDeduplicate
+      )
+
+      const orderBy1: OrderBy = [
+        {
+          expression: ref(`age`),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      // First limited call
+      await deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        orderBy: orderBy1,
+        limit: 10,
+      })
+      expect(callCount).toBe(1)
+
+      // Second limited call is a subset (stricter where and smaller limit)
+      const subsetOptions = {
+        where: gt(ref(`age`), val(20)),
+        orderBy: orderBy1,
+        limit: 5,
+      }
+      const result = await deduplicated.loadSubset(subsetOptions)
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
+      expect(onDeduplicate).toHaveBeenCalledTimes(1)
+      expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
+    })
+
+    it(`should delay onDeduplicate until covering in-flight request completes`, async () => {
+      let resolveFirst: (() => void) | undefined
+      let callCount = 0
+      const firstPromise = new Promise<void>((resolve) => {
+        resolveFirst = () => resolve()
+      })
+
+      // First call will remain in-flight until we resolve it
+      let first = true
+      const mockLoadSubset = (_options: LoadSubsetOptions) => {
+        callCount++
+        if (first) {
+          first = false
+          return firstPromise
+        }
+        return Promise.resolve()
+      }
+
+      const onDeduplicate = vi.fn()
+      const deduplicated = new DeduplicatedLoadSubset(
+        mockLoadSubset,
+        onDeduplicate
+      )
+
+      // Start a broad in-flight request
+      const inflightOptions = { where: gt(ref(`age`), val(10)) }
+      const inflight = deduplicated.loadSubset(inflightOptions)
+      expect(inflight).toBeInstanceOf(Promise)
+      expect(callCount).toBe(1)
+
+      // Issue a subset request while first is still in-flight
+      const subsetOptions = { where: gt(ref(`age`), val(20)) }
+      const subsetPromise = deduplicated.loadSubset(subsetOptions)
+      expect(subsetPromise).toBeInstanceOf(Promise)
+
+      // onDeduplicate should NOT have fired yet
+      expect(onDeduplicate).not.toHaveBeenCalled()
+
+      // Complete the first request
+      resolveFirst?.()
+
+      // Wait for the subset promise to settle (which chains the first)
+      await subsetPromise
+
+      // Now the callback should have been called exactly once, with the subset options
+      expect(onDeduplicate).toHaveBeenCalledTimes(1)
+      expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
     })
   })
 })
