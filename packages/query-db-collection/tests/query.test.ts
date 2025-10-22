@@ -2339,5 +2339,127 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
     })
+
+    it(`should have optimistic delete applied before onDelete handler runs (BUG: currently fails)`, async () => {
+      const queryKey = [`writeDelete-in-onDelete-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Track whether execution continues after writeDelete
+      const executionLog: Array<string> = []
+
+      const onDelete = vi.fn(async ({ transaction }) => {
+        executionLog.push(`onDelete started`)
+        const deletedItem = transaction.mutations[0]?.original
+
+        // Debug: Check collection state when handler runs
+        executionLog.push(`has('1'): ${collection.has(`1`)}`)
+        executionLog.push(
+          `syncedData.has('1'): ${collection._state.syncedData.has(`1`)}`
+        )
+        executionLog.push(
+          `optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+        )
+        executionLog.push(`collection.size: ${collection.size}`)
+
+        // This is the problematic pattern from the issue:
+        // User tries to call writeDelete on an already-deleted item
+        collection.utils.writeDelete(deletedItem.id)
+        executionLog.push(`writeDelete succeeded`)
+
+        executionLog.push(`onDelete completed`)
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `writeDelete-in-onDelete-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        onDelete,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for collection to be ready
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      // Log state before delete
+      executionLog.push(
+        `BEFORE DELETE: optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+      )
+      executionLog.push(
+        `BEFORE DELETE: transaction count: ${collection._state.transactions.size}`
+      )
+
+      // Delete an item - this should trigger the onDelete handler
+      const transaction = collection.delete(`1`)
+
+      // Log state immediately after delete (but before handler runs)
+      executionLog.push(
+        `AFTER DELETE (sync): optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+      )
+      executionLog.push(
+        `AFTER DELETE (sync): transaction.state: ${transaction.state}`
+      )
+      executionLog.push(
+        `AFTER DELETE (sync): transaction count: ${collection._state.transactions.size}`
+      )
+
+      // Wait for the transaction to complete (or fail)
+      await transaction.isPersisted.promise.catch((error) => ({
+        error,
+      }))
+
+      executionLog.push(
+        `AFTER HANDLER: optimisticDeletes.has('1'): ${collection._state.optimisticDeletes.has(`1`)}`
+      )
+
+      // The bug is that the error is silently caught and execution stops
+      // Expected behavior: The error should be propagated or at least logged
+
+      // ============================================================================
+      // BUG REPRODUCTION: Issue #706
+      // ============================================================================
+      // When onDelete runs, the optimistic delete should ALREADY be applied
+      // so that any operations in the handler see the correct collection state.
+      //
+      // However, the current implementation calls commit() BEFORE calling
+      // recomputeOptimisticState(), which means:
+      // 1. commit() starts executing immediately (even though it's async)
+      // 2. The onDelete handler runs BEFORE recomputeOptimisticState()
+      // 3. So optimisticDeletes doesn't contain the deleted item yet
+      // 4. writeDelete('1') succeeds instead of throwing an error
+      //
+      // Expected: optimisticDeletes.has('1') should be TRUE when handler runs
+      // Actual: optimisticDeletes.has('1') is FALSE (BUG!)
+      // ============================================================================
+
+      // Verify the handler ran
+      expect(executionLog).toContain(`onDelete started`)
+
+      // BUG: The optimistic delete is NOT applied when the handler runs
+      // This assertion will FAIL until the bug is fixed
+      const optimisticDeletesWhenHandlerRan = executionLog.find((log) =>
+        log.includes(`onDelete started`)
+      )
+      const optimisticDeletesCheck =
+        executionLog[executionLog.indexOf(optimisticDeletesWhenHandlerRan!) + 3]
+
+      // THIS IS THE BUG: optimisticDeletes should have '1' but it doesn't!
+      expect(optimisticDeletesCheck).toBe(`optimisticDeletes.has('1'): true`)
+
+      // As a result, writeDelete succeeds when it should throw an error
+      expect(executionLog).toContain(`writeDelete succeeded`)
+    })
   })
 })
