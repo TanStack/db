@@ -10,6 +10,7 @@ import {
   max,
   not,
 } from "../../src/query/builder/functions.js"
+import { createFilterFunctionFromExpression } from "../../src/collection/change-events.js"
 
 type Person = {
   id: string
@@ -2311,7 +2312,7 @@ describe(`OrderBy with duplicate values`, () => {
 
   function createOrderByBugTests(autoIndex: `off` | `eager`): void {
     describe(`with autoIndex ${autoIndex}`, () => {
-      it.only(`should correctly advance window when there are duplicate values`, async () => {
+      it(`should correctly advance window when there are duplicate values`, async () => {
         // Create test data that reproduces the specific bug described:
         // Items with many duplicates at value 5, then normal progression
         const duplicateTestData: Array<TestItem> = [
@@ -2328,6 +2329,9 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 11, a: 11, keep: true },
           { id: 12, a: 12, keep: true },
           { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
         ]
 
         const duplicateCollection = createCollection(
@@ -2373,7 +2377,6 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Second page should return items 6-10 (all with value 5)
         results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
-        console.log(`2nd page results: `, results)
         expect(results).toEqual([
           { id: 6, a: 5, keep: true },
           { id: 7, a: 5, keep: true },
@@ -2383,7 +2386,7 @@ describe(`OrderBy with duplicate values`, () => {
         ])
 
         // Now move to third page (offset 10, limit 5)
-        // This is where the bug occurs - it should advance past the duplicate 5s
+        // It should advance past the duplicate 5s
         collection.utils.setWindow({ offset: 10, limit: 5 })
         await collection.stateWhenReady()
 
@@ -2394,6 +2397,8 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 11, a: 11, keep: true },
           { id: 12, a: 12, keep: true },
           { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
         ])
 
         // Verify we can continue to next page
@@ -2402,10 +2407,372 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Should be empty since we've exhausted all items
         results = Array.from(collection.values())
-        expect(results).toHaveLength(0)
+        expect(results).toEqual([{ id: 16, a: 16, keep: true }])
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded from sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with only the first 5 items in the local collection
+        const initialData = allTestData.slice(0, 5)
+        let loadSubsetCallCount = 0
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Return a slice from 0 to limit
+                        const { limit } = options
+                        const dataToLoad = limit
+                          ? filteredData.slice(0, limit)
+                          : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        // expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Because of a bug with `setWindow` it currently always returns true
+        // instead of the promise, so we can't wait for it so instead we sleep
+        await sleep(20)
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
+        expect(loadSubsetCallCount).toBe(3)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+        // expect(moveToThirdPage).toBeInstanceOf(Promise)
+        await moveToThirdPage
+
+        await sleep(20)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(3)
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded fro both local collection and sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with only the first 5 items in the local collection
+        const initialData = allTestData.slice(0, 10)
+        let loadSubsetCallCount = 0
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Return a slice from 0 to limit
+                        const { limit } = options
+                        const dataToLoad = limit
+                          ? filteredData.slice(0, limit)
+                          : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        // expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Because of a bug with `setWindow` it currently always returns true
+        // instead of the promise, so we can't wait for it so instead we sleep
+        await sleep(20)
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
+        expect(loadSubsetCallCount).toBe(3)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+        // expect(moveToThirdPage).toBeInstanceOf(Promise)
+        await moveToThirdPage
+
+        await sleep(20)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(3)
       })
     })
   }
 
   createOrderByBugTests(`eager`)
 })
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
