@@ -4,6 +4,7 @@ export * from "./useLiveInfiniteQuery"
 
 // Re-export SSR/RSC hydration utilities
 export * from "./server"
+export * from "./hydration"
 
 // Re-export everything from @tanstack/db
 export * from "@tanstack/db"

@@ -4,7 +4,7 @@ import {
   CollectionImpl,
   createLiveQueryCollection,
 } from "@tanstack/db"
-import { HydrationContext } from "./server"
+import { HydrationContext } from "./hydration"
 import type {
   Collection,
   CollectionConfigSingleRowOption,
@@ -381,7 +381,7 @@ export function useLiveQuery(
     ? configOrQueryOrCollection.id
     : typeof configOrQueryOrCollection === `object` &&
         configOrQueryOrCollection !== null &&
-        !configOrQueryOrCollection.subscribeChanges
+        `id` in configOrQueryOrCollection
       ? configOrQueryOrCollection.id
       : undefined
 
@@ -602,7 +602,14 @@ export function useLiveQuery(
             return stateCache
           },
           get data() {
-            return hydratedData
+            // Mirror the non-hydrated path's singleResult semantics
+            if (singleResult) {
+              return Array.isArray(hydratedData)
+                ? hydratedData[0]
+                : hydratedData
+            }
+            // Ensure array when singleResult is false
+            return Array.isArray(hydratedData) ? hydratedData : [hydratedData]
           },
           collection: snapshot.collection,
           status: `ready` as const, // Pretend we're ready since we have data

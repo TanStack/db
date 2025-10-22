@@ -3,12 +3,11 @@ import { render, renderHook, waitFor } from "@testing-library/react"
 import { createCollection, gt } from "@tanstack/db"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import {
-  HydrationBoundary,
   createServerContext,
   dehydrate,
-  hydrate,
   prefetchLiveQuery,
 } from "../src/server"
+import { HydrationBoundary, hydrate } from "../src/hydration"
 import { useLiveQuery } from "../src/useLiveQuery"
 
 type Person = {
@@ -378,5 +377,48 @@ describe(`SSR/RSC Hydration`, () => {
     // Should have actual data, not hydrated data
     expect(result.current.data).toHaveLength(3)
     expect((result.current.data as Array<Person>)[0]!.name).toBe(`John Doe`)
+  })
+
+  it(`should respect singleResult with hydrated data`, () => {
+    const singlePerson = {
+      id: `1`,
+      name: `Single Person`,
+      age: 30,
+      email: `single@example.com`,
+    }
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-single-person`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      })
+    )
+
+    // Set up hydrated state with a single-result query
+    const dehydratedState = {
+      queries: [
+        {
+          id: `test-single-person`,
+          data: [singlePerson], // Server returns array, but client expects single object
+          timestamp: Date.now(),
+        },
+      ],
+    }
+    hydrate(dehydratedState)
+
+    const { result } = renderHook(() => {
+      return useLiveQuery({
+        id: `test-single-person`,
+        query: (q) => q.from({ persons: collection }).findOne(),
+      })
+    })
+
+    // With singleResult: true, data should be a single object, not an array
+    expect(result.current.isReady).toBe(true)
+    expect(Array.isArray(result.current.data)).toBe(false)
+    expect((result.current.data as Person | undefined)?.name).toBe(
+      `Single Person`
+    )
   })
 })
