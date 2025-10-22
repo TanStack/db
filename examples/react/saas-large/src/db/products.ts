@@ -31,7 +31,7 @@ const itemsPerPage = 50
 
 function computePageNumber(limit: number | undefined) {
   const effectiveLimit = limit ?? itemsPerPage
-  return Math.floor(effectiveLimit / itemsPerPage) - 1
+  return Math.max(0, Math.floor(effectiveLimit / itemsPerPage) - 1)
 }
 
 export const productsCollection = createCollection(
