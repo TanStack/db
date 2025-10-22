@@ -17,7 +17,7 @@ Introduces a new serialized mutations system that enables optimistic mutations w
 **Available Strategies:**
 
 - `debounceStrategy`: Wait for inactivity before persisting (ideal for auto-save, search-as-you-type)
-- `queueStrategy`: Process all mutations sequentially with FIFO/LIFO options (ideal for sequential workflows, rate-limited APIs)
+- `queueStrategy`: Process each mutation as a separate transaction sequentially (defaults to FIFO, configurable to LIFO) (ideal for sequential workflows, rate-limited APIs)
 - `throttleStrategy`: Ensure minimum spacing between executions (ideal for analytics, progress updates)
 
 **Example Usage:**
