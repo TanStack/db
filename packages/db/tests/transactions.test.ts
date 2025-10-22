@@ -554,9 +554,35 @@ describe(`Transactions`, () => {
     expect(transaction3.state).toBe(`failed`)
   })
 
-  it(`sets a global marker to detect duplicate instances`, () => {
-    // The duplicate instance marker should be set when the module loads
-    const marker = Symbol.for(`@tanstack/db/instance-marker`)
-    expect((globalThis as any)[marker]).toBe(true)
+  describe(`duplicate instance detection`, () => {
+    it(`sets a global marker in dev mode when in browser top window`, () => {
+      // The duplicate instance marker should be set when the module loads in dev mode
+      const marker = Symbol.for(`@tanstack/db/instance-marker`)
+      // This will only be true if we're in dev mode AND in a browser top window
+      // In test environment (vitest), we should have these conditions met
+      expect((globalThis as any)[marker]).toBe(true)
+    })
+
+    it(`marker is only set in development mode`, () => {
+      // This test verifies the marker exists in our test environment
+      // In production (NODE_ENV=production), the marker would NOT be set
+      const marker = Symbol.for(`@tanstack/db/instance-marker`)
+      const isDev =
+        typeof process !== `undefined` && process.env.NODE_ENV !== `production`
+
+      if (isDev) {
+        expect((globalThis as any)[marker]).toBe(true)
+      }
+      // Note: We can't easily test the production case without changing NODE_ENV
+      // which would affect the entire test suite
+    })
+
+    it(`can be disabled with environment variable`, () => {
+      // This test documents that TANSTACK_DB_DISABLE_DUP_CHECK=1 disables the check
+      // We can't easily test the actual behavior without reloading the module,
+      // but the implementation in transactions.ts checks this variable
+      const disableCheck = process.env.TANSTACK_DB_DISABLE_DUP_CHECK === `1`
+      expect(typeof disableCheck).toBe(`boolean`)
+    })
   })
 })

@@ -59,6 +59,8 @@ export class DuplicateDbInstanceError extends TanStackDBError {
         `   - pnpm: "pnpm.overrides" in package.json\n` +
         `   - yarn: "resolutions" in package.json\n` +
         `3. Clear node_modules and lockfile, then reinstall\n\n` +
+        `To temporarily disable this check (not recommended):\n` +
+        `Set environment variable: TANSTACK_DB_DISABLE_DUP_CHECK=1\n\n` +
         `See: https://tanstack.com/db/latest/docs/troubleshooting#duplicate-instances`
     )
     this.name = `DuplicateDbInstanceError`
