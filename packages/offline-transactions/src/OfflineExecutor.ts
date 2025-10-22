@@ -53,6 +53,11 @@ export class OfflineExecutor {
   public readonly mode: OfflineMode
   public readonly storageDiagnostic: StorageDiagnostic
 
+  // Track initialization completion
+  private initPromise: Promise<void>
+  private initResolve!: () => void
+  private initReject!: (error: Error) => void
+
   // Coordination mechanism for blocking transactions
   private pendingTransactionPromises: Map<
     string,
@@ -81,6 +86,12 @@ export class OfflineExecutor {
       mode: `offline`,
       message: `Initializing storage...`,
     }
+
+    // Create initialization promise
+    this.initPromise = new Promise((resolve, reject) => {
+      this.initResolve = resolve
+      this.initReject = reject
+    })
 
     this.initialize()
   }
@@ -237,6 +248,7 @@ export class OfflineExecutor {
             this.config.onStorageFailure(diagnostic)
           }
           span.setAttribute(`result`, `online-only`)
+          this.initResolve()
           return
         }
 
@@ -250,20 +262,25 @@ export class OfflineExecutor {
         )
         this.leaderElection = this.createLeaderElection()
 
-        // Set up event listeners now that components are ready
-        this.setupEventListeners()
-
-        // Request leadership and replay transactions if leader
+        // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
         span.setAttribute(`isLeader`, isLeader)
+
+        // Set up event listeners after leadership is established
+        // This prevents the callback from being called multiple times
+        this.setupEventListeners()
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
         }
         span.setAttribute(`result`, `offline-enabled`)
+        this.initResolve()
       } catch (error) {
         console.warn(`Failed to initialize offline executor:`, error)
         span.setAttribute(`result`, `failed`)
+        this.initReject(
+          error instanceof Error ? error : new Error(String(error))
+        )
       }
     })
   }
@@ -356,6 +373,9 @@ export class OfflineExecutor {
   private async persistTransaction(
     transaction: OfflineTransaction
   ): Promise<void> {
+    // Wait for initialization to complete
+    await this.initPromise
+
     return withNestedSpan(
       `executor.persistTransaction`,
       {
