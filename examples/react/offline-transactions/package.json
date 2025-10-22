@@ -9,13 +9,6 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.56.0",
-    "@opentelemetry/instrumentation": "^0.56.0",
-    "@opentelemetry/instrumentation-fetch": "^0.56.0",
-    "@opentelemetry/resources": "^1.29.0",
-    "@opentelemetry/sdk-trace-web": "^1.29.0",
-    "@opentelemetry/semantic-conventions": "^1.29.0",
     "@tanstack/offline-transactions": "workspace:*",
     "@tanstack/query-db-collection": "workspace:*",
     "@tanstack/react-db": "workspace:*",

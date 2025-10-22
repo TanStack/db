@@ -100,10 +100,6 @@ export interface OfflineConfig {
   onLeadershipChange?: (isLeader: boolean) => void
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
-  otel?: {
-    endpoint: string
-    headers?: Record<string, string>
-  }
 }
 
 export interface StorageAdapter {

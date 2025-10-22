@@ -245,10 +245,7 @@ export function createTodoActions(offline: any) {
 }
 
 // IndexedDB offline executor
-export async function createIndexedDBOfflineExecutor(otel?: {
-  endpoint: string
-  headers?: Record<string, string>
-}) {
+export async function createIndexedDBOfflineExecutor() {
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
     storage: new IndexedDBAdapter(`offline-todos-indexeddb`, `transactions`),
@@ -271,33 +268,17 @@ export async function createIndexedDBOfflineExecutor(otel?: {
         }
       )
     },
-    otel,
   })
 
   // Log diagnostic information
   console.log(`Offline executor mode:`, executor.mode)
   console.log(`Storage diagnostic:`, executor.storageDiagnostic)
 
-  // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
-  if (otel?.endpoint) {
-    const { initWebTracing } = await import(`~/otel-web`)
-    await initWebTracing({
-      endpoint: otel.endpoint,
-      headers: otel.headers,
-      onlineDetector: executor.getOnlineDetector(),
-    }).catch((error) => {
-      console.error(`Failed to initialize OpenTelemetry:`, error)
-    })
-  }
-
   return executor
 }
 
 // localStorage offline executor
-export async function createLocalStorageOfflineExecutor(otel?: {
-  endpoint: string
-  headers?: Record<string, string>
-}) {
+export async function createLocalStorageOfflineExecutor() {
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
     storage: new LocalStorageAdapter(`offline-todos-ls:`),
@@ -319,24 +300,11 @@ export async function createLocalStorageOfflineExecutor(otel?: {
         }
       )
     },
-    otel,
   })
 
   // Log diagnostic information
   console.log(`Offline executor mode:`, executor.mode)
   console.log(`Storage diagnostic:`, executor.storageDiagnostic)
-
-  // Initialize OpenTelemetry AFTER creating the executor so we can pass the online detector
-  if (otel?.endpoint) {
-    const { initWebTracing } = await import(`~/otel-web`)
-    await initWebTracing({
-      endpoint: otel.endpoint,
-      headers: otel.headers,
-      onlineDetector: executor.getOnlineDetector(),
-    }).catch((error) => {
-      console.error(`Failed to initialize OpenTelemetry:`, error)
-    })
-  }
 
   return executor
 }
