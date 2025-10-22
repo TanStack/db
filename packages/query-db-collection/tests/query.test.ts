@@ -2340,7 +2340,7 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(items.length)
     })
 
-    it(`should not silently swallow errors from writeDelete in onDelete handler (BUG: currently fails)`, async () => {
+    it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
       const queryKey = [`writeDelete-error-test`]
       const items: Array<TestItem> = [
         { id: `1`, name: `Item 1` },
@@ -2391,9 +2391,7 @@ describe(`QueryCollection`, () => {
       const transaction = collection.delete(`1`)
 
       // Wait for transaction
-      const result = await transaction.isPersisted.promise.catch((error) => ({
-        error,
-      }))
+      await transaction.isPersisted.promise
 
       executionLog.push(`transaction.state: ${transaction.state}`)
       executionLog.push(`final collection.has('1'): ${collection.has(`1`)}`)
@@ -2403,44 +2401,40 @@ describe(`QueryCollection`, () => {
       executionLog.forEach((log) => console.log(log))
 
       // ============================================================================
-      // BUG REPRODUCTION: Issue #706
+      // FIX FOR Issue #706
       // ============================================================================
-      // The bug: writeDelete() throws an error inside onDelete handler, but the
-      // error is silently swallowed, causing execution to stop without any visible
-      // error message.
+      // The fix: writeDelete() now checks only the synced store, not the combined
+      // view (synced + optimistic). This allows writeDelete to work correctly even
+      // when called inside handlers where optimistic updates are active.
       //
-      // Root cause: mutations.ts:531 has .catch(() => undefined) which silently
-      // swallows ALL errors from the onDelete handler
+      // Previous bug: writeDelete validated using collection.has() which checks the
+      // combined view. When optimistic delete was applied, collection.has() returned
+      // false, causing writeDelete to throw DeleteOperationItemNotFoundError.
       //
-      // Flow when optimistic delete IS applied before handler runs:
+      // The fix in manual-sync.ts:
+      // - Changed validation from: ctx.collection.has(op.key)
+      // - To: ctx.collection._state.syncedData.has(op.key)
+      // - This checks only the synced store, ignoring optimistic state
+      //
+      // Now the flow works correctly:
       // 1. collection.delete('1') creates optimistic delete
-      // 2. Item appears deleted (collection.has('1') = false)
+      // 2. Item appears deleted in UI (collection.has('1') = false due to optimistic)
       // 3. onDelete handler runs
       // 4. Handler calls writeDelete('1')
-      // 5. writeDelete validates: !collection.has('1') throws DeleteOperationItemNotFoundError
-      // 6. Error propagates out of handler
-      // 7. commit() rejects with the error
-      // 8. .catch(() => undefined) SILENTLY SWALLOWS the error
-      // 9. No error shown to user, execution stops at writeDelete line
-      // 10. Transaction fails and rolls back
-      // 11. Item reappears (optimistic delete cleared)
-      //
-      // Expected: Error should be visible to the user or handler should complete
-      // Actual: Execution stops silently, item flickers and reappears
+      // 5. writeDelete validates: syncedData.has('1') = true ✓
+      // 6. Synced delete is written successfully
+      // 7. Handler completes with { refetch: false }
+      // 8. Transaction completes successfully
+      // 9. Item stays deleted (both optimistic and synced deletes applied)
       // ============================================================================
 
-      // The bug: If writeDelete throws (when optimistic delete is applied),
-      // the error should be propagated, not silently swallowed
-      if (`error` in result) {
-        // Error was propagated - this is the expected behavior
-        expect(transaction.state).toBe(`failed`)
-        expect(executionLog).not.toContain(`onDelete completed`)
-      } else {
-        // Transaction succeeded - writeDelete must have worked
-        expect(transaction.state).toBe(`completed`)
-        expect(executionLog).toContain(`onDelete completed`)
-        expect(collection.has(`1`)).toBe(false)
-      }
+      // Verify the fix works: transaction should complete successfully
+      expect(transaction.state).toBe(`completed`)
+      expect(executionLog).toContain(`onDelete started`)
+      expect(executionLog).toContain(`writeDelete succeeded`)
+      expect(executionLog).toContain(`onDelete completed`)
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.size).toBe(1)
     })
   })
 })
