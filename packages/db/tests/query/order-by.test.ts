@@ -2301,3 +2301,111 @@ describe(`OrderBy with collection alias conflicts`, () => {
     expect(result[2]?.email).toBe(`third@test.com`)
   })
 })
+
+describe(`OrderBy with duplicate values`, () => {
+  type TestItem = {
+    id: number
+    a: number
+    keep: boolean
+  }
+
+  function createOrderByBugTests(autoIndex: `off` | `eager`): void {
+    describe(`with autoIndex ${autoIndex}`, () => {
+      it.only(`should correctly advance window when there are duplicate values`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const duplicateTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+        ]
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-window-bug`,
+            getKey: (item) => item.id,
+            initialData: duplicateTestData,
+            autoIndex,
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+
+        // Now move to next page (offset 5, limit 5)
+        collection.utils.setWindow({ offset: 5, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Second page should return items 6-10 (all with value 5)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        console.log(`2nd page results: `, results)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+
+        // Now move to third page (offset 10, limit 5)
+        // This is where the bug occurs - it should advance past the duplicate 5s
+        collection.utils.setWindow({ offset: 10, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+        ])
+
+        // Verify we can continue to next page
+        collection.utils.setWindow({ offset: 15, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Should be empty since we've exhausted all items
+        results = Array.from(collection.values())
+        expect(results).toHaveLength(0)
+      })
+    })
+  }
+
+  createOrderByBugTests(`eager`)
+})
