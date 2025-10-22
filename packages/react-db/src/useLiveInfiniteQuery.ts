@@ -150,35 +150,58 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const [loadedPageCount, setLoadedPageCount] = useState(1)
   const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
 
-  // Track collection instance and whether we've validated it (only for pre-created collections)
-  const collectionRef = useRef(isCollection ? queryFnOrCollection : null)
-  const hasValidatedCollectionRef = useRef(false)
+  // Track whether we've set initial window for current collection instance
+  const hasSetInitialWindowRef = useRef(false)
+  const prevCollectionRef = useRef(isCollection ? queryFnOrCollection : null)
 
   // Track deps for query functions (stringify for comparison)
   const depsKey = JSON.stringify(deps)
   const prevDepsKeyRef = useRef(depsKey)
 
-  // Reset pagination when inputs change
-  useEffect(() => {
-    let shouldReset = false
+  // Validate pre-created collections have orderBy (required for infinite pagination)
+  // and set initial window BEFORE useLiveQuery is called
+  if (isCollection) {
+    const utils = queryFnOrCollection.utils
+    if (!isLiveQueryCollectionUtils(utils)) {
+      throw new Error(
+        `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
+          `Please add .orderBy() to your createLiveQueryCollection query.`
+      )
+    }
 
+    // Check if this is a new collection instance
+    const isNewCollection = prevCollectionRef.current !== queryFnOrCollection
+    if (isNewCollection) {
+      hasSetInitialWindowRef.current = false
+    }
+
+    // Set initial window to override any pre-set limit from collection creation
+    // This must happen BEFORE useLiveQuery is called below
+    if (!hasSetInitialWindowRef.current) {
+      const initialLimit = pageSize + 1 // +1 for peek ahead
+      console.log({ initialLimit })
+      utils.setWindow({
+        offset: 0,
+        limit: initialLimit,
+      })
+      hasSetInitialWindowRef.current = true
+    }
+  }
+
+  // Reset page count when collection instance or deps change
+  useEffect(() => {
     if (isCollection) {
-      // Reset if collection instance changed
-      if (collectionRef.current !== queryFnOrCollection) {
-        collectionRef.current = queryFnOrCollection
-        hasValidatedCollectionRef.current = false
-        shouldReset = true
+      // Check if collection instance changed
+      if (prevCollectionRef.current !== queryFnOrCollection) {
+        prevCollectionRef.current = queryFnOrCollection
+        setLoadedPageCount(1)
       }
     } else {
       // Reset if deps changed (for query functions)
       if (prevDepsKeyRef.current !== depsKey) {
         prevDepsKeyRef.current = depsKey
-        shouldReset = true
+        setLoadedPageCount(1)
       }
-    }
-
-    if (shouldReset) {
-      setLoadedPageCount(1)
     }
   }, [isCollection, queryFnOrCollection, depsKey])
 
@@ -199,36 +222,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
     // Check if collection has orderBy (required for setWindow)
     if (!isLiveQueryCollectionUtils(utils)) {
-      // For pre-created collections, throw an error if no orderBy
-      if (isCollection) {
-        throw new Error(
-          `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`
-        )
-      }
       return
-    }
-
-    // For pre-created collections, validate window on first check
-    if (isCollection && !hasValidatedCollectionRef.current) {
-      const currentWindow = utils.getWindow()
-      if (
-        currentWindow &&
-        (currentWindow.offset !== expectedOffset ||
-          currentWindow.limit !== expectedLimit)
-      ) {
-        console.warn(
-          `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`
-        )
-      }
-      hasValidatedCollectionRef.current = true
     }
 
     // For query functions, wait until collection is ready
     if (!isCollection && !queryResult.isReady) return
 
-    // Adjust the window
+    // Adjust the window based on current page count
+    // For pre-created collections, this handles pagination beyond the first page
+    // For query functions, this handles all pagination including the first page
     const result = utils.setWindow({
       offset: expectedOffset,
       limit: expectedLimit,
