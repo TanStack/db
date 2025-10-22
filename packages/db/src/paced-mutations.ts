@@ -1,5 +1,5 @@
 import { createTransaction } from "./transactions"
-import type { Transaction, TransactionConfig } from "./types"
+import type { MutationFn, Transaction } from "./types"
 import type { Strategy } from "./strategies/types"
 
 /**
@@ -7,12 +7,20 @@ import type { Strategy } from "./strategies/types"
  */
 export interface PacedMutationsConfig<
   T extends object = Record<string, unknown>,
-> extends Omit<TransactionConfig<T>, `autoCommit`> {
+> {
+  /**
+   * Function to execute the mutation on the server
+   */
+  mutationFn: MutationFn<T>
   /**
    * Strategy for controlling mutation execution timing
-   * Examples: debounceStrategy, queueStrategy, throttleStrategy, batchStrategy
+   * Examples: debounceStrategy, queueStrategy, throttleStrategy
    */
   strategy: Strategy
+  /**
+   * Custom metadata to associate with transactions
+   */
+  metadata?: Record<string, unknown>
 }
 
 /**

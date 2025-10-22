@@ -100,7 +100,7 @@ export function usePacedMutations<T extends object = Record<string, unknown>>(
     return createPacedMutations<T>(config)
     // Include all config properties in dependencies
     // Strategy changes will recreate the instance
-  }, [config.mutationFn, config.metadata, config.strategy, config.id])
+  }, [config.mutationFn, config.metadata, config.strategy])
 
   // Return stable mutate callback
   const stableMutate = useCallback(mutate, [mutate])
