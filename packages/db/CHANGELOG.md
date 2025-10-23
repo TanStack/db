@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.13
+
+### Patch Changes
+
+- Fix synced propagation when preceding mutation was non-optimistic ([#715](https://github.com/TanStack/db/pull/715))
+
 ## 0.4.12
 
 ### Patch Changes
