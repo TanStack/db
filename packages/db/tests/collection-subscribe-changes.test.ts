@@ -1250,6 +1250,70 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.has(1)).toBe(false)
   })
 
+  it(`should emit synced delete after a non-optimistic delete`, async () => {
+    const emitter = mitt()
+    const callback = vi.fn()
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `non-optimistic-delete-sync`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // replay any pending mutations emitted via mitt
+          // @ts-expect-error Mitt typings are loose for our test helpers
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error test helper
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+
+          // seed initial row
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+          })
+          commit()
+        },
+      },
+      onDelete: async ({ transaction }) => {
+        emitter.emit(`sync`, transaction.mutations)
+      },
+    })
+
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    // initial insert emitted
+    expect(callback).toHaveBeenCalledTimes(1)
+    callback.mockClear()
+
+    const tx = collection.delete(1, { optimistic: false })
+    await tx.isPersisted.promise
+
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      value: string
+    }>
+    expect(deleteChanges).toEqual([
+      {
+        type: `delete`,
+        key: 1,
+        value: { id: 1, value: `initial` },
+      },
+    ])
+    expect(collection.state.has(1)).toBe(false)
+
+    subscription.unsubscribe()
+  })
+
   it(`truncate + optimistic insert: server did NOT reinsert key -> inserted optimistically`, async () => {
     const changeEvents: Array<any> = []
     let f: any = null
