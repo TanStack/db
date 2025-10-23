@@ -26,11 +26,10 @@ const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned
  */
 export interface UseLiveQueryOptions {
   /**
-   * Unique identifier for SSR/RSC hydration matching. Required for hydration to work.
-   * Must match the hydrateId used in prefetchLiveQuery on the server.
-   * Note: This is separate from the collection's `id` field (used for devtools).
+   * Unique identifier for this query. Required for SSR/RSC hydration to work.
+   * Must match the id used in prefetchLiveQuery on the server.
    */
-  hydrateId?: string
+  id?: string
 
   /**
    * Garbage collection time in milliseconds
@@ -43,17 +42,15 @@ export interface UseLiveQueryOptions {
  * Hook to get hydrated data for a query from HydrationBoundary context
  * @internal
  */
-function useHydratedData<T = any>(
-  hydrateId: string | undefined
-): T | undefined {
+function useHydratedData<T = any>(id: string | undefined): T | undefined {
   const hydrationState = useContext(HydrationContext)
 
   return useMemo(() => {
-    if (!hydrateId || !hydrationState) return undefined
+    if (!id || !hydrationState) return undefined
 
-    const query = hydrationState.queries.find((q) => q.hydrateId === hydrateId)
+    const query = hydrationState.queries.find((q) => q.id === id)
     return query?.data as T | undefined
-  }, [hydrateId, hydrationState])
+  }, [id, hydrationState])
 }
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
@@ -361,18 +358,21 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
-  // Extract hydrateId from config object (not from collections or functions)
-  // Only config objects support hydrateId for SSR hydration matching
-  const hydrateId =
+  // Extract id from config object (not from collections or functions)
+  // Only config objects support id for SSR hydration matching
+  const queryId =
     !isCollection &&
     typeof configOrQueryOrCollection === `object` &&
     configOrQueryOrCollection !== null &&
-    `hydrateId` in configOrQueryOrCollection
-      ? configOrQueryOrCollection.hydrateId
+    `id` in configOrQueryOrCollection
+      ? configOrQueryOrCollection.id
       : undefined
 
   // Check for hydrated data using the hook
-  const hydratedData = useHydratedData(hydrateId)
+  const hydratedData = useHydratedData(queryId)
+
+  // Get hydration context to check if SSR/hydration is being used
+  const hydrationState = useContext(HydrationContext)
 
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
@@ -562,15 +562,17 @@ export function useLiveQuery(
       const shouldUseHydratedData =
         hydratedData !== undefined && !collectionHasData
 
-      // Dev-mode hint: warn if hydrateId is provided but no hydration found
+      // Dev-mode hint: warn if hydrationState exists (SSR setup) but query has id and no matching data
+      // This catches the case where HydrationBoundary is present but this specific query wasn't prefetched
       if (
         process.env.NODE_ENV !== `production` &&
-        hydrateId &&
+        hydrationState && // Only warn if we're in an SSR environment with HydrationBoundary
+        queryId &&
         !collectionHasData &&
         hydratedData === undefined
       ) {
         console.warn(
-          `TanStack DB: no hydrated data found for hydrateId "${hydrateId}" — did you wrap this subtree in <HydrationBoundary state={...}>?`
+          `TanStack DB: no hydrated data found for id "${queryId}" — did you prefetch this query on the server with prefetchLiveQuery()?`
         )
       }
 

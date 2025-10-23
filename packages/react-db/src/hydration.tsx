@@ -16,15 +16,15 @@ export const HydrationContext = createContext<DehydratedState | undefined>(
  * Hook to access hydrated data for a specific query
  * @internal
  */
-export function useHydratedQuery<T = any>(hydrateId: string): T | undefined {
+export function useHydratedQuery<T = any>(id: string): T | undefined {
   const hydrationState = useContext(HydrationContext)
 
   return useMemo(() => {
     if (!hydrationState) return undefined
 
-    const query = hydrationState.queries.find((q) => q.hydrateId === hydrateId)
+    const query = hydrationState.queries.find((q) => q.id === id)
     return query?.data as T | undefined
-  }, [hydrationState, hydrateId])
+  }, [hydrationState, id])
 }
 
 /**
@@ -39,7 +39,7 @@ export function useHydratedQuery<T = any>(hydrateId: string): T | undefined {
  * async function Page() {
  *   const serverContext = createServerContext()
  *   await prefetchLiveQuery(serverContext, {
- *     hydrateId: 'todos',
+ *     id: 'todos',
  *     query: (q) => q.from({ todos: todosCollection })
  *   })
  *
@@ -54,7 +54,7 @@ export function useHydratedQuery<T = any>(hydrateId: string): T | undefined {
  * 'use client'
  * function TodoList() {
  *   const { data } = useLiveQuery({
- *     hydrateId: 'todos', // Must match the hydrateId used in prefetchLiveQuery
+ *     id: 'todos', // Must match the id used in prefetchLiveQuery
  *     query: (q) => q.from({ todos: todosCollection })
  *   })
  *   return <div>{data.map(todo => <Todo key={todo.id} {...todo} />)}</div>
