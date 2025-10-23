@@ -2339,5 +2339,49 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
     })
+
+    it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
+      const queryKey = [`writeDelete-in-onDelete-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const onDelete = vi.fn(async ({ transaction, collection }) => {
+        const deletedItem = transaction.mutations[0]?.original
+        // Call writeDelete inside onDelete handler - this should work without throwing
+        collection.utils.writeDelete(deletedItem.id)
+        return { refetch: false }
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `writeDelete-in-onDelete-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        onDelete,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      const transaction = collection.delete(`1`)
+      await transaction.isPersisted.promise
+
+      // Verify the fix: writeDelete should work, transaction completes, item is deleted
+      expect(transaction.state).toBe(`completed`)
+      expect(onDelete).toHaveBeenCalledTimes(1)
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.size).toBe(1)
+    })
   })
 })
