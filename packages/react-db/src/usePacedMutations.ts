@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { createPacedMutations } from "@tanstack/db"
 import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
 
@@ -95,12 +95,24 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
 export function usePacedMutations<T extends object = Record<string, unknown>>(
   config: PacedMutationsConfig<T>
 ): (callback: () => void) => Transaction<T> {
+  // Keep a ref to the latest mutationFn so we can call it without recreating the instance
+  const mutationFnRef = useRef(config.mutationFn)
+  mutationFnRef.current = config.mutationFn
+
+  // Create a stable wrapper around mutationFn that always calls the latest version
+  const stableMutationFn = useCallback<typeof config.mutationFn>((params) => {
+    return mutationFnRef.current(params)
+  }, [])
+
   // Create paced mutations instance with proper dependency tracking
   // Serialize strategy for stable comparison since strategy objects are recreated on each render
   const { mutate } = useMemo(() => {
-    return createPacedMutations<T>(config)
+    return createPacedMutations<T>({
+      ...config,
+      mutationFn: stableMutationFn,
+    })
   }, [
-    config.mutationFn,
+    stableMutationFn,
     config.metadata,
     // Serialize strategy to avoid recreating when object reference changes but values are same
     JSON.stringify({
