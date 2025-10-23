@@ -20,7 +20,6 @@ import type {
   InsertMutationFnParams,
   SyncConfig,
   UpdateMutationFnParams,
-  UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
@@ -147,7 +146,9 @@ export interface QueryCollectionUtils<
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
   TError = unknown,
-> extends UtilsRecord {
+> {
+  /** Allow additional utility functions to be added */
+  [key: string]: any
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
   /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
@@ -160,21 +161,48 @@ export interface QueryCollectionUtils<
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
   /** Execute multiple write operations as a single atomic batch to the synced data store */
   writeBatch: (callback: () => void) => void
-  /** Get the last error encountered by the query (if any); reset on success */
-  lastError: () => TError | undefined
-  /** Check if the collection is in an error state */
-  isError: () => boolean
+  /** The last error encountered by the query (if any); reset on success */
+  readonly lastError: TError | undefined
+  /** Whether the collection is in an error state */
+  readonly isError: boolean
   /**
-   * Get the number of consecutive sync failures.
+   * The number of consecutive sync failures.
    * Incremented only when query fails completely (not per retry attempt); reset on success.
    */
-  errorCount: () => number
+  readonly errorCount: number
   /**
    * Clear the error state and trigger a refetch of the query
    * @returns Promise that resolves when the refetch completes successfully
    * @throws Error if the refetch fails
    */
   clearError: () => Promise<void>
+  /**
+   * Whether the query is currently fetching data (including background refetches).
+   * True during both initial fetches and background refetches.
+   */
+  readonly isFetching: boolean
+  /**
+   * Whether the query is currently refetching data in the background.
+   * True only during background refetches (not initial fetch).
+   */
+  readonly isRefetching: boolean
+  /**
+   * Whether the query is loading for the first time (no data yet).
+   * True only during the initial fetch before any data is available.
+   */
+  readonly isLoading: boolean
+  /**
+   * The timestamp (in milliseconds since epoch) when the data was last successfully updated.
+   * Returns 0 if the query has never successfully fetched data.
+   */
+  readonly dataUpdatedAt: number
+  /**
+   * The current fetch status of the query.
+   * - 'fetching': Query is currently fetching
+   * - 'paused': Query is paused (e.g., network offline)
+   * - 'idle': Query is not fetching
+   */
+  readonly fetchStatus: `fetching` | `paused` | `idle`
 }
 
 /**
@@ -282,7 +310,12 @@ export function queryCollectionOptions<
     schema: T
     select: (data: TQueryData) => Array<InferSchemaInput<T>>
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -315,7 +348,12 @@ export function queryCollectionOptions<
     schema?: never // prohibit schema
     select: (data: TQueryData) => Array<T>
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
@@ -339,7 +377,12 @@ export function queryCollectionOptions<
   > & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -365,14 +408,24 @@ export function queryCollectionOptions<
   > & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
 export function queryCollectionOptions(
   config: QueryCollectionConfig<Record<string, unknown>>
-): CollectionConfig & {
+): CollectionConfig<
+  Record<string, unknown>,
+  string | number,
+  never,
+  QueryCollectionUtils
+> & {
   utils: QueryCollectionUtils
 } {
   const {
@@ -421,6 +474,15 @@ export function queryCollectionOptions(
   /** The timestamp for when the query most recently returned the status as "error" */
   let lastErrorUpdatedAt = 0
 
+  /** Query state tracking from QueryObserver */
+  const queryState = {
+    isFetching: false,
+    isRefetching: false,
+    isLoading: false,
+    dataUpdatedAt: 0,
+    fetchStatus: `idle` as `fetching` | `paused` | `idle`,
+  }
+
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
@@ -451,11 +513,26 @@ export function queryCollectionOptions(
       any
     >(queryClient, observerOptions)
 
+    // Initialize query state with current observer state
+    const initialResult = localObserver.getCurrentResult()
+    queryState.isFetching = initialResult.isFetching
+    queryState.isRefetching = initialResult.isRefetching
+    queryState.isLoading = initialResult.isLoading
+    queryState.dataUpdatedAt = initialResult.dataUpdatedAt
+    queryState.fetchStatus = initialResult.fetchStatus
+
     let isSubscribed = false
     let actualUnsubscribeFn: (() => void) | null = null
 
     type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
     const handleQueryResult: UpdateHandler = (result) => {
+      // Update query state from QueryObserver result
+      queryState.isFetching = result.isFetching
+      queryState.isRefetching = result.isRefetching
+      queryState.isLoading = result.isLoading
+      queryState.dataUpdatedAt = result.dataUpdatedAt
+      queryState.fetchStatus = result.fetchStatus
+
       if (result.isSuccess) {
         // Clear error state
         lastError = undefined
@@ -692,18 +769,67 @@ export function queryCollectionOptions(
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {
-      refetch,
-      ...writeUtils,
-      lastError: () => lastError,
-      isError: () => !!lastError,
-      errorCount: () => errorCount,
-      clearError: () => {
-        lastError = undefined
-        errorCount = 0
-        lastErrorUpdatedAt = 0
-        return refetch({ throwOnError: true })
+    utils: Object.defineProperties(
+      {
+        refetch,
+        ...writeUtils,
+        clearError: () => {
+          lastError = undefined
+          errorCount = 0
+          lastErrorUpdatedAt = 0
+          return refetch({ throwOnError: true })
+        },
       },
-    },
+      {
+        lastError: {
+          get() {
+            return lastError
+          },
+          enumerable: true,
+        },
+        isError: {
+          get() {
+            return !!lastError
+          },
+          enumerable: true,
+        },
+        errorCount: {
+          get() {
+            return errorCount
+          },
+          enumerable: true,
+        },
+        isFetching: {
+          get() {
+            return queryState.isFetching
+          },
+          enumerable: true,
+        },
+        isRefetching: {
+          get() {
+            return queryState.isRefetching
+          },
+          enumerable: true,
+        },
+        isLoading: {
+          get() {
+            return queryState.isLoading
+          },
+          enumerable: true,
+        },
+        dataUpdatedAt: {
+          get() {
+            return queryState.dataUpdatedAt
+          },
+          enumerable: true,
+        },
+        fetchStatus: {
+          get() {
+            return queryState.fetchStatus
+          },
+          enumerable: true,
+        },
+      }
+    ),
   }
 }
