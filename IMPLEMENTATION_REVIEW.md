@@ -12,25 +12,28 @@
 ### 1. Server-Side Query Execution ✅
 
 **Requested API:**
+
 ```typescript
 const serverContext = createServerContext({
   collections: { todos: todosCollection },
-  defaultOptions: { staleTime: 60 * 1000 }
+  defaultOptions: { staleTime: 60 * 1000 },
 })
 await prefetchLiveQuery(serverContext, (q) => q.from({ todos }))
 ```
 
 **Implemented API:**
+
 ```typescript
-const serverContext = createServerContext()  // ✅ Simpler - no config needed
+const serverContext = createServerContext() // ✅ Simpler - no config needed
 await prefetchLiveQuery(serverContext, {
-  id: 'todos',  // ✅ Explicit query identity (better than auto-matching)
+  id: "todos", // ✅ Explicit query identity (better than auto-matching)
   query: (q) => q.from({ todos: todosCollection }),
-  transform: (rows) => rows.map(/* serialization */)  // ✅ BONUS: not in original spec
+  transform: (rows) => rows.map(/* serialization */), // ✅ BONUS: not in original spec
 })
 ```
 
 **Differences:**
+
 - ✅ **Simplified**: No need to pass collections to context (queries already have collection references)
 - ✅ **Explicit IDs**: Required `id` field makes query matching deterministic (addresses "Query Matching" challenge)
 - ✅ **Transform option**: Added after code review for server-side data transformation (Date serialization, etc.)
@@ -43,6 +46,7 @@ await prefetchLiveQuery(serverContext, {
 ### 2. Dehydration ✅
 
 **Requested:**
+
 ```typescript
 export async function getServerSideProps() {
   return {
@@ -54,6 +58,7 @@ export async function getServerSideProps() {
 ```
 
 **Implemented:**
+
 ```typescript
 // Exactly as specified ✅
 const dehydratedState = dehydrate(serverContext)
@@ -67,6 +72,7 @@ const dehydratedState = dehydrate(serverContext)
 ### 3. Client-Side Hydration ✅
 
 **Requested:**
+
 ```typescript
 import { HydrationBoundary } from '@tanstack/react-db/server'
 
@@ -80,6 +86,7 @@ function MyApp({ Component, pageProps }) {
 ```
 
 **Implemented:**
+
 ```typescript
 import { HydrationBoundary } from '@tanstack/react-db/hydration'  // ✅ Better path
 
@@ -93,6 +100,7 @@ function MyApp({ Component, pageProps }) {
 ```
 
 **Differences:**
+
 - ✅ **Better import path**: `/hydration` instead of `/server` (more accurate - it's client code marked `'use client'`)
 - ✅ **Context-based**: Uses React Context for proper nested boundary support
 - ✅ **Global fallback**: Also supports `hydrate(state)` for non-React contexts
@@ -104,6 +112,7 @@ function MyApp({ Component, pageProps }) {
 ### 4. React Server Components Support ✅
 
 **Requested:**
+
 ```typescript
 async function TodoPage() {
   const serverContext = createServerContext({
@@ -123,6 +132,7 @@ async function TodoPage() {
 ```
 
 **Implemented:**
+
 ```typescript
 // Exact same pattern ✅
 // Tested in examples/react/projects/src/routes/_authenticated/project/$projectId.tsx
@@ -149,6 +159,7 @@ async function ProjectPage() {
 ### 5. Package Structure ✅
 
 **Requested:**
+
 ```
 @tanstack/react-db
 ├── index.ts         # Client-only exports
@@ -156,6 +167,7 @@ async function ProjectPage() {
 ```
 
 **Implemented:**
+
 ```
 @tanstack/react-db
 ├── index.ts         # Client exports (useLiveQuery, etc.)
@@ -164,6 +176,7 @@ async function ProjectPage() {
 ```
 
 **Differences:**
+
 - ✅ **Split server/client better**: `server.ts` has zero React imports (pure server code)
 - ✅ **Explicit client boundary**: `hydration.tsx` marked with `'use client'` for RSC safety
 - ✅ **Subpath exports**: Added `@tanstack/react-db/server` and `@tanstack/react-db/hydration` for bundler optimization
@@ -175,6 +188,7 @@ async function ProjectPage() {
 ### 6. useLiveQuery Hydration Integration ✅
 
 **Requested:**
+
 ```typescript
 function TodoList() {
   const { data, isLoading } = useLiveQuery((q) =>
@@ -188,6 +202,7 @@ function TodoList() {
 ```
 
 **Implemented:**
+
 ```typescript
 function TodoList() {
   const { data, isLoading } = useLiveQuery({
@@ -203,6 +218,7 @@ function TodoList() {
 ```
 
 **How it works:**
+
 - Checks HydrationBoundary context for hydrated data
 - Returns hydrated data while `collection.status === 'loading'`
 - Switches to live collection data when ready
@@ -217,6 +233,7 @@ function TodoList() {
 ### 1. React Suspense Integration ⏸️
 
 **Requested:**
+
 ```typescript
 function TodoList() {
   const { data } = useLiveQuery((q) =>
@@ -228,6 +245,7 @@ function TodoList() {
 ```
 
 **Status:**
+
 - ❌ `suspense: true` option NOT implemented
 - ❌ No `useSuspenseLiveQuery` hook
 - 🔗 Related PR #697 exists for Suspense hook (mentioned in conversation)
@@ -240,11 +258,13 @@ function TodoList() {
 ### 2. Streaming SSR ⏸️
 
 **Requested:**
+
 - Support for React 18 streaming
 - Progressive content delivery
 - Suspense boundaries during streaming
 
 **Status:**
+
 - ❌ NOT IMPLEMENTED
 - ⚠️ Current implementation uses `await collection.toArrayWhenReady()` which blocks
 - 📝 Would need async/streaming dehydration
@@ -256,11 +276,13 @@ function TodoList() {
 ### 3. Advanced Features ⏸️
 
 **Requested:**
+
 - Partial hydration (selective queries)
 - Concurrent rendering optimizations
 - Error boundaries for failed hydration
 
 **Status:**
+
 - ❌ NOT IMPLEMENTED
 - ⚠️ All queries in serverContext are dehydrated (no filtering)
 - 📝 No special concurrent mode handling
@@ -276,6 +298,7 @@ function TodoList() {
 **Challenge:** "How to reliably match server-executed queries with client `useLiveQuery` calls?"
 
 **Solution:**
+
 - Required explicit `id` field in both `prefetchLiveQuery` and `useLiveQuery`
 - IDs must match exactly for hydration to work
 - Simple, deterministic, no magic
@@ -289,7 +312,8 @@ function TodoList() {
 **Challenge:** "What minimal collection state needs to be transferred for hydration?"
 
 **Solution:**
-- Only transfer query *results* (via `collection.toArray`)
+
+- Only transfer query _results_ (via `collection.toArray`)
 - No collection metadata, no differential dataflow state
 - Client reconstructs collection state from query results using `getKey`
 
@@ -302,6 +326,7 @@ function TodoList() {
 **Challenge:** "How to handle sync-engine backed collections that may not work on server?"
 
 **Solution:**
+
 - `createLiveQueryCollection({ startSync: false })` prevents auto-sync
 - `await collection.preload()` loads data without starting live sync
 - `collection.cleanup()` ensures proper cleanup
@@ -316,6 +341,7 @@ function TodoList() {
 **Challenge:** "Ensure server contexts are properly cleaned up after each request"
 
 **Solution:**
+
 - `createServerContext()` creates isolated per-request context
 - `prefetchLiveQuery` cleans up collections in `finally` block
 - No global state on server
@@ -330,6 +356,7 @@ function TodoList() {
 **Challenge:** "Live queries are inherently client-side reactive - RSC prefetching is for initial data only"
 
 **Solution:**
+
 - Server Components prefetch data only
 - Client Components (`useLiveQuery`) handle reactivity
 - Clear documentation about server vs client roles
@@ -345,12 +372,13 @@ function TodoList() {
 
 ```typescript
 await prefetchLiveQuery(serverContext, {
-  id: 'events',
+  id: "events",
   query: (q) => q.from({ events: eventsCollection }),
-  transform: (rows) => rows.map(event => ({
-    ...event,
-    createdAt: event.createdAt.toISOString()  // Date → string
-  }))
+  transform: (rows) =>
+    rows.map((event) => ({
+      ...event,
+      createdAt: event.createdAt.toISOString(), // Date → string
+    })),
 })
 ```
 
@@ -390,6 +418,7 @@ const { status, isReady } = useLiveQuery(...)
 **Requested:** Not specified in issue
 
 **Implemented:**
+
 - 13 SSR/RSC specific tests
 - 70 total tests passing
 - 90% code coverage
@@ -413,11 +442,13 @@ const { status, isReady } = useLiveQuery(...)
 ## 📚 Documentation
 
 **Requested:**
+
 - API reference
 - Usage examples
 - Integration guides
 
 **Implemented:**
+
 - ✅ Complete README with SSR/RSC section
 - ✅ API reference for all functions
 - ✅ Data serialization constraints documented
@@ -433,17 +464,17 @@ const { status, isReady } = useLiveQuery(...)
 
 ## 🔍 API Comparison Summary
 
-| Feature | Requested | Implemented | Status |
-|---------|-----------|-------------|--------|
-| createServerContext | With collections config | No config needed | ✅ Simpler |
-| prefetchLiveQuery | Auto query matching | Explicit `id` required | ✅ Better |
-| dehydrate | As specified | As specified | ✅ Match |
-| HydrationBoundary | From `/server` | From `/hydration` | ✅ Better |
-| hydrate | Basic | + `oneShot` option | ✅ Enhanced |
-| transform | Not in spec | Added | ✨ Bonus |
-| staleTime | In spec | Removed (unused) | ⚠️ Defer |
-| suspense | In spec | Not implemented | ⏸️ Phase 4 |
-| Streaming SSR | In spec | Not implemented | ⏸️ Phase 4 |
+| Feature             | Requested               | Implemented            | Status      |
+| ------------------- | ----------------------- | ---------------------- | ----------- |
+| createServerContext | With collections config | No config needed       | ✅ Simpler  |
+| prefetchLiveQuery   | Auto query matching     | Explicit `id` required | ✅ Better   |
+| dehydrate           | As specified            | As specified           | ✅ Match    |
+| HydrationBoundary   | From `/server`          | From `/hydration`      | ✅ Better   |
+| hydrate             | Basic                   | + `oneShot` option     | ✅ Enhanced |
+| transform           | Not in spec             | Added                  | ✨ Bonus    |
+| staleTime           | In spec                 | Removed (unused)       | ⚠️ Defer    |
+| suspense            | In spec                 | Not implemented        | ⏸️ Phase 4  |
+| Streaming SSR       | In spec                 | Not implemented        | ⏸️ Phase 4  |
 
 ---
 
@@ -479,6 +510,7 @@ const { status, isReady } = useLiveQuery(...)
 **READY TO MERGE** for minor release with the included changeset.
 
 This implementation:
+
 - ✅ Delivers all Phase 1-3 requirements
 - ✅ Exceeds original spec in several areas (transform, nested boundaries, status alignment)
 - ✅ Addresses all 5 "Technical Challenges" from the issue

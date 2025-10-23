@@ -10,16 +10,21 @@ React hooks for TanStack DB. See [TanStack/db](https://github.com/TanStack/db) f
 
 ```tsx
 // Server Component (Next.js App Router)
-import { createServerContext, prefetchLiveQuery, dehydrate, HydrationBoundary } from '@tanstack/react-db'
-import { todosCollection } from './collections'
+import {
+  createServerContext,
+  prefetchLiveQuery,
+  dehydrate,
+  HydrationBoundary,
+} from "@tanstack/react-db"
+import { todosCollection } from "./collections"
 
 async function TodosPage() {
   const serverContext = createServerContext()
 
   // Prefetch queries on the server
   await prefetchLiveQuery(serverContext, {
-    id: 'todos',
-    query: (q) => q.from({ todos: todosCollection })
+    id: "todos",
+    query: (q) => q.from({ todos: todosCollection }),
   })
 
   return (
@@ -30,17 +35,23 @@ async function TodosPage() {
 }
 
 // Client Component
-'use client'
-import { useLiveQuery } from '@tanstack/react-db'
-import { todosCollection } from './collections'
+;("use client")
+import { useLiveQuery } from "@tanstack/react-db"
+import { todosCollection } from "./collections"
 
 function TodoList() {
   const { data, isReady } = useLiveQuery({
-    id: 'todos', // Must match the id used in prefetchLiveQuery
-    query: (q) => q.from({ todos: todosCollection })
+    id: "todos", // Must match the id used in prefetchLiveQuery
+    query: (q) => q.from({ todos: todosCollection }),
   })
 
-  return <div>{data.map(todo => <Todo key={todo.id} {...todo} />)}</div>
+  return (
+    <div>
+      {data.map((todo) => (
+        <Todo key={todo.id} {...todo} />
+      ))}
+    </div>
+  )
 }
 ```
 
@@ -59,11 +70,13 @@ function TodoList() {
 For SSR/RSC to work correctly, all query data **must be JSON-serializable**. Non-serializable types will cause runtime errors during hydration.
 
 **Supported types:**
+
 - Primitives: `string`, `number`, `boolean`, `null`
 - Objects and arrays (plain objects only)
 - JSON-serializable structures
 
 **Unsupported types that require special handling:**
+
 - `Date` objects (serialize as ISO strings, then parse on client)
 - `BigInt` values (convert to strings or numbers)
 - `Map`, `Set`, `WeakMap`, `WeakSet`
@@ -76,29 +89,31 @@ For SSR/RSC to work correctly, all query data **must be JSON-serializable**. Non
 ```tsx
 // Server-side prefetch with transform
 await prefetchLiveQuery(serverContext, {
-  id: 'events',
+  id: "events",
   query: (q) => q.from({ events: eventsCollection }),
   // Transform the results before dehydration
-  transform: (rows) => rows.map(event => ({
-    ...event,
-    createdAt: event.createdAt.toISOString()
-  }))
+  transform: (rows) =>
+    rows.map((event) => ({
+      ...event,
+      createdAt: event.createdAt.toISOString(),
+    })),
 })
 
 // Client-side usage
 const { data } = useLiveQuery({
-  id: 'events',
-  query: (q) => q.from({ events: eventsCollection })
+  id: "events",
+  query: (q) => q.from({ events: eventsCollection }),
 })
 
 // Parse ISO strings back to Date objects if needed
-const eventsWithDates = data.map(event => ({
+const eventsWithDates = data.map((event) => ({
   ...event,
-  createdAt: new Date(event.createdAt)
+  createdAt: new Date(event.createdAt),
 }))
 ```
 
 **For complex serialization needs**, consider using libraries like:
+
 - [`superjson`](https://github.com/blitz-js/superjson) - Handles Date, RegExp, Map, Set, BigInt, etc.
 - [`devalue`](https://github.com/Rich-Harris/devalue) - Lightweight alternative with circular reference support
 
@@ -128,11 +143,15 @@ For better bundler clarity and explicit server/client boundaries, you can use su
 
 ```tsx
 // Server files
-import { createServerContext, prefetchLiveQuery, dehydrate } from '@tanstack/react-db/server'
+import {
+  createServerContext,
+  prefetchLiveQuery,
+  dehydrate,
+} from "@tanstack/react-db/server"
 
 // Client files
-import { HydrationBoundary } from '@tanstack/react-db/hydration'
-import { useLiveQuery } from '@tanstack/react-db'
+import { HydrationBoundary } from "@tanstack/react-db/hydration"
+import { useLiveQuery } from "@tanstack/react-db"
 ```
 
 This makes the intent explicit and helps RSC bundlers optimize server vs. client code.

@@ -31,8 +31,8 @@ async function Page() {
   const serverContext = createServerContext()
 
   await prefetchLiveQuery(serverContext, {
-    id: 'todos',
-    query: (q) => q.from({ todos: todosCollection })
+    id: "todos",
+    query: (q) => q.from({ todos: todosCollection }),
   })
 
   return (
@@ -43,14 +43,20 @@ async function Page() {
 }
 
 // Client Component
-'use client'
+;("use client")
 function TodoList() {
   const { data } = useLiveQuery({
-    id: 'todos',
-    query: (q) => q.from({ todos: todosCollection })
+    id: "todos",
+    query: (q) => q.from({ todos: todosCollection }),
   })
 
-  return <div>{data.map(todo => <Todo key={todo.id} {...todo} />)}</div>
+  return (
+    <div>
+      {data.map((todo) => (
+        <Todo key={todo.id} {...todo} />
+      ))}
+    </div>
+  )
 }
 ```
 

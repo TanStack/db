@@ -307,7 +307,9 @@ export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
       query: (q) =>
         q
           .from({ todo: todoCollection })
-          .where(({ todo }) => eq(todo.project_id, parseInt(params.projectId, 10)))
+          .where(({ todo }) =>
+            eq(todo.project_id, parseInt(params.projectId, 10))
+          )
           .orderBy(({ todo }) => todo.created_at),
     })
 
@@ -340,7 +342,13 @@ function ProjectPage() {
   })
 
   // Component renders immediately with server data, then gets live updates
-  return <ul>{todos.map(todo => <li key={todo.id}>{todo.text}</li>)}</ul>
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  )
 }
 ```
 
