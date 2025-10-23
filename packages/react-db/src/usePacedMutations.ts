@@ -96,11 +96,18 @@ export function usePacedMutations<T extends object = Record<string, unknown>>(
   config: PacedMutationsConfig<T>
 ): (callback: () => void) => Transaction<T> {
   // Create paced mutations instance with proper dependency tracking
+  // Serialize strategy for stable comparison since strategy objects are recreated on each render
   const { mutate } = useMemo(() => {
     return createPacedMutations<T>(config)
-    // Include all config properties in dependencies
-    // Strategy changes will recreate the instance
-  }, [config.mutationFn, config.metadata, config.strategy])
+  }, [
+    config.mutationFn,
+    config.metadata,
+    // Serialize strategy to avoid recreating when object reference changes but values are same
+    JSON.stringify({
+      type: config.strategy._type,
+      options: config.strategy.options,
+    }),
+  ])
 
   // Return stable mutate callback
   const stableMutate = useCallback(mutate, [mutate])
