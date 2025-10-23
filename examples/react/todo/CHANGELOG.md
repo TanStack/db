@@ -1,5 +1,15 @@
 # examples/react/todo
 
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/electric-db-collection@0.1.37
+  - @tanstack/query-db-collection@0.2.35
+  - @tanstack/react-db@0.1.35
+  - @tanstack/trailbase-db-collection@0.1.35
+
 ## 0.1.13
 
 ### Patch Changes
