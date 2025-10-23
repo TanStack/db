@@ -361,17 +361,18 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
-  // Extract id from config if available
-  const queryId = isCollection
-    ? configOrQueryOrCollection.id
-    : typeof configOrQueryOrCollection === `object` &&
-        configOrQueryOrCollection !== null &&
-        `id` in configOrQueryOrCollection
-      ? configOrQueryOrCollection.id
+  // Extract hydrateId from config object (not from collections or functions)
+  // Only config objects support hydrateId for SSR hydration matching
+  const hydrateId =
+    !isCollection &&
+    typeof configOrQueryOrCollection === `object` &&
+    configOrQueryOrCollection !== null &&
+    `hydrateId` in configOrQueryOrCollection
+      ? configOrQueryOrCollection.hydrateId
       : undefined
 
   // Check for hydrated data using the hook
-  const hydratedData = useHydratedData(queryId)
+  const hydratedData = useHydratedData(hydrateId)
 
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
@@ -561,15 +562,15 @@ export function useLiveQuery(
       const shouldUseHydratedData =
         hydratedData !== undefined && !collectionHasData
 
-      // Dev-mode hint: warn if id is provided but no hydration found
+      // Dev-mode hint: warn if hydrateId is provided but no hydration found
       if (
         process.env.NODE_ENV !== `production` &&
-        queryId &&
+        hydrateId &&
         !collectionHasData &&
         hydratedData === undefined
       ) {
         console.warn(
-          `TanStack DB: no hydrated data found for id "${queryId}" — did you wrap this subtree in <HydrationBoundary state={...}>?`
+          `TanStack DB: no hydrated data found for hydrateId "${hydrateId}" — did you wrap this subtree in <HydrationBoundary state={...}>?`
         )
       }
 
