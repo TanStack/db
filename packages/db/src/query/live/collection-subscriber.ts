@@ -176,30 +176,14 @@ export class CollectionSubscriber<
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo
   ) {
-    const { orderBy, offset, limit, comparator, dataNeeded, index } =
-      orderByInfo
+    const { orderBy, offset, limit, index } = orderByInfo
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
       // Split live updates into a delete of the old value and an insert of the new value
-      // and filter out changes that are bigger than the biggest value we've sent so far
-      // because they can't affect the topK (and if later we need more data, we will dynamically load more data)
       const splittedChanges = splitUpdates(changes)
-      let filteredChanges = splittedChanges
-      if (dataNeeded && dataNeeded() === 0) {
-        // If the topK is full [..., maxSentValue] then we do not need to send changes > maxSentValue
-        // because they can never make it into the topK.
-        // However, if the topK isn't full yet, we need to also send changes > maxSentValue
-        // because they will make it into the topK
-        filteredChanges = filterChangesSmallerOrEqualToMax(
-          splittedChanges,
-          comparator,
-          this.biggest
-        )
-      }
-
-      this.sendChangesToPipelineWithTracking(filteredChanges, subscription)
+      this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
     }
 
     // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
@@ -394,38 +378,4 @@ function* splitUpdates<
       yield change
     }
   }
-}
-
-function* filterChanges<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
->(
-  changes: Iterable<ChangeMessage<T, TKey>>,
-  f: (change: ChangeMessage<T, TKey>) => boolean
-): Generator<ChangeMessage<T, TKey>> {
-  for (const change of changes) {
-    if (f(change)) {
-      yield change
-    }
-  }
-}
-
-/**
- * Filters changes to only include those that are smaller or equal to the provided max value
- * @param changes - Iterable of changes to filter
- * @param comparator - Comparator function to use for filtering
- * @param maxValue - Range to filter changes within (range boundaries are exclusive)
- * @returns Iterable of changes that fall within the range
- */
-function* filterChangesSmallerOrEqualToMax<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
->(
-  changes: Iterable<ChangeMessage<T, TKey>>,
-  comparator: (a: any, b: any) => number,
-  maxValue: any
-): Generator<ChangeMessage<T, TKey>> {
-  yield* filterChanges(changes, (change) => {
-    return !maxValue || comparator(change.value, maxValue) <= 0
-  })
 }
