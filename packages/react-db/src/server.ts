@@ -17,7 +17,7 @@ export interface ServerContext {
  * Dehydrated query result that can be serialized and sent to the client
  */
 export interface DehydratedQuery<T = any> {
-  id: string
+  hydrateId: string
   data: T
   timestamp: number
 }
@@ -34,10 +34,10 @@ export interface DehydratedState {
  */
 export interface PrefetchLiveQueryOptions<TContext extends Context> {
   /**
-   * Unique identifier for this query. Required for hydration to work.
-   * Must match the id used in the client-side useLiveQuery call.
+   * Unique identifier for SSR hydration matching. Required for hydration to work.
+   * Must match the hydrateId used in the client-side useLiveQuery call.
    */
-  id: string
+  hydrateId: string
 
   /**
    * The query to execute
@@ -79,7 +79,7 @@ export function createServerContext(): ServerContext {
  * const serverContext = createServerContext()
  *
  * await prefetchLiveQuery(serverContext, {
- *   id: 'todos',
+ *   hydrateId: 'todos',
  *   query: (q) => q.from({ todos: todosCollection })
  * })
  *
@@ -90,11 +90,11 @@ export async function prefetchLiveQuery<TContext extends Context>(
   serverContext: ServerContext,
   options: PrefetchLiveQueryOptions<TContext>
 ): Promise<void> {
-  const { id, query, transform } = options
+  const { hydrateId, query, transform } = options
 
   // Create a temporary collection for this query
   const config: LiveQueryCollectionConfig<TContext> = {
-    id,
+    id: hydrateId, // Use hydrateId as the collection id (temporary, server-side only)
     query,
     startSync: false, // Don't auto-start, we'll preload manually
   }
@@ -111,8 +111,8 @@ export async function prefetchLiveQuery<TContext extends Context>(
     const data = Array.isArray(out) ? out : [out]
 
     // Store in server context
-    serverContext.queries.set(id, {
-      id,
+    serverContext.queries.set(hydrateId, {
+      hydrateId,
       data,
       timestamp: Date.now(),
     })

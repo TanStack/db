@@ -26,10 +26,11 @@ const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned
  */
 export interface UseLiveQueryOptions {
   /**
-   * Unique identifier for this query. Required for SSR/RSC hydration to work.
-   * Must match the id used in prefetchLiveQuery on the server.
+   * Unique identifier for SSR/RSC hydration matching. Required for hydration to work.
+   * Must match the hydrateId used in prefetchLiveQuery on the server.
+   * Note: This is separate from the collection's `id` field (used for devtools).
    */
-  id?: string
+  hydrateId?: string
 
   /**
    * Garbage collection time in milliseconds
@@ -42,15 +43,17 @@ export interface UseLiveQueryOptions {
  * Hook to get hydrated data for a query from HydrationBoundary context
  * @internal
  */
-function useHydratedData<T = any>(id: string | undefined): T | undefined {
+function useHydratedData<T = any>(
+  hydrateId: string | undefined
+): T | undefined {
   const hydrationState = useContext(HydrationContext)
 
   return useMemo(() => {
-    if (!id || !hydrationState) return undefined
+    if (!hydrateId || !hydrationState) return undefined
 
-    const query = hydrationState.queries.find((q) => q.id === id)
+    const query = hydrationState.queries.find((q) => q.hydrateId === hydrateId)
     return query?.data as T | undefined
-  }, [id, hydrationState])
+  }, [hydrateId, hydrationState])
 }
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
