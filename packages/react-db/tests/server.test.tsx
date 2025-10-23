@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { render, renderHook, waitFor } from "@testing-library/react"
 import { createCollection, gt } from "@tanstack/db"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
@@ -7,7 +7,7 @@ import {
   dehydrate,
   prefetchLiveQuery,
 } from "../src/server"
-import { HydrationBoundary, hydrate } from "../src/hydration"
+import { HydrationBoundary } from "../src/hydration"
 import { useLiveQuery } from "../src/useLiveQuery"
 
 type Person = {
@@ -39,20 +39,6 @@ const initialPersons: Array<Person> = [
 ]
 
 describe(`SSR/RSC Hydration`, () => {
-  beforeEach(() => {
-    // Clear any global hydration state before each test
-    if (typeof window !== `undefined`) {
-      // Legacy key (pre-symbol)
-      delete (window as any).__TANSTACK_DB_HYDRATED_STATE__
-      // Symbol-based slot
-      const SYM =
-        typeof Symbol !== `undefined`
-          ? Symbol.for(`tanstack.db.hydrated`)
-          : `__TANSTACK_DB_HYDRATED_STATE__`
-      delete (window as any)[SYM]
-    }
-  })
-
   it(`should create a server context`, () => {
     const serverContext = createServerContext()
     expect(serverContext).toBeDefined()
@@ -133,31 +119,6 @@ describe(`SSR/RSC Hydration`, () => {
     expect(dehydratedState.queries[0]!.data).toHaveLength(3)
   })
 
-  it(`should hydrate state globally`, () => {
-    const dehydratedState = {
-      queries: [
-        {
-          id: `test-query`,
-          data: [{ id: `1`, name: `Test` }],
-          timestamp: Date.now(),
-        },
-      ],
-    }
-
-    hydrate(dehydratedState)
-
-    // Check that the hydrated state is stored correctly
-    const HYDRATED_SYMBOL =
-      typeof Symbol !== `undefined`
-        ? Symbol.for(`tanstack.db.hydrated`)
-        : `__TANSTACK_DB_HYDRATED_STATE__`
-
-    const storedData = (window as any)[HYDRATED_SYMBOL]
-    expect(storedData).toBeDefined()
-    expect(storedData.state).toEqual(dehydratedState)
-    expect(storedData.oneShot).toBe(false)
-  })
-
   it(`should use hydrated data in useLiveQuery`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -177,15 +138,23 @@ describe(`SSR/RSC Hydration`, () => {
         },
       ],
     }
-    hydrate(dehydratedState)
 
-    // Render hook with collection that has an id matching hydrated data
-    const { result } = renderHook(() => {
-      return useLiveQuery({
-        id: `test-persons-hydration`,
-        query: (q) => q.from({ persons: collection }),
-      })
-    })
+    // Render hook with HydrationBoundary wrapper
+    const { result } = renderHook(
+      () => {
+        return useLiveQuery({
+          id: `test-persons-hydration`,
+          query: (q) => q.from({ persons: collection }),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={dehydratedState}>
+            {children}
+          </HydrationBoundary>
+        ),
+      }
+    )
 
     // Should immediately have hydrated data
     expect(result.current.data).toHaveLength(3)
@@ -210,7 +179,6 @@ describe(`SSR/RSC Hydration`, () => {
         },
       ],
     }
-    hydrate(dehydratedState)
 
     // Create collection WITHOUT initialData to simulate real SSR scenario
     // where collection data loads after component mounts
@@ -222,12 +190,21 @@ describe(`SSR/RSC Hydration`, () => {
       })
     )
 
-    const { result } = renderHook(() => {
-      return useLiveQuery({
-        id: `test-persons-transition`,
-        query: (q) => q.from({ persons: collection }),
-      })
-    })
+    const { result } = renderHook(
+      () => {
+        return useLiveQuery({
+          id: `test-persons-transition`,
+          query: (q) => q.from({ persons: collection }),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={dehydratedState}>
+            {children}
+          </HydrationBoundary>
+        ),
+      }
+    )
 
     // Initially should show hydrated data since collection is empty
     expect(result.current.data).toHaveLength(1)
@@ -376,12 +353,20 @@ describe(`SSR/RSC Hydration`, () => {
         },
       ],
     }
-    hydrate(dehydratedState)
 
-    const { result } = renderHook(() => {
-      // Query without an explicit id
-      return useLiveQuery((q) => q.from({ persons: collection }))
-    })
+    const { result } = renderHook(
+      () => {
+        // Query without an explicit id
+        return useLiveQuery((q) => q.from({ persons: collection }))
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={dehydratedState}>
+            {children}
+          </HydrationBoundary>
+        ),
+      }
+    )
 
     // Wait for collection to be ready
     await waitFor(() => {
@@ -419,14 +404,22 @@ describe(`SSR/RSC Hydration`, () => {
         },
       ],
     }
-    hydrate(dehydratedState)
 
-    const { result } = renderHook(() => {
-      return useLiveQuery({
-        id: `test-single-person`,
-        query: (q) => q.from({ persons: collection }).findOne(),
-      })
-    })
+    const { result } = renderHook(
+      () => {
+        return useLiveQuery({
+          id: `test-single-person`,
+          query: (q) => q.from({ persons: collection }).findOne(),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <HydrationBoundary state={dehydratedState}>
+            {children}
+          </HydrationBoundary>
+        ),
+      }
+    )
 
     // With singleResult: true, data should be a single object, not an array
     expect(result.current.isReady).toBe(true)
@@ -517,60 +510,5 @@ describe(`SSR/RSC Hydration`, () => {
     expect((innerResult.current.data as Person | undefined)?.name).toBe(
       `Inner Person`
     )
-  })
-
-  it(`should support one-shot hydration`, async () => {
-    const testPerson = {
-      id: `1`,
-      name: `Test Person`,
-      age: 30,
-      email: `test@example.com`,
-    }
-
-    const collection = createCollection(
-      mockSyncCollectionOptions<Person>({
-        id: `test-oneshot`,
-        getKey: (person: Person) => person.id,
-        initialData: [],
-      })
-    )
-
-    const dehydratedState = {
-      queries: [
-        {
-          id: `oneshot-query`,
-          data: [testPerson],
-          timestamp: Date.now(),
-        },
-      ],
-    }
-
-    // Hydrate with oneShot enabled
-    hydrate(dehydratedState, { oneShot: true })
-
-    // First read should succeed
-    const { result: firstResult } = renderHook(() => {
-      return useLiveQuery({
-        id: `oneshot-query`,
-        query: (q) => q.from({ persons: collection }).findOne(),
-      })
-    })
-
-    expect(firstResult.current.isReady).toBe(true)
-    expect((firstResult.current.data as Person | undefined)?.name).toBe(
-      `Test Person`
-    )
-
-    // After first read, global state should be cleared
-    // Second hook should not find hydrated data (would be loading/idle)
-    const { result: secondResult } = renderHook(() => {
-      return useLiveQuery({
-        id: `oneshot-query`,
-        query: (q) => q.from({ persons: collection }).findOne(),
-      })
-    })
-
-    // Second result should not have hydrated data (collection is empty)
-    expect(secondResult.current.data).toBeUndefined()
   })
 })

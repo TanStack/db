@@ -51,8 +51,6 @@ function TodoList() {
   - `options.transform` - Optional callback to transform results before dehydration (e.g., Date serialization)
 - **`dehydrate(context)`** - Serializes prefetched queries for client hydration
 - **`HydrationBoundary`** - React component that provides hydrated data to descendants
-- **`hydrate(state, options?)`** - Manual hydration for non-React contexts
-  - `options.oneShot` - If `true`, clears hydrated data after first read (useful for large pages)
 
 ### Important Constraints
 

@@ -10,7 +10,7 @@ export type {
   DehydratedState,
   PrefetchLiveQueryOptions,
 } from "./server"
-export { HydrationBoundary, hydrate } from "./hydration"
+export { HydrationBoundary } from "./hydration"
 
 // Re-export everything from @tanstack/db
 export * from "@tanstack/db"

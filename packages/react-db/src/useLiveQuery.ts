@@ -4,7 +4,7 @@ import {
   CollectionImpl,
   createLiveQueryCollection,
 } from "@tanstack/db"
-import { HydrationContext, getHydratedQuery } from "./hydration"
+import { HydrationContext } from "./hydration"
 import type {
   Collection,
   CollectionConfigSingleRowOption,
@@ -39,26 +39,17 @@ export interface UseLiveQueryOptions {
 }
 
 /**
- * Hook to get hydrated data for a query
- * This checks both the HydrationBoundary context and global state
+ * Hook to get hydrated data for a query from HydrationBoundary context
  * @internal
  */
 function useHydratedData<T = any>(id: string | undefined): T | undefined {
-  // Try to get from React context first (if HydrationBoundary is being used)
   const hydrationState = useContext(HydrationContext)
 
   return useMemo(() => {
-    if (!id) return undefined
+    if (!id || !hydrationState) return undefined
 
-    // Check React context first
-    if (hydrationState) {
-      const query = hydrationState.queries.find((q) => q.id === id)
-      if (query) return query.data as T
-    }
-
-    // Fall back to global state (when using hydrate() directly)
-    // Use getHydratedQuery to reuse the Symbol-based logic
-    return getHydratedQuery<T>(id)
+    const query = hydrationState.queries.find((q) => q.id === id)
+    return query?.data as T | undefined
   }, [id, hydrationState])
 }
 
