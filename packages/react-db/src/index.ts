@@ -2,9 +2,15 @@
 export * from "./useLiveQuery"
 export * from "./useLiveInfiniteQuery"
 
-// Re-export SSR/RSC hydration utilities
-export * from "./server"
-export * from "./hydration"
+// Re-export SSR/RSC hydration utilities (public API only)
+export { createServerContext, prefetchLiveQuery, dehydrate } from "./server"
+export type {
+  ServerContext,
+  DehydratedQuery,
+  DehydratedState,
+  PrefetchLiveQueryOptions,
+} from "./server"
+export { HydrationBoundary, hydrate } from "./hydration"
 
 // Re-export everything from @tanstack/db
 export * from "@tanstack/db"

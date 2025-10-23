@@ -48,9 +48,11 @@ function TodoList() {
 
 - **`createServerContext()`** - Creates a server context to collect prefetched queries
 - **`prefetchLiveQuery(context, options)`** - Executes a query on the server
+  - `options.transform` - Optional callback to transform results before dehydration (e.g., Date serialization)
 - **`dehydrate(context)`** - Serializes prefetched queries for client hydration
 - **`HydrationBoundary`** - React component that provides hydrated data to descendants
-- **`hydrate(state)`** - Manual hydration for non-React contexts
+- **`hydrate(state, options?)`** - Manual hydration for non-React contexts
+  - `options.oneShot` - If `true`, clears hydrated data after first read (useful for large pages)
 
 ### Important Constraints
 
@@ -121,3 +123,18 @@ useLiveQuery({
 ```
 
 Without matching IDs, the client will not use the prefetched data and will wait for the collection to load.
+
+### Subpath Imports (Recommended for RSC)
+
+For better bundler clarity and explicit server/client boundaries, you can use subpath imports:
+
+```tsx
+// Server files
+import { createServerContext, prefetchLiveQuery, dehydrate } from '@tanstack/react-db/server'
+
+// Client files
+import { HydrationBoundary } from '@tanstack/react-db/hydration'
+import { useLiveQuery } from '@tanstack/react-db'
+```
+
+This makes the intent explicit and helps RSC bundlers optimize server vs. client code.

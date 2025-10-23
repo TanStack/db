@@ -49,6 +49,7 @@ export interface PrefetchLiveQueryOptions<TContext extends Context> {
   /**
    * Optional transform function to apply to the query results before dehydration.
    * Useful for serialization (e.g., converting Date objects to ISO strings).
+   * Should return an array of rows; non-arrays are normalized to a single-element array.
    *
    * @example
    * ```tsx
@@ -58,7 +59,7 @@ export interface PrefetchLiveQueryOptions<TContext extends Context> {
    * }))
    * ```
    */
-  transform?: (rows: Array<any>) => any
+  transform?: (rows: Array<any>) => Array<any> | any
 }
 
 /**
@@ -105,7 +106,9 @@ export async function prefetchLiveQuery<TContext extends Context>(
     const base = await collection.toArrayWhenReady()
 
     // Apply optional transform (e.g., for serialization)
-    const data = transform ? transform(base as Array<any>) : base
+    const out = transform ? transform(base as Array<any>) : base
+    // Normalize to array (defensive)
+    const data = Array.isArray(out) ? out : [out]
 
     // Store in server context
     serverContext.queries.set(id, {

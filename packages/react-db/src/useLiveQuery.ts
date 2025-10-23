@@ -603,12 +603,15 @@ export function useLiveQuery(
             return Array.isArray(hydratedData) ? hydratedData : [hydratedData]
           },
           collection: snapshot.collection,
-          status: `ready` as const, // Pretend we're ready since we have data
-          isLoading: false,
-          isReady: true,
-          isIdle: false,
-          isError: false,
-          isCleanedUp: false,
+          // Keep status consistent with the underlying collection
+          status: snapshot.collection.status,
+          isLoading: snapshot.collection.status === `loading`,
+          // Consider hydrated data as "ready enough" for UI
+          isReady:
+            snapshot.collection.status === `ready` || shouldUseHydratedData,
+          isIdle: snapshot.collection.status === `idle`,
+          isError: snapshot.collection.status === `error`,
+          isCleanedUp: snapshot.collection.status === `cleaned-up`,
           isEnabled: true,
         }
       } else {

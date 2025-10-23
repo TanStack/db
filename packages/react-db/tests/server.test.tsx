@@ -42,7 +42,14 @@ describe(`SSR/RSC Hydration`, () => {
   beforeEach(() => {
     // Clear any global hydration state before each test
     if (typeof window !== `undefined`) {
+      // Legacy key (pre-symbol)
       delete (window as any).__TANSTACK_DB_HYDRATED_STATE__
+      // Symbol-based slot
+      const SYM =
+        typeof Symbol !== `undefined`
+          ? Symbol.for(`tanstack.db.hydrated`)
+          : `__TANSTACK_DB_HYDRATED_STATE__`
+      delete (window as any)[SYM]
     }
   })
 
