@@ -175,6 +175,33 @@ export interface QueryCollectionUtils<
    * @throws Error if the refetch fails
    */
   clearError: () => Promise<void>
+  /**
+   * Check if the query is currently fetching data (including background refetches).
+   * Returns true during both initial fetches and background refetches.
+   */
+  isFetching: () => boolean
+  /**
+   * Check if the query is currently refetching data in the background.
+   * Returns true only during background refetches (not initial fetch).
+   */
+  isRefetching: () => boolean
+  /**
+   * Check if the query is loading for the first time (no data yet).
+   * Returns true only during the initial fetch before any data is available.
+   */
+  isLoading: () => boolean
+  /**
+   * Get the timestamp (in milliseconds since epoch) when the data was last successfully updated.
+   * Returns 0 if the query has never successfully fetched data.
+   */
+  dataUpdatedAt: () => number
+  /**
+   * Get the current fetch status of the query.
+   * - 'fetching': Query is currently fetching
+   * - 'paused': Query is paused (e.g., network offline)
+   * - 'idle': Query is not fetching
+   */
+  fetchStatus: () => `fetching` | `paused` | `idle`
 }
 
 /**
@@ -421,6 +448,15 @@ export function queryCollectionOptions(
   /** The timestamp for when the query most recently returned the status as "error" */
   let lastErrorUpdatedAt = 0
 
+  /** Query state tracking from QueryObserver */
+  const queryState = {
+    isFetching: false,
+    isRefetching: false,
+    isLoading: false,
+    dataUpdatedAt: 0,
+    fetchStatus: `idle` as `fetching` | `paused` | `idle`,
+  }
+
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
 
@@ -456,6 +492,13 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<typeof localObserver.subscribe>[0]
     const handleQueryResult: UpdateHandler = (result) => {
+      // Update query state from QueryObserver result
+      queryState.isFetching = result.isFetching
+      queryState.isRefetching = result.isRefetching
+      queryState.isLoading = result.isLoading
+      queryState.dataUpdatedAt = result.dataUpdatedAt
+      queryState.fetchStatus = result.fetchStatus
+
       if (result.isSuccess) {
         // Clear error state
         lastError = undefined
@@ -704,6 +747,11 @@ export function queryCollectionOptions(
         lastErrorUpdatedAt = 0
         return refetch({ throwOnError: true })
       },
+      isFetching: () => queryState.isFetching,
+      isRefetching: () => queryState.isRefetching,
+      isLoading: () => queryState.isLoading,
+      dataUpdatedAt: () => queryState.dataUpdatedAt,
+      fetchStatus: () => queryState.fetchStatus,
     },
   }
 }
