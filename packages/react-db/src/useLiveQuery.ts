@@ -558,6 +558,18 @@ export function useLiveQuery(
       const shouldUseHydratedData =
         hydratedData !== undefined && !collectionHasData
 
+      // Dev-mode hint: warn if id is provided but no hydration found
+      if (
+        process.env.NODE_ENV !== `production` &&
+        queryId &&
+        !collectionHasData &&
+        hydratedData === undefined
+      ) {
+        console.warn(
+          `TanStack DB: no hydrated data found for id "${queryId}" — did you wrap this subtree in <HydrationBoundary state={...}>?`
+        )
+      }
+
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 

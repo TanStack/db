@@ -203,8 +203,7 @@ function TodoList() {
 ```
 
 **How it works:**
-- Checks HydrationBoundary context first
-- Falls back to global `hydrate()` state
+- Checks HydrationBoundary context for hydrated data
 - Returns hydrated data while `collection.status === 'loading'`
 - Switches to live collection data when ready
 - Maintains correct data shape (single object vs array)
@@ -359,28 +358,7 @@ await prefetchLiveQuery(serverContext, {
 
 ---
 
-### 2. OneShot Hydration ✨
-
-```typescript
-hydrate(dehydratedState, { oneShot: true })
-// Clears global state after first read
-```
-
-**Why added:** Code review feedback - memory optimization for large pages
-
----
-
-### 3. Symbol-Based Global Storage ✨
-
-```typescript
-const HYDRATED_SYMBOL = Symbol.for('tanstack.db.hydrated')
-```
-
-**Why added:** Code review feedback - prevents bundle collisions
-
----
-
-### 4. Nested HydrationBoundary Support ✨
+### 2. Nested HydrationBoundary Support ✨
 
 ```typescript
 <HydrationBoundary state={outerState}>
@@ -394,7 +372,7 @@ const HYDRATED_SYMBOL = Symbol.for('tanstack.db.hydrated')
 
 ---
 
-### 5. Status Alignment ✨
+### 3. Status Alignment ✨
 
 ```typescript
 // Hydrated path reports actual collection status
@@ -492,7 +470,7 @@ const { status, isReady } = useLiveQuery(...)
 ✅ **3 rounds of external code review** - All feedback addressed
 ✅ **Production-ready** - Reviewer's final verdict: "merge-worthy"
 ✅ **Best practices** - Follows React Query patterns
-✅ **Safety** - Symbol globals, proper cleanup, module boundaries
+✅ **Safety** - Proper cleanup, module boundaries, React-idiomatic patterns
 
 ---
 
@@ -502,7 +480,7 @@ const { status, isReady } = useLiveQuery(...)
 
 This implementation:
 - ✅ Delivers all Phase 1-3 requirements
-- ✅ Exceeds original spec in several areas (transform, oneShot, nested boundaries)
+- ✅ Exceeds original spec in several areas (transform, nested boundaries, status alignment)
 - ✅ Addresses all 5 "Technical Challenges" from the issue
 - ✅ Provides working example and comprehensive docs
 - ✅ Passes 70 tests with 90% coverage
