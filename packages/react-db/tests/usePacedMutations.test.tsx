@@ -345,3 +345,115 @@ describe(`usePacedMutations with throttle strategy`, () => {
     expect(tx1!.state).toBe(`completed`)
   })
 })
+
+describe(`usePacedMutations memoization`, () => {
+  it(`should not recreate instance when strategy object changes but values are same`, () => {
+    const mutationFn = vi.fn(async () => {})
+
+    // Simulate a custom hook that creates strategy inline on each render
+    const useCustomHook = (wait: number) => {
+      return usePacedMutations({
+        mutationFn,
+        // Strategy is created inline on every render - new object reference each time
+        strategy: debounceStrategy({ wait }),
+      })
+    }
+
+    const { result, rerender } = renderHook(({ wait }) => useCustomHook(wait), {
+      initialProps: { wait: 3000 },
+    })
+
+    const firstMutate = result.current
+
+    // Rerender with same wait value - strategy object will be different reference
+    rerender({ wait: 3000 })
+    const secondMutate = result.current
+
+    // mutate function should be stable (same reference)
+    expect(secondMutate).toBe(firstMutate)
+
+    // Rerender with different wait value - should create new instance
+    rerender({ wait: 5000 })
+    const thirdMutate = result.current
+
+    // mutate function should be different now
+    expect(thirdMutate).not.toBe(firstMutate)
+  })
+
+  it(`should not recreate instance when wrapped in custom hook with inline strategy`, () => {
+    const mutationFn = vi.fn(async () => {})
+
+    // Simulate the exact user scenario: custom hook wrapping usePacedMutations
+    const useDebouncedTransaction = (opts?: {
+      wait?: number
+      trailing?: boolean
+      leading?: boolean
+    }) => {
+      return usePacedMutations({
+        mutationFn,
+        strategy: debounceStrategy({
+          wait: opts?.wait ?? 3000,
+          trailing: opts?.trailing ?? true,
+          leading: opts?.leading ?? false,
+        }),
+      })
+    }
+
+    const { result, rerender } = renderHook(() => useDebouncedTransaction())
+
+    const firstMutate = result.current
+
+    // Multiple rerenders with no options - should not recreate instance
+    rerender()
+    expect(result.current).toBe(firstMutate)
+
+    rerender()
+    expect(result.current).toBe(firstMutate)
+
+    rerender()
+    expect(result.current).toBe(firstMutate)
+
+    // All should still be the same mutate function
+    expect(result.current).toBe(firstMutate)
+  })
+
+  it(`should recreate instance when strategy options actually change`, () => {
+    const mutationFn = vi.fn(async () => {})
+
+    const useDebouncedTransaction = (opts?: {
+      wait?: number
+      trailing?: boolean
+      leading?: boolean
+    }) => {
+      return usePacedMutations({
+        mutationFn,
+        strategy: debounceStrategy({
+          wait: opts?.wait ?? 3000,
+          trailing: opts?.trailing ?? true,
+          leading: opts?.leading ?? false,
+        }),
+      })
+    }
+
+    const { result, rerender } = renderHook(
+      ({ opts }) => useDebouncedTransaction(opts),
+      { initialProps: { opts: { wait: 3000 } } }
+    )
+
+    const firstMutate = result.current
+
+    // Rerender with different wait value
+    rerender({ opts: { wait: 5000 } })
+    const secondMutate = result.current
+
+    // Should be different instance since wait changed
+    expect(secondMutate).not.toBe(firstMutate)
+
+    // Rerender with same wait value again
+    rerender({ opts: { wait: 5000 } })
+    const thirdMutate = result.current
+
+    // Should be same as second since value didn't change
+    expect(thirdMutate).toBe(secondMutate)
+  })
+})
