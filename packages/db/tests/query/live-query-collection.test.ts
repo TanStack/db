@@ -1706,4 +1706,68 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
   })
+
+  describe(`custom getKey validation with joins`, () => {
+    it(`should allow joins without custom getKey`, async () => {
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `base-join-validation`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, name: `Item 1` }],
+        })
+      )
+
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string; value: number }>({
+          id: `related-join-validation`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, value: 100 }],
+        })
+      )
+
+      // Should not throw - no custom getKey on the live query
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ base })
+            .join({ related }, ({ base, related }) => eq(base.id, related.id))
+            .select(({ base, related }) => ({ ...base, related })),
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+    })
+
+    it(`should throw error when custom getKey is used with joins`, () => {
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `base-custom-key-error`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
+        })
+      )
+
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `related-custom-key-error`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
+        })
+      )
+
+      expect(() => {
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ base })
+              .join({ related }, ({ base, related }) => eq(base.id, related.id))
+              .select(({ base, related }) => ({
+                baseId: base.id,
+                relatedId: related?.id,
+              })),
+          getKey: (item) => item.baseId, // Custom getKey not allowed with joins
+        })
+      }).toThrow(/Custom getKey is not supported for queries with joins/)
+    })
+  })
 })

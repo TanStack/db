@@ -2,6 +2,7 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import {
+  CustomGetKeyWithJoinError,
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
 } from "../../errors.js"
@@ -151,6 +152,11 @@ export class CollectionConfigBuilder<
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
+    // Validate: Custom getKey is not allowed with joined queries
+    if (config.getKey && this.hasJoins(this.query)) {
+      throw new CustomGetKeyWithJoinError()
+    }
+
     // Build a reverse lookup map from alias to collection instance.
     // This enables self-join support where the same collection can be referenced
     // multiple times with different aliases (e.g., { employee: col, manager: col })
@@ -171,6 +177,36 @@ export class CollectionConfigBuilder<
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
+  }
+
+  /**
+   * Recursively checks if a query or any of its subqueries contains joins
+   */
+  private hasJoins(query: QueryIR): boolean {
+    // Check if this query has joins
+    if (query.join && query.join.length > 0) {
+      return true
+    }
+
+    // Recursively check subqueries in the from clause
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true
+      }
+    }
+
+    // Recursively check subqueries in join clauses
+    if (query.join) {
+      for (const joinClause of query.join) {
+        if (joinClause.from.type === `queryRef`) {
+          if (this.hasJoins(joinClause.from.query)) {
+            return true
+          }
+        }
+      }
+    }
+
+    return false
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {

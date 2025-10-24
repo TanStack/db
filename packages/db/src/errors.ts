@@ -73,6 +73,17 @@ export class SchemaMustBeSynchronousError extends CollectionConfigurationError {
   }
 }
 
+export class CustomGetKeyWithJoinError extends CollectionConfigurationError {
+  constructor() {
+    super(
+      `Custom getKey is not supported for queries with joins. ` +
+        `Joined queries use composite keys internally (e.g., "[key1,key2]") to ensure uniqueness. ` +
+        `Remove the getKey option and use the default key behavior, or use array methods like ` +
+        `.toArray.find() to locate items by field instead of .get().`
+    )
+  }
+}
+
 // Collection State Errors
 export class CollectionStateError extends TanStackDBError {
   constructor(message: string) {
