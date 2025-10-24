@@ -187,6 +187,19 @@ importers:
         specifier: ~5.8.2
         version: 5.8.3
 
+  examples/html/todo:
+    dependencies:
+      '@tanstack/html-db':
+        specifier: workspace:*
+        version: link:../../../packages/html-db
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.11
+        version: 6.4.1(@types/node@24.7.0)(jiti@2.6.0)(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
   examples/react/projects:
     dependencies:
       '@tailwindcss/vite':
@@ -646,6 +659,16 @@ importers:
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
+      '@vitest/coverage-istanbul':
+        specifier: ^3.2.4
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.0)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+
+  packages/html-db:
+    dependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.0)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))

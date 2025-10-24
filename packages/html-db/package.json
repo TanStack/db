@@ -1,0 +1,55 @@
+{
+  "name": "@tanstack/html-db",
+  "description": "Vanilla JavaScript / HTML integration for @tanstack/db",
+  "version": "0.0.1",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/html-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "html",
+    "vanilla",
+    "javascript",
+    "typescript"
+  ],
+  "packageManager": "pnpm@10.18.3",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-istanbul": "^3.2.4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "npx vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}
