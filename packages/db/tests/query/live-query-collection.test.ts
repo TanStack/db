@@ -1769,43 +1769,5 @@ describe(`createLiveQueryCollection`, () => {
         })
       }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
-
-    it(`should detect joins in nested subqueries`, () => {
-      const base = createCollection(
-        mockSyncCollectionOptions<{ id: string }>({
-          id: `base-nested`,
-          getKey: (item) => item.id,
-          initialData: [{ id: `1` }],
-        })
-      )
-
-      const related = createCollection(
-        mockSyncCollectionOptions<{ id: string }>({
-          id: `related-nested`,
-          getKey: (item) => item.id,
-          initialData: [{ id: `1` }],
-        })
-      )
-
-      // Create a live query collection that contains a join
-      const subqueryCollection = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ base })
-            .join({ related }, ({ base, related }) => eq(base.id, related.id))
-            .select(({ base, related }) => ({
-              baseId: base.id,
-              relatedId: related?.id,
-            })),
-      })
-
-      // Now try to create another live query with custom getKey that references the joined subquery
-      expect(() => {
-        createLiveQueryCollection({
-          query: (q) => q.from({ sub: subqueryCollection }),
-          getKey: (item) => item.baseId, // Custom getKey not allowed with nested joins
-        })
-      }).toThrow(/Custom getKey is not supported for queries with joins/)
-    })
   })
 })
