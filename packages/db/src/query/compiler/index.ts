@@ -100,6 +100,11 @@ export function compileQuery(
     return cachedResult
   }
 
+  // Validate the raw query BEFORE optimization to check user's original structure.
+  // This must happen before optimization because the optimizer may create internal
+  // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
+  validateQueryStructure(rawQuery)
+
   // Optimize the query before compilation
   const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
 
@@ -125,9 +130,6 @@ export function compileQuery(
   // of the same collection (e.g., self-joins) maintain independent filtered streams.
   const sources: Record<string, KeyedStream> = {}
 
-  // Collect direct collection aliases used in this query (for validation when processing subqueries)
-  const parentCollectionAliases = collectDirectCollectionAliases(query)
-
   // Process the FROM clause to get the main source
   const {
     alias: mainSource,
@@ -145,8 +147,7 @@ export function compileQuery(
     cache,
     queryMapping,
     aliasToCollectionId,
-    aliasRemapping,
-    parentCollectionAliases
+    aliasRemapping
   )
   sources[mainSource] = mainInput
 
@@ -406,22 +407,44 @@ function collectDirectCollectionAliases(query: QueryIR): Set<string> {
 }
 
 /**
- * Validates that a subquery doesn't reuse any collection aliases from its parent query.
- * Only checks aliases for direct collection references, not subquery references.
- * Throws DuplicateAliasInSubqueryError if conflicts are found.
+ * Validates the structure of a query and its subqueries.
+ * Checks that subqueries don't reuse collection aliases from parent queries.
+ * This must be called on the RAW query before optimization.
  */
-function validateSubqueryAliases(
-  subquery: QueryIR,
-  parentCollectionAliases: Set<string>
+function validateQueryStructure(
+  query: QueryIR,
+  parentCollectionAliases: Set<string> = new Set()
 ): void {
-  const subqueryCollectionAliases = collectDirectCollectionAliases(subquery)
+  // Collect direct collection aliases from this query level
+  const currentLevelAliases = collectDirectCollectionAliases(query)
 
-  for (const alias of subqueryCollectionAliases) {
+  // Check if any current alias conflicts with parent aliases
+  for (const alias of currentLevelAliases) {
     if (parentCollectionAliases.has(alias)) {
       throw new DuplicateAliasInSubqueryError(
         alias,
         Array.from(parentCollectionAliases)
       )
+    }
+  }
+
+  // Combine parent and current aliases for checking nested subqueries
+  const combinedAliases = new Set([
+    ...parentCollectionAliases,
+    ...currentLevelAliases,
+  ])
+
+  // Recursively validate FROM subquery
+  if (query.from.type === `queryRef`) {
+    validateQueryStructure(query.from.query, combinedAliases)
+  }
+
+  // Recursively validate JOIN subqueries
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `queryRef`) {
+        validateQueryStructure(joinClause.from.query, combinedAliases)
+      }
     }
   }
 }
@@ -442,8 +465,7 @@ function processFrom(
   cache: QueryCache,
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>,
-  parentCollectionAliases: Set<string>
+  aliasRemapping: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -461,9 +483,6 @@ function processFrom(
     case `queryRef`: {
       // Find the original query for caching purposes
       const originalQuery = queryMapping.get(from.query) || from.query
-
-      // Validate that subquery doesn't reuse parent query collection aliases
-      validateSubqueryAliases(originalQuery, parentCollectionAliases)
 
       // Recursively compile the sub-query with cache
       const subQueryResult = compileQuery(

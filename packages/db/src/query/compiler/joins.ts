@@ -1,7 +1,6 @@
 import { filter, join as joinOperator, map, tap } from "@tanstack/db-ivm"
 import {
   CollectionInputNotFoundError,
-  DuplicateAliasInSubqueryError,
   InvalidJoinCondition,
   InvalidJoinConditionLeftSourceError,
   InvalidJoinConditionRightSourceError,
@@ -122,9 +121,6 @@ function processJoin(
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
-  // Collect parent direct collection aliases for subquery validation
-  const parentCollectionAliases = collectDirectCollectionAliases(rawQuery)
-
   // Get the joined source alias and input stream
   const {
     alias: joinedSource,
@@ -143,8 +139,7 @@ function processJoin(
     queryMapping,
     onCompileSubquery,
     aliasToCollectionId,
-    aliasRemapping,
-    parentCollectionAliases
+    aliasRemapping
   )
 
   // Add the joined source to the sources map
@@ -420,52 +415,6 @@ function getSourceAliasFromExpression(expr: BasicExpression): string | null {
 }
 
 /**
- * Collects aliases used for DIRECT collection references (not subqueries).
- * Used to validate that subqueries don't reuse parent query collection aliases.
- * Only direct CollectionRef aliases matter - QueryRef aliases don't cause conflicts.
- */
-function collectDirectCollectionAliases(query: QueryIR): Set<string> {
-  const aliases = new Set<string>()
-
-  // Collect FROM alias only if it's a direct collection reference
-  if (query.from.type === `collectionRef`) {
-    aliases.add(query.from.alias)
-  }
-
-  // Collect JOIN aliases only for direct collection references
-  if (query.join) {
-    for (const joinClause of query.join) {
-      if (joinClause.from.type === `collectionRef`) {
-        aliases.add(joinClause.from.alias)
-      }
-    }
-  }
-
-  return aliases
-}
-
-/**
- * Validates that a subquery doesn't reuse any collection aliases from its parent query.
- * Only checks aliases for direct collection references, not subquery references.
- * Throws DuplicateAliasInSubqueryError if conflicts are found.
- */
-function validateSubqueryAliases(
-  subquery: QueryIR,
-  parentCollectionAliases: Set<string>
-): void {
-  const subqueryCollectionAliases = collectDirectCollectionAliases(subquery)
-
-  for (const alias of subqueryCollectionAliases) {
-    if (parentCollectionAliases.has(alias)) {
-      throw new DuplicateAliasInSubqueryError(
-        alias,
-        Array.from(parentCollectionAliases)
-      )
-    }
-  }
-}
-
-/**
  * Processes the join source (collection or sub-query)
  */
 function processJoinSource(
@@ -481,8 +430,7 @@ function processJoinSource(
   queryMapping: QueryMapping,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>,
-  parentCollectionAliases: Set<string>
+  aliasRemapping: Record<string, string>
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -500,9 +448,6 @@ function processJoinSource(
     case `queryRef`: {
       // Find the original query for caching purposes
       const originalQuery = queryMapping.get(from.query) || from.query
-
-      // Validate that subquery doesn't reuse parent query collection aliases
-      validateSubqueryAliases(originalQuery, parentCollectionAliases)
 
       // Recursively compile the sub-query with cache
       const subQueryResult = onCompileSubquery(

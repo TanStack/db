@@ -74,7 +74,7 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
             )
             .select(({ vote, lock }) => ({
               voteId: vote._id,
-              lockName: lock.lockName,
+              lockName: lock!.lockName,
             }))
         },
       })
@@ -105,7 +105,7 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
           )
           .select(({ vote, lock }) => ({
             voteId: vote._id,
-            lockName: lock.lockName,
+            lockName: lock!.lockName,
           }))
       },
     })
