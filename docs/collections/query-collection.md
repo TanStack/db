@@ -234,28 +234,56 @@ ws.on('todos:update', (changes) => {
 
 ### Example: Incremental Updates
 
+When the server returns computed fields (like server-generated IDs or timestamps), you can use the `onInsert` handler with `{ refetch: false }` to avoid unnecessary refetches while still syncing the server response:
+
 ```typescript
-// Handle server responses after mutations without full refetch
-const createTodo = async (todo) => {
-  // Optimistically add the todo
-  const tempId = crypto.randomUUID()
-  todosCollection.insert({ ...todo, id: tempId })
-  
-  try {
-    // Send to server
-    const serverTodo = await api.createTodo(todo)
-    
-    // Sync the server response (with server-generated ID and timestamps)
-    // without triggering a full collection refetch
-    todosCollection.utils.writeBatch(() => {
-      todosCollection.utils.writeDelete(tempId)
-      todosCollection.utils.writeInsert(serverTodo)
-    })
-  } catch (error) {
-    // Rollback happens automatically
-    throw error
-  }
-}
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['todos'],
+    queryFn: fetchTodos,
+    queryClient,
+    getKey: (item) => item.id,
+
+    onInsert: async ({ transaction }) => {
+      const newItems = transaction.mutations.map(m => m.modified)
+
+      // Send to server and get back items with server-computed fields
+      const serverItems = await api.createTodos(newItems)
+
+      // Sync server-computed fields (like server-generated IDs, timestamps, etc.)
+      // to the collection's synced data store
+      todosCollection.utils.writeBatch(() => {
+        serverItems.forEach(serverItem => {
+          todosCollection.utils.writeInsert(serverItem)
+        })
+      })
+
+      // Skip automatic refetch since we've already synced the server response
+      // (optimistic state is automatically replaced when handler completes)
+      return { refetch: false }
+    },
+
+    onUpdate: async ({ transaction }) => {
+      const updates = transaction.mutations.map(m => ({
+        id: m.key,
+        changes: m.changes
+      }))
+      const serverItems = await api.updateTodos(updates)
+
+      // Sync server-computed fields from the update response
+      todosCollection.utils.writeBatch(() => {
+        serverItems.forEach(serverItem => {
+          todosCollection.utils.writeUpdate(serverItem)
+        })
+      })
+
+      return { refetch: false }
+    }
+  })
+)
+
+// Usage is just like a regular collection
+todosCollection.insert({ text: 'Buy milk', completed: false })
 ```
 
 ### Example: Large Dataset Pagination

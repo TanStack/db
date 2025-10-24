@@ -5,11 +5,8 @@ const RESERVED_RXDB_FIELDS = new Set([
   `_meta`,
 ])
 
-export function stripRxdbFields<T extends Record<string, any>>(
-  obj: T | any
-): T {
-  if (!obj) return obj
-  const out: any = Array.isArray(obj) ? [] : {}
+export function stripRxdbFields<T extends Record<string, unknown>>(obj: T): T {
+  const out: Record<string, unknown> = {}
   for (const k of Object.keys(obj)) {
     if (RESERVED_RXDB_FIELDS.has(k)) continue
     out[k] = obj[k]

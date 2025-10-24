@@ -5,10 +5,12 @@ import type {
   InferSchemaOutput,
   InsertMutationFnParams,
   OperationType,
+  PendingMutation,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "./types"
+import type { Collection } from "./collection/index"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 /**
@@ -33,9 +35,38 @@ export interface LocalOnlyCollectionConfig<
 }
 
 /**
- * Local-only collection utilities type (currently empty but matches the pattern)
+ * Local-only collection utilities type
  */
-export interface LocalOnlyCollectionUtils extends UtilsRecord {}
+export interface LocalOnlyCollectionUtils extends UtilsRecord {
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them.
+   * This should be called in your transaction's mutationFn to persist local-only data.
+   *
+   * @param transaction - The transaction containing mutations to accept
+   * @example
+   * const localData = createCollection(localOnlyCollectionOptions({...}))
+   *
+   * const tx = createTransaction({
+   *   mutationFn: async ({ transaction }) => {
+   *     // Make API call first
+   *     await api.save(...)
+   *     // Then persist local-only mutations after success
+   *     localData.utils.acceptMutations(transaction)
+   *   }
+   * })
+   */
+  acceptMutations: (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => void
+}
+
+type LocalOnlyCollectionOptionsResult<
+  T extends object,
+  TKey extends string | number,
+  TSchema extends StandardSchemaV1 | never = never,
+> = CollectionConfig<T, TKey, TSchema> & {
+  utils: LocalOnlyCollectionUtils
+}
 
 /**
  * Creates Local-only collection options for use with a standard Collection
@@ -44,10 +75,16 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  * that immediately "syncs" all optimistic changes to the collection, making them permanent.
  * Perfect for local-only data that doesn't need persistence or external synchronization.
  *
+ * **Using with Manual Transactions:**
+ *
+ * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. This is necessary because local-only collections
+ * don't participate in the standard mutation handler flow for manual transactions.
+ *
  * @template T - The schema type if a schema is provided, otherwise the type of items in the collection
  * @template TKey - The type of the key returned by getKey
  * @param config - Configuration options for the Local-only collection
- * @returns Collection options with utilities (currently empty but follows the pattern)
+ * @returns Collection options with utilities including acceptMutations
  *
  * @example
  * // Basic local-only collection
@@ -80,6 +117,32 @@ export interface LocalOnlyCollectionUtils extends UtilsRecord {}
  *     },
  *   })
  * )
+ *
+ * @example
+ * // Using with manual transactions
+ * const localData = createCollection(
+ *   localOnlyCollectionOptions({
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Use local data in API call
+ *     const localMutations = transaction.mutations.filter(m => m.collection === localData)
+ *     await api.save({ metadata: localMutations[0]?.modified })
+ *
+ *     // Persist local-only mutations after API success
+ *     localData.utils.acceptMutations(transaction)
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   localData.insert({ id: 1, data: 'metadata' })
+ *   apiCollection.insert({ id: 2, data: 'main data' })
+ * })
+ *
+ * await tx.commit()
  */
 
 // Overload for when schema is provided
@@ -90,8 +153,7 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
-  utils: LocalOnlyCollectionUtils
+): LocalOnlyCollectionOptionsResult<InferSchemaOutput<T>, TKey, T> & {
   schema: T
 }
 
@@ -104,32 +166,30 @@ export function localOnlyCollectionOptions<
   config: LocalOnlyCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
-  utils: LocalOnlyCollectionUtils
+): LocalOnlyCollectionOptionsResult<T, TKey> & {
   schema?: never // no schema in the result
 }
 
-export function localOnlyCollectionOptions(
-  config: LocalOnlyCollectionConfig<any, any, string | number>
-): CollectionConfig<any, string | number, any> & {
-  utils: LocalOnlyCollectionUtils
+export function localOnlyCollectionOptions<
+  T extends object = object,
+  TSchema extends StandardSchemaV1 = never,
+  TKey extends string | number = string | number,
+>(
+  config: LocalOnlyCollectionConfig<T, TSchema, TKey>
+): LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
   schema?: StandardSchemaV1
 } {
   const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync(initialData)
+  const syncResult = createLocalOnlySync<T, TKey>(initialData)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
    * Wraps the user's onInsert handler to also confirm the transaction immediately
    */
   const wrappedOnInsert = async (
-    params: InsertMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: InsertMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -147,11 +207,7 @@ export function localOnlyCollectionOptions(
    * Wrapper for onUpdate handler that also confirms the transaction immediately
    */
   const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: UpdateMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -169,11 +225,7 @@ export function localOnlyCollectionOptions(
    * Wrapper for onDelete handler that also confirms the transaction immediately
    */
   const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<
-      any,
-      string | number,
-      LocalOnlyCollectionUtils
-    >
+    params: DeleteMutationFnParams<T, TKey, LocalOnlyCollectionUtils>
   ) => {
     // Call user handler first if provided
     let handlerResult
@@ -187,15 +239,42 @@ export function localOnlyCollectionOptions(
     return handlerResult
   }
 
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them
+   */
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => {
+    // Filter mutations that belong to this collection
+    const collectionMutations = transaction.mutations.filter(
+      (m) =>
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        m.collection === syncResult.collection
+    )
+
+    if (collectionMutations.length === 0) {
+      return
+    }
+
+    // Persist the mutations through sync
+    syncResult.confirmOperationsSync(
+      collectionMutations as Array<PendingMutation<T>>
+    )
+  }
+
   return {
     ...restConfig,
     sync: syncResult.sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {} as LocalOnlyCollectionUtils,
+    utils: {
+      acceptMutations,
+    },
     startSync: true,
     gcTime: 0,
+  } as LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
+    schema?: StandardSchemaV1
   }
 }
 
@@ -212,11 +291,12 @@ export function localOnlyCollectionOptions(
 function createLocalOnlySync<T extends object, TKey extends string | number>(
   initialData?: Array<T>
 ) {
-  // Capture sync functions for transaction confirmation
+  // Capture sync functions and collection for transaction confirmation
   let syncBegin: (() => void) | null = null
   let syncWrite: ((message: { type: OperationType; value: T }) => void) | null =
     null
   let syncCommit: (() => void) | null = null
+  let collection: Collection<T, TKey, LocalOnlyCollectionUtils> | null = null
 
   const sync: SyncConfig<T, TKey> = {
     /**
@@ -227,10 +307,11 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
     sync: (params) => {
       const { begin, write, commit, markReady } = params
 
-      // Capture sync functions for later use by confirmOperationsSync
+      // Capture sync functions and collection for later use
       syncBegin = begin
       syncWrite = write
       syncCommit = commit
+      collection = params.collection
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {
@@ -265,7 +346,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
    *
    * @param mutations - Array of mutation objects from the transaction
    */
-  const confirmOperationsSync = (mutations: Array<any>) => {
+  const confirmOperationsSync = (mutations: Array<PendingMutation<T>>) => {
     if (!syncBegin || !syncWrite || !syncCommit) {
       return // Sync not initialized yet, which is fine
     }
@@ -286,5 +367,6 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   return {
     sync,
     confirmOperationsSync,
+    collection,
   }
 }

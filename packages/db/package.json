@@ -1,14 +1,14 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.4.3",
+  "version": "0.4.13",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
-    "arktype": "^2.1.22",
+    "arktype": "^2.1.23",
     "temporal-polyfill": "^0.3.0"
   },
   "exports": {
@@ -30,7 +30,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.18.3",
   "peerDependencies": {
     "typescript": ">=4.7"
   },

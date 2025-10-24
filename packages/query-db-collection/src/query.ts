@@ -446,14 +446,15 @@ export function queryCollectionOptions(
     > = {
       queryKey: queryKey,
       queryFn: queryFn,
-      meta: meta,
-      enabled: enabled,
-      refetchInterval: refetchInterval,
-      retry: retry,
-      retryDelay: retryDelay,
-      staleTime: staleTime,
       structuralSharing: true,
       notifyOnChangeProps: `all`,
+      // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
+      ...(meta !== undefined && { meta }),
+      ...(enabled !== undefined && { enabled }),
+      ...(refetchInterval !== undefined && { refetchInterval }),
+      ...(retry !== undefined && { retry }),
+      ...(retryDelay !== undefined && { retryDelay }),
+      ...(staleTime !== undefined && { staleTime }),
     }
 
     const localObserver = new QueryObserver<
@@ -577,10 +578,9 @@ export function queryCollectionOptions(
       }
     }
 
-    // If startSync=true or there are subscribers to the collection, subscribe to the query straight away
-    if (config.startSync || collection.subscriberCount > 0) {
-      subscribeToQuery()
-    }
+    // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
+    // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
+    subscribeToQuery()
 
     // Set up event listener for subscriber changes
     const unsubscribeFromCollectionEvents = collection.on(

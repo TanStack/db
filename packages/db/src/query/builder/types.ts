@@ -1,4 +1,5 @@
 import type { CollectionImpl } from "../../collection/index.js"
+import type { SingleResult } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -47,6 +48,8 @@ export interface Context {
   >
   // The result type after select (if select has been called)
   result?: any
+  // Single result only (if findOne has been called)
+  singleResult?: boolean
 }
 
 /**
@@ -104,7 +107,7 @@ export type SchemaFromSource<T extends Source> = Prettify<{
  * GetAliases - Extracts all table aliases available in a query context
  *
  * Simple utility type that returns the keys of the schema, representing
- * all table/collection aliases that can be referenced in the current query.
+ * all table/source aliases that can be referenced in the current query.
  */
 export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
 
@@ -571,6 +574,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
+  singleResult: TContext[`singleResult`] extends true ? true : false
 }
 
 /**
@@ -620,6 +624,14 @@ export type ApplyJoinOptionalityToMergedSchema<
     : // New table is required for inner and right joins
       TNewSchema[K]
 }
+
+/**
+ * Utility type to infer the query result size (single row or an array)
+ */
+export type InferResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? GetResult<TContext> | undefined
+    : Array<GetResult<TContext>>
 
 /**
  * GetResult - Determines the final result type of a query

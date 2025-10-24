@@ -1,13 +1,13 @@
 {
   "name": "@tanstack/trailbase-db-collection",
   "description": "TrailBase collection for TanStack DB",
-  "version": "0.1.25",
+  "version": "0.1.35",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.7.7",
+    "@tanstack/store": "^0.8.0",
     "debug": "^4.4.3",
-    "trailbase": "^0.7.4"
+    "trailbase": "^0.8.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
@@ -32,7 +32,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.18.3",
   "peerDependencies": {
     "typescript": ">=4.7"
   },

@@ -150,9 +150,28 @@ export class Index<TKey, TValue, TPrefix = any> {
    *   hash to identify identical values, storing them in a third level value map.
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
+  #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
 
   constructor() {
     this.#inner = new Map()
+  }
+
+  /**
+   * Create an Index from multiple MultiSet messages.
+   * @param messages - Array of MultiSet messages to build the index from.
+   * @returns A new Index containing all the data from the messages.
+   */
+  static fromMultiSets<K, V>(messages: Array<MultiSet<[K, V]>>): Index<K, V> {
+    const index = new Index<K, V>()
+
+    for (const message of messages) {
+      for (const [item, multiplicity] of message.getInner()) {
+        const [key, value] = item
+        index.addValue(key, [value, multiplicity])
+      }
+    }
+
+    return index
   }
 
   /**
@@ -182,6 +201,32 @@ export class Index<TKey, TValue, TPrefix = any> {
    */
   has(key: TKey): boolean {
     return this.#inner.has(key)
+  }
+
+  /**
+   * Check if a key has presence (non-zero consolidated multiplicity).
+   * @param key - The key to check.
+   * @returns True if the key has non-zero consolidated multiplicity, false otherwise.
+   */
+  hasPresence(key: TKey): boolean {
+    return (this.#consolidatedMultiplicity.get(key) || 0) !== 0
+  }
+
+  /**
+   * Get the consolidated multiplicity (sum of multiplicities) for a key.
+   * @param key - The key to get the consolidated multiplicity for.
+   * @returns The consolidated multiplicity for the key.
+   */
+  getConsolidatedMultiplicity(key: TKey): number {
+    return this.#consolidatedMultiplicity.get(key) || 0
+  }
+
+  /**
+   * Get all keys that have presence (non-zero consolidated multiplicity).
+   * @returns An iterator of keys with non-zero consolidated multiplicity.
+   */
+  getPresenceKeys(): Iterable<TKey> {
+    return this.#consolidatedMultiplicity.keys()
   }
 
   /**
@@ -256,6 +301,15 @@ export class Index<TKey, TValue, TPrefix = any> {
     const [value, multiplicity] = valueTuple
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
+
+    // Update consolidated multiplicity tracking
+    const newConsolidatedMultiplicity =
+      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
+    if (newConsolidatedMultiplicity === 0) {
+      this.#consolidatedMultiplicity.delete(key)
+    } else {
+      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    }
 
     const mapOrSingleValue = this.#inner.get(key)
 

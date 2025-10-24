@@ -1,4 +1,5 @@
 import {
+  CollectionConfigurationError,
   CollectionIsInErrorStateError,
   DuplicateKeySyncError,
   NoPendingSyncTransactionCommitError,
@@ -7,11 +8,19 @@ import {
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from "../errors"
+import { deepEquals } from "../utils"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage, CollectionConfig } from "../types"
+import type {
+  ChangeMessage,
+  CleanupFn,
+  CollectionConfig,
+  LoadSubsetOptions,
+  SyncConfigRes,
+} from "../types"
 import type { CollectionImpl } from "./index.js"
 import type { CollectionStateManager } from "./state"
 import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionEventsManager } from "./events.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -22,11 +31,18 @@ export class CollectionSyncManager<
   private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+  private _events!: CollectionEventsManager
   private config!: CollectionConfig<TOutput, TKey, TSchema>
   private id: string
+  private syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
+  public syncLoadSubsetFn:
+    | ((options: LoadSubsetOptions) => true | Promise<void>)
+    | null = null
+
+  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -34,16 +50,19 @@ export class CollectionSyncManager<
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
     this.config = config
     this.id = id
+    this.syncMode = config.syncMode ?? `eager`
   }
 
   setDeps(deps: {
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
   }) {
     this.collection = deps.collection
     this.state = deps.state
     this.lifecycle = deps.lifecycle
+    this._events = deps.events
   }
 
   /**
@@ -51,7 +70,6 @@ export class CollectionSyncManager<
    * This is called when the collection is first accessed or preloaded
    */
   public startSync(): void {
-    const state = this.state
     if (
       this.lifecycle.status !== `idle` &&
       this.lifecycle.status !== `cleaned-up`
@@ -62,106 +80,134 @@ export class CollectionSyncManager<
     this.lifecycle.setStatus(`loading`)
 
     try {
-      const cleanupFn = this.config.sync.sync({
-        collection: this.collection,
-        begin: () => {
-          state.pendingSyncedTransactions.push({
-            committed: false,
-            operations: [],
-            deletedKeys: new Set(),
-          })
-        },
-        write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
-          const pendingTransaction =
-            state.pendingSyncedTransactions[
-              state.pendingSyncedTransactions.length - 1
-            ]
-          if (!pendingTransaction) {
-            throw new NoPendingSyncTransactionWriteError()
-          }
-          if (pendingTransaction.committed) {
-            throw new SyncTransactionAlreadyCommittedWriteError()
-          }
-          const key = this.config.getKey(messageWithoutKey.value)
-
-          // Check if an item with this key already exists when inserting
-          if (messageWithoutKey.type === `insert`) {
-            const insertingIntoExistingSynced = state.syncedData.has(key)
-            const hasPendingDeleteForKey =
-              pendingTransaction.deletedKeys.has(key)
-            const isTruncateTransaction = pendingTransaction.truncate === true
-            // Allow insert after truncate in the same transaction even if it existed in syncedData
-            if (
-              insertingIntoExistingSynced &&
-              !hasPendingDeleteForKey &&
-              !isTruncateTransaction
-            ) {
-              throw new DuplicateKeySyncError(key, this.id)
+      const syncRes = normalizeSyncFnResult(
+        this.config.sync.sync({
+          collection: this.collection,
+          begin: () => {
+            this.state.pendingSyncedTransactions.push({
+              committed: false,
+              operations: [],
+              deletedKeys: new Set(),
+            })
+          },
+          write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionWriteError()
             }
-          }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedWriteError()
+            }
+            const key = this.config.getKey(messageWithoutKey.value)
 
-          const message: ChangeMessage<TOutput> = {
-            ...messageWithoutKey,
-            key,
-          }
-          pendingTransaction.operations.push(message)
+            let messageType = messageWithoutKey.type
 
-          if (messageWithoutKey.type === `delete`) {
-            pendingTransaction.deletedKeys.add(key)
-          }
-        },
-        commit: () => {
-          const pendingTransaction =
-            state.pendingSyncedTransactions[
-              state.pendingSyncedTransactions.length - 1
-            ]
-          if (!pendingTransaction) {
-            throw new NoPendingSyncTransactionCommitError()
-          }
-          if (pendingTransaction.committed) {
-            throw new SyncTransactionAlreadyCommittedError()
-          }
+            // Check if an item with this key already exists when inserting
+            if (messageWithoutKey.type === `insert`) {
+              const insertingIntoExistingSynced = this.state.syncedData.has(key)
+              const hasPendingDeleteForKey =
+                pendingTransaction.deletedKeys.has(key)
+              const isTruncateTransaction = pendingTransaction.truncate === true
+              // Allow insert after truncate in the same transaction even if it existed in syncedData
+              if (
+                insertingIntoExistingSynced &&
+                !hasPendingDeleteForKey &&
+                !isTruncateTransaction
+              ) {
+                const existingValue = this.state.syncedData.get(key)
+                if (
+                  existingValue !== undefined &&
+                  deepEquals(existingValue, messageWithoutKey.value)
+                ) {
+                  // The "insert" is an echo of a value we already have locally.
+                  // Treat it as an update so we preserve optimistic intent without
+                  // throwing a duplicate-key error during reconciliation.
+                  messageType = `update`
+                } else {
+                  throw new DuplicateKeySyncError(key, this.id)
+                }
+              }
+            }
 
-          pendingTransaction.committed = true
+            const message: ChangeMessage<TOutput> = {
+              ...messageWithoutKey,
+              type: messageType,
+              key,
+            }
+            pendingTransaction.operations.push(message)
 
-          // Update status to initialCommit when transitioning from loading
-          // This indicates we're in the process of committing the first transaction
-          if (this.lifecycle.status === `loading`) {
-            this.lifecycle.setStatus(`initialCommit`)
-          }
+            if (messageType === `delete`) {
+              pendingTransaction.deletedKeys.add(key)
+            }
+          },
+          commit: () => {
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionCommitError()
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedError()
+            }
 
-          state.commitPendingTransactions()
-        },
-        markReady: () => {
-          this.lifecycle.markReady()
-        },
-        truncate: () => {
-          const pendingTransaction =
-            state.pendingSyncedTransactions[
-              state.pendingSyncedTransactions.length - 1
-            ]
-          if (!pendingTransaction) {
-            throw new NoPendingSyncTransactionWriteError()
-          }
-          if (pendingTransaction.committed) {
-            throw new SyncTransactionAlreadyCommittedWriteError()
-          }
+            pendingTransaction.committed = true
 
-          // Clear all operations from the current transaction
-          pendingTransaction.operations = []
-          pendingTransaction.deletedKeys.clear()
+            this.state.commitPendingTransactions()
+          },
+          markReady: () => {
+            this.lifecycle.markReady()
+          },
+          truncate: () => {
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionWriteError()
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedWriteError()
+            }
 
-          // Mark the transaction as a truncate operation. During commit, this triggers:
-          // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
-          // - Clearing of syncedData/syncedMetadata
-          // - Subsequent synced ops applied on the fresh base
-          // - Finally, optimistic mutations re-applied on top (single batch)
-          pendingTransaction.truncate = true
-        },
-      })
+            // Clear all operations from the current transaction
+            pendingTransaction.operations = []
+            pendingTransaction.deletedKeys.clear()
+
+            // Mark the transaction as a truncate operation. During commit, this triggers:
+            // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
+            // - Clearing of syncedData/syncedMetadata
+            // - Subsequent synced ops applied on the fresh base
+            // - Finally, optimistic mutations re-applied on top (single batch)
+            pendingTransaction.truncate = true
+
+            // Capture optimistic state NOW to preserve it even if transactions complete
+            // before this truncate transaction is committed
+            pendingTransaction.optimisticSnapshot = {
+              upserts: new Map(this.state.optimisticUpserts),
+              deletes: new Set(this.state.optimisticDeletes),
+            }
+          },
+        })
+      )
 
       // Store cleanup function if provided
-      this.syncCleanupFn = typeof cleanupFn === `function` ? cleanupFn : null
+      this.syncCleanupFn = syncRes?.cleanup ?? null
+
+      // Store loadSubset function if provided
+      this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
+
+      // Validate: on-demand mode requires a loadSubset function
+      if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
+        throw new CollectionConfigurationError(
+          `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
+            `Either provide a loadSubset handler or use syncMode "eager".`
+        )
+      }
     } catch (error) {
       this.lifecycle.setStatus(`error`)
       throw error
@@ -210,6 +256,73 @@ export class CollectionSyncManager<
     return this.preloadPromise
   }
 
+  /**
+   * Gets whether the collection is currently loading more data
+   */
+  public get isLoadingSubset(): boolean {
+    return this.pendingLoadSubsetPromises.size > 0
+  }
+
+  /**
+   * Tracks a load promise for isLoadingSubset state.
+   * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
+   */
+  public trackLoadPromise(promise: Promise<void>): void {
+    const loadingStarting = !this.isLoadingSubset
+    this.pendingLoadSubsetPromises.add(promise)
+
+    if (loadingStarting) {
+      this._events.emit(`loadingSubset:change`, {
+        type: `loadingSubset:change`,
+        collection: this.collection,
+        isLoadingSubset: true,
+        previousIsLoadingSubset: false,
+        loadingSubsetTransition: `start`,
+      })
+    }
+
+    promise.finally(() => {
+      const loadingEnding =
+        this.pendingLoadSubsetPromises.size === 1 &&
+        this.pendingLoadSubsetPromises.has(promise)
+      this.pendingLoadSubsetPromises.delete(promise)
+
+      if (loadingEnding) {
+        this._events.emit(`loadingSubset:change`, {
+          type: `loadingSubset:change`,
+          collection: this.collection,
+          isLoadingSubset: false,
+          previousIsLoadingSubset: true,
+          loadingSubsetTransition: `end`,
+        })
+      }
+    })
+  }
+
+  /**
+   * Requests the sync layer to load more data.
+   * @param options Options to control what data is being loaded
+   * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
+   *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
+   */
+  public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+    // Bypass loadSubset when syncMode is 'eager'
+    if (this.syncMode === `eager`) {
+      return true
+    }
+
+    if (this.syncLoadSubsetFn) {
+      const result = this.syncLoadSubsetFn(options)
+      // If the result is a promise, track it
+      if (result instanceof Promise) {
+        this.trackLoadPromise(result)
+        return result
+      }
+    }
+
+    return true
+  }
+
   public cleanup(): void {
     try {
       if (this.syncCleanupFn) {
@@ -232,4 +345,16 @@ export class CollectionSyncManager<
     }
     this.preloadPromise = null
   }
+}
+
+function normalizeSyncFnResult(result: void | CleanupFn | SyncConfigRes) {
+  if (typeof result === `function`) {
+    return { cleanup: result }
+  }
+
+  if (typeof result === `object`) {
+    return result
+  }
+
+  return undefined
 }

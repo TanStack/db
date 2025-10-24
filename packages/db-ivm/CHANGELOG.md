@@ -1,5 +1,37 @@
 # @tanstack/db-ivm
 
+## 0.1.12
+
+### Patch Changes
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#701](https://github.com/TanStack/db/pull/701))
+
+## 0.1.11
+
+### Patch Changes
+
+- Add `utils.setWindow()` method to live query collections to dynamically change limit and offset on ordered queries. ([#663](https://github.com/TanStack/db/pull/663))
+
+  You can now change the pagination window of an ordered live query without recreating the collection:
+
+  ```ts
+  const users = createLiveQueryCollection((q) =>
+    q
+      .from({ user: usersCollection })
+      .orderBy(({ user }) => user.name, "asc")
+      .limit(10)
+      .offset(0)
+  )
+
+  users.utils.setWindow({ offset: 10, limit: 10 })
+  ```
+
+## 0.1.10
+
+### Patch Changes
+
+- Redesign of the join operators with direct algorithms for major performance improvements by replacing composition-based joins (inner+anti) with implementation using mass tracking. Delivers significant performance gains while maintaining full correctness for all join types (inner, left, right, full, anti). ([#571](https://github.com/TanStack/db/pull/571))
+
 ## 0.1.9
 
 ### Patch Changes

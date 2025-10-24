@@ -17,6 +17,7 @@ export interface QueryIR {
   limit?: Limit
   offset?: Offset
   distinct?: true
+  singleResult?: true
 
   // Functional variants
   fnSelect?: (row: NamespacedRow) => any

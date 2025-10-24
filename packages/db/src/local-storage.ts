@@ -1,8 +1,6 @@
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
-  NoStorageAvailableError,
-  NoStorageEventApiError,
   SerializationError,
   StorageKeyRequiredError,
 } from "./errors"
@@ -12,6 +10,7 @@ import type {
   DeleteMutationFnParams,
   InferSchemaOutput,
   InsertMutationFnParams,
+  PendingMutation,
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
@@ -90,6 +89,26 @@ export type GetStorageSizeFn = () => number
 export interface LocalStorageCollectionUtils extends UtilsRecord {
   clearStorage: ClearStorageFn
   getStorageSize: GetStorageSizeFn
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
+   * This should be called in your transaction's mutationFn to persist local-storage data.
+   *
+   * @param transaction - The transaction containing mutations to accept
+   * @example
+   * const localSettings = createCollection(localStorageCollectionOptions({...}))
+   *
+   * const tx = createTransaction({
+   *   mutationFn: async ({ transaction }) => {
+   *     // Make API call first
+   *     await api.save(...)
+   *     // Then persist local-storage mutations after success
+   *     localSettings.utils.acceptMutations(transaction)
+   *   }
+   * })
+   */
+  acceptMutations: (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => void
 }
 
 /**
@@ -118,16 +137,68 @@ function generateUuid(): string {
 }
 
 /**
+ * Creates an in-memory storage implementation that mimics the StorageApi interface
+ * Used as a fallback when localStorage is not available (e.g., server-side rendering)
+ * @returns An object implementing the StorageApi interface using an in-memory Map
+ */
+function createInMemoryStorage(): StorageApi {
+  const storage = new Map<string, string>()
+
+  return {
+    getItem(key: string): string | null {
+      return storage.get(key) ?? null
+    },
+    setItem(key: string, value: string): void {
+      storage.set(key, value)
+    },
+    removeItem(key: string): void {
+      storage.delete(key)
+    },
+  }
+}
+
+/**
+ * Creates a no-op storage event API for environments without window (e.g., server-side)
+ * This provides the required interface but doesn't actually listen to any events
+ * since cross-tab synchronization is not possible in server environments
+ * @returns An object implementing the StorageEventApi interface with no-op methods
+ */
+function createNoOpStorageEventApi(): StorageEventApi {
+  return {
+    addEventListener: () => {
+      // No-op: cannot listen to storage events without window
+    },
+    removeEventListener: () => {
+      // No-op: cannot remove listeners without window
+    },
+  }
+}
+
+/**
  * Creates localStorage collection options for use with a standard Collection
  *
  * This function creates a collection that persists data to localStorage/sessionStorage
  * and synchronizes changes across browser tabs using storage events.
  *
+ * **Fallback Behavior:**
+ *
+ * When localStorage is not available (e.g., in server-side rendering environments),
+ * this function automatically falls back to an in-memory storage implementation.
+ * This prevents errors during module initialization and allows the collection to
+ * work in any environment, though data will not persist across page reloads or
+ * be shared across tabs when using the in-memory fallback.
+ *
+ * **Using with Manual Transactions:**
+ *
+ * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
+ * don't participate in the standard mutation handler flow for manual transactions.
+ *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
  * @template TFallback - The fallback type if no explicit or schema type is provided
  * @param config - Configuration options for the localStorage collection
- * @returns Collection options with utilities including clearStorage and getStorageSize
+ * @returns Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
  *
  * @example
  * // Basic localStorage collection
@@ -159,6 +230,33 @@ function generateUuid(): string {
  *     },
  *   })
  * )
+ *
+ * @example
+ * // Using with manual transactions
+ * const localSettings = createCollection(
+ *   localStorageCollectionOptions({
+ *     storageKey: 'user-settings',
+ *     getKey: (item) => item.id,
+ *   })
+ * )
+ *
+ * const tx = createTransaction({
+ *   mutationFn: async ({ transaction }) => {
+ *     // Use settings data in API call
+ *     const settingsMutations = transaction.mutations.filter(m => m.collection === localSettings)
+ *     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
+ *
+ *     // Persist local-storage mutations after API success
+ *     localSettings.utils.acceptMutations(transaction)
+ *   }
+ * })
+ *
+ * tx.mutate(() => {
+ *   localSettings.insert({ id: 'theme', value: 'dark' })
+ *   apiCollection.insert({ id: 2, data: 'profile data' })
+ * })
+ *
+ * await tx.commit()
  */
 
 // Overload for when schema is provided
@@ -203,21 +301,18 @@ export function localStorageCollectionOptions(
   }
 
   // Default to window.localStorage if no storage is provided
+  // Fall back to in-memory storage if localStorage is not available (e.g., server-side rendering)
   const storage =
     config.storage ||
-    (typeof window !== `undefined` ? window.localStorage : null)
-
-  if (!storage) {
-    throw new NoStorageAvailableError()
-  }
+    (typeof window !== `undefined` ? window.localStorage : null) ||
+    createInMemoryStorage()
 
   // Default to window for storage events if not provided
+  // Fall back to no-op storage event API if window is not available (e.g., server-side rendering)
   const storageEventApi =
-    config.storageEventApi || (typeof window !== `undefined` ? window : null)
-
-  if (!storageEventApi) {
-    throw new NoStorageEventApiError()
-  }
+    config.storageEventApi ||
+    (typeof window !== `undefined` ? window : null) ||
+    createNoOpStorageEventApi()
 
   // Track the last known state to detect changes
   const lastKnownData = new Map<string | number, StoredItem<any>>()
@@ -397,6 +492,76 @@ export function localStorageCollectionOptions(
   // Default id to a pattern based on storage key if not provided
   const collectionId = id ?? `local-collection:${config.storageKey}`
 
+  /**
+   * Accepts mutations from a transaction that belong to this collection and persists them to storage
+   */
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }) => {
+    // Filter mutations that belong to this collection
+    // Use collection ID for filtering if collection reference isn't available yet
+    const collectionMutations = transaction.mutations.filter((m) => {
+      // Try to match by collection reference first
+      if (sync.collection && m.collection === sync.collection) {
+        return true
+      }
+      // Fall back to matching by collection ID
+      return m.collection.id === collectionId
+    })
+
+    if (collectionMutations.length === 0) {
+      return
+    }
+
+    // Validate all mutations can be serialized before modifying storage
+    for (const mutation of collectionMutations) {
+      switch (mutation.type) {
+        case `insert`:
+        case `update`:
+          validateJsonSerializable(mutation.modified, mutation.type)
+          break
+        case `delete`:
+          validateJsonSerializable(mutation.original, mutation.type)
+          break
+      }
+    }
+
+    // Load current data from storage
+    const currentData = loadFromStorage<Record<string, unknown>>(
+      config.storageKey,
+      storage
+    )
+
+    // Apply each mutation
+    for (const mutation of collectionMutations) {
+      // Use the engine's pre-computed key to avoid key derivation issues
+      const key = mutation.key
+
+      switch (mutation.type) {
+        case `insert`:
+        case `update`: {
+          const storedItem: StoredItem<Record<string, unknown>> = {
+            versionKey: generateUuid(),
+            data: mutation.modified,
+          }
+          currentData.set(key, storedItem)
+          break
+        }
+        case `delete`: {
+          currentData.delete(key)
+          break
+        }
+      }
+    }
+
+    // Save to storage
+    saveToStorage(currentData)
+
+    // Confirm the mutations in the collection to move them from optimistic to synced state
+    // This writes them through the sync interface to make them "synced" instead of "optimistic"
+    sync.confirmOperationsSync(collectionMutations)
+  }
+
   return {
     ...restConfig,
     id: collectionId,
@@ -407,6 +572,7 @@ export function localStorageCollectionOptions(
     utils: {
       clearStorage,
       getStorageSize,
+      acceptMutations,
     },
   }
 }
@@ -480,8 +646,13 @@ function createLocalStorageSync<T extends object>(
   storageEventApi: StorageEventApi,
   _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
-): SyncConfig<T> & { manualTrigger?: () => void } {
+): SyncConfig<T> & {
+  manualTrigger?: () => void
+  collection: any
+  confirmOperationsSync: (mutations: Array<any>) => void
+} {
   let syncParams: Parameters<SyncConfig<T>[`sync`]>[0] | null = null
+  let collection: any = null
 
   /**
    * Compare two Maps to find differences using version keys
@@ -556,12 +727,16 @@ function createLocalStorageSync<T extends object>(
     }
   }
 
-  const syncConfig: SyncConfig<T> & { manualTrigger?: () => void } = {
+  const syncConfig: SyncConfig<T> & {
+    manualTrigger?: () => void
+    collection: any
+  } = {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
 
-      // Store sync params for later use
+      // Store sync params and collection for later use
       syncParams = params
+      collection = params.collection
 
       // Initial load
       const initialData = loadFromStorage<T>(storageKey, storage)
@@ -613,7 +788,38 @@ function createLocalStorageSync<T extends object>(
 
     // Manual trigger function for local updates
     manualTrigger: processStorageChanges,
+
+    // Collection instance reference
+    collection,
   }
 
-  return syncConfig
+  /**
+   * Confirms mutations by writing them through the sync interface
+   * This moves mutations from optimistic to synced state
+   * @param mutations - Array of mutation objects to confirm
+   */
+  const confirmOperationsSync = (mutations: Array<any>) => {
+    if (!syncParams) {
+      // Sync not initialized yet, mutations will be handled on next sync
+      return
+    }
+
+    const { begin, write, commit } = syncParams
+
+    // Write the mutations through sync to confirm them
+    begin()
+    mutations.forEach((mutation: any) => {
+      write({
+        type: mutation.type,
+        value:
+          mutation.type === `delete` ? mutation.original : mutation.modified,
+      })
+    })
+    commit()
+  }
+
+  return {
+    ...syncConfig,
+    confirmOperationsSync,
+  }
 }
