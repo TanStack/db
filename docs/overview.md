@@ -549,6 +549,34 @@ const Todos = () => {
 }
 ```
 
+#### `useLiveSuspenseQuery` hook
+
+For React Suspense support, use `useLiveSuspenseQuery`. This hook suspends rendering during initial data load and guarantees that `data` is always defined:
+
+```tsx
+import { useLiveSuspenseQuery } from '@tanstack/react-db'
+import { Suspense } from 'react'
+
+const Todos = () => {
+  // data is always defined - no need for optional chaining
+  const { data: todos } = useLiveSuspenseQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, false))
+  )
+
+  return <List items={ todos } />
+}
+
+const App = () => (
+  <Suspense fallback={<div>Loading...</div>}>
+    <Todos />
+  </Suspense>
+)
+```
+
+See the [React Suspense section in Live Queries](../guides/live-queries#using-with-react-suspense) for detailed usage patterns and when to use `useLiveSuspenseQuery` vs `useLiveQuery`.
+
 #### `queryBuilder`
 
 You can also build queries directly (outside of the component lifecycle) using the underlying `queryBuilder` API:
