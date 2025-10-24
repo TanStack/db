@@ -1,7 +1,8 @@
 import React, { useState } from "react"
 import { Link } from "@tanstack/react-router"
+import { debounceStrategy, usePacedMutations } from "@tanstack/react-db"
 import type { FormEvent } from "react"
-import type { Collection } from "@tanstack/react-db"
+import type { Collection, Transaction } from "@tanstack/react-db"
 
 import type { SelectConfig, SelectTodo } from "@/db/validation"
 import { getComplementaryColor } from "@/lib/color"
@@ -12,6 +13,7 @@ interface TodoAppProps {
   todoCollection: Collection<SelectTodo>
   configCollection: Collection<SelectConfig>
   title: string
+  configMutationFn?: (params: { transaction: Transaction }) => Promise<void>
 }
 
 export function TodoApp({
@@ -20,8 +22,18 @@ export function TodoApp({
   todoCollection,
   configCollection,
   title,
+  configMutationFn,
 }: TodoAppProps) {
   const [newTodo, setNewTodo] = useState(``)
+
+  // Use paced mutations with debounce strategy for color picker if mutationFn provided
+  // Waits for 2500ms of inactivity before persisting - only the final value is saved
+  const mutateConfig = configMutationFn
+    ? usePacedMutations({
+        mutationFn: configMutationFn,
+        strategy: debounceStrategy({ wait: 2500 }),
+      })
+    : undefined
 
   // Define a type-safe helper function to get config values
   const getConfigValue = (key: string): string | undefined => {
@@ -35,23 +47,47 @@ export function TodoApp({
 
   // Define a helper function to update config values
   const setConfigValue = (key: string, value: string): void => {
-    for (const config of configData) {
-      if (config.key === key) {
-        configCollection.update(config.id, (draft) => {
-          draft.value = value
-        })
-        return
-      }
-    }
+    if (mutateConfig) {
+      // Use paced mutations for updates (optimistic + batched persistence)
+      mutateConfig(() => {
+        for (const config of configData) {
+          if (config.key === key) {
+            configCollection.update(config.id, (draft) => {
+              draft.value = value
+            })
+            return
+          }
+        }
 
-    // If the config doesn't exist yet, create it
-    configCollection.insert({
-      id: Math.round(Math.random() * 1000000),
-      key,
-      value,
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
+        // If the config doesn't exist yet, create it
+        configCollection.insert({
+          id: Math.round(Math.random() * 1000000),
+          key,
+          value,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+      })
+    } else {
+      // Use naked collection calls (collection handlers will be invoked)
+      for (const config of configData) {
+        if (config.key === key) {
+          configCollection.update(config.id, (draft) => {
+            draft.value = value
+          })
+          return
+        }
+      }
+
+      // If the config doesn't exist yet, create it
+      configCollection.insert({
+        id: Math.round(Math.random() * 1000000),
+        key,
+        value,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+    }
   }
 
   const backgroundColor = getConfigValue(`backgroundColor`)
