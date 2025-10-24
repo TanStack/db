@@ -102,40 +102,66 @@ This bug requires a more substantial architectural change:
 - E.g., parent uses "vote", subquery internally uses "vote_subquery_1"
 - Requires careful tracking and remapping of aliases
 
-## Recommendation
+## Solution Implemented
 
-This issue requires deeper architectural discussion and likely a larger refactor. The current fix provides:
-- Better cache isolation (prevents some edge cases)
-- Foundation for future improvements
+After Sam's insight, the fix is to **validate and prevent** alias reuse, not to make it work:
 
-But does not solve the core bug. I recommend:
+### Implementation
 
-1. Creating an issue to track this as a known limitation
-2. Documenting the workaround (wrapping in an extra `from()` layer)
-3. Planning a larger refactor to properly support this use case
+Added validation that throws a clear error when a subquery uses the same alias as its parent query for DIRECT collection references:
 
-## Workaround for Users
+1. **New Error Type** (`DuplicateAliasInSubqueryError`):
+   - Clear message explaining the conflict
+   - Lists all parent aliases for context
+   - Suggests renaming the alias
 
-As mentioned in the Discord thread, wrapping the query in another layer works:
+2. **Validation Logic**:
+   - `collectDirectCollectionAliases()`: Collects only CollectionRef aliases, not QueryRef
+   - `validateSubqueryAliases()`: Checks for conflicts before compiling subqueries
+   - Only validates direct collection references to allow legitimate subquery wrapping
+
+### Key Insight
+
+The validation only checks **direct** collection references (CollectionRef), not subquery references (QueryRef). This allows:
 
 ```typescript
-const problematicQuery = q
-  .from({ vote: c.votesCollection })
-  .join({ lockAgg }, ...)
-  .where(...)
-
-// Workaround: wrap in another from()
-return q.from({ votesQ: problematicQuery })
-  .where(({ votesQ }) => eq(votesQ.poolAddress, poolAddress))
+// ✅ ALLOWED: Different alias scopes
+const subquery = q.from({ issue: issuesCollection })
+return q.from({ issue: subquery })  // OK - "issue" refers to subquery output
 ```
 
-This works because the wrapped query no longer directly uses "vote" at the top level, avoiding the alias conflict.
+```typescript
+// ❌ PREVENTED: Same collection, same alias
+const subquery = q.from({ lock: ... }).join({ vote: votesCollection }, ...)
+return q.from({ vote: votesCollection }).join({ lock: subquery }, ...)
+// Error: Both use "vote" for votesCollection directly
+```
+
+### Workaround for Users
+
+Rename the alias in either the parent or subquery:
+
+```typescript
+// Discord bug - renamed "vote" to "v" in subquery
+const locksAgg = q
+  .from({ lock: c.locksCollection })
+  .join({ v: c.votesCollection }, ({ lock, v }) =>  // Renamed!
+    eq(lock._id, v.lockId)
+  )
+
+return q
+  .from({ vote: c.votesCollection })  // No conflict now
+  .join({ lock: locksAgg }, ...)
+```
 
 ---
 
 **Files Modified:**
-- `packages/db/src/query/compiler/index.ts` (added collectQueryAliases, fresh cache for subqueries)
-- `packages/db/src/query/compiler/joins.ts` (same changes for join processing)
+- `packages/db/src/errors.ts` - Added `DuplicateAliasInSubqueryError`
+- `packages/db/src/query/compiler/index.ts` - Added validation logic
+- `packages/db/src/query/compiler/joins.ts` - Added validation logic
+- `packages/db/tests/query/discord-alias-bug.test.ts` - Test for the Discord bug
 
 **Investigation Date:** 2025-10-24
-**Investigated By:** Claude Code
+**Solution Date:** 2025-10-24
+**Investigated & Fixed By:** Claude Code
