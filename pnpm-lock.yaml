@@ -196,10 +196,10 @@ importers:
         specifier: ^5.90.5
         version: 5.90.5
       '@tanstack/query-db-collection':
-        specifier: ^0.2.35
+        specifier: ^0.2.36
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.35
+        specifier: ^0.1.36
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.133.15
