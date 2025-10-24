@@ -1706,4 +1706,109 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
   })
+
+  describe(`custom getKey with joins`, () => {
+    it(`should work with default getKey (no custom getKey) on joined queries`, async () => {
+      type Media = { id: string; title: string; created_at: number }
+      type Metadata = { id: string; description: string }
+
+      const mediaCollectionBase = createCollection(
+        mockSyncCollectionOptions<Media>({
+          id: `media-base`,
+          getKey: (media) => media.id,
+          initialData: [
+            { id: `m1`, title: `Media 1`, created_at: 1000 },
+            { id: `m2`, title: `Media 2`, created_at: 2000 },
+          ],
+        })
+      )
+
+      const metadataCollection = createCollection(
+        mockSyncCollectionOptions<Metadata>({
+          id: `metadata`,
+          getKey: (metadata) => metadata.id,
+          initialData: [
+            { id: `m1`, description: `Description 1` },
+            { id: `m2`, description: `Description 2` },
+          ],
+        })
+      )
+
+      // ✅ CORRECT: Using object-based constructor WITHOUT custom getKey for joined query
+      const mediaCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ media: mediaCollectionBase })
+            .orderBy(({ media }) => media.created_at, `desc`)
+            .join(
+              { metadata: metadataCollection },
+              ({ media, metadata }) => eq(media.id, metadata.id),
+              `left`
+            )
+            .select(({ media, metadata }) => ({
+              ...media,
+              metadata,
+            })),
+        // No custom getKey - uses default composite key
+      })
+
+      await mediaCollection.preload()
+
+      expect(mediaCollection.size).toBe(2)
+      const results = mediaCollection.toArray
+      expect(results[0]?.title).toBe(`Media 2`)
+      expect(results[0]?.metadata?.description).toBe(`Description 2`)
+      expect(results[1]?.title).toBe(`Media 1`)
+      expect(results[1]?.metadata?.description).toBe(`Description 1`)
+    })
+
+    it(`should NOT use custom getKey on joined queries as it causes key conflicts`, async () => {
+      type Media = { id: string; title: string; created_at: number }
+      type Metadata = { id: string; description: string }
+
+      const mediaCollectionBase = createCollection(
+        mockSyncCollectionOptions<Media>({
+          id: `media-base-custom-key`,
+          getKey: (media) => media.id,
+          initialData: [
+            { id: `m1`, title: `Media 1`, created_at: 1000 },
+          ],
+        })
+      )
+
+      const metadataCollection = createCollection(
+        mockSyncCollectionOptions<Metadata>({
+          id: `metadata-custom-key`,
+          getKey: (metadata) => metadata.id,
+          initialData: [
+            { id: `m1`, description: `Description 1` },
+          ],
+        })
+      )
+
+      // ⚠️ INCORRECT: Using custom getKey with joined query
+      // This test documents the issue - custom getKey conflicts with composite keys
+      const mediaCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ media: mediaCollectionBase })
+            .orderBy(({ media }) => media.created_at, `desc`)
+            .join(
+              { metadata: metadataCollection },
+              ({ media, metadata }) => eq(media.id, metadata.id),
+              `left`
+            )
+            .select(({ media, metadata }) => ({
+              ...media,
+              metadata,
+            })),
+        getKey: (media) => media.id, // ⚠️ This causes issues!
+      })
+
+      // This should throw a CollectionOperationError due to key mismatch
+      // The internal DD stream uses composite keys like "[m1,m1]"
+      // but the custom getKey returns just "m1"
+      await expect(mediaCollection.preload()).rejects.toThrow()
+    })
+  })
 })
