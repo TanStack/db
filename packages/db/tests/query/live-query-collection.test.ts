@@ -1787,28 +1787,65 @@ describe(`createLiveQueryCollection`, () => {
       )
 
       // ⚠️ INCORRECT: Using custom getKey with joined query
-      // This test documents the issue - custom getKey conflicts with composite keys
-      const mediaCollection = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ media: mediaCollectionBase })
-            .orderBy(({ media }) => media.created_at, `desc`)
-            .join(
-              { metadata: metadataCollection },
-              ({ media, metadata }) => eq(media.id, metadata.id),
-              `left`
-            )
-            .select(({ media, metadata }) => ({
-              ...media,
-              metadata,
-            })),
-        getKey: (media) => media.id, // ⚠️ This causes issues!
-      })
+      // This should throw immediately during collection creation
+      expect(() => {
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ media: mediaCollectionBase })
+              .orderBy(({ media }) => media.created_at, `desc`)
+              .join(
+                { metadata: metadataCollection },
+                ({ media, metadata }) => eq(media.id, metadata.id),
+                `left`
+              )
+              .select(({ media, metadata }) => ({
+                ...media,
+                metadata,
+              })),
+          getKey: (media) => media.id, // ⚠️ This causes the error!
+        })
+      }).toThrow(/Custom getKey is not supported for queries with joins/)
+    })
 
-      // This should throw a CollectionOperationError due to key mismatch
-      // The internal DD stream uses composite keys like "[m1,m1]"
-      // but the custom getKey returns just "m1"
-      await expect(mediaCollection.preload()).rejects.toThrow()
+    it(`should throw error when custom getKey is used with nested subquery containing joins`, () => {
+      type Media = { id: string; title: string; created_at: number }
+      type Metadata = { id: string; description: string }
+
+      const mediaCollectionBase = createCollection(
+        mockSyncCollectionOptions<Media>({
+          id: `media-base-nested`,
+          getKey: (media) => media.id,
+          initialData: [{ id: `m1`, title: `Media 1`, created_at: 1000 }],
+        })
+      )
+
+      const metadataCollection = createCollection(
+        mockSyncCollectionOptions<Metadata>({
+          id: `metadata-nested`,
+          getKey: (metadata) => metadata.id,
+          initialData: [{ id: `m1`, description: `Description 1` }],
+        })
+      )
+
+      // Create a subquery with a join
+      const subquery = (q: any) =>
+        q
+          .from({ media: mediaCollectionBase })
+          .join(
+            { metadata: metadataCollection },
+            ({ media, metadata }: any) => eq(media.id, metadata.id),
+            `left`
+          )
+
+      // ⚠️ INCORRECT: Using custom getKey with a query that contains a subquery with joins
+      // This should also be detected and throw an error
+      expect(() => {
+        createLiveQueryCollection({
+          query: (q) => q.from({ combined: subquery }),
+          getKey: (item) => item.id, // ⚠️ This causes the error!
+        })
+      }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
   })
 })

@@ -125,24 +125,48 @@ If you need to find items by a specific field (like `media.id`), use:
 2. **Queries/filters:** Create a separate query or use collection filtering
 3. **Don't use `.get()`** with a simple ID on joined collections
 
-## Recommendation for Future Enhancement
+## Implemented Runtime Validation
+
+Runtime validation has been added to prevent this error from occurring. The validation:
+
+1. **Detects joins recursively:** Checks the query and all nested subqueries for joins
+2. **Fails fast:** Throws `CustomGetKeyWithJoinError` immediately during collection creation
+3. **Provides clear guidance:** Error message explains the issue and suggests alternatives
+
+**Implementation Details:**
+
+- New error class: `CustomGetKeyWithJoinError` in `/home/user/db/packages/db/src/errors.ts`
+- Validation in: `CollectionConfigBuilder` constructor in `/home/user/db/packages/db/src/query/live/collection-config-builder.ts`
+- Method: `hasJoins()` recursively checks query tree for any joins
+
+**Error Message:**
+```
+Custom getKey is not supported for queries with joins. Joined queries use composite keys
+internally (e.g., "[key1,key2]") to ensure uniqueness. Remove the getKey option and use
+the default key behavior, or use array methods like .toArray.find() to locate items by
+field instead of .get().
+```
+
+## Future Enhancements
 
 Consider adding:
 
 1. **TypeScript warning:** Type-level error when `getKey` is provided with a joined query
-2. **Runtime validation:** Throw an error at collection creation time if `getKey` is provided for a joined query
-3. **Documentation:** Clearly document in API docs that custom `getKey` is not supported for joined queries
+2. **Documentation:** Clearly document in API docs that custom `getKey` is not supported for joined queries
 
 ## Test Cases
 
 Test cases have been added to `/home/user/db/packages/db/tests/query/live-query-collection.test.ts`:
 
-1. **Positive test:** Demonstrates correct usage without custom `getKey`
-2. **Negative test:** Documents that custom `getKey` with joins throws an error
+1. **Positive test:** Demonstrates correct usage without custom `getKey` - works as expected
+2. **Negative test (direct join):** Verifies error is thrown when custom `getKey` is used with a joined query
+3. **Negative test (nested subquery):** Verifies error is thrown when custom `getKey` is used with a nested subquery containing joins
 
 ## Files Modified
 
-- `/home/user/db/packages/db/tests/query/live-query-collection.test.ts` - Added test cases demonstrating the issue
+- `/home/user/db/packages/db/src/errors.ts` - Added `CustomGetKeyWithJoinError` class
+- `/home/user/db/packages/db/src/query/live/collection-config-builder.ts` - Added runtime validation in constructor and `hasJoins()` helper method
+- `/home/user/db/packages/db/tests/query/live-query-collection.test.ts` - Added test cases demonstrating correct usage and validating error handling
 
 ## Related Code References
 
