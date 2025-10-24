@@ -1707,143 +1707,96 @@ describe(`createLiveQueryCollection`, () => {
     })
   })
 
-  describe(`custom getKey with joins`, () => {
-    it(`should work with default getKey (no custom getKey) on joined queries`, async () => {
-      type Media = { id: string; title: string; created_at: number }
-      type Metadata = { id: string; description: string }
-
-      const mediaCollectionBase = createCollection(
-        mockSyncCollectionOptions<Media>({
-          id: `media-base`,
-          getKey: (media) => media.id,
-          initialData: [
-            { id: `m1`, title: `Media 1`, created_at: 1000 },
-            { id: `m2`, title: `Media 2`, created_at: 2000 },
-          ],
+  describe(`custom getKey validation with joins`, () => {
+    it(`should allow joins without custom getKey`, async () => {
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `base-join-validation`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, name: `Item 1` }],
         })
       )
 
-      const metadataCollection = createCollection(
-        mockSyncCollectionOptions<Metadata>({
-          id: `metadata`,
-          getKey: (metadata) => metadata.id,
-          initialData: [
-            { id: `m1`, description: `Description 1` },
-            { id: `m2`, description: `Description 2` },
-          ],
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string; value: number }>({
+          id: `related-join-validation`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, value: 100 }],
         })
       )
 
-      // ✅ CORRECT: Using object-based constructor WITHOUT custom getKey for joined query
-      const mediaCollection = createLiveQueryCollection({
+      // Should not throw - no custom getKey on the live query
+      const liveQuery = createLiveQueryCollection({
         query: (q) =>
           q
-            .from({ media: mediaCollectionBase })
-            .orderBy(({ media }) => media.created_at, `desc`)
-            .join(
-              { metadata: metadataCollection },
-              ({ media, metadata }) => eq(media.id, metadata.id),
-              `left`
-            )
-            .select(({ media, metadata }) => ({
-              ...media,
-              metadata,
-            })),
-        // No custom getKey - uses default composite key
+            .from({ base })
+            .join({ related }, ({ base, related }) => eq(base.id, related.id))
+            .select(({ base, related }) => ({ ...base, related })),
       })
 
-      await mediaCollection.preload()
-
-      expect(mediaCollection.size).toBe(2)
-      const results = mediaCollection.toArray
-      expect(results[0]?.title).toBe(`Media 2`)
-      expect(results[0]?.metadata?.description).toBe(`Description 2`)
-      expect(results[1]?.title).toBe(`Media 1`)
-      expect(results[1]?.metadata?.description).toBe(`Description 1`)
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
     })
 
-    it(`should NOT use custom getKey on joined queries as it causes key conflicts`, async () => {
-      type Media = { id: string; title: string; created_at: number }
-      type Metadata = { id: string; description: string }
-
-      const mediaCollectionBase = createCollection(
-        mockSyncCollectionOptions<Media>({
-          id: `media-base-custom-key`,
-          getKey: (media) => media.id,
-          initialData: [
-            { id: `m1`, title: `Media 1`, created_at: 1000 },
-          ],
+    it(`should throw error when custom getKey is used with joins`, () => {
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `base-custom-key-error`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
         })
       )
 
-      const metadataCollection = createCollection(
-        mockSyncCollectionOptions<Metadata>({
-          id: `metadata-custom-key`,
-          getKey: (metadata) => metadata.id,
-          initialData: [
-            { id: `m1`, description: `Description 1` },
-          ],
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `related-custom-key-error`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
         })
       )
 
-      // ⚠️ INCORRECT: Using custom getKey with joined query
-      // This should throw immediately during collection creation
       expect(() => {
         createLiveQueryCollection({
           query: (q) =>
             q
-              .from({ media: mediaCollectionBase })
-              .orderBy(({ media }) => media.created_at, `desc`)
-              .join(
-                { metadata: metadataCollection },
-                ({ media, metadata }) => eq(media.id, metadata.id),
-                `left`
-              )
-              .select(({ media, metadata }) => ({
-                ...media,
-                metadata,
-              })),
-          getKey: (media) => media.id, // ⚠️ This causes the error!
+              .from({ base })
+              .join({ related }, ({ base, related }) =>
+                eq(base.id, related.id)
+              ),
+          getKey: (item) => item.id, // Custom getKey not allowed with joins
         })
       }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
 
-    it(`should throw error when custom getKey is used with nested subquery containing joins`, () => {
-      type Media = { id: string; title: string; created_at: number }
-      type Metadata = { id: string; description: string }
-
-      const mediaCollectionBase = createCollection(
-        mockSyncCollectionOptions<Media>({
-          id: `media-base-nested`,
-          getKey: (media) => media.id,
-          initialData: [{ id: `m1`, title: `Media 1`, created_at: 1000 }],
+    it(`should detect joins in nested subqueries`, () => {
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `base-nested`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
         })
       )
 
-      const metadataCollection = createCollection(
-        mockSyncCollectionOptions<Metadata>({
-          id: `metadata-nested`,
-          getKey: (metadata) => metadata.id,
-          initialData: [{ id: `m1`, description: `Description 1` }],
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string }>({
+          id: `related-nested`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1` }],
         })
       )
 
-      // Create a subquery with a join
+      // Subquery contains a join
       const subquery = (q: any) =>
         q
-          .from({ media: mediaCollectionBase })
-          .join(
-            { metadata: metadataCollection },
-            ({ media, metadata }: any) => eq(media.id, metadata.id),
-            `left`
+          .from({ base })
+          .join({ related }, ({ base, related }: any) =>
+            eq(base.id, related.id)
           )
 
-      // ⚠️ INCORRECT: Using custom getKey with a query that contains a subquery with joins
-      // This should also be detected and throw an error
       expect(() => {
         createLiveQueryCollection({
-          query: (q) => q.from({ combined: subquery }),
-          getKey: (item) => item.id, // ⚠️ This causes the error!
+          query: (q) => q.from({ sub: subquery }),
+          getKey: (item) => item.id, // Custom getKey not allowed even with nested joins
         })
       }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
