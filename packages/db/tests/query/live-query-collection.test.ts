@@ -1760,10 +1760,12 @@ describe(`createLiveQueryCollection`, () => {
           query: (q) =>
             q
               .from({ base })
-              .join({ related }, ({ base, related }) =>
-                eq(base.id, related.id)
-              ),
-          getKey: (item) => item.id, // Custom getKey not allowed with joins
+              .join({ related }, ({ base, related }) => eq(base.id, related.id))
+              .select(({ base, related }) => ({
+                baseId: base.id,
+                relatedId: related?.id,
+              })),
+          getKey: (item) => item.baseId, // Custom getKey not allowed with joins
         })
       }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
@@ -1785,18 +1787,23 @@ describe(`createLiveQueryCollection`, () => {
         })
       )
 
-      // Subquery contains a join
-      const subquery = (q: any) =>
-        q
-          .from({ base })
-          .join({ related }, ({ base, related }: any) =>
-            eq(base.id, related.id)
-          )
+      // Create a live query collection that contains a join
+      const subqueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ base })
+            .join({ related }, ({ base, related }) => eq(base.id, related.id))
+            .select(({ base, related }) => ({
+              baseId: base.id,
+              relatedId: related?.id,
+            })),
+      })
 
+      // Now try to create another live query with custom getKey that references the joined subquery
       expect(() => {
         createLiveQueryCollection({
-          query: (q) => q.from({ sub: subquery }),
-          getKey: (item) => item.id, // Custom getKey not allowed even with nested joins
+          query: (q) => q.from({ sub: subqueryCollection }),
+          getKey: (item) => item.baseId, // Custom getKey not allowed with nested joins
         })
       }).toThrow(/Custom getKey is not supported for queries with joins/)
     })
