@@ -1702,4 +1702,291 @@ describe(`Electric Integration`, () => {
       vi.useRealTimers()
     })
   })
+
+  // Tests for error propagation
+  describe(`Error propagation`, () => {
+    let capturedOnError: ((error: Error) => void) | undefined
+
+    beforeEach(async () => {
+      vi.clearAllMocks()
+      capturedOnError = undefined
+
+      // Import and mock ShapeStream to capture onError callback
+      const electricClient = await import(`@electric-sql/client`)
+      const ShapeStreamMock = electricClient.ShapeStream as any
+
+      // Override the mock to capture onError
+      ShapeStreamMock.mockImplementation((options: any) => {
+        capturedOnError = options.onError
+        return mockStream
+      })
+
+      // Reset mock subscriber
+      mockSubscribe.mockImplementation((callback) => {
+        subscriber = callback
+        return () => {}
+      })
+    })
+
+    it(`should throw error when no custom onError handler is provided`, () => {
+      const config = {
+        id: `error-propagation-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Verify we captured the onError callback
+      expect(capturedOnError).toBeDefined()
+
+      // Simulate an error from Electric
+      const testError = new Error(`Network connection failed`)
+
+      // The onError callback should throw the error
+      expect(() => {
+        capturedOnError!(testError)
+      }).toThrow(`Network connection failed`)
+    })
+
+    it(`should call custom onError handler when provided`, () => {
+      const customErrorHandler = vi.fn()
+      const config = {
+        id: `custom-error-handler-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: customErrorHandler,
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      createCollection(electricCollectionOptions(config))
+
+      // Verify we captured the onError callback
+      expect(capturedOnError).toBeDefined()
+
+      // Simulate an error from Electric
+      const testError = new Error(`Network connection failed`)
+
+      // The onError callback should call the custom handler
+      capturedOnError!(testError)
+
+      expect(customErrorHandler).toHaveBeenCalledWith(testError)
+    })
+
+    it(`should not mark collection as ready on error`, () => {
+      const config = {
+        id: `no-premature-ready-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: () => {
+            // Custom handler that swallows the error
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Collection should start in loading state
+      expect(testCollection.status).toBe(`loading`)
+
+      // Simulate an error from Electric
+      const testError = new Error(`Network connection failed`)
+      capturedOnError!(testError)
+
+      // Collection should still be loading (not marked ready)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Verify collection has no data
+      expect(testCollection.size).toBe(0)
+    })
+
+    it(`should allow ShapeStream to call markReady after recovery from transitory error`, () => {
+      const config = {
+        id: `recovery-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: () => {
+            // Custom handler that allows retry/recovery
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Simulate a transitory error
+      const testError = new Error(`Temporary network issue`)
+      capturedOnError!(testError)
+
+      // Collection should still be loading
+      expect(testCollection.status).toBe(`loading`)
+
+      // Simulate ShapeStream recovering and sending data
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now collection should be ready with data
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+    })
+
+    it(`should set collection to error status after 10 seconds of continuous errors`, () => {
+      vi.useFakeTimers()
+
+      const config = {
+        id: `persistent-error-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: () => {
+            // Custom handler that swallows the error
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Collection should start in loading state
+      expect(testCollection.status).toBe(`loading`)
+
+      // Simulate an error
+      const testError = new Error(`Persistent network error`)
+      capturedOnError!(testError)
+
+      // Immediately after error, should still be loading
+      expect(testCollection.status).toBe(`loading`)
+
+      // Fast forward 9 seconds - should still be loading
+      vi.advanceTimersByTime(9000)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Fast forward past 10 seconds - should now be error
+      vi.advanceTimersByTime(1100)
+      expect(testCollection.status).toBe(`error`)
+
+      vi.useRealTimers()
+    })
+
+    it(`should reject preload() after 10 seconds of continuous errors`, async () => {
+      vi.useFakeTimers()
+
+      const config = {
+        id: `preload-reject-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: () => {
+            // Custom handler that swallows the error
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: false, // Don't auto-start, we'll call preload
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start preload
+      const preloadPromise = testCollection.preload()
+
+      // Catch the rejection to prevent test failure
+      preloadPromise.catch(() => {})
+
+      // Simulate an error
+      const testError = new Error(`Persistent network error`)
+      capturedOnError!(testError)
+
+      // Fast forward past 10 seconds to trigger error status
+      await vi.advanceTimersByTimeAsync(11000)
+
+      // preload should reject
+      await expect(preloadPromise).rejects.toThrow()
+
+      vi.useRealTimers()
+    }, 15000)
+
+    it(`should clear error timer and not set error status if recovery happens within 10 seconds`, () => {
+      vi.useFakeTimers()
+
+      const config = {
+        id: `recovery-within-grace-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          onError: () => {
+            // Custom handler that swallows the error
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Simulate an error
+      const testError = new Error(`Temporary network error`)
+      capturedOnError!(testError)
+
+      // Fast forward 5 seconds
+      vi.advanceTimersByTime(5000)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Simulate successful recovery
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Should be ready, not error
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+
+      // Fast forward past 10 seconds to ensure timer was cleared
+      vi.advanceTimersByTime(6000)
+      expect(testCollection.status).toBe(`ready`) // Still ready, not error
+
+      vi.useRealTimers()
+    })
+  })
 })
