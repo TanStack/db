@@ -723,11 +723,11 @@ export function queryCollectionOptions(
       lastError: () => lastError,
       isError: () => !!lastError,
       errorCount: () => errorCount,
-      clearError: () => {
+      clearError: async () => {
         lastError = undefined
         errorCount = 0
         lastErrorUpdatedAt = 0
-        return refetch({ throwOnError: true })
+        await refetch({ throwOnError: true })
       },
     },
   }
