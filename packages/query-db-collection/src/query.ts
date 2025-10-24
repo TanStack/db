@@ -11,6 +11,7 @@ import type {
   QueryFunctionContext,
   QueryKey,
   QueryObserverOptions,
+  QueryObserverResult,
 } from "@tanstack/query-core"
 import type {
   BaseCollectionConfig,
@@ -77,18 +78,6 @@ export interface QueryCollectionConfig<
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
-  /**
-   * The type of refetch to perform (default: all)
-   * - `all`: Refetch this collection regardless of observer state
-   * - `active`: Refetch only when there is an active observer
-   * - `inactive`: Refetch only when there is no active observer
-   *
-   * Notes:
-   * - Refetch only targets queries that already exist in the TanStack Query cache for the exact `queryKey`
-   * - If `enabled: false`, `utils.refetch()` is a no-op for all `refetchType` values
-   * - An "active observer" exists while the collection is syncing (e.g. when `startSync: true` or once started manually)
-   */
-  refetchType?: `active` | `inactive` | `all`
   refetchInterval?: QueryObserverOptions<
     Array<T>,
     TError,
@@ -143,8 +132,11 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
+ * Returns the QueryObserverResult from TanStack Query
  */
-export type RefetchFn = (opts?: { throwOnError?: boolean }) => Promise<void>
+export type RefetchFn = (opts?: {
+  throwOnError?: boolean
+}) => Promise<QueryObserverResult<any, any> | void>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -393,7 +385,6 @@ export function queryCollectionOptions(
     select,
     queryClient,
     enabled,
-    refetchType = `all`,
     refetchInterval,
     retry,
     retryDelay,
@@ -433,6 +424,8 @@ export function queryCollectionOptions(
   let errorCount = 0
   /** The timestamp for when the query most recently returned the status as "error" */
   let lastErrorUpdatedAt = 0
+  /** Reference to the QueryObserver for imperative refetch */
+  let queryObserver: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
@@ -464,6 +457,9 @@ export function queryCollectionOptions(
       Array<any>,
       any
     >(queryClient, observerOptions)
+
+    // Store reference for imperative refetch
+    queryObserver = localObserver
 
     let isSubscribed = false
     let actualUnsubscribeFn: (() => void) | null = null
@@ -608,19 +604,32 @@ export function queryCollectionOptions(
 
   /**
    * Refetch the query data
-   * @returns Promise that resolves when the refetch is complete
+   *
+   * Uses queryObserver.refetch() because:
+   * - Bypasses `enabled: false` to support manual/imperative refetch patterns (e.g., button-triggered fetch)
+   * - Ensures clearError() works even when enabled: false
+   * - Always refetches THIS specific collection (exact targeting via observer)
+   * - Respects retry, retryDelay, and other observer options
+   *
+   * This matches TanStack Query's hook behavior where refetch() bypasses enabled: false.
+   * See: https://tanstack.com/query/latest/docs/framework/react/guides/disabling-queries
+   *
+   * Used by both:
+   * - utils.refetch() - for explicit user-triggered refetches
+   * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
+   *
+   * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
-  const refetch: RefetchFn = (opts) => {
-    return queryClient.refetchQueries(
-      {
-        queryKey: queryKey,
-        exact: true,
-        type: refetchType,
-      },
-      {
-        throwOnError: opts?.throwOnError,
-      }
-    )
+  const refetch: RefetchFn = async (opts) => {
+    // Observer is created when sync starts. If never synced, nothing to refetch.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!queryObserver) {
+      return
+    }
+    // Return the QueryObserverResult for users to inspect
+    return queryObserver.refetch({
+      throwOnError: opts?.throwOnError,
+    })
   }
 
   // Create write context for manual write operations
