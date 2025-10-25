@@ -12,7 +12,7 @@ import {
   UnsupportedJoinTypeError,
 } from "../../errors.js"
 import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { PropRef, followRef } from "../ir.js"
+import { PropRef, followRef, getWhereExpression } from "../ir.js"
 import { inArray } from "../builder/functions.js"
 import { compileExpression } from "./evaluators.js"
 import type { CompileQueryFn } from "./index.js"
@@ -231,7 +231,24 @@ function processJoin(
     const hasComputedJoinExpr =
       mainExpr.type === `func` || joinedExpr.type === `func`
 
-    if (!limitedSubquery && !hasComputedJoinExpr) {
+    // If the main query has a limit/offset with WHERE clauses on the lazy source,
+    // we must deoptimize because:
+    // 1. The ORDER BY optimization loads limited rows from the active collection
+    // 2. WHERE filters on the lazy collection may filter out most/all results
+    // 3. This causes the query to return fewer results than the limit (or even 0)
+    // Solution: Load all lazy collection data upfront so filtering happens before limiting
+    const lazyAlias = activeSource === `main` ? joinedSource : mainSource
+    const mainQueryLimitedWithLazyFilters =
+      (rawQuery.limit !== undefined || rawQuery.offset !== undefined) &&
+      rawQuery.where &&
+      rawQuery.where.length > 0 &&
+      hasWhereClauseReferencingAlias(rawQuery.where, lazyAlias)
+
+    if (
+      !limitedSubquery &&
+      !hasComputedJoinExpr &&
+      !mainQueryLimitedWithLazyFilters
+    ) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
@@ -386,6 +403,51 @@ function analyzeJoinExpressions(
 
   // This should not be reachable given the logic above, but just in case
   throw new InvalidJoinCondition()
+}
+
+/**
+ * Checks if any WHERE clause in the array references the given alias
+ */
+function hasWhereClauseReferencingAlias(
+  whereClauses: Array<
+    | BasicExpression<boolean>
+    | { expression: BasicExpression<boolean>; residual?: boolean }
+  >,
+  alias: string
+): boolean {
+  for (const where of whereClauses) {
+    const whereExpression = getWhereExpression(where)
+    if (expressionReferencesAlias(whereExpression, alias)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Recursively checks if an expression references the given alias
+ */
+function expressionReferencesAlias(
+  expr: BasicExpression,
+  alias: string
+): boolean {
+  switch (expr.type) {
+    case `ref`:
+      // PropRef path has the source alias as the first element
+      return expr.path[0] === alias
+    case `func`: {
+      // For function expressions, check all arguments recursively
+      for (const arg of expr.args) {
+        if (expressionReferencesAlias(arg, alias)) {
+          return true
+        }
+      }
+      return false
+    }
+    default:
+      // Values (type='val') don't reference any source
+      return false
+  }
 }
 
 /**
