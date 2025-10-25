@@ -245,11 +245,10 @@ export function localOnlyCollectionOptions<
   const acceptMutations = (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => {
-    // Filter mutations that belong to this collection
+    // Filter mutations that belong to this collection by checking if they have the same acceptMutations function
+    // This works because each collection has a unique utils object with a unique acceptMutations closure
     const collectionMutations = transaction.mutations.filter(
-      (m) =>
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        m.collection === syncResult.collection
+      (m) => m.collection.utils?.acceptMutations === acceptMutations
     )
 
     if (collectionMutations.length === 0) {
