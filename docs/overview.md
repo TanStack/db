@@ -127,21 +127,25 @@ With an instant inner loop of optimistic state, superseded in time by the slower
 
 ### Collections
 
-There are a number of built-in collection types:
+TanStack DB provides several built-in collection types for different data sources and use cases. Each collection type has its own detailed documentation page:
 
-1. [`QueryCollection`](#querycollection) to load data into collections using [TanStack Query](https://tanstack.com/query)
-2. [`ElectricCollection`](#electriccollection) to sync data into collections using [ElectricSQL](https://electric-sql.com)
-3. [`TrailBaseCollection`](#trailbasecollection) to sync data into collections using [TrailBase](https://trailbase.io)
-4. [`RxDBCollection`](#rxdbcollection) to integrate with [RxDB](https://rxdb.info) for local persistence and sync
-5. [`LocalStorageCollection`](#localstoragecollection) for small amounts of local-only state that syncs across browser tabs
-6. [`LocalOnlyCollection`](#localonlycollection) for in-memory client data or UI state
+#### Built-in Collection Types
 
-You can also use:
+1. **[QueryCollection](./collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
 
-- use live collection queries to [derive collections from other collections](#derived-collections)
-- the [base Collection](#base-collection) to define your own collection types
+2. **[ElectricCollection](./collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
 
-#### Collection schemas
+3. **[TrailBaseCollection](./collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
+
+4. **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
+
+5. **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
+
+6. **[LocalOnlyCollection](./collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
+
+7. **[Derived Collections](./collections/derived-collections.md)** &mdash; Create collections from live queries over other collections, acting as materialized views that update incrementally.
+
+#### Collection Schemas
 
 All collections optionally (though strongly recommended) support adding a `schema`.
 
@@ -152,349 +156,11 @@ The collection will use the schema to do client-side validation of optimistic mu
 The collection will use the schema for its type so if you provide a schema, you can't also pass in an explicit
 type (e.g. `createCollection<Todo>()`).
 
-#### `QueryCollection`
+#### Creating Custom Collection Types
 
-[TanStack Query](https://tanstack.com/query) fetches data using managed queries. Use `queryCollectionOptions` to fetch data into a collection using TanStack Query:
+You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts).
 
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
-
-const todoCollection = createCollection(
-  queryCollectionOptions({
-    queryKey: ["todoItems"],
-    queryFn: async () => {
-      const response = await fetch("/api/todos")
-      return response.json()
-    },
-    getKey: (item) => item.id,
-    schema: todoSchema, // any standard schema
-  })
-)
-```
-
-The collection will be populated with the query results.
-
-#### `ElectricCollection`
-
-[Electric](https://electric-sql.com) is a read-path sync engine for Postgres. It allows you to sync subsets of data out of a Postgres database, [through your API](https://electric-sql.com/blog/2024/11/21/local-first-with-your-existing-api), into a TanStack DB collection.
-
-Electric's main primitive for sync is a [Shape](https://electric-sql.com/docs/guides/shapes). Use `electricCollectionOptions` to sync a shape into a collection:
-
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
-
-export const todoCollection = createCollection(
-  electricCollectionOptions({
-    id: "todos",
-    shapeOptions: {
-      url: "https://example.com/v1/shape",
-      params: {
-        table: "todos",
-      },
-    },
-    getKey: (item) => item.id,
-    schema: todoSchema,
-  })
-)
-```
-
-The Electric collection requires two Electric-specific options:
-
-- `shapeOptions` &mdash; the Electric [ShapeStreamOptions](https://electric-sql.com/docs/api/clients/typescript#options) that define the [Shape](https://electric-sql.com/docs/guides/shapes) to sync into the collection; this includes the
-  - `url` to your sync engine; and
-  - `params` to specify the `table` to sync and any optional `where` clauses, etc.
-- `getKey` &mdash; identifies the id for the rows being synced into the collection
-
-A new collections doesn't start syncing until you call `collection.preload()` or you query it.
-
-Electric shapes allow you to filter data using where clauses:
-
-```ts
-export const myPendingTodos = createCollection(
-  electricCollectionOptions({
-    id: "todos",
-    shapeOptions: {
-      url: "https://example.com/v1/shape",
-      params: {
-        table: "todos",
-        where: `
-        status = 'pending'
-        AND
-        user_id = '${user.id}'
-      `,
-      },
-    },
-    getKey: (item) => item.id,
-    schema: todoSchema,
-  })
-)
-```
-
-> [!TIP]
-> Shape where clauses, used to filter the data you sync into `ElectricCollection`s, are different from the [live queries](#live-queries) you use to query data in components.
->
-> Live queries are much more expressive than shapes, allowing you to query across collections, join, aggregate, etc. Shapes just contain filtered database tables and are used to populate the data in a collection.
-
-If you need more control over what data syncs into the collection, Electric allows you to [use your API](https://electric-sql.com/blog/2024/11/21/local-first-with-your-existing-api#filtering) as a proxy to both authorize and filter data.
-
-See the [Electric docs](https://electric-sql.com/docs/intro) for more information.
-
-#### `TrailBaseCollection`
-
-[TrailBase](https://trailbase.io) is an easy-to-self-host, single-executable application backend with built-in SQLite, a V8 JS runtime, auth, admin UIs and sync functionality.
-
-TrailBase lets you expose tables via [Record APIs](https://trailbase.io/documentation/apis_record/) and subscribe to changes when `enable_subscriptions` is set. Use `trailBaseCollectionOptions` to sync records into a collection:
-
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
-import { initClient } from "trailbase"
-
-const trailBaseClient = initClient(`https://trailbase.io`)
-
-export const todoCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
-    id: "todos",
-    recordApi: trailBaseClient.records(`todos`),
-    getKey: (item) => item.id,
-    schema: todoSchema,
-    parse: {
-      created_at: (ts) => new Date(ts * 1000),
-    },
-    serialize: {
-      created_at: (date) => Math.floor(date.valueOf() / 1000),
-    },
-  })
-)
-```
-
-This collection requires the following TrailBase-specific options:
-
-- `recordApi` — identifies the API to sync.
-- `getKey` — identifies the id for the records being synced into the collection.
-- `parse` — maps `(v: Todo[k]) => SelectTodo[k]`.
-- `serialize` — maps `(v: SelectTodo[k]) => Todo[k]`.
-
-A new collections doesn't start syncing until you call `collection.preload()` or you query it.
-
-#### `RxDBCollection`
-
-[RxDB](https://rxdb.info) is a client-side database for JavaScript apps with replication, conflict resolution, and offline-first features.  
-Use `rxdbCollectionOptions` from `@tanstack/rxdb-db-collection` to integrate an RxDB collection with TanStack DB:
-
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { rxdbCollectionOptions } from "@tanstack/rxdb-db-collection"
-import { createRxDatabase } from "rxdb"
-
-const db = await createRxDatabase({
-  name: "mydb",
-  storage: getRxStorageMemory(),
-})
-await db.addCollections({
-  todos: {
-    schema: {
-      version: 0,
-      primaryKey: "id",
-      type: "object",
-      properties: {
-        id: { type: "string", maxLength: 100 },
-        text: { type: "string" },
-        completed: { type: "boolean" },
-      },
-    },
-  },
-})
-
-// Wrap the RxDB collection with TanStack DB
-export const todoCollection = createCollection(
-  rxdbCollectionOptions({
-    rxCollection: db.todos,
-    startSync: true,
-  })
-)
-```
-
-With this integration:
-
-- TanStack DB subscribes to RxDB's change streams and reflects updates, deletes, and inserts in real-time.
-- You get local-first sync when RxDB replication is configured.
-- Mutation handlers (onInsert, onUpdate, onDelete) are implemented using RxDB's APIs (bulkUpsert, incrementalPatch, bulkRemove).
-
-This makes RxDB a great choice for apps that need local-first storage, replication, or peer-to-peer sync combined with TanStack DB's live queries and transaction lifecycle.
-
-#### `LocalStorageCollection`
-
-localStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time. All data is stored under a single localStorage key and automatically synchronized using storage events.
-
-Use `localStorageCollectionOptions` to create a collection that stores data in localStorage:
-
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { localStorageCollectionOptions } from "@tanstack/react-db"
-
-export const userPreferencesCollection = createCollection(
-  localStorageCollectionOptions({
-    id: "user-preferences",
-    storageKey: "app-user-prefs", // localStorage key
-    getKey: (item) => item.id,
-    schema: userPrefsSchema,
-  })
-)
-```
-
-The localStorage collection requires:
-
-- `storageKey` — the localStorage key where all collection data is stored
-- `getKey` — identifies the id for items in the collection
-
-Mutation handlers (`onInsert`, `onUpdate`, `onDelete`) are completely optional. Data will persist to localStorage whether or not you provide handlers. You can provide alternative storage backends like `sessionStorage` or custom implementations that match the localStorage API.
-
-```ts
-export const sessionCollection = createCollection(
-  localStorageCollectionOptions({
-    id: "session-data",
-    storageKey: "session-key",
-    storage: sessionStorage, // Use sessionStorage instead
-    getKey: (item) => item.id,
-  })
-)
-```
-
-> [!TIP]
-> localStorage collections are perfect for user preferences, UI state, and other data that should persist locally but doesn't need server synchronization. For server-synchronized data, use [`QueryCollection`](#querycollection) or [`ElectricCollection`](#electriccollection) instead.
-
-#### `LocalOnlyCollection`
-
-LocalOnly collections are designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs. They provide a simple way to manage temporary, session-only data with full optimistic mutation support.
-
-Use `localOnlyCollectionOptions` to create a collection that stores data only in memory:
-
-```ts
-import { createCollection } from "@tanstack/react-db"
-import { localOnlyCollectionOptions } from "@tanstack/react-db"
-
-export const uiStateCollection = createCollection(
-  localOnlyCollectionOptions({
-    id: "ui-state",
-    getKey: (item) => item.id,
-    schema: uiStateSchema,
-    // Optional initial data to populate the collection
-    initialData: [
-      { id: "sidebar", isOpen: false },
-      { id: "theme", mode: "light" },
-    ],
-  })
-)
-```
-
-The LocalOnly collection requires:
-
-- `getKey` — identifies the id for items in the collection
-
-Optional configuration:
-
-- `initialData` — array of items to populate the collection with on creation
-- `onInsert`, `onUpdate`, `onDelete` — optional mutation handlers for custom logic
-
-Mutation handlers are completely optional. When provided, they are called before the optimistic state is confirmed. The collection automatically manages the transition from optimistic to confirmed state internally.
-
-```ts
-export const tempDataCollection = createCollection(
-  localOnlyCollectionOptions({
-    id: "temp-data",
-    getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
-      // Custom logic before confirming the insert
-      console.log("Inserting:", transaction.mutations[0].modified)
-    },
-    onUpdate: async ({ transaction }) => {
-      // Custom logic before confirming the update
-      const { original, modified } = transaction.mutations[0]
-      console.log("Updating from", original, "to", modified)
-    },
-  })
-)
-```
-
-> [!TIP]
-> LocalOnly collections are perfect for temporary UI state, form data, or any client-side data that doesn't need persistence. For data that should persist across sessions, use [`LocalStorageCollection`](#localstoragecollection) instead.
-
-**Using LocalStorage and LocalOnly Collections with Manual Transactions:**
-
-When using either LocalStorage or LocalOnly collections with manual transactions (created via `createTransaction`), you must call `utils.acceptMutations()` in your transaction's `mutationFn` to persist the changes. This is necessary because these collections don't participate in the standard mutation handler flow for manual transactions.
-
-```ts
-import { createTransaction } from "@tanstack/react-db"
-
-const localData = createCollection(
-  localOnlyCollectionOptions({
-    id: "form-draft",
-    getKey: (item) => item.id,
-  })
-)
-
-const serverCollection = createCollection(
-  queryCollectionOptions({
-    queryKey: ["items"],
-    queryFn: async () => api.items.getAll(),
-    getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
-      await api.items.create(transaction.mutations[0].modified)
-    },
-  })
-)
-
-const tx = createTransaction({
-  mutationFn: async ({ transaction }) => {
-    // Server collection mutations are handled by their onInsert handler automatically
-    // (onInsert will be called and awaited)
-
-    // After server mutations succeed, persist local collection mutations
-    localData.utils.acceptMutations(transaction)
-  },
-})
-
-// Apply mutations to both collections in one transaction
-tx.mutate(() => {
-  localData.insert({ id: "draft-1", data: "..." })
-  serverCollection.insert({ id: "1", name: "Item" })
-})
-
-await tx.commit()
-```
-
-#### Derived collections
-
-Live queries return collections. This allows you to derive collections from other collections.
-
-For example:
-
-```ts
-import { createLiveQueryCollection, eq } from "@tanstack/db"
-
-// Imagine you have a collection of todos.
-const todoCollection = createCollection({
-  // config
-})
-
-// You can derive a new collection that's a subset of it.
-const completedTodoCollection = createLiveQueryCollection({
-  startSync: true,
-  query: (q) =>
-    q.from({ todo: todoCollection }).where(({ todo }) => todo.completed),
-})
-```
-
-This also works with joins to derive collections from multiple source collections. And it works recursively -- you can derive collections from other derived collections. Changes propagate efficiently using differential dataflow and it's collections all the way down.
-
-#### Collection
-
-There is a `Collection` interface in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts). You can use this to implement your own collection types.
-
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -603,8 +269,8 @@ You can use TanStack DB with your existing REST API via TanStack Query.
 
 The steps are to:
 
-1. create [`QueryCollection`](#querycollection)s that load data using TanStack Query
-2. implement [`mutationFn`](#mutationfn)s that handle mutations by posting them to your API endpoints
+1. create [QueryCollection](./collections/query-collection.md)s that load data using TanStack Query
+2. implement mutation handlers that handle mutations by posting them to your API endpoints
 
 ```tsx
 import { useLiveQuery, createCollection } from "@tanstack/react-db"
