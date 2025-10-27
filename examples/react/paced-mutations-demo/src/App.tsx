@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import mitt from "mitt"
 import {
   createCollection,
@@ -110,9 +110,16 @@ export function App() {
     }
   }, [strategyType, wait, leading, trailing])
 
-  // Memoize mutationFn to prevent recreation on every render
-  const mutationFn = useCallback(
-    async ({ transaction }: { transaction: Transaction }) => {
+  // Create the paced mutations hook with onMutate for optimistic updates
+  const mutate = usePacedMutations<number>({
+    onMutate: (newValue) => {
+      // Apply optimistic update immediately
+      itemCollection.update(1, (draft) => {
+        draft.value = newValue
+        draft.timestamp = Date.now()
+      })
+    },
+    mutationFn: async ({ transaction }) => {
       console.log(`mutationFn called with transaction:`, transaction)
 
       // Update transaction state to executing when commit starts
@@ -152,25 +159,15 @@ export function App() {
       // Sync back from server
       serverEmitter.emit(`sync`, transaction.mutations)
     },
-    []
-  )
-
-  // Create the paced mutations hook
-  const mutate = usePacedMutations({
-    mutationFn,
     strategy,
   })
 
   // Trigger a mutation with a specific value
   const triggerMutation = (newValue: number) => {
-    const tx = mutate(() => {
-      itemCollection.update(1, (draft) => {
-        draft.value = newValue
-        draft.timestamp = Date.now()
-      })
-    })
+    // Pass the value directly - onMutate will apply the optimistic update
+    const tx = mutate(newValue)
 
-    // Update optimistic state
+    // Update optimistic state after onMutate has been called
     setOptimisticState(itemCollection.get(1))
 
     // Track this transaction
