@@ -700,6 +700,7 @@ export class CollectionStateManager<
         if (transaction.state === `completed`) {
           for (const mutation of transaction.mutations) {
             if (
+              mutation.optimistic &&
               this.isThisCollection(mutation.collection) &&
               changedKeys.has(mutation.key)
             ) {

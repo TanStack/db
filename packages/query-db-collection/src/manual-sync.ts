@@ -110,12 +110,14 @@ function validateOperations<
     seenKeys.add(op.key)
 
     // Validate operation-specific requirements
+    // NOTE: These validations check the synced store only, not the combined view (synced + optimistic)
+    // This allows write operations to work correctly even when items are optimistically modified
     if (op.type === `update`) {
-      if (!ctx.collection.has(op.key)) {
+      if (!ctx.collection._state.syncedData.has(op.key)) {
         throw new UpdateOperationItemNotFoundError(op.key)
       }
     } else if (op.type === `delete`) {
-      if (!ctx.collection.has(op.key)) {
+      if (!ctx.collection._state.syncedData.has(op.key)) {
         throw new DeleteOperationItemNotFoundError(op.key)
       }
     }
@@ -149,7 +151,8 @@ export function performWriteOperations<
         break
       }
       case `update`: {
-        const currentItem = ctx.collection.get(op.key)!
+        // Get from synced store only, not the combined view
+        const currentItem = ctx.collection._state.syncedData.get(op.key)!
         const updatedItem = {
           ...currentItem,
           ...op.data,
@@ -166,7 +169,8 @@ export function performWriteOperations<
         break
       }
       case `delete`: {
-        const currentItem = ctx.collection.get(op.key)!
+        // Get from synced store only, not the combined view
+        const currentItem = ctx.collection._state.syncedData.get(op.key)!
         ctx.write({
           type: `delete`,
           value: currentItem,
@@ -174,12 +178,14 @@ export function performWriteOperations<
         break
       }
       case `upsert`: {
+        // Check synced store only, not the combined view
+        const existsInSyncedStore = ctx.collection._state.syncedData.has(op.key)
         const resolved = ctx.collection.validateData(
           op.data,
-          ctx.collection.has(op.key) ? `update` : `insert`,
+          existsInSyncedStore ? `update` : `insert`,
           op.key
         )
-        if (ctx.collection.has(op.key)) {
+        if (existsInSyncedStore) {
           ctx.write({
             type: `update`,
             value: resolved,

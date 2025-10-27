@@ -1,6 +1,6 @@
 {
   "name": "todos",
-  "version": "0.0.12",
+  "version": "0.0.15",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -22,12 +22,12 @@
   },
   "private": true,
   "dependencies": {
-    "@angular/common": "^20.3.6",
-    "@angular/compiler": "^20.3.6",
-    "@angular/core": "^20.3.6",
-    "@angular/forms": "^20.3.6",
-    "@angular/platform-browser": "^20.3.6",
-    "@angular/router": "^20.3.6",
+    "@angular/common": "^20.3.7",
+    "@angular/compiler": "^20.3.7",
+    "@angular/core": "^20.3.7",
+    "@angular/forms": "^20.3.7",
+    "@angular/platform-browser": "^20.3.7",
+    "@angular/router": "^20.3.7",
     "@tanstack/angular-db": "workspace:*",
     "@tanstack/db": "workspace:*",
     "rxjs": "~7.8.2",
@@ -35,9 +35,9 @@
     "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular/build": "^20.3.6",
-    "@angular/cli": "^20.3.6",
-    "@angular/compiler-cli": "^20.3.6",
+    "@angular/build": "^20.3.7",
+    "@angular/cli": "^20.3.7",
+    "@angular/compiler-cli": "^20.3.7",
     "@types/jasmine": "~5.1.12",
     "autoprefixer": "^10.4.21",
     "jasmine-core": "~5.12.0",

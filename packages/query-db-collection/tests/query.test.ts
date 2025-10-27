@@ -2339,5 +2339,186 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
     })
+
+    it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
+      const queryKey = [`writeDelete-in-onDelete-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const onDelete = vi.fn(async ({ transaction, collection }) => {
+        const deletedItem = transaction.mutations[0]?.original
+        // Call writeDelete inside onDelete handler - this should work without throwing
+        collection.utils.writeDelete(deletedItem.id)
+        return { refetch: false }
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `writeDelete-in-onDelete-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        onDelete,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      const transaction = collection.delete(`1`)
+      await transaction.isPersisted.promise
+
+      // Verify the fix: writeDelete should work, transaction completes, item is deleted
+      expect(transaction.state).toBe(`completed`)
+      expect(onDelete).toHaveBeenCalledTimes(1)
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.size).toBe(1)
+    })
+  })
+
+  describe(`QueryClient defaultOptions`, () => {
+    it(`should respect defaultOptions from QueryClient when not overridden`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds
+            retry: 2,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+
+      const queryKey = [`defaultOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection without specifying staleTime or retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `defaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify queryFn was called once
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Verify the query has the correct staleTime from defaultOptions
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(10000)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should override defaultOptions when explicitly provided in queryCollectionOptions`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds default
+            retry: 2,
+          },
+        },
+      })
+
+      const queryKey = [`overrideOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection WITH explicit staleTime override
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `overrideOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 100, // Override to 100ms
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify the query uses the overridden staleTime (100ms), not the default (10000ms)
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(100)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should use retry from QueryClient defaultOptions when not overridden`, async () => {
+      let callCount = 0
+      // Create a QueryClient with custom retry defaultOption
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 2, // Retry 2 times
+            retryDelay: 1, // 1ms delay for fast test
+          },
+        },
+      })
+
+      const queryKey = [`retryDefaultOptionsTest`]
+      const queryFn = vi.fn().mockImplementation(() => {
+        callCount++
+        // Fail on first 2 attempts, succeed on 3rd
+        if (callCount <= 2) {
+          return Promise.reject(new Error(`Attempt ${callCount} failed`))
+        }
+        return Promise.resolve([{ id: `1`, name: `Item 1` }])
+      })
+
+      // Create a collection without specifying retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `retryDefaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for the query to eventually succeed (after retries)
+      await vi.waitFor(
+        () => {
+          expect(collection.status).toBe(`ready`)
+        },
+        { timeout: 2000 }
+      )
+
+      // Should have called queryFn 3 times (initial + 2 retries)
+      expect(callCount).toBe(3)
+
+      // Clean up
+      customQueryClient.clear()
+    })
   })
 })

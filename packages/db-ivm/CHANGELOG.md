@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.12
+
+### Patch Changes
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#701](https://github.com/TanStack/db/pull/701))
+
 ## 0.1.11
 
 ### Patch Changes

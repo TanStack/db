@@ -433,14 +433,15 @@ export function queryCollectionOptions(
     > = {
       queryKey: queryKey,
       queryFn: queryFn,
-      meta: meta,
-      enabled: enabled,
-      refetchInterval: refetchInterval,
-      retry: retry,
-      retryDelay: retryDelay,
-      staleTime: staleTime,
       structuralSharing: true,
       notifyOnChangeProps: `all`,
+      // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
+      ...(meta !== undefined && { meta }),
+      ...(enabled !== undefined && { enabled }),
+      ...(refetchInterval !== undefined && { refetchInterval }),
+      ...(retry !== undefined && { retry }),
+      ...(retryDelay !== undefined && { retryDelay }),
+      ...(staleTime !== undefined && { staleTime }),
     }
 
     const localObserver = new QueryObserver<

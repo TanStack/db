@@ -1,5 +1,62 @@
 # @tanstack/db
 
+## 0.4.14
+
+### Patch Changes
+
+- Fix collection cleanup to fire status:change event with 'cleaned-up' status ([#714](https://github.com/TanStack/db/pull/714))
+
+  Previously, when a collection was garbage collected, event handlers were removed before the status was changed to 'cleaned-up'. This prevented listeners from receiving the status:change event, breaking the collection factory pattern where collections listen for cleanup to remove themselves from a cache.
+
+  Now, the cleanup process:
+  1. Cleans up sync, state, changes, and indexes
+  2. Sets status to 'cleaned-up' (fires the event)
+  3. Finally cleans up event handlers
+
+  This enables the collection factory pattern:
+
+  ```typescript
+  const cache = new Map<string, ReturnType<typeof createCollection>>()
+
+  const getTodoCollection = (id: string) => {
+    if (!cache.has(id)) {
+      const collection = createCollection(/* ... */)
+
+      collection.on("status:change", ({ status }) => {
+        if (status === "cleaned-up") {
+          cache.delete(id) // This now works!
+        }
+      })
+
+      cache.set(id, collection)
+    }
+    return cache.get(id)!
+  }
+  ```
+
+## 0.4.13
+
+### Patch Changes
+
+- Fix synced propagation when preceding mutation was non-optimistic ([#715](https://github.com/TanStack/db/pull/715))
+
+## 0.4.12
+
+### Patch Changes
+
+- Add in-memory fallback for localStorage collections in SSR environments ([#696](https://github.com/TanStack/db/pull/696))
+
+  Prevents errors when localStorage collections are imported on the server by automatically falling back to an in-memory store. This allows isomorphic JavaScript applications to safely import localStorage collection modules without errors during module initialization.
+
+  When localStorage is not available (e.g., in server-side rendering environments), the collection automatically uses an in-memory storage implementation. Data will not persist across page reloads or be shared across tabs when using the in-memory fallback, but the collection will function normally otherwise.
+
+  Fixes #691
+
+- Add support for orderBy and limit in currentStateAsChanges function ([#701](https://github.com/TanStack/db/pull/701))
+
+- Updated dependencies [[`8187c6d`](https://github.com/TanStack/db/commit/8187c6d69c4b498e306ac2eb5fc7115e4f8193a5)]:
+  - @tanstack/db-ivm@0.1.12
+
 ## 0.4.11
 
 ### Patch Changes
