@@ -6,17 +6,23 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
  * React hook for managing paced mutations with timing strategies.
  *
  * Provides optimistic mutations with pluggable strategies like debouncing,
- * queuing, or throttling. Each call to `mutate` creates mutations that are
- * auto-merged and persisted according to the strategy.
+ * queuing, or throttling. The optimistic updates are applied immediately via
+ * `onMutate`, and the actual persistence is controlled by the strategy.
  *
- * @param config - Configuration including mutationFn and strategy
- * @returns A mutate function that executes mutations and returns Transaction objects
+ * @param config - Configuration including onMutate, mutationFn and strategy
+ * @returns A mutate function that accepts variables and returns Transaction objects
  *
  * @example
  * ```tsx
  * // Debounced auto-save
- * function AutoSaveForm() {
- *   const mutate = usePacedMutations({
+ * function AutoSaveForm({ formId }: { formId: string }) {
+ *   const mutate = usePacedMutations<string>({
+ *     onMutate: (value) => {
+ *       // Apply optimistic update immediately
+ *       formCollection.update(formId, draft => {
+ *         draft.content = value
+ *       })
+ *     },
  *     mutationFn: async ({ transaction }) => {
  *       await api.save(transaction.mutations)
  *     },
@@ -24,11 +30,7 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
  *   })
  *
  *   const handleChange = async (value: string) => {
- *     const tx = mutate(() => {
- *       formCollection.update(formId, draft => {
- *         draft.content = value
- *       })
- *     })
+ *     const tx = mutate(value)
  *
  *     // Optional: await persistence or handle errors
  *     try {
@@ -47,22 +49,19 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
  * ```tsx
  * // Throttled slider updates
  * function VolumeSlider() {
- *   const mutate = usePacedMutations({
+ *   const mutate = usePacedMutations<number>({
+ *     onMutate: (volume) => {
+ *       settingsCollection.update('volume', draft => {
+ *         draft.value = volume
+ *       })
+ *     },
  *     mutationFn: async ({ transaction }) => {
  *       await api.updateVolume(transaction.mutations)
  *     },
  *     strategy: throttleStrategy({ wait: 200 })
  *   })
  *
- *   const handleVolumeChange = (volume: number) => {
- *     mutate(() => {
- *       settingsCollection.update('volume', draft => {
- *         draft.value = volume
- *       })
- *     })
- *   }
- *
- *   return <input type="range" onChange={e => handleVolumeChange(+e.target.value)} />
+ *   return <input type="range" onChange={e => mutate(+e.target.value)} />
  * }
  * ```
  *
@@ -70,7 +69,12 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
  * ```tsx
  * // Debounce with leading/trailing for color picker (persist first + final only)
  * function ColorPicker() {
- *   const mutate = usePacedMutations({
+ *   const mutate = usePacedMutations<string>({
+ *     onMutate: (color) => {
+ *       themeCollection.update('primary', draft => {
+ *         draft.color = color
+ *       })
+ *     },
  *     mutationFn: async ({ transaction }) => {
  *       await api.updateTheme(transaction.mutations)
  *     },
@@ -80,38 +84,44 @@ import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
  *   return (
  *     <input
  *       type="color"
- *       onChange={e => {
- *         mutate(() => {
- *           themeCollection.update('primary', draft => {
- *             draft.color = e.target.value
- *           })
- *         })
- *       }}
+ *       onChange={e => mutate(e.target.value)}
  *     />
  *   )
  * }
  * ```
  */
-export function usePacedMutations<T extends object = Record<string, unknown>>(
-  config: PacedMutationsConfig<T>
-): (callback: () => void) => Transaction<T> {
-  // Keep a ref to the latest mutationFn so we can call it without recreating the instance
+export function usePacedMutations<
+  TVariables = unknown,
+  T extends object = Record<string, unknown>,
+>(
+  config: PacedMutationsConfig<TVariables, T>
+): (variables: TVariables) => Transaction<T> {
+  // Keep refs to the latest callbacks so we can call them without recreating the instance
+  const onMutateRef = useRef(config.onMutate)
+  onMutateRef.current = config.onMutate
+
   const mutationFnRef = useRef(config.mutationFn)
   mutationFnRef.current = config.mutationFn
 
-  // Create a stable wrapper around mutationFn that always calls the latest version
+  // Create stable wrappers that always call the latest version
+  const stableOnMutate = useCallback<typeof config.onMutate>((variables) => {
+    return onMutateRef.current(variables)
+  }, [])
+
   const stableMutationFn = useCallback<typeof config.mutationFn>((params) => {
     return mutationFnRef.current(params)
   }, [])
 
   // Create paced mutations instance with proper dependency tracking
   // Serialize strategy for stable comparison since strategy objects are recreated on each render
-  const { mutate } = useMemo(() => {
-    return createPacedMutations<T>({
+  const mutate = useMemo(() => {
+    return createPacedMutations<TVariables, T>({
       ...config,
+      onMutate: stableOnMutate,
       mutationFn: stableMutationFn,
     })
   }, [
+    stableOnMutate,
     stableMutationFn,
     config.metadata,
     // Serialize strategy to avoid recreating when object reference changes but values are same

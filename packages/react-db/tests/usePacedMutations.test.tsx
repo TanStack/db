@@ -18,13 +18,6 @@ describe(`usePacedMutations with debounce strategy`, () => {
   it(`should batch multiple rapid mutations into a single transaction`, async () => {
     const mutationFn = vi.fn(async () => {})
 
-    const { result } = renderHook(() =>
-      usePacedMutations({
-        mutationFn,
-        strategy: debounceStrategy({ wait: 50 }),
-      })
-    )
-
     const collection = createCollection(
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
@@ -39,29 +32,37 @@ describe(`usePacedMutations with debounce strategy`, () => {
     collection.utils.markReady()
     await preloadPromise
 
+    let insertCount = 0
+    const { result } = renderHook(() =>
+      usePacedMutations<{ id: number; value: number }>({
+        onMutate: (item) => {
+          if (insertCount === 0) {
+            collection.insert(item)
+            insertCount++
+          } else {
+            collection.update(item.id, (draft) => {
+              draft.value = item.value
+            })
+          }
+        },
+        mutationFn,
+        strategy: debounceStrategy({ wait: 50 }),
+      })
+    )
+
     let tx1, tx2, tx3
 
     // Trigger three rapid mutations (all within 50ms debounce window)
     act(() => {
-      tx1 = result.current(() => {
-        collection.insert({ id: 1, value: 1 })
-      })
+      tx1 = result.current({ id: 1, value: 1 })
     })
 
     act(() => {
-      tx2 = result.current(() => {
-        collection.update(1, (draft) => {
-          draft.value = 2
-        })
-      })
+      tx2 = result.current({ id: 1, value: 2 })
     })
 
     act(() => {
-      tx3 = result.current(() => {
-        collection.update(1, (draft) => {
-          draft.value = 3
-        })
-      })
+      tx3 = result.current({ id: 1, value: 3 })
     })
 
     // All three calls should return the SAME transaction object
@@ -101,13 +102,6 @@ describe(`usePacedMutations with debounce strategy`, () => {
   it(`should reset debounce timer on each new mutation`, async () => {
     const mutationFn = vi.fn(async () => {})
 
-    const { result } = renderHook(() =>
-      usePacedMutations({
-        mutationFn,
-        strategy: debounceStrategy({ wait: 50 }),
-      })
-    )
-
     const collection = createCollection(
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
@@ -121,11 +115,27 @@ describe(`usePacedMutations with debounce strategy`, () => {
     collection.utils.markReady()
     await preloadPromise
 
+    let insertCount = 0
+    const { result } = renderHook(() =>
+      usePacedMutations<{ id: number; value: number }>({
+        onMutate: (item) => {
+          if (insertCount === 0) {
+            collection.insert(item)
+            insertCount++
+          } else {
+            collection.update(item.id, (draft) => {
+              draft.value = item.value
+            })
+          }
+        },
+        mutationFn,
+        strategy: debounceStrategy({ wait: 50 }),
+      })
+    )
+
     // First mutation at t=0
     act(() => {
-      result.current(() => {
-        collection.insert({ id: 1, value: 1 })
-      })
+      result.current({ id: 1, value: 1 })
     })
 
     // Wait 40ms (still within 50ms debounce window)
@@ -136,11 +146,7 @@ describe(`usePacedMutations with debounce strategy`, () => {
 
     // Second mutation at t=40 (resets the timer)
     act(() => {
-      result.current(() => {
-        collection.update(1, (draft) => {
-          draft.value = 2
-        })
-      })
+      result.current({ id: 1, value: 2 })
     })
 
     // Wait another 40ms (t=80, but only 40ms since last mutation)
@@ -168,13 +174,6 @@ describe(`usePacedMutations with queue strategy`, () => {
       await new Promise((resolve) => setTimeout(resolve, 5))
     })
 
-    const { result } = renderHook(() =>
-      usePacedMutations({
-        mutationFn,
-        strategy: queueStrategy({ wait: 10 }),
-      })
-    )
-
     const collection = createCollection(
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
@@ -189,15 +188,27 @@ describe(`usePacedMutations with queue strategy`, () => {
     collection.utils.markReady()
     await preloadPromise
 
+    const { result } = renderHook(() =>
+      usePacedMutations<Item>({
+        onMutate: (item) => {
+          collection.insert(item)
+        },
+        mutationFn,
+        strategy: queueStrategy({ wait: 10 }),
+      })
+    )
+
     let tx1
 
-    // Trigger rapid mutations within single act - they accumulate in one transaction
+    // Trigger rapid mutations - queue creates separate transactions
     act(() => {
-      tx1 = result.current(() => {
-        collection.insert({ id: 1, value: 1 })
-        collection.insert({ id: 2, value: 2 })
-        collection.insert({ id: 3, value: 3 })
-      })
+      tx1 = result.current({ id: 1, value: 1 })
+    })
+    act(() => {
+      result.current({ id: 2, value: 2 })
+    })
+    act(() => {
+      result.current({ id: 3, value: 3 })
     })
 
     // Queue starts processing immediately
@@ -208,25 +219,14 @@ describe(`usePacedMutations with queue strategy`, () => {
     await tx1!.isPersisted.promise
     expect(tx1!.state).toBe(`completed`)
 
-    // All 3 mutations should be in the same transaction
-    expect(tx1!.mutations).toHaveLength(3)
+    // Each mutation should be in its own transaction
+    expect(tx1!.mutations).toHaveLength(1)
   })
 })
 
 describe(`usePacedMutations with throttle strategy`, () => {
   it(`should throttle mutations with leading and trailing execution`, async () => {
     const mutationFn = vi.fn(async () => {})
-
-    const { result } = renderHook(() =>
-      usePacedMutations({
-        mutationFn,
-        strategy: throttleStrategy({
-          wait: 100,
-          leading: true,
-          trailing: true,
-        }),
-      })
-    )
 
     const collection = createCollection(
       mockSyncCollectionOptionsNoInitialState<Item>({
@@ -242,13 +242,25 @@ describe(`usePacedMutations with throttle strategy`, () => {
     collection.utils.markReady()
     await preloadPromise
 
+    const { result } = renderHook(() =>
+      usePacedMutations<Item>({
+        onMutate: (item) => {
+          collection.insert(item)
+        },
+        mutationFn,
+        strategy: throttleStrategy({
+          wait: 100,
+          leading: true,
+          trailing: true,
+        }),
+      })
+    )
+
     let tx1, tx2, tx3
 
     // First mutation at t=0 (should execute immediately due to leading: true)
     act(() => {
-      tx1 = result.current(() => {
-        collection.insert({ id: 1, value: 1 })
-      })
+      tx1 = result.current({ id: 1, value: 1 })
     })
 
     // Leading edge should execute immediately
@@ -258,17 +270,13 @@ describe(`usePacedMutations with throttle strategy`, () => {
 
     // Second mutation at t=20 (during throttle period, should batch)
     act(() => {
-      tx2 = result.current(() => {
-        collection.insert({ id: 2, value: 2 })
-      })
+      tx2 = result.current({ id: 2, value: 2 })
     })
 
     // Third mutation at t=30 (during throttle period, should batch with second)
     await new Promise((resolve) => setTimeout(resolve, 10))
     act(() => {
-      tx3 = result.current(() => {
-        collection.insert({ id: 3, value: 3 })
-      })
+      tx3 = result.current({ id: 3, value: 3 })
     })
 
     // tx2 and tx3 should be the same transaction (batched)
@@ -292,17 +300,6 @@ describe(`usePacedMutations with throttle strategy`, () => {
   it(`should respect trailing: true with leading: false option`, async () => {
     const mutationFn = vi.fn(async () => {})
 
-    const { result } = renderHook(() =>
-      usePacedMutations({
-        mutationFn,
-        strategy: throttleStrategy({
-          wait: 50,
-          leading: false,
-          trailing: true,
-        }),
-      })
-    )
-
     const collection = createCollection(
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
@@ -316,13 +313,25 @@ describe(`usePacedMutations with throttle strategy`, () => {
     collection.utils.markReady()
     await preloadPromise
 
+    const { result } = renderHook(() =>
+      usePacedMutations<Item>({
+        onMutate: (item) => {
+          collection.insert(item)
+        },
+        mutationFn,
+        strategy: throttleStrategy({
+          wait: 50,
+          leading: false,
+          trailing: true,
+        }),
+      })
+    )
+
     let tx1
 
     // First mutation should NOT execute immediately with leading: false
     act(() => {
-      tx1 = result.current(() => {
-        collection.insert({ id: 1, value: 1 })
-      })
+      tx1 = result.current({ id: 1, value: 1 })
     })
 
     // Should not have been called yet
@@ -331,9 +340,7 @@ describe(`usePacedMutations with throttle strategy`, () => {
 
     // Add another mutation during throttle period to ensure trailing fires
     act(() => {
-      result.current(() => {
-        collection.insert({ id: 2, value: 2 })
-      })
+      result.current({ id: 2, value: 2 })
     })
 
     // Wait for throttle period to complete
@@ -349,10 +356,12 @@ describe(`usePacedMutations with throttle strategy`, () => {
 describe(`usePacedMutations memoization`, () => {
   it(`should not recreate instance when strategy object changes but values are same`, () => {
     const mutationFn = vi.fn(async () => {})
+    const onMutate = vi.fn(() => {})
 
     // Simulate a custom hook that creates strategy inline on each render
     const useCustomHook = (wait: number) => {
       return usePacedMutations({
+        onMutate,
         mutationFn,
         // Strategy is created inline on every render - new object reference each time
         strategy: debounceStrategy({ wait }),
@@ -382,6 +391,7 @@ describe(`usePacedMutations memoization`, () => {
 
   it(`should not recreate instance when wrapped in custom hook with inline strategy`, () => {
     const mutationFn = vi.fn(async () => {})
+    const onMutate = vi.fn(() => {})
 
     // Simulate the exact user scenario: custom hook wrapping usePacedMutations
     const useDebouncedTransaction = (opts?: {
@@ -390,6 +400,7 @@ describe(`usePacedMutations memoization`, () => {
       leading?: boolean
     }) => {
       return usePacedMutations({
+        onMutate,
         mutationFn,
         strategy: debounceStrategy({
           wait: opts?.wait ?? 3000,
@@ -419,6 +430,7 @@ describe(`usePacedMutations memoization`, () => {
 
   it(`should recreate instance when strategy options actually change`, () => {
     const mutationFn = vi.fn(async () => {})
+    const onMutate = vi.fn(() => {})
 
     const useDebouncedTransaction = (opts?: {
       wait?: number
@@ -426,6 +438,7 @@ describe(`usePacedMutations memoization`, () => {
       leading?: boolean
     }) => {
       return usePacedMutations({
+        onMutate,
         mutationFn,
         strategy: debounceStrategy({
           wait: opts?.wait ?? 3000,
