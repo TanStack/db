@@ -6,10 +6,17 @@ import type { Strategy } from "./strategies/types"
  * Configuration for creating a paced mutations manager
  */
 export interface PacedMutationsConfig<
+  TVariables = unknown,
   T extends object = Record<string, unknown>,
 > {
   /**
-   * Function to execute the mutation on the server
+   * Callback to apply optimistic updates immediately.
+   * Receives the variables passed to the mutate function.
+   */
+  onMutate: (variables: TVariables) => void
+  /**
+   * Function to execute the mutation on the server.
+   * Receives the transaction parameters containing all merged mutations.
    */
   mutationFn: MutationFn<T>
   /**
@@ -28,42 +35,45 @@ export interface PacedMutationsConfig<
  *
  * This function provides a way to control when and how optimistic mutations
  * are persisted to the backend, using strategies like debouncing, queuing,
- * or throttling. Each call to `mutate` creates mutations that are auto-merged
- * and persisted according to the strategy.
+ * or throttling. The optimistic updates are applied immediately via `onMutate`,
+ * and the actual persistence is controlled by the strategy.
  *
- * The returned `mutate` function returns a Transaction object that can be
- * awaited to know when persistence completes or to handle errors.
+ * The returned function accepts variables of type TVariables and returns a
+ * Transaction object that can be awaited to know when persistence completes
+ * or to handle errors.
  *
- * @param config - Configuration including mutationFn and strategy
- * @returns Object with mutate function and cleanup
+ * @param config - Configuration including onMutate, mutationFn and strategy
+ * @returns A function that accepts variables and returns a Transaction
  *
  * @example
  * ```ts
  * // Debounced mutations for auto-save
- * const { mutate, cleanup } = createPacedMutations({
- *   mutationFn: async ({ transaction }) => {
+ * const updateTodo = createPacedMutations<string>({
+ *   onMutate: (text) => {
+ *     // Apply optimistic update immediately
+ *     collection.update(id, draft => { draft.text = text })
+ *   },
+ *   mutationFn: async (text, { transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
  *   strategy: debounceStrategy({ wait: 500 })
  * })
  *
- * // Each mutate call returns a transaction
- * const tx = mutate(() => {
- *   collection.update(id, draft => { draft.value = newValue })
- * })
+ * // Call with variables, returns a transaction
+ * const tx = updateTodo('New text')
  *
  * // Await persistence or handle errors
  * await tx.isPersisted.promise
- *
- * // Cleanup when done
- * cleanup()
  * ```
  *
  * @example
  * ```ts
  * // Queue strategy for sequential processing
- * const { mutate } = createPacedMutations({
- *   mutationFn: async ({ transaction }) => {
+ * const addTodo = createPacedMutations<{ text: string }>({
+ *   onMutate: ({ text }) => {
+ *     collection.insert({ id: uuid(), text, completed: false })
+ *   },
+ *   mutationFn: async ({ text }, { transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
  *   strategy: queueStrategy({
@@ -75,13 +85,12 @@ export interface PacedMutationsConfig<
  * ```
  */
 export function createPacedMutations<
+  TVariables = unknown,
   T extends object = Record<string, unknown>,
 >(
-  config: PacedMutationsConfig<T>
-): {
-  mutate: (callback: () => void) => Transaction<T>
-} {
-  const { strategy, ...transactionConfig } = config
+  config: PacedMutationsConfig<TVariables, T>
+): (variables: TVariables) => Transaction<T> {
+  const { onMutate, mutationFn, strategy, ...transactionConfig } = config
 
   // The currently active transaction (pending, not yet persisting)
   let activeTransaction: Transaction<T> | null = null
@@ -115,21 +124,24 @@ export function createPacedMutations<
   }
 
   /**
-   * Executes a mutation callback. Creates a new transaction if none is active,
+   * Executes a mutation with the given variables. Creates a new transaction if none is active,
    * or adds to the existing active transaction. The strategy controls when
    * the transaction is actually committed.
    */
-  function mutate(callback: () => void): Transaction<T> {
+  function mutate(variables: TVariables): Transaction<T> {
     // Create a new transaction if we don't have an active one
     if (!activeTransaction || activeTransaction.state !== `pending`) {
       activeTransaction = createTransaction<T>({
         ...transactionConfig,
+        mutationFn,
         autoCommit: false,
       })
     }
 
-    // Execute the mutation callback to add mutations to the active transaction
-    activeTransaction.mutate(callback)
+    // Execute onMutate with variables to apply optimistic updates
+    activeTransaction.mutate(() => {
+      onMutate(variables)
+    })
 
     // Save reference before calling strategy.execute
     const txToReturn = activeTransaction
@@ -153,7 +165,5 @@ export function createPacedMutations<
     return txToReturn
   }
 
-  return {
-    mutate,
-  }
+  return mutate
 }
