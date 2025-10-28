@@ -179,6 +179,10 @@ export class CollectionSubscriber<
     const { orderBy, offset, limit, comparator, dataNeeded, index } =
       orderByInfo
 
+    // Reset biggest when starting a new subscription to ensure fresh tracking
+    // This is critical when filter changes cause a new subscription to be created
+    this.biggest = undefined
+
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>
     ) => {
