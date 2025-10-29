@@ -7,8 +7,11 @@
     "@tanstack/db-ivm": "workspace:*"
   },
   "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.2.0",
     "@vitest/coverage-istanbul": "^3.2.4",
     "arktype": "^2.1.23",
+    "size-limit": "^11.2.0",
+    "source-map-explorer": "^2.5.3",
     "temporal-polyfill": "^0.3.0"
   },
   "exports": {
