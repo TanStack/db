@@ -1,0 +1,7 @@
+{
+  "name": "test-bundle",
+  "type": "module",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  }
+}
