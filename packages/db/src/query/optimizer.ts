@@ -687,6 +687,13 @@ function applyOptimizations(
     // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
+  // Combine multiple remaining WHERE clauses into a single clause to avoid
+  // multiple filter operations in the pipeline (performance optimization)
+  const finalWhere: Array<Where> =
+    remainingWhereClauses.length > 1
+      ? [combineWithAnd(remainingWhereClauses.map(getWhereExpression))]
+      : remainingWhereClauses
+
   // Create a completely new query object to ensure immutability
   const optimizedQuery: QueryIR = {
     // Copy all non-optimized fields as-is
@@ -705,8 +712,8 @@ function applyOptimizations(
     from: optimizedFrom,
     join: optimizedJoins,
 
-    // Only include WHERE clauses that weren't successfully optimized
-    where: remainingWhereClauses.length > 0 ? remainingWhereClauses : [],
+    // Include combined WHERE clauses
+    where: finalWhere.length > 0 ? finalWhere : [],
   }
 
   return optimizedQuery

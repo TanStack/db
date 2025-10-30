@@ -1464,6 +1464,64 @@ describe(`Query Optimizer`, () => {
         )
       }
     })
+
+    test(`should combine multiple remaining WHERE clauses after optimization`, () => {
+      // This test verifies that if multiple WHERE clauses remain after optimization
+      // (e.g., because some can't be pushed down), they are combined into a single clause
+      const subqueryWithAggregates: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        select: {
+          department_id: createPropRef(`u`, `department_id`),
+          user_count: createAgg(`count`, createPropRef(`u`, `id`)),
+        },
+        groupBy: [createPropRef(`u`, `department_id`)],
+      }
+
+      const query: QueryIR = {
+        from: new QueryRef(subqueryWithAggregates, `stats`),
+        join: [
+          {
+            from: new CollectionRef(mockCollection, `p`),
+            type: `inner`,
+            left: createPropRef(`stats`, `department_id`),
+            right: createPropRef(`p`, `department_id`),
+          },
+        ],
+        where: [
+          createGt(createPropRef(`stats`, `user_count`), createValue(5)), // Can't push down - GROUP BY
+          createGt(createPropRef(`p`, `views`), createValue(100)), // Can push down
+          createEq(
+            createPropRef(`stats`, `department_id`),
+            createPropRef(`p`, `author_dept`)
+          ), // Multi-source
+        ],
+      }
+
+      const { optimizedQuery: optimized } = optimizeQuery(query)
+
+      // The posts clause should be pushed down
+      expect(optimized.join).toHaveLength(1)
+      if (optimized.join && optimized.join[0]) {
+        expect(optimized.join[0].from.type).toBe(`queryRef`)
+        if (optimized.join[0].from.type === `queryRef`) {
+          expect(optimized.join[0].from.query.where).toHaveLength(1)
+        }
+      }
+
+      // The stats clause and multi-source clause should remain BUT be combined into ONE
+      console.log(
+        `Remaining WHERE clauses: ${optimized.where?.length || 0}`,
+        JSON.stringify(optimized.where, null, 2)
+      )
+      expect(optimized.where).toBeDefined()
+      // This is the KEY assertion - all remaining clauses should be combined
+      // Currently this might FAIL if step 3 is missing
+      expect(optimized.where!.length).toBe(1)
+      expect(optimized.where![0]).toMatchObject({
+        type: `func`,
+        name: `and`,
+      })
+    })
   })
 
   describe(`JOIN semantics preservation`, () => {

@@ -1,11 +1,20 @@
 # Investigation: Issue #445 - useLiveQuery Performance Problem
 
 ## Summary
-Investigated and fixed a performance issue where using multiple `.where()` calls resulted in 40%+ slowdown compared to using a single WHERE clause with AND.
+Investigated and fixed a performance issue where using multiple `.where()` calls resulted in 40%+ slowdown compared to using a single WHERE clause with AND. The root cause affected **both** queries with and without joins.
 
 ## Root Cause Analysis
 
-### The Problem
+### The Complete Problem
+
+The optimizer's intended process is:
+1. **Split**: Split all WHERE clauses with "and" at top level into separate clauses
+2. **Push down**: Push single-source clauses to subqueries (for queries with joins)
+3. **Combine**: Combine all remaining WHERE clauses back into a single one with "and"
+
+**Step 3 was missing entirely**, causing multiple filter operations in the pipeline.
+
+### Problem #1: Queries WITHOUT Joins
 When users write queries like this:
 ```javascript
 useLiveQuery(q =>
@@ -16,7 +25,7 @@ useLiveQuery(q =>
 )
 ```
 
-The optimizer was completely skipping queries without joins, as seen in `optimizer.ts:333-337`:
+The optimizer was completely skipping queries without joins (`optimizer.ts:333-337`):
 ```typescript
 // Skip optimization if there are no joins - predicate pushdown only benefits joins
 // Single-table queries don't benefit from this optimization
@@ -25,7 +34,28 @@ if (!query.join || query.join.length === 0) {
 }
 ```
 
-This meant the three WHERE clauses remained as separate array elements. During query compilation (`compiler/index.ts:185-196`), each WHERE clause was applied as a **separate filter() operation** in the D2 pipeline:
+This meant ALL THREE STEPS were skipped, leaving WHERE clauses as separate array elements.
+
+### Problem #2: Queries WITH Joins (Broader Issue)
+Even for queries WITH joins, **step 3 was missing**. After pushing down single-source clauses, any remaining WHERE clauses (multi-source + unpushable single-source) were left as separate array elements instead of being combined.
+
+Example scenario:
+```javascript
+q.from({ stats: subqueryWithGroupBy })  // Can't push WHERE into GROUP BY
+  .join({ posts: postsCollection }, ...)
+  .where(({ stats }) => gt(stats.count, 5))  // Single-source but can't push down
+  .where(({ posts }) => gt(posts.views, 100))  // Single-source, can push down
+  .where(({ stats, posts }) => eq(stats.id, posts.author_id))  // Multi-source
+```
+
+After optimization:
+- Posts clause: pushed down ✓
+- Stats clause: can't push down (GROUP BY safety check)
+- Multi-source clause: must stay in main query
+- **Result**: 2 separate WHERE clauses remaining → 2 filter operators ✗
+
+### The Pipeline Impact
+During query compilation (`compiler/index.ts:185-196`), each WHERE clause creates a **separate filter() operation**:
 
 ```typescript
 if (query.where && query.where.length > 0) {
@@ -41,27 +71,24 @@ if (query.where && query.where.length > 0) {
 }
 ```
 
-This creates **three separate filter operators** in the pipeline instead of one, causing unnecessary overhead.
-
 ### Performance Impact
 - Each filter operator adds overhead to the pipeline
-- Data flows through multiple filter stages instead of a single combined evaluation
-- This compounds when rendering many items simultaneously (as reported in the issue)
+- Data flows through N filter stages instead of 1 combined evaluation
+- This compounds when rendering many items simultaneously
 - Results in 40%+ performance degradation
 
 ## The Solution
 
-Modified the optimizer to combine multiple WHERE clauses into a single AND expression for queries without joins:
+Implemented **step 3** for all query types:
+
+### Fix #1: Queries WITHOUT Joins (in `applySingleLevelOptimization`)
 
 ```typescript
 // For queries without joins, combine multiple WHERE clauses into a single clause
-// to avoid creating multiple filter operators in the pipeline
 if (!query.join || query.join.length === 0) {
   if (query.where.length > 1) {
-    // Combine multiple WHERE clauses into a single AND expression
     const splitWhereClauses = splitAndClauses(query.where)
     const combinedWhere = combineWithAnd(splitWhereClauses)
-
     return {
       ...query,
       where: [combinedWhere],
@@ -71,22 +98,40 @@ if (!query.join || query.join.length === 0) {
 }
 ```
 
+### Fix #2: Queries WITH Joins (in `applyOptimizations`)
+After pushing down single-source clauses, combine all remaining WHERE clauses:
+
+```typescript
+// Combine multiple remaining WHERE clauses into a single clause to avoid
+// multiple filter operations in the pipeline (performance optimization)
+const finalWhere: Array<Where> =
+  remainingWhereClauses.length > 1
+    ? [combineWithAnd(remainingWhereClauses.map(getWhereExpression))]
+    : remainingWhereClauses
+```
+
 ### Benefits
-1. **Single Pipeline Operator**: Only one filter() operation is added to the pipeline instead of N operations
-2. **Consistent Performance**: Performance matches single WHERE with AND
-3. **Semantically Equivalent**: Multiple WHERE clauses are still ANDed together, just more efficiently
-4. **Applies Broadly**: Works for simple FROM queries as well as nested subqueries
+1. **Single Pipeline Operator**: Only one filter() operation regardless of how many WHERE clauses remain
+2. **Consistent Performance**: Matches the performance of writing WHERE clauses manually with AND
+3. **Semantically Equivalent**: Multiple WHERE clauses are still ANDed together
+4. **Applies Universally**: Works for all query types (with/without joins, simple/complex)
+5. **Preserves Optimizations**: Still does predicate pushdown for queries with joins
 
 ## Implementation Details
 
 ### Files Changed
-1. **`packages/db/src/query/optimizer.ts`**: Added WHERE clause combining logic for queries without joins
-2. **`packages/db/tests/query/optimizer.test.ts`**: Updated tests to expect combined WHERE clauses
+1. **`packages/db/src/query/optimizer.ts`**:
+   - Added WHERE combining for queries without joins (line 333-350)
+   - Added WHERE combining after predicate pushdown for queries with joins (line 690-695)
+2. **`packages/db/tests/query/optimizer.test.ts`**:
+   - Added test: "should combine multiple WHERE clauses for queries without joins"
+   - Added test: "should combine multiple remaining WHERE clauses after optimization"
+   - Updated 5 existing tests to expect combined WHERE clauses
 
 ### Testing
-- All 42 optimizer tests pass
-- Added new test case: "should combine multiple WHERE clauses for queries without joins"
-- Updated 5 existing tests to reflect the new optimization behavior
+- All 43 optimizer tests pass
+- New test confirms remaining WHERE clauses are combined after optimization
+- Updated tests reflect the new optimization behavior
 
 ### Before vs After
 
