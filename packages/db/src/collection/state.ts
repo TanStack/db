@@ -520,7 +520,12 @@ export class CollectionStateManager<
               this.syncedData.get(key)
             if (previousValue !== undefined) {
               const viewKey = this.viewKeyMap.get(key)
-              events.push({ type: `delete`, key, value: previousValue, viewKey })
+              events.push({
+                type: `delete`,
+                key,
+                value: previousValue,
+                viewKey,
+              })
             }
           }
 
