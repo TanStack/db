@@ -330,9 +330,22 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
-  // Skip optimization if there are no joins - predicate pushdown only benefits joins
-  // Single-table queries don't benefit from this optimization
+  // For queries without joins, combine multiple WHERE clauses into a single clause
+  // to avoid creating multiple filter operators in the pipeline (performance optimization for issue #445)
   if (!query.join || query.join.length === 0) {
+    // Only optimize if there are multiple WHERE clauses to combine
+    if (query.where.length > 1) {
+      // Combine multiple WHERE clauses into a single AND expression
+      const splitWhereClauses = splitAndClauses(query.where)
+      const combinedWhere = combineWithAnd(splitWhereClauses)
+
+      return {
+        ...query,
+        where: [combinedWhere],
+      }
+    }
+
+    // For single WHERE clauses, no optimization needed
     return query
   }
 
