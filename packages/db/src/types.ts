@@ -239,6 +239,7 @@ export interface SyncConfig<
     write: (message: Omit<ChangeMessage<T>, `key`>) => void
     commit: () => void
     markReady: () => void
+    markError: () => void
     truncate: () => void
   }) => void | CleanupFn | SyncConfigRes
 
