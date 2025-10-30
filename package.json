@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
+    "build:minified": "pnpm --filter \"./packages/**\" build:minified",
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
