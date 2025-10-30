@@ -2,7 +2,7 @@
 
 ## Summary
 
-Investigated and fixed a performance issue where using multiple `.where()` calls resulted in 40%+ slowdown compared to using a single WHERE clause with AND. The root cause affected **both** queries with and without joins.
+Investigated and fixed a performance issue where using multiple `.where()` calls resulted in slower performance compared to using a single WHERE clause with AND. The root cause affected **both** queries with and without joins.
 
 ## Root Cause Analysis
 
@@ -86,7 +86,7 @@ if (query.where && query.where.length > 0) {
 - Each filter operator adds overhead to the pipeline
 - Data flows through N filter stages instead of 1 combined evaluation
 - This compounds when rendering many items simultaneously
-- Results in 40%+ performance degradation
+- Results in unnecessary performance degradation
 
 ## The Solution
 
