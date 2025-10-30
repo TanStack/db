@@ -25,6 +25,7 @@ const todoCollection = createCollection({
 ```
 
 New APIs:
+
 - `collection.getViewKey(key)` - Returns stable viewKey for any key (temporary or real)
 - `collection.mapViewKey(tempKey, realKey)` - Links temporary and real IDs to share the same viewKey
 - `viewKey` configuration option - Function to generate stable view keys for inserted items
