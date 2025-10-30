@@ -689,9 +689,16 @@ function applyOptimizations(
 
   // Combine multiple remaining WHERE clauses into a single clause to avoid
   // multiple filter operations in the pipeline (performance optimization)
+  // First flatten any nested AND expressions to avoid and(and(...), ...)
   const finalWhere: Array<Where> =
     remainingWhereClauses.length > 1
-      ? [combineWithAnd(remainingWhereClauses.map(getWhereExpression))]
+      ? [
+          combineWithAnd(
+            remainingWhereClauses.flatMap((clause) =>
+              splitAndClausesRecursive(getWhereExpression(clause))
+            )
+          ),
+        ]
       : remainingWhereClauses
 
   // Create a completely new query object to ensure immutability

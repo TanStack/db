@@ -1522,6 +1522,96 @@ describe(`Query Optimizer`, () => {
         name: `and`,
       })
     })
+
+    test(`should flatten nested AND expressions when combining remaining clauses`, () => {
+      // This test verifies that if remaining WHERE clauses already contain AND expressions,
+      // they are flattened to avoid and(and(...), ...) nesting
+      const subqueryWithAggregates: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        select: {
+          department_id: createPropRef(`u`, `department_id`),
+          user_count: createAgg(`count`, createPropRef(`u`, `id`)),
+        },
+        groupBy: [createPropRef(`u`, `department_id`)],
+      }
+
+      const query: QueryIR = {
+        from: new QueryRef(subqueryWithAggregates, `stats`),
+        join: [
+          {
+            from: new CollectionRef(mockCollection, `p`),
+            type: `inner`,
+            left: createPropRef(`stats`, `department_id`),
+            right: createPropRef(`p`, `department_id`),
+          },
+        ],
+        where: [
+          // This is an AND expression that can't be pushed down
+          createAnd(
+            createGt(createPropRef(`stats`, `user_count`), createValue(5)),
+            createEq(createPropRef(`stats`, `department_id`), createValue(1))
+          ),
+          createGt(createPropRef(`p`, `views`), createValue(100)), // Can push down
+          createEq(
+            createPropRef(`stats`, `department_id`),
+            createPropRef(`p`, `author_dept`)
+          ), // Multi-source
+        ],
+      }
+
+      const { optimizedQuery: optimized } = optimizeQuery(query)
+
+      // The posts clause should be pushed down
+      expect(optimized.join).toHaveLength(1)
+      if (optimized.join && optimized.join[0]) {
+        expect(optimized.join[0].from.type).toBe(`queryRef`)
+      }
+
+      // The remaining clauses should be combined WITHOUT nested AND
+      expect(optimized.where).toBeDefined()
+      expect(optimized.where!.length).toBe(1)
+      const combinedWhere = optimized.where![0] as any
+      expect(combinedWhere.type).toBe(`func`)
+      expect(combinedWhere.name).toBe(`and`)
+      // Should have 4 args (the 2 from the nested AND + the multi-source clause),
+      // NOT 2 args where one is itself an AND
+      expect(combinedWhere.args).toHaveLength(3)
+      // Verify none of the args are AND expressions (i.e., fully flattened)
+      const argTypes = combinedWhere.args.map((arg: any) => ({
+        type: arg.type,
+        name: arg.name,
+      }))
+      expect(argTypes).not.toContainEqual({ type: `func`, name: `and` })
+    })
+
+    test(`should not combine functional WHERE clauses`, () => {
+      // Verify that fn.where() clauses remain separate and are not combined
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        where: [
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
+          createGt(createPropRef(`u`, `age`), createValue(25)),
+        ],
+        fnWhere: [
+          (row: any) => row.u.name.startsWith(`A`),
+          (row: any) => row.u.email !== null,
+        ],
+      }
+
+      const { optimizedQuery: optimized } = optimizeQuery(query)
+
+      // Regular WHERE clauses should be combined into one
+      expect(optimized.where).toHaveLength(1)
+      expect(optimized.where![0]).toMatchObject({
+        type: `func`,
+        name: `and`,
+      })
+
+      // Functional WHERE clauses should remain separate (not combined)
+      expect(optimized.fnWhere).toHaveLength(2)
+      expect(optimized.fnWhere![0]).toBeTypeOf(`function`)
+      expect(optimized.fnWhere![1]).toBeTypeOf(`function`)
+    })
   })
 
   describe(`JOIN semantics preservation`, () => {
