@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import superjson from "superjson"
 import { createCollection } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import { createTransaction } from "../src/transactions"
@@ -174,6 +175,40 @@ describe(`localStorage collection`, () => {
 
       // Restore window
       globalThis.window = originalWindow
+    })
+
+    it(`should support custom parsers like superjson`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (item) => item.id,
+          parser: superjson,
+        })
+      )
+
+      const todo: Todo = {
+        id: `1`,
+        title: `superjson`,
+        completed: false,
+        createdAt: new Date(),
+      }
+
+      const insertTx = collection.insert(todo)
+
+      await insertTx.isPersisted.promise
+
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+
+      const parsed = superjson.parse<Record<string, { data: Todo }>>(
+        storedData!
+      )
+
+      expect(parsed[`1`]?.data.title).toBe(`superjson`)
+      expect(parsed[`1`]?.data.completed).toBe(false)
+      expect(parsed[`1`]?.data.createdAt).toBeInstanceOf(Date)
     })
   })
 
