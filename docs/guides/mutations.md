@@ -1127,30 +1127,19 @@ const TodoItem = ({ todo, isPersisted }: { todo: Todo, isPersisted: boolean }) =
 }
 ```
 
-### Solution 3: Maintain a View Key Mapping
+### Solution 3: Use Built-in Stable View Keys
 
-To avoid UI flicker while keeping optimistic updates, maintain a separate mapping from IDs (both temporary and real) to stable view keys:
+TanStack DB provides built-in support for stable view keys that prevent UI flicker during ID transitions:
 
 ```tsx
-// Create a mapping API
-const idToViewKey = new Map<number | string, string>()
-
-function getViewKey(id: number | string): string {
-  if (!idToViewKey.has(id)) {
-    idToViewKey.set(id, crypto.randomUUID())
-  }
-  return idToViewKey.get(id)!
-}
-
-function linkIds(tempId: number, realId: number) {
-  const viewKey = getViewKey(tempId)
-  idToViewKey.set(realId, viewKey)
-}
-
-// Configure collection to link IDs when real ID comes back
+// Configure collection with automatic view key generation
 const todoCollection = createCollection({
   id: "todos",
-  // ... other options
+  getKey: (item) => item.id,
+  // Enable automatic view key generation
+  viewKey: {
+    generate: () => crypto.randomUUID()
+  },
   onInsert: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
     const tempId = mutation.modified.id
@@ -1162,17 +1151,16 @@ const todoCollection = createCollection({
     })
     const realId = response.id
 
-    // Link temp ID to same view key as real ID
-    linkIds(tempId, realId)
+    // Link temp ID to real ID (they share the same viewKey)
+    todoCollection.mapViewKey(tempId, realId)
 
     // Wait for sync back
     await todoCollection.utils.refetch()
   },
 })
 
-// When inserting with temp ID
+// Insert with temp ID - viewKey is automatically generated
 const tempId = -Math.floor(Math.random() * 1000000) + 1
-const viewKey = getViewKey(tempId) // Creates and stores mapping
 
 todoCollection.insert({
   id: tempId,
@@ -1180,7 +1168,7 @@ todoCollection.insert({
   completed: false
 })
 
-// Use view key for rendering
+// Use getViewKey() for stable rendering keys
 const TodoList = () => {
   const { data: todos } = useLiveQuery((q) =>
     q.from({ todo: todoCollection })
@@ -1189,7 +1177,7 @@ const TodoList = () => {
   return (
     <ul>
       {todos.map((todo) => (
-        <li key={getViewKey(todo.id)}> {/* Stable key */}
+        <li key={todoCollection.getViewKey(todo.id)}> {/* Stable key! */}
           {todo.text}
         </li>
       ))}
@@ -1198,14 +1186,48 @@ const TodoList = () => {
 }
 ```
 
-This pattern maintains a stable key throughout the temporary → real ID transition, preventing your UI framework from unmounting and remounting the component. The view key is stored outside the collection items, so you don't need to add extra fields to your data model.
+**How it works:**
+
+1. The `viewKey.generate` function creates a stable UUID when items are inserted
+2. `mapViewKey(tempId, realId)` links the temporary and real IDs to share the same viewKey
+3. `getViewKey(id)` returns the stable viewKey for any ID (temp or real)
+4. React uses the stable viewKey, preventing unmount/remount during ID transitions
+
+**Alternative: Use existing field as viewKey**
+
+If your items already have a stable UUID field separate from the ID:
+
+```tsx
+interface Todo {
+  id: number       // Server-generated sequential ID
+  uuid: string     // Client-generated UUID (stable)
+  text: string
+  completed: boolean
+}
+
+const todoCollection = createCollection({
+  id: "todos",
+  getKey: (item) => item.id,
+  // Use existing uuid field as the viewKey
+  viewKey: {
+    field: 'uuid'
+  },
+  // ...
+})
+
+// Insert with both temp ID and stable UUID
+todoCollection.insert({
+  id: -Date.now(),
+  uuid: crypto.randomUUID(),
+  text: "New todo",
+  completed: false
+})
+```
 
 ### Best Practices
 
-1. **Use UUIDs when possible**: Client-generated UUIDs eliminate the temporary ID problem
-2. **Generate temporary IDs deterministically**: Use negative numbers or a specific pattern to distinguish temporary IDs from real ones
-3. **Disable operations on temporary items**: Disable delete/update buttons until persistence completes
-4. **Maintain view key mappings**: Create a mapping between IDs and stable view keys for rendering
-
-> [!NOTE]
-> There's an [open issue](https://github.com/TanStack/db/issues/19) to add better built-in support for temporary ID handling in TanStack DB. This would automate the view key pattern and make it easier to work with server-generated IDs.
+1. **Use UUIDs when possible**: Client-generated UUIDs as IDs eliminate the temporary ID problem entirely
+2. **Enable viewKeys for server-generated IDs**: Use the `viewKey` config option to enable automatic stable keys
+3. **Link IDs in insert handlers**: Always call `mapViewKey(tempId, realId)` after getting the real ID from the server
+4. **Use getViewKey() in renders**: Call `collection.getViewKey(item.id)` for React keys instead of using the ID directly
+5. **Generate temporary IDs deterministically**: Use negative numbers or a specific pattern to distinguish temporary IDs from real ones

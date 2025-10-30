@@ -83,6 +83,8 @@ export interface PendingMutation<
   createdAt: Date
   updatedAt: Date
   collection: TCollection
+  /** Stable view key for rendering (survives ID transitions) */
+  viewKey?: string
 }
 
 /**
@@ -267,6 +269,8 @@ export interface ChangeMessage<
   previousValue?: T
   type: OperationType
   metadata?: Record<string, unknown>
+  /** Stable view key for rendering (survives ID transitions) */
+  viewKey?: string
 }
 
 export interface OptimisticChangeMessage<
@@ -581,6 +585,29 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+
+  /**
+   * Optional configuration for stable view keys to prevent UI re-renders during
+   * temporary-to-real ID transitions.
+   *
+   * @example
+   * // Auto-generate view keys with UUIDs
+   * viewKey: {
+   *   generate: () => crypto.randomUUID()
+   * }
+   *
+   * @example
+   * // Use existing field from item as view key
+   * viewKey: {
+   *   field: 'uuid'
+   * }
+   */
+  viewKey?: {
+    /** Function to generate a stable view key for new items */
+    generate?: (item: T) => string
+    /** Use an existing field from the item as the view key */
+    field?: keyof T
+  }
 
   utils?: TUtils
 }

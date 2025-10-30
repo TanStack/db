@@ -176,6 +176,21 @@ export class CollectionMutationsManager<
       }
       const globalKey = this.generateGlobalKey(key, item)
 
+      // Generate viewKey if configured
+      let viewKey: string | undefined
+      if (this.config.viewKey) {
+        if (this.config.viewKey.generate) {
+          viewKey = this.config.viewKey.generate(validatedData)
+        } else if (this.config.viewKey.field) {
+          viewKey = String(validatedData[this.config.viewKey.field])
+        }
+
+        // Store viewKey mapping
+        if (viewKey) {
+          this.state.viewKeyMap.set(key, viewKey)
+        }
+      }
+
       const mutation: PendingMutation<TOutput, `insert`> = {
         mutationId: crypto.randomUUID(),
         original: {},
@@ -198,6 +213,7 @@ export class CollectionMutationsManager<
         createdAt: new Date(),
         updatedAt: new Date(),
         collection: this.collection,
+        viewKey,
       }
 
       mutations.push(mutation)

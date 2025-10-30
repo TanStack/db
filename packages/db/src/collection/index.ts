@@ -451,6 +451,57 @@ export class CollectionImpl<
   }
 
   /**
+   * Get a stable view key for a given item key.
+   * If viewKey configuration is enabled, returns the stable viewKey.
+   * Otherwise, returns the key as a string (backward compatible behavior).
+   *
+   * @param key - The item key to get the view key for
+   * @returns The stable view key as a string
+   *
+   * @example
+   * // Use in React components for stable keys during ID transitions
+   * {todos.map((todo) => (
+   *   <li key={collection.getViewKey(todo.id)}>
+   *     {todo.text}
+   *   </li>
+   * ))}
+   */
+  public getViewKey(key: TKey): string {
+    const viewKey = this._state.viewKeyMap.get(key)
+    return viewKey ?? String(key)
+  }
+
+  /**
+   * Link a temporary key to a real key, maintaining the same stable viewKey.
+   * This is used when server-generated IDs replace temporary client IDs.
+   *
+   * @param tempKey - The temporary key used during optimistic insert
+   * @param realKey - The real key assigned by the server
+   *
+   * @example
+   * // In your insert handler, link temp ID to real ID
+   * onInsert: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const tempId = mutation.modified.id
+   *
+   *   const response = await api.todos.create(mutation.modified)
+   *   const realId = response.id
+   *
+   *   // Link the IDs so they share the same viewKey
+   *   collection.mapViewKey(tempId, realId)
+   *
+   *   await collection.utils.refetch()
+   * }
+   */
+  public mapViewKey(tempKey: TKey, realKey: TKey): void {
+    const viewKey = this._state.viewKeyMap.get(tempKey)
+    if (viewKey) {
+      // Link real key to the same viewKey
+      this._state.viewKeyMap.set(realKey, viewKey)
+    }
+  }
+
+  /**
    * Creates an index on a collection for faster queries.
    * Indexes significantly improve query performance by allowing constant time lookups
    * and logarithmic time range queries instead of full scans.

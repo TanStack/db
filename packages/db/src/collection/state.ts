@@ -50,6 +50,9 @@ export class CollectionStateManager<
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
 
+  // ViewKey mapping for stable rendering keys across ID transitions
+  public viewKeyMap = new Map<TKey, string>()
+
   // Cached size for performance
   public size = 0
 
@@ -380,10 +383,13 @@ export class CollectionStateManager<
         previousDeletes
       )
 
+      // Get viewKey if available
+      const viewKey = this.viewKeyMap.get(key)
+
       if (previousValue !== undefined && currentValue === undefined) {
-        events.push({ type: `delete`, key, value: previousValue })
+        events.push({ type: `delete`, key, value: previousValue, viewKey })
       } else if (previousValue === undefined && currentValue !== undefined) {
-        events.push({ type: `insert`, key, value: currentValue })
+        events.push({ type: `insert`, key, value: currentValue, viewKey })
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
@@ -394,6 +400,7 @@ export class CollectionStateManager<
           key,
           value: currentValue,
           previousValue,
+          viewKey,
         })
       }
     }
@@ -512,7 +519,8 @@ export class CollectionStateManager<
               truncateOptimisticSnapshot?.upserts.get(key) ||
               this.syncedData.get(key)
             if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
+              const viewKey = this.viewKeyMap.get(key)
+              events.push({ type: `delete`, key, value: previousValue, viewKey })
             }
           }
 
@@ -619,10 +627,12 @@ export class CollectionStateManager<
               }
             }
             if (!foundInsert) {
-              events.push({ type: `insert`, key, value })
+              const viewKey = this.viewKeyMap.get(key)
+              events.push({ type: `insert`, key, value, viewKey })
             }
           } else {
-            events.push({ type: `insert`, key, value })
+            const viewKey = this.viewKeyMap.get(key)
+            events.push({ type: `insert`, key, value, viewKey })
           }
         }
 
@@ -739,6 +749,7 @@ export class CollectionStateManager<
         }
 
         if (!isRedundantSync) {
+          const viewKey = this.viewKeyMap.get(key)
           if (
             previousVisibleValue === undefined &&
             newVisibleValue !== undefined
@@ -747,6 +758,7 @@ export class CollectionStateManager<
               type: `insert`,
               key,
               value: newVisibleValue,
+              viewKey,
             })
           } else if (
             previousVisibleValue !== undefined &&
@@ -756,6 +768,7 @@ export class CollectionStateManager<
               type: `delete`,
               key,
               value: previousVisibleValue,
+              viewKey,
             })
           } else if (
             previousVisibleValue !== undefined &&
@@ -767,6 +780,7 @@ export class CollectionStateManager<
               key,
               value: newVisibleValue,
               previousValue: previousVisibleValue,
+              viewKey,
             })
           }
         }
