@@ -414,7 +414,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
+    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
 
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
@@ -449,7 +449,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
+    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
 
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
@@ -479,7 +479,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
+    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
 
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
@@ -548,9 +548,9 @@ export function localStorageCollectionOptions(
 
     // Load current data from storage
     const currentData = loadFromStorage<Record<string, unknown>>(
-      parser,
       config.storageKey,
-      storage
+      storage,
+      parser
     )
 
     // Apply each mutation
@@ -606,9 +606,9 @@ export function localStorageCollectionOptions(
  * @returns Map of stored items with version tracking, or empty Map if loading fails
  */
 function loadFromStorage<T extends object>(
-  parser: Parser,
   storageKey: string,
-  storage: StorageApi
+  storage: StorageApi,
+  parser: Parser
 ): Map<string | number, StoredItem<T>> {
   try {
     const rawData = storage.getItem(storageKey)
@@ -728,7 +728,7 @@ function createLocalStorageSync<T extends object>(
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage<T>(parser, storageKey, storage)
+    const newData = loadFromStorage<T>(storageKey, storage, parser)
 
     // Find the specific changes
     const changes = findChanges(lastKnownData, newData)
@@ -763,7 +763,7 @@ function createLocalStorageSync<T extends object>(
       collection = params.collection
 
       // Initial load
-      const initialData = loadFromStorage<T>(parser, storageKey, storage)
+      const initialData = loadFromStorage<T>(storageKey, storage, parser)
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {
