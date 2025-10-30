@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.4.15
+
+### Patch Changes
+
+- Added support for custom parsers/serializers like superjson in LocalStorage collections ([#730](https://github.com/TanStack/db/pull/730))
+
 ## 0.4.14
 
 ### Patch Changes
