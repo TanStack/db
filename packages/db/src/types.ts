@@ -269,8 +269,6 @@ export interface ChangeMessage<
   previousValue?: T
   type: OperationType
   metadata?: Record<string, unknown>
-  /** Stable view key for rendering (survives ID transitions) */
-  viewKey?: string
 }
 
 export interface OptimisticChangeMessage<

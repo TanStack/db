@@ -383,13 +383,10 @@ export class CollectionStateManager<
         previousDeletes
       )
 
-      // Get viewKey if available
-      const viewKey = this.viewKeyMap.get(key)
-
       if (previousValue !== undefined && currentValue === undefined) {
-        events.push({ type: `delete`, key, value: previousValue, viewKey })
+        events.push({ type: `delete`, key, value: previousValue })
       } else if (previousValue === undefined && currentValue !== undefined) {
-        events.push({ type: `insert`, key, value: currentValue, viewKey })
+        events.push({ type: `insert`, key, value: currentValue })
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
@@ -400,7 +397,6 @@ export class CollectionStateManager<
           key,
           value: currentValue,
           previousValue,
-          viewKey,
         })
       }
     }
@@ -519,13 +515,7 @@ export class CollectionStateManager<
               truncateOptimisticSnapshot?.upserts.get(key) ||
               this.syncedData.get(key)
             if (previousValue !== undefined) {
-              const viewKey = this.viewKeyMap.get(key)
-              events.push({
-                type: `delete`,
-                key,
-                value: previousValue,
-                viewKey,
-              })
+              events.push({ type: `delete`, key, value: previousValue })
             }
           }
 
@@ -632,12 +622,10 @@ export class CollectionStateManager<
               }
             }
             if (!foundInsert) {
-              const viewKey = this.viewKeyMap.get(key)
-              events.push({ type: `insert`, key, value, viewKey })
+              events.push({ type: `insert`, key, value })
             }
           } else {
-            const viewKey = this.viewKeyMap.get(key)
-            events.push({ type: `insert`, key, value, viewKey })
+            events.push({ type: `insert`, key, value })
           }
         }
 
@@ -754,7 +742,6 @@ export class CollectionStateManager<
         }
 
         if (!isRedundantSync) {
-          const viewKey = this.viewKeyMap.get(key)
           if (
             previousVisibleValue === undefined &&
             newVisibleValue !== undefined
@@ -763,7 +750,6 @@ export class CollectionStateManager<
               type: `insert`,
               key,
               value: newVisibleValue,
-              viewKey,
             })
           } else if (
             previousVisibleValue !== undefined &&
@@ -773,7 +759,6 @@ export class CollectionStateManager<
               type: `delete`,
               key,
               value: previousVisibleValue,
-              viewKey,
             })
           } else if (
             previousVisibleValue !== undefined &&
@@ -785,7 +770,6 @@ export class CollectionStateManager<
               key,
               value: newVisibleValue,
               previousValue: previousVisibleValue,
-              viewKey,
             })
           }
         }
