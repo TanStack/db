@@ -1137,7 +1137,8 @@ const todoCollection = createCollection({
   id: "todos",
   getKey: (item) => item.id,
   // Enable automatic view key generation
-  viewKey: () => crypto.randomUUID(),
+  // The callback receives the item being inserted (can ignore it with _item)
+  viewKey: (_item) => crypto.randomUUID(),
   onInsert: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
     const tempId = mutation.modified.id

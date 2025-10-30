@@ -498,6 +498,11 @@ export class CollectionImpl<
     if (viewKey) {
       // Link real key to the same viewKey
       this._state.viewKeyMap.set(realKey, viewKey)
+    } else if (process.env.NODE_ENV !== `production`) {
+      console.warn(
+        `[TanStack DB] mapViewKey called for tempKey "${String(tempKey)}" but no viewKey was found. ` +
+          `Make sure you've configured the collection with a viewKey function.`
+      )
     }
   }
 
