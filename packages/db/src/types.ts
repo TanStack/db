@@ -590,18 +590,15 @@ export interface BaseCollectionConfig<
    * Optional function to generate stable view keys for items.
    * This prevents UI re-renders during temporary-to-real ID transitions.
    *
-   * The function receives the item being inserted. You can use the item's
-   * properties if needed, or ignore it to generate a random key.
-   *
    * When enabled, call `collection.mapViewKey(tempId, realId)` in your
    * insert handler to link the temporary and real IDs to the same viewKey.
    *
    * @example
-   * // Auto-generate view keys with UUIDs (item parameter unused)
-   * viewKey: (_item) => crypto.randomUUID()
+   * // Auto-generate view keys with UUIDs
+   * viewKey: () => crypto.randomUUID()
    *
    * @example
-   * // Derive from item property
+   * // Or derive from item property if needed
    * viewKey: (item) => `view-${item.userId}-${crypto.randomUUID()}`
    */
   viewKey?: (item: T) => string
