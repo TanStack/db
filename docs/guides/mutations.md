@@ -1137,9 +1137,7 @@ const todoCollection = createCollection({
   id: "todos",
   getKey: (item) => item.id,
   // Enable automatic view key generation
-  viewKey: {
-    generate: () => crypto.randomUUID()
-  },
+  viewKey: () => crypto.randomUUID(),
   onInsert: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
     const tempId = mutation.modified.id
@@ -1188,41 +1186,10 @@ const TodoList = () => {
 
 **How it works:**
 
-1. The `viewKey.generate` function creates a stable UUID when items are inserted
+1. The `viewKey` function creates a stable UUID when items are inserted
 2. `mapViewKey(tempId, realId)` links the temporary and real IDs to share the same viewKey
 3. `getViewKey(id)` returns the stable viewKey for any ID (temp or real)
 4. React uses the stable viewKey, preventing unmount/remount during ID transitions
-
-**Alternative: Use existing field as viewKey**
-
-If your items already have a stable UUID field separate from the ID:
-
-```tsx
-interface Todo {
-  id: number       // Server-generated sequential ID
-  uuid: string     // Client-generated UUID (stable)
-  text: string
-  completed: boolean
-}
-
-const todoCollection = createCollection({
-  id: "todos",
-  getKey: (item) => item.id,
-  // Use existing uuid field as the viewKey
-  viewKey: {
-    field: 'uuid'
-  },
-  // ...
-})
-
-// Insert with both temp ID and stable UUID
-todoCollection.insert({
-  id: -Date.now(),
-  uuid: crypto.randomUUID(),
-  text: "New todo",
-  completed: false
-})
-```
 
 ### Best Practices
 

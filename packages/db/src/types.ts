@@ -587,27 +587,17 @@ export interface BaseCollectionConfig<
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
 
   /**
-   * Optional configuration for stable view keys to prevent UI re-renders during
-   * temporary-to-real ID transitions.
+   * Optional function to generate stable view keys for items.
+   * This prevents UI re-renders during temporary-to-real ID transitions.
+   *
+   * When enabled, call `collection.mapViewKey(tempId, realId)` in your
+   * insert handler to link the temporary and real IDs to the same viewKey.
    *
    * @example
    * // Auto-generate view keys with UUIDs
-   * viewKey: {
-   *   generate: () => crypto.randomUUID()
-   * }
-   *
-   * @example
-   * // Use existing field from item as view key
-   * viewKey: {
-   *   field: 'uuid'
-   * }
+   * viewKey: () => crypto.randomUUID()
    */
-  viewKey?: {
-    /** Function to generate a stable view key for new items */
-    generate?: (item: T) => string
-    /** Use an existing field from the item as the view key */
-    field?: keyof T
-  }
+  viewKey?: (item: T) => string
 
   utils?: TUtils
 }

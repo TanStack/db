@@ -179,16 +179,9 @@ export class CollectionMutationsManager<
       // Generate viewKey if configured
       let viewKey: string | undefined
       if (this.config.viewKey) {
-        if (this.config.viewKey.generate) {
-          viewKey = this.config.viewKey.generate(validatedData)
-        } else if (this.config.viewKey.field) {
-          viewKey = String(validatedData[this.config.viewKey.field])
-        }
-
+        viewKey = this.config.viewKey(validatedData)
         // Store viewKey mapping
-        if (viewKey) {
-          this.state.viewKeyMap.set(key, viewKey)
-        }
+        this.state.viewKeyMap.set(key, viewKey)
       }
 
       const mutation: PendingMutation<TOutput, `insert`> = {
