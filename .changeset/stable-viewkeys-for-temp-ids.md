@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+"@tanstack/db": patch
 ---
 
 Add stable `viewKey` support to prevent UI re-renders during temporary-to-real ID transitions. When inserting items with temporary IDs that are later replaced by server-generated IDs, React components would previously unmount and remount, causing loss of focus and visual flicker.
