@@ -244,3 +244,45 @@ describe('Dependent Collection Queries', () => {
     expect(collection.get('2')).toEqual({ id: '2', name: 'Editor', accountId: 'acc2' })
   })
 })
+
+describe('useCollection Hook Solution', () => {
+  /**
+   * NOTE: These tests demonstrate how the useCollection hook (from @tanstack/react-db)
+   * solves the dependent query collection problem automatically.
+   *
+   * With useCollection:
+   * - No manual ref handling needed
+   * - No manual refetch triggering needed
+   * - Automatically detects dependency changes and refetches
+   * - Cleaner, more intuitive API
+   *
+   * Example usage:
+   * ```typescript
+   * import { useCollection } from '@tanstack/react-db'
+   * import { useQueries } from '@tanstack/react-query'
+   *
+   * const queryResults = useQueries({ queries })
+   * const { data, isReady } = useCollection(
+   *   queryCollectionOptions({
+   *     queryKey: ['combined', 'roles'],
+   *     queryFn: async () => queryResults.flatMap(q => q.data ?? []),
+   *     queryClient,
+   *     getKey: role => role.id,
+   *   }),
+   *   [queryResults] // Just pass dependencies - hook handles the rest!
+   * )
+   * ```
+   *
+   * The hook internally:
+   * 1. Stores the config in a ref that updates every render
+   * 2. Creates a wrapper queryFn that reads from the ref
+   * 3. Watches dependencies and triggers refetch on change
+   * 4. Maintains stable collection instance
+   */
+
+  it('documents the useCollection solution pattern', () => {
+    // This test exists for documentation purposes
+    // See packages/react-db/tests/useCollection.test.tsx for actual implementation tests
+    expect(true).toBe(true)
+  })
+})
