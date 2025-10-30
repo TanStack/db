@@ -414,7 +414,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
+    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
 
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
@@ -449,7 +449,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
+    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
 
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
@@ -479,7 +479,7 @@ export function localStorageCollectionOptions(
 
     // Always persist to storage
     // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
+    const currentData = loadFromStorage<any>(parser, config.storageKey, storage)
 
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
@@ -548,6 +548,7 @@ export function localStorageCollectionOptions(
 
     // Load current data from storage
     const currentData = loadFromStorage<Record<string, unknown>>(
+      parser,
       config.storageKey,
       storage
     )
@@ -599,11 +600,13 @@ export function localStorageCollectionOptions(
 
 /**
  * Load data from storage and return as a Map
+ * @param parser - The parser to use for deserializing the data
  * @param storageKey - The key used to store data in the storage API
  * @param storage - The storage API to load from (localStorage, sessionStorage, etc.)
  * @returns Map of stored items with version tracking, or empty Map if loading fails
  */
 function loadFromStorage<T extends object>(
+  parser: Parser,
   storageKey: string,
   storage: StorageApi
 ): Map<string | number, StoredItem<T>> {
@@ -613,7 +616,7 @@ function loadFromStorage<T extends object>(
       return new Map()
     }
 
-    const parsed = JSON.parse(rawData)
+    const parsed = parser.parse(rawData)
     const dataMap = new Map<string | number, StoredItem<T>>()
 
     // Handle object format where keys map to StoredItem values
@@ -725,7 +728,7 @@ function createLocalStorageSync<T extends object>(
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage<T>(storageKey, storage)
+    const newData = loadFromStorage<T>(parser, storageKey, storage)
 
     // Find the specific changes
     const changes = findChanges(lastKnownData, newData)
@@ -760,7 +763,7 @@ function createLocalStorageSync<T extends object>(
       collection = params.collection
 
       // Initial load
-      const initialData = loadFromStorage<T>(storageKey, storage)
+      const initialData = loadFromStorage<T>(parser, storageKey, storage)
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {
