@@ -44,7 +44,7 @@ interface StoredItem<T> {
   data: T
 }
 
-interface Parser {
+export interface Parser {
   parse: (data: string) => unknown
   stringify: (data: unknown) => string
 }
