@@ -331,7 +331,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
   }
 
   // For queries without joins, combine multiple WHERE clauses into a single clause
-  // to avoid creating multiple filter operators in the pipeline (performance optimization for issue #445)
+  // to avoid creating multiple filter operators in the pipeline
   if (!query.join || query.join.length === 0) {
     // Only optimize if there are multiple WHERE clauses to combine
     if (query.where.length > 1) {
