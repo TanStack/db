@@ -2,6 +2,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from "../errors"
+import { lazyInitForWorkers } from "../utils/lazy-init"
 import { currentStateAsChanges } from "./change-events"
 
 import { CollectionStateManager } from "./state"
@@ -185,18 +186,37 @@ export function createCollection(
     utils?: UtilsRecord
   }
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options
-  )
+  function _createCollection() {
+    const collection = new CollectionImpl<any, string | number, any, any, any>(
+      options
+    )
 
-  // Copy utils to both top level and .utils namespace
-  if (options.utils) {
-    collection.utils = { ...options.utils }
-  } else {
-    collection.utils = {}
+    // Copy utils to both top level and .utils namespace
+    if (options.utils) {
+      collection.utils = { ...options.utils }
+    } else {
+      collection.utils = {}
+    }
+
+    return collection
   }
 
-  return collection
+  // Check if we're running in Cloudflare Workers runtime
+  // https://developers.cloudflare.com/workers/runtime-apis/web-standards/#navigatoruseragent
+  const isCloudflareWorkers =
+    typeof navigator !== `undefined` &&
+    navigator.userAgent === `Cloudflare-Workers`
+
+  // Workers runtime limitation
+  // Without this, initializing a collection causes this error:
+  //   Disallowed operation called within global scope.
+  if (isCloudflareWorkers) {
+    return lazyInitForWorkers(() => {
+      return _createCollection()
+    })
+  }
+
+  return _createCollection()
 }
 
 export class CollectionImpl<
