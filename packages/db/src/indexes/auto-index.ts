@@ -55,7 +55,7 @@ export function ensureIndexForField<
         return current
       },
       {
-        name: `auto_${fieldPath.join(`_`)}`,
+        name: `auto:${fieldPath.join(`.`)}`,
         indexType: BTreeIndex,
         options: compareFn ? { compareFn, compareOptions } : {},
       }
