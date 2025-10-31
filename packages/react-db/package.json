@@ -54,6 +54,7 @@
   },
   "scripts": {
     "build": "vite build",
+    "build:minified": "vite build --minify",
     "dev": "vite build --watch",
     "test": "npx vitest --run",
     "lint": "eslint . --fix"
