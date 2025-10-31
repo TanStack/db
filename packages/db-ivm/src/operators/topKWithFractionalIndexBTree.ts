@@ -277,9 +277,9 @@ export class TopKWithFractionalIndexBTreeOperator<
  */
 export function topKWithFractionalIndexBTree<KType, T>(
   comparator: (a: T, b: T) => number,
-  options?: TopKWithFractionalIndexOptions
+  options?: TopKWithFractionalIndexOptions<KType, T>
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
-  const opts = options || {}
+  const opts: TopKWithFractionalIndexOptions<KType, T> = options ?? {}
 
   if (BTree === undefined) {
     throw new Error(
