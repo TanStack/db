@@ -123,6 +123,36 @@ Collection status values:
 - `error` - In error state
 - `cleaned-up` - Cleaned up and no longer usable
 
+### Using Suspense and Error Boundaries (React)
+
+For React applications, you can handle loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
+
+```tsx
+import { useLiveSuspenseQuery } from "@tanstack/react-db"
+import { Suspense } from "react"
+import { ErrorBoundary } from "react-error-boundary"
+
+const TodoList = () => {
+  // No need to check status - Suspense and ErrorBoundary handle it
+  const { data } = useLiveSuspenseQuery(
+    (query) => query.from({ todos: todoCollection })
+  )
+
+  // data is always defined here
+  return <div>{data.map(todo => <div key={todo.id}>{todo.text}</div>)}</div>
+}
+
+const App = () => (
+  <ErrorBoundary fallback={<div>Failed to load todos</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
+      <TodoList />
+    </Suspense>
+  </ErrorBoundary>
+)
+```
+
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
+
 ## Transaction Error Handling
 
 When mutations fail, TanStack DB automatically rolls back optimistic updates:
