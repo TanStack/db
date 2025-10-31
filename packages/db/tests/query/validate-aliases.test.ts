@@ -38,7 +38,7 @@ function createTestCollections() {
   }
 }
 
-describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
+describe(`Alias validation in subqueries`, () => {
   let locksCollection: ReturnType<
     typeof createTestCollections
   >[`locksCollection`]
@@ -52,7 +52,7 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
     votesCollection = collections.votesCollection
   })
 
-  test(`should throw error when subquery uses same alias as parent (Discord bug)`, () => {
+  test(`should throw DuplicateAliasInSubqueryError when subquery reuses a parent query collection alias`, () => {
     expect(() => {
       createLiveQueryCollection({
         startSync: true,
@@ -68,7 +68,7 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
             }))
 
           return q
-            .from({ vote: votesCollection }) // CONFLICT: "vote" alias used here
+            .from({ vote: votesCollection }) // Reuses "vote" alias from subquery
             .join({ lock: locksAgg }, ({ vote, lock }) =>
               eq(lock._id, vote.lockId)
             )
@@ -81,17 +81,15 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
     }).toThrow(/Subquery uses alias "vote"/)
   })
 
-  test(`workaround: rename alias in one of the queries`, () => {
+  test(`should allow subqueries when all collection aliases are unique`, () => {
     const query = createLiveQueryCollection({
       startSync: true,
       query: (q) => {
         const locksAgg = q
           .from({ lock: locksCollection })
           .join(
-            { v: votesCollection },
-            (
-              { lock, v } // Renamed to "v"
-            ) => eq(lock._id, v.lockId)
+            { v: votesCollection }, // Uses unique alias "v" instead of "vote"
+            ({ lock, v }) => eq(lock._id, v.lockId)
           )
           .select(({ lock }) => ({
             _id: lock._id,
@@ -111,10 +109,8 @@ describe(`Discord Bug: Same Alias in Parent and Subquery`, () => {
     })
 
     const results = query.toArray
-    // Each lock (2) joins with each vote for that lock
-    // Lock 1 has 2 votes, Lock 2 has 1 vote
-    // But locksAgg groups by lock, so we get 2 aggregated lock records
-    // Each of the 3 votes joins with its corresponding lock aggregate
+
+    // Should successfully execute and return results
     expect(results.length).toBeGreaterThan(0)
     expect(results.every((r) => r.lockName)).toBe(true)
   })
