@@ -262,7 +262,7 @@ See the [Mutations guide](../guides/mutations.md) for comprehensive documentatio
 Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
-2. [using the ElectricSQL sync engine](#2-electricsql-sync) with a generic ingestion endpoint
+2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
